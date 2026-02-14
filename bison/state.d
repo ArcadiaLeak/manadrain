@@ -21,6 +21,7 @@ class state {
   state_number number;
   bool consistent;
   bool[][] lookaheads;
+  symbol[] errs;
 
   this(symbol_number sym, immutable item_index[] core) {
     accessing_symbol = sym;
