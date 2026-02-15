@@ -136,7 +136,7 @@ void symbols_token_translations_init() {
   foreach (s; symbols[0..ntokens]) {
     sym_content sym = s.content;
     if (sym.code == CODE_UNDEFINED)
-      sym.code = max_code++;
+      sym.code = ++max_code;
     if (sym.code > max_code)
       max_code = sym.code;
   }
