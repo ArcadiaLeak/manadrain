@@ -19,9 +19,9 @@ enum bool TRACE_CLOSURE = 0;
 enum bool TRACE_AUTOMATON = 0;
 
 void main() {
-  gram_init_pre;
+  symbols_new;
   glslgram;
-  gram_init_post;
+  check_and_convert_grammar;
   derives_compute;
   nullable_compute;
   generate_states;

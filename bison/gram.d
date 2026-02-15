@@ -12,6 +12,9 @@ int nsyms = 0;
 int ntokens = 1;
 int nnterms = 0;
 
+symbol_number[] token_translations;
+int max_code;
+
 struct item_number {
   int _;
   alias _ this;

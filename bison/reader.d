@@ -111,7 +111,7 @@ void packgram() {
   }
 }
 
-void gram_init_pre() {
+void symbols_new() {
   acceptsymbol = symbol_get("$accept");
   acceptsymbol.order_of_appearance = 0;
   acceptsymbol.content.class_ = symbol_class_.nterm_sym;
@@ -140,14 +140,12 @@ void gram_init_pre() {
   }
 }
 
-void gram_init_post() {
-  import std.algorithm.sorting;
-  import std.array;
-
+void check_and_convert_grammar() {
   eoftoken = symbol_get("YYEOF");
   eoftoken.order_of_appearance = 0;
   eoftoken.content.class_ = symbol_class_.token_sym;
   eoftoken.content.number = 0;
+  eoftoken.content.code = 0;
   {
     symbol alias_ = symbol_get("$end");
     alias_.order_of_appearance = 0;
@@ -155,28 +153,16 @@ void gram_init_post() {
     eoftoken.make_alias(alias_);
   }
 
-  symbol start = start_symbols.sym;
-  create_start_rule(null, start);
-
-  symbols_sorted = symbol_table.values
-    .sort!("a.order_of_appearance < b.order_of_appearance")
-    .array;
-  foreach (sym; symbols_sorted) {
-    sym_content s = sym.content;
-
-    if (s.number == NUMBER_UNDEFINED)
-      s.number = s.class_ == symbol_class_.token_sym ? ntokens++ : nnterms++;
-  }
+  create_start_rules;
+  symbols_check_defined;
 
   nsyms = ntokens + nnterms;
-  symbols = new symbol[nsyms];
 
-  foreach (sym; symbols_sorted) {
-    if (sym.content.class_ == symbol_class_.nterm_sym)
-      sym.content.number += ntokens;
+  symbols_pack;
+  packgram;
+}
 
-    symbols[sym.content.number] = sym.content.symbol_;
-  }
-
-  packgram();
+void create_start_rules() {
+  symbol start = start_symbols.sym;
+  create_start_rule(null, start);
 }

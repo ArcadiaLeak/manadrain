@@ -13,7 +13,8 @@ struct symbol_number {
   alias _ this;
 }
 
-enum NUMBER_UNDEFINED = symbol_number(-1);
+enum int CODE_UNDEFINED = -1;
+enum int NUMBER_UNDEFINED = -1;
 
 symbol acceptsymbol;
 symbol errtoken;
@@ -50,12 +51,15 @@ class sym_content {
   symbol symbol_;
   symbol_class_ class_;
   symbol_number number;
+  int code;
 
   this(symbol s) {
     symbol_ = s;
 
+    number = symbol_number(NUMBER_UNDEFINED);
+    code = CODE_UNDEFINED;
+
     class_ = symbol_class_.unknown_sym;
-    number = NUMBER_UNDEFINED;
   }
 }
 
@@ -80,3 +84,71 @@ symbol dummy_symbol_get() {
   );
 }
 
+
+void symbols_check_defined() {
+  import std.algorithm.sorting;
+  import std.array;
+  symbols_sorted = symbol_table.values
+    .sort!("a.order_of_appearance < b.order_of_appearance")
+    .array;
+
+  foreach (sym; symbols_sorted)
+    if (sym.content.number == NUMBER_UNDEFINED)
+      sym.content.number = sym.content.class_ == symbol_class_.token_sym
+        ? ntokens++ : nnterms++;
+}
+
+void symbols_pack() {
+  symbols = new symbol[nsyms];
+  foreach (sym; symbols_sorted)
+    sym.symbol_pack;
+
+  symbols_token_translations_init;
+}
+
+void symbol_pack(symbol sym) {
+  if (sym.content.class_ == symbol_class_.nterm_sym)
+    sym.content.number += ntokens;
+
+  symbols[sym.content.number] = sym.content.symbol_;
+}
+
+void symbols_token_translations_init() {
+  bool code_256_available_p = true;
+
+  max_code = 0;
+  foreach (s; symbols[0..ntokens]) {
+    sym_content sym = s.content;
+    if (sym.code != CODE_UNDEFINED) {
+      if (sym.code > max_code)
+        max_code = sym.code;
+      if (sym.code == 256)
+        code_256_available_p = false;
+    }
+  }
+
+  if (code_256_available_p && errtoken.content.code == CODE_UNDEFINED)
+    errtoken.content.code = 256;
+
+  if (max_code < 256)
+    max_code = 256;
+
+  foreach (s; symbols[0..ntokens]) {
+    sym_content sym = s.content;
+    if (sym.code == CODE_UNDEFINED)
+      sym.code = max_code++;
+    if (sym.code > max_code)
+      max_code = sym.code;
+  }
+
+  token_translations = new symbol_number[max_code + 1];
+  token_translations[] = undeftoken.content.number;
+
+  foreach (sym; symbols_sorted)
+    sym.symbol_translation;
+}
+
+void symbol_translation(symbol sym) {
+  if (sym.content.class_ == symbol_class_.token_sym && !sym.is_alias)
+    token_translations[sym.content.code] = sym.content.number;
+}
