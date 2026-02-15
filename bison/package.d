@@ -2,6 +2,7 @@ module bison;
 
 private import bison.glslgram;
 package import bison.closure;
+package import bison.conflicts;
 package import bison.derives;
 package import bison.gram;
 package import bison.lalr;
@@ -12,7 +13,7 @@ package import bison.relation;
 package import bison.state;
 package import bison.symlist;
 package import bison.symtab;
-package import bison.conflicts;
+package import bison.tables;
 
 enum bool TRACE_SETS = 0;
 enum bool TRACE_CLOSURE = 0;
@@ -27,4 +28,5 @@ void main() {
   generate_states;
   lalr;
   conflicts_solve;
+  tables_generate;
 }

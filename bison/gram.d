@@ -32,8 +32,11 @@ struct rule_number {
 
 struct rule {
   rule_number number;
+
   sym_content lhs;
   item_number[] rhs;
+
+  bool useful;
 }
 
 void item_print(item_number[] item) {
