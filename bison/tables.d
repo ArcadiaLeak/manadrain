@@ -57,6 +57,38 @@ void token_actions() {
 
   foreach (i; 0..nstates) {
     rule[] default_reduction = states[i].action_row;
+    yydefact[i] = default_reduction ? default_reduction[0].number + 1 : 0;
+    i.save_row;
+
+    foreach (j; 0..ntokens)
+      if (actrow[j] < 0 && actrow[j] != int.min)
+        rules[-1 - actrow[j]].useful = true;
+    if (yydefact[i])
+      rules[yydefact[i] - 1].useful = true;
+  }
+}
+
+void save_row(size_t s) {
+  size_t count = 0;
+  foreach (i; 0..ntokens)
+    if (actrow[i] != 0)
+      count++;
+  
+  if (count) {
+    base_number[] sp1 = froms[s] = new base_number[count];
+    base_number[] sp2 = tos[s] = new base_number[count];
+    int[] sp3 = conflict_tos[s] = null;
+
+    foreach (i; 0..ntokens)
+      if (actrow[i] != 0) {
+        sp1[0] = i;
+        sp1 = sp1[1..$];
+        sp2[0] = actrow[i];
+        sp2 = sp2[1..$];
+      }
+
+    tally[s] = count;
+    width[s] = froms[s][froms[s].length - sp1.length - 1] - froms[s][0] + 1;
   }
 }
 
