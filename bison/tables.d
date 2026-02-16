@@ -11,6 +11,11 @@ struct action_number {
   alias _ this;
 }
 
+struct vector_number {
+  int _;
+  alias _ this;
+}
+
 int nvectors;
 
 base_number[][] froms;
@@ -26,6 +31,7 @@ int[] conflict_list;
 int conflict_list_cnt;
 int conflict_list_free;
 
+state_number[] yydefgoto;
 rule_number[] yydefact;
 
 void tables_generate() {
@@ -38,6 +44,7 @@ void tables_generate() {
   width = new base_number[nvectors];
 
   token_actions;
+  goto_actions;
 }
 
 void token_actions() {
@@ -160,4 +167,65 @@ rule[] action_row(state s) {
         actrow[i] = 0;
 
   return default_reduction;
+}
+
+void goto_actions() {
+  size_t[] state_count = new size_t[nstates];
+  yydefgoto = new state_number[nnterms];
+
+  foreach (i; ntokens..nsyms) {
+    state_number default_state = default_goto(i.symbol_number, state_count);
+    save_column(i.symbol_number, default_state);
+    yydefgoto[i - ntokens] = default_state;
+  }
+}
+
+state_number default_goto(symbol_number sym, size_t[] state_count) {
+  goto_number begin = goto_map[sym - ntokens];
+  goto_number end = goto_map[sym - ntokens + 1];
+
+  state_number res = 0.state_number;
+
+  if (begin != end) {
+    state_count[] = 0;
+
+    foreach (i; begin..end)
+      state_count[to_state[i]]++;
+
+    size_t max = 0;
+    foreach (s; 0..nstates)
+      if (max < state_count[s]) {
+        max = state_count[s];
+        res = s.state_number;
+      }
+  }
+
+  return res;
+}
+
+void save_column(symbol_number sym, state_number default_state) {
+  goto_number begin = goto_map[sym - ntokens];
+  goto_number end = goto_map[sym - ntokens + 1];
+
+  size_t count = 0;
+  foreach (i; begin..end)
+    if (to_state[i] != default_state)
+      count++;
+  
+  if (count) {
+    vector_number symno = vector_number(cast(int) nstates + sym - ntokens);
+    base_number[] sp1 = froms[symno] = new base_number[count];
+    base_number[] sp2 = tos[symno] = new base_number[count];
+
+    foreach (i; begin..end)
+      if (to_state[i] != default_state) {
+        sp1[0] = base_number(cast(int) from_state[i]);
+        sp1 = sp1[1..$];
+        sp2[0] = base_number(cast(int) to_state[i]);
+        sp2 = sp2[1..$];
+      }
+    
+    tally[symno] = count;
+    width[symno] = froms[symno][froms[symno].length - sp1.length - 1] - froms[symno][0] + 1;
+  }
 }
