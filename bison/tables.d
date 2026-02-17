@@ -347,7 +347,7 @@ base_number pack_vector(vector_number vector) {
   int[] conflict_to = conflict_tos[i];
 
   import std.range;
-  foreach (res; iota(lowzero - from[0])) {
+  foreach (res; recurrence!"a[n-1] + 1"(lowzero - from[0])) {
     bool ok = true;
     {
       foreach (k; 0..t) {
