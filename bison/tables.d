@@ -30,6 +30,7 @@ vector_number[] order;
 int nentries;
 
 base_number[] base;
+base_number base_ninf = 0.base_number;
 
 bool[] pos_set;
 int pos_set_base = 0;
@@ -43,6 +44,7 @@ int conflict_list_free;
 enum int table_size = 32768;
 base_number[] table;
 base_number[] check;
+base_number table_ninf = 0.base_number;
 
 int lowzero;
 int high;
@@ -290,7 +292,18 @@ void pack_table() {
   foreach (i; 0..nentries) {
     state_number s = i.vector_number.matching_state;
     base_number place;
+
+    if (s < 0)
+      place = i.vector_number.pack_vector;
+    else
+      place = base[s];
+
+    place.pos_set_set;
+    base[order[i]] = place;
   }
+
+  base_ninf = table_ninf_remap(base);
+  table_ninf = table_ninf_remap(table[0..high + 1]);
 }
 
 state_number matching_state(vector_number vector) {
@@ -334,7 +347,64 @@ base_number pack_vector(vector_number vector) {
   int[] conflict_to = conflict_tos[i];
 
   import std.range;
-  foreach (res; iota(lowzero - from[0])) {}
+  foreach (res; iota(lowzero - from[0])) {
+    bool ok = true;
+    {
+      foreach (k; 0..t) {
+        if (!ok) break;
+        
+        int loc = res + from[k];
+        if (table[loc] != 0)
+          ok = false;
+      }
+
+      if (ok && res.pos_set_test)
+        ok = false;
+    }
+    
+    if (ok) {
+      int loc = -1;
+      foreach (k; 0..t) {
+        loc = res + from[k];
+        table[loc] = to[k];
+        check[loc] = from[k];
+      }
+
+      while (table[lowzero] != 0)
+        lowzero++;
+      
+      if (high < loc)
+        high = loc;
+      
+      return res.base_number;
+    }
+  }
 
   assert(0);
+}
+
+bool pos_set_test(int pos) {
+  int bitno = pos - pos_set_base;
+  return pos_set[bitno];
+}
+
+void pos_set_set(int pos) {
+  int bitno = pos - pos_set_base;
+  pos_set[bitno] = true;
+}
+
+base_number table_ninf_remap(base_number[] tab) {
+  base_number res;
+
+  foreach (t; tab)
+    if (t < res && t != int.min)
+      res = t;
+
+  --res;
+
+  foreach (i; 0..tab.length)
+    if (tab[i] == int.min)
+      tab[i] = res;
+
+  return res;
 }
