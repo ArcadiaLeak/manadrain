@@ -26,16 +26,32 @@ base_number[] width;
 
 action_number[] actrow;
 
+vector_number[] order;
+int nentries;
+
+base_number[] base;
+
+bool[] pos_set;
+int pos_set_base = 0;
+
 int[] conflrow;
+int[] conflict_table;
 int[] conflict_list;
 int conflict_list_cnt;
 int conflict_list_free;
+
+enum int table_size = 32768;
+base_number[] table;
+base_number[] check;
+
+int lowzero;
+int high;
 
 state_number[] yydefgoto;
 rule_number[] yydefact;
 
 void tables_generate() {
-  nvectors = cast(int) nstates + nnterms;
+  nvectors = nstates + nnterms;
 
   froms = new base_number[][nvectors];
   tos = new base_number[][nvectors];
@@ -45,6 +61,10 @@ void tables_generate() {
 
   token_actions;
   goto_actions;
+
+  order = new vector_number[nvectors];
+  sort_actions;
+  pack_table;
 }
 
 void token_actions() {
@@ -130,7 +150,7 @@ rule[] action_row(state s) {
       conflicted = true;
       conflrow[sym] = 1;
     }
-    actrow[sym] = action_number(cast(int) shift_state.number);
+    actrow[sym] = action_number(shift_state.number);
 
     if (sym == errtoken.content.number)
       nodefault = true;
@@ -213,19 +233,108 @@ void save_column(symbol_number sym, state_number default_state) {
       count++;
   
   if (count) {
-    vector_number symno = vector_number(cast(int) nstates + sym - ntokens);
+    vector_number symno = vector_number(nstates + sym - ntokens);
     base_number[] sp1 = froms[symno] = new base_number[count];
     base_number[] sp2 = tos[symno] = new base_number[count];
 
     foreach (i; begin..end)
       if (to_state[i] != default_state) {
-        sp1[0] = base_number(cast(int) from_state[i]);
+        sp1[0] = base_number(from_state[i]);
         sp1 = sp1[1..$];
-        sp2[0] = base_number(cast(int) to_state[i]);
+        sp2[0] = base_number(to_state[i]);
         sp2 = sp2[1..$];
       }
     
     tally[symno] = count;
     width[symno] = froms[symno][froms[symno].length - sp1.length - 1] - froms[symno][0] + 1;
   }
+}
+
+void sort_actions() {
+  nentries = 0;
+
+  foreach (i; 0..nvectors)
+    if (tally[i] > 0) {
+      size_t t = tally[i];
+      int w = width[i];
+      int j = nentries - 1;
+
+      while (j >= 0 && width[order[j]] < w)
+        j--;
+
+      while (j >= 0 && width[order[j]] == w && tally[order[j]] < t)
+        j--;
+
+      for (int k = nentries - 1; k > j; k--)
+        order[k + 1] = order[k];
+      
+      order[j + 1] = i;
+      nentries++;
+    }
+}
+
+void pack_table() {
+  base = new base_number[nvectors];
+  pos_set = new bool[table_size + nstates];
+  pos_set_base = -nstates;
+  table = new base_number[table_size];
+  conflict_table = new int[table_size];
+  check = new base_number[table_size];
+
+  lowzero = 0;
+  high = 0;
+
+  base[] = base_number(int.min);
+  check[] = base_number(-1);
+
+  foreach (i; 0..nentries) {
+    state_number s = i.vector_number.matching_state;
+    base_number place;
+  }
+}
+
+state_number matching_state(vector_number vector) {
+  vector_number i = order[vector];
+
+  if (i < nstates) {
+    size_t t = tally[i];
+    int w = width[i];
+
+    if (conflict_tos[i] !is null)
+      foreach (j; 0..t)
+        if (conflict_tos[i][j] != 0)
+          return state_number(-1);
+    
+    foreach_reverse (prev; 0..vector) {
+      vector_number j = order[prev];
+      if (width[j] != w || tally[j] != t)
+        return state_number(-1);
+      else {
+        bool match = true;
+        foreach (k; 0..t) {
+          if (!match) break;
+          if (tos[j][k] != tos[i][k] ||
+            froms[j][k] != froms[i][k] ||
+            (conflict_tos[j] !is null && conflict_tos[j][k] != 0))
+            match = false;
+        }
+        if (match) return state_number(j);
+      }
+    }
+  }
+
+  return state_number(-1);
+}
+
+base_number pack_vector(vector_number vector) {
+  vector_number i = order[vector];
+  size_t t = tally[i];
+  base_number[] from = froms[i];
+  base_number[] to = tos[i];
+  int[] conflict_to = conflict_tos[i];
+
+  import std.range;
+  foreach (res; iota(lowzero - from[0])) {}
+
+  assert(0);
 }

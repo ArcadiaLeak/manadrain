@@ -114,7 +114,7 @@ void set_goto_map() {
     foreach_reverse (trans; s.transitions) {
       if (trans.accessing_symbol < ntokens) break;
       goto_number k = temp_map[trans.accessing_symbol - ntokens]++;
-      from_state[k] = state_number(s_idx);
+      from_state[k] = state_number(cast(int) s_idx);
       to_state[k] = trans.number;
     }
   }
