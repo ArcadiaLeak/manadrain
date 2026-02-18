@@ -9,13 +9,15 @@ import std.format;
 import std.path;
 import std.stdio;
 
+enum string pkgname = "glslang_tab";
+
 void write_output() {
-  string dir = buildPath(getcwd, "glslang_tab");
+  string dir = buildPath(getcwd, pkgname);
   if (!dir.exists)
     mkdirRecurse(dir);
   File file = File(dir.buildPath("yytokentype.d"), "w");
   
-  file.write("module glslang_tab.yytokentype;");
+  file.write("module " ~ [pkgname, "yytokentype"].join(".") ~ ";");
   file.write("\n\n");
   file.write("enum yytokentype_ \x7B");
   file.write("\n  ");
