@@ -152,3 +152,10 @@ void symbol_translation(symbol sym) {
   if (sym.content.class_ == symbol_class_.token_sym && !sym.is_alias)
     token_translations[sym.content.code] = sym.content.number;
 }
+
+string symbol_id_get(symbol sym) {
+  if (sym.alias_)
+    return sym.alias_.tag;
+  else
+    return sym.tag;
+}
