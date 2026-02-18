@@ -314,3 +314,5 @@ class TInputScanner {
     }
   }
 }
+
+class TParserToken {}

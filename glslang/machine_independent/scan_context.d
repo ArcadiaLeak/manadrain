@@ -21,4 +21,8 @@ class TScanContext {
     afterBuffer = false; inDeclaratorList = false; afterDeclarator = false;
     angleBracketDepth = 0; squareBracketDepth = 0; parenDepth = 0;
   }
+
+  int tokenize(TPpContext pp, TParserToken token) {
+    return -1;
+  }
 }

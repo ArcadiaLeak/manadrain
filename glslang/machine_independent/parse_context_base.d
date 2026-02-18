@@ -128,4 +128,7 @@ class TParseContextBase : TParseVersions {
   }
 
   abstract bool lineContinuationCheck(in TSourceLoc, bool endOfComment);
+
+  TPpContext getPpContext() => ppContext;
+  TScanContext getScanContext() => scanContext;
 }
