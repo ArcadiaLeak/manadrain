@@ -14,6 +14,10 @@ class TScanContext {
     int angleBracketDepth;
     int squareBracketDepth;
     int parenDepth;
+    TSourceLoc loc;
+    TParserToken parserToken;
+
+    char[] tokenText;
   }
 
   this(TParseContextBase pc) @safe {
@@ -22,7 +26,17 @@ class TScanContext {
     angleBracketDepth = 0; squareBracketDepth = 0; parenDepth = 0;
   }
 
-  int tokenize(TPpContext pp, TParserToken token) {
-    return -1;
+  int tokenize(TPpContext pp, TParserToken token_) {
+    do {
+      parserToken = token_;
+      TPpToken ppToken;
+      int token = pp.tokenize(ppToken);
+      if (token == EndOfInput)
+        return 0;
+
+      tokenText = ppToken.name;
+      loc = ppToken.loc;
+
+    } while(true);
   }
 }
