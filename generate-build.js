@@ -1,20 +1,29 @@
 import { walk } from "jsr:@std/fs/walk";
 
-const targets = ["bison", "glslang"];
+let Makefile = "all: build/glslang_gen build/glslang\n";
 
-let Makefile = "";
+{
+  const bisonSrcEntries = await Array.fromAsync(walk("bison", { exts: ["d"] }));
+  const bisonSrcPaths = bisonSrcEntries.map(e => e.path).join(" ");
 
-Makefile += "all:";
-for (const target of targets) {
-  Makefile += ` build/${target}`;
+  const glslgramSrcEntries = await Array.fromAsync(walk("glslgram", { exts: ["d"] }));
+  const glslgramSrcPaths = glslgramSrcEntries.map(e => e.path).join(" ");
+
+  const genSrcEntries = await Array.fromAsync(walk("glslang_gen", { exts: ["d"] }));
+  const genSrcPaths = genSrcEntries.map(e => e.path).join(" ");
+
+  Makefile += "\n" + `build/glslang_gen: ${bisonSrcPaths} ${glslgramSrcPaths} ${genSrcPaths}\n` +
+    "\t" + "dmd -debug -of=$@ $^\n";
 }
-Makefile += "\n";
 
-for (const target of targets) {
-  const srcEntries = await Array.fromAsync(walk(target, { exts: ["d"] }));
-  const srcPaths = srcEntries.map(e => e.path).join(" ");
+{
+  const tabSrcEntries = await Array.fromAsync(walk("glslang_tab", { exts: ["d"] }));
+  const tabSrcPaths = tabSrcEntries.map(e => e.path).join(" ");
 
-  Makefile += "\n" + `build/${target}: ${srcPaths}\n` +
+  const glslangSrcEntries = await Array.fromAsync(walk("glslang", { exts: ["d"] }));
+  const glslangSrcPaths = glslangSrcEntries.map(e => e.path).join(" ");
+
+  Makefile += "\n" + `build/glslang: ${glslangSrcPaths} ${tabSrcPaths}\n` +
     "\t" + "dmd -debug -of=$@ $^\n";
 }
 

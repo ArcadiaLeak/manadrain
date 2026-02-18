@@ -47,12 +47,12 @@ void item_print(item_number[] item) {
   if (r.rhs[0] >= 0) {
     foreach (sym; r.rhs[0..r.rhs.length - item.length])
       writef(" %s", symbols[sym].tag);
-    writef(" %s", cast(dchar) 0x2022);
+    writef(" %s", '\u2022');
     foreach (sym; item)
       if (sym >= 0) writef(" %s", symbols[sym._].tag);
       else break;
   } else
-    writef(" %s %s", cast(dchar) 0x03b5, cast(dchar) 0x2022);
+    writef(" %s %s", '\u03B5', '\u2022');
 }
 
 ref rule item_rule(item_number[] item) {
@@ -75,7 +75,7 @@ void rule_rhs_print(in rule r) {
     for (int k = 0; r.rhs[k] >= 0; k++)
       writef(" %s", symbols[r.rhs[k]].tag);
   else
-    writef(" %s", cast(dchar) 0x03b5);
+    writef(" %s", '\u03B5');
 }
 
 size_t ritem_longest_rhs() {
