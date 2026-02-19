@@ -1,0 +1,101 @@
+[
+  {
+    "id": "primary_expression",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "variable_identifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "LEFT_PAREN" },
+          { "num": 1, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 2, "id": "expression" }
+        ],
+        "rhs": [0, 2, 1]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "FLOATCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "INTCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "UINTCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "BOOLCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "STRING_LITERAL" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "INT32CONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "UINT32CONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "INT64CONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "UINT64CONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "INT16CONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "UINT16CONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "DOUBLECONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "FLOAT16CONSTANT" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

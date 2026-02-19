@@ -1,0 +1,33 @@
+[
+  {
+    "id": "parameter_declaration",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "type_qualifier" },
+          { "num": 1, "id": "parameter_declarator" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "parameter_declarator" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "type_qualifier" },
+          { "num": 1, "id": "parameter_type_specifier" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "parameter_type_specifier" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

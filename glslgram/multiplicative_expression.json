@@ -1,0 +1,43 @@
+[
+  {
+    "id": "multiplicative_expression",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "unary_expression" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "STAR" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "multiplicative_expression" },
+          { "num": 2, "id": "unary_expression" }
+        ],
+        "rhs": [1, 0, 2]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SLASH" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "multiplicative_expression" },
+          { "num": 2, "id": "unary_expression" }
+        ],
+        "rhs": [1, 0, 2]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "PERCENT" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "multiplicative_expression" },
+          { "num": 2, "id": "unary_expression" }
+        ],
+        "rhs": [1, 0, 2]
+      }
+    ]
+  }
+]
