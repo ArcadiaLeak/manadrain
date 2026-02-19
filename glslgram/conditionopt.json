@@ -1,0 +1,16 @@
+[
+  {
+    "id": "conditionopt",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "condition" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "rhs": []
+      }
+    ]
+  }
+]

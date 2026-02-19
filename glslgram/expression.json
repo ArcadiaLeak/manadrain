@@ -1,0 +1,23 @@
+[
+  {
+    "id": "expression_statement",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "assignment_expression" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "COMMA" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "expression" },
+          { "num": 2, "id": "assignment_expression" }
+        ],
+        "rhs": [1, 0, 2]
+      }
+    ]
+  }
+]
