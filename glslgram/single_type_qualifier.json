@@ -1,0 +1,73 @@
+[
+  {
+    "id": "single_type_qualifier",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "storage_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "layout_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "precision_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "interpolation_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "invariant_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "precise_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "non_uniform_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "spirv_storage_class_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "spirv_decorate_qualifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_BY_REFERENCE" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_LITERAL" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

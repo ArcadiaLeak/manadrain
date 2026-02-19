@@ -1,0 +1,37 @@
+[
+  {
+    "id": "spirv_decorate_parameter",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "FLOATCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "INTCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "UINTCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "BOOLCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "spirv_decorate_id_parameter" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]
