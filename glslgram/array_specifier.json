@@ -1,0 +1,45 @@
+[
+  {
+    "id": "array_specifier",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "LEFT_BRACKET" },
+          { "num": 1, "id": "RIGHT_BRACKET" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "nterm": [
+          { "num": 2, "id": "conditional_expression" }
+        ],
+        "token": [
+          { "num": 0, "id": "LEFT_BRACKET" },
+          { "num": 1, "id": "RIGHT_BRACKET" }
+        ],
+        "rhs": [0, 2, 1]
+      },
+      {
+        "nterm": [
+          { "num": 2, "id": "array_specifier" }
+        ],
+        "token": [
+          { "num": 0, "id": "LEFT_BRACKET" },
+          { "num": 1, "id": "RIGHT_BRACKET" }
+        ],
+        "rhs": [2, 0, 1]
+      },
+      {
+        "nterm": [
+          { "num": 2, "id": "array_specifier" },
+          { "num": 3, "id": "conditional_expression" }
+        ],
+        "token": [
+          { "num": 0, "id": "LEFT_BRACKET" },
+          { "num": 1, "id": "RIGHT_BRACKET" }
+        ],
+        "rhs": [2, 0, 3, 1]
+      }
+    ]
+  }
+]
