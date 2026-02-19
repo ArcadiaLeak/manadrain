@@ -1,0 +1,23 @@
+[
+  {
+    "id": "attribute_list",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "single_attribute" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "attribute_list" },
+          { "num": 1, "id": "single_attribute" }
+        ],
+        "token": [
+          { "num": 2, "id": "COMMA" }
+        ],
+        "rhs": [0, 2, 1]
+      }
+    ]
+  }
+]
