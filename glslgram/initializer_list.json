@@ -1,0 +1,23 @@
+[
+  {
+    "id": "initializer_list",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "initializer" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "COMMA" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "initializer_list" },
+          { "num": 2, "id": "initializer" }
+        ],
+        "rhs": [1, 0, 2]
+      }
+    ]
+  }
+]

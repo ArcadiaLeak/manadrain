@@ -1,0 +1,67 @@
+[
+  {
+    "id": "interpolation_qualifier",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "SMOOTH" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "FLAT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "NOPERSPECTIVE" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "EXPLICITINTERPAMD" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "PERVERTEXNV" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "PERVERTEXEXT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "PERPRIMITIVENV" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "PERPRIMITIVEEXT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "PERVIEWNV" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "PERTASKNV" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

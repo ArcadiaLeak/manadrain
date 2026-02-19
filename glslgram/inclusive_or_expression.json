@@ -1,0 +1,23 @@
+[
+  {
+    "id": "inclusive_or_expression",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "exclusive_or_expression" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "VERTICAL_BAR" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "inclusive_or_expression" },
+          { "num": 2, "id": "exclusive_or_expression" }
+        ],
+        "rhs": [1, 0, 2]
+      }
+    ]
+  }
+]
