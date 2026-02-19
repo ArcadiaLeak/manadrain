@@ -1,0 +1,24 @@
+[
+  {
+    "id": "function_call_header_with_parameters",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "function_call_header" },
+          { "num": 1, "id": "assignment_expression" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "COMMA" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "function_call_header_with_parameters" },
+          { "num": 2, "id": "assignment_expression" }
+        ],
+        "rhs": [1, 0, 2]
+      }
+    ]
+  }
+]

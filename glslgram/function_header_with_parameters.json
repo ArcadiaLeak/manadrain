@@ -1,0 +1,34 @@
+[
+  {
+    "id": "function_header_with_parameters",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "function_header" },
+          { "num": 1, "id": "parameter_declaration" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "COMMA" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "function_header_with_parameters" },
+          { "num": 2, "id": "parameter_declaration" }
+        ],
+        "rhs": [1, 0, 2]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "COMMA" },
+          { "num": 1, "id": "DOT" }
+        ],
+        "nterm": [
+          { "num": 2, "id": "function_header_with_parameters" }
+        ],
+        "rhs": [2, 0, 1, 1, 1]
+      }
+    ]
+  }
+]
