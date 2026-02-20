@@ -1,0 +1,31 @@
+[
+  {
+    "id": "spirv_requirements_parameter",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" },
+          { "num": 1, "id": "EQUAL" },
+          { "num": 2, "id": "LEFT_BRACKET" },
+          { "num": 3, "id": "RIGHT_BRACKET" }
+        ],
+        "nterm": [
+          { "num": 4, "id": "spirv_extension_list" }
+        ],
+        "rhs": [0, 1, 2, 4, 3]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" },
+          { "num": 1, "id": "EQUAL" },
+          { "num": 2, "id": "LEFT_BRACKET" },
+          { "num": 3, "id": "RIGHT_BRACKET" }
+        ],
+        "nterm": [
+          { "num": 4, "id": "spirv_capability_list" }
+        ],
+        "rhs": [0, 1, 2, 4, 3]
+      }
+    ]
+  }
+]
