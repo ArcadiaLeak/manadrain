@@ -1,0 +1,22 @@
+[
+  {
+    "id": "struct_declarator",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "array_specifier" }
+        ],
+        "rhs": [0, 1]
+      }
+    ]
+  }
+]
