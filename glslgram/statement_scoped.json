@@ -1,0 +1,25 @@
+[
+  {
+    "id": "statement_scoped",
+    "rule": [
+      {
+        "midrule": [
+          { "num": 0 }
+        ],
+        "nterm": [
+          { "num": 1, "id": "compound_statement" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "midrule": [
+          { "num": 0 }
+        ],
+        "nterm": [
+          { "num": 1, "id": "simple_statement" }
+        ],
+        "rhs": [0, 1]
+      }
+    ]
+  }
+]
