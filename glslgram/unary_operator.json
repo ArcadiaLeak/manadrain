@@ -1,0 +1,31 @@
+[
+  {
+    "id": "unary_operator",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "PLUS" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "DASH" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "BANG" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "TILDE" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]
