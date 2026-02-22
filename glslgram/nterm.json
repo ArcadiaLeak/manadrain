@@ -181,7 +181,10 @@
             { "num": 3, "id": "type_qualifier" },
             { "num": 4, "id": "struct_declaration_list" }
           ],
-          "rhs": [3, 0, 1, 4, 2]
+          "midrule": [
+            { "num": 5 }
+          ],
+          "rhs": [3, 0, 1, 5, 4, 2]
         }
       ]
     },
