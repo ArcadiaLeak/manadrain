@@ -15,7 +15,9 @@ auto read_json(
   int ntokens,
   int nnterms,
   symbol[string] symbol_table,
-  symbol acceptsymbol
+  symbol acceptsymbol,
+  symbol undeftoken,
+  symbol errtoken
 ) {
   int dummy_count = 0;
   int order_of_appearance = 0;
@@ -195,6 +197,10 @@ auto read_json(
     grammar,
     nrules,
     nritems,
-    acceptsymbol
+    acceptsymbol,
+    ntokens,
+    nnterms,
+    undeftoken,
+    errtoken
   );
 }

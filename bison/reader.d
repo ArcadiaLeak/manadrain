@@ -8,7 +8,7 @@ auto symbols_new(string gram_path) {
   int ntokens = 1;
   int nnterms = 0;
 
-  symbol[string] symbol_table;
+  symbol[string] symbol_table = new symbol[string];
 
   symbol acceptsymbol = symbol_table.symbol_get("$accept");
   acceptsymbol.order_of_appearance = 0;
@@ -43,7 +43,9 @@ auto symbols_new(string gram_path) {
     ntokens,
     nnterms,
     symbol_table,
-    acceptsymbol
+    acceptsymbol,
+    undeftoken,
+    errtoken
   );
 }
 
@@ -53,8 +55,18 @@ void check_and_convert_grammar(
   symbol_list grammar,
   int nrules,
   int nritems,
-  symbol acceptsymbol
+  symbol acceptsymbol,
+  int ntokens,
+  int nnterms,
+  symbol undeftoken,
+  symbol errtoken
 ) {
+  symbol[] symbols_sorted;
+  int[] token_translations;
+  symbol[] symbols;
+  int nsyms;
+  int max_code;
+
   symbol eoftoken = symbol_table.symbol_get("YYEOF");
   eoftoken.order_of_appearance = 0;
   eoftoken.content.class_ = symbol_class_.token_sym;
@@ -87,5 +99,79 @@ void check_and_convert_grammar(
     create_start_rule(null, start);
   }
 
+  void symbols_check_defined() {
+    import std.algorithm.sorting;
+    import std.array;
+
+    symbols_sorted = symbol_table.values
+      .sort!("a.order_of_appearance < b.order_of_appearance")
+      .array;
+
+    foreach (sym; symbols_sorted)
+      if (sym.content.number == NUMBER_UNDEFINED)
+        sym.content.number = sym.content.class_ == symbol_class_.token_sym
+          ? ntokens++ : nnterms++;
+  }
+
+  void symbol_pack(symbol sym) {
+    if (sym.content.class_ == symbol_class_.nterm_sym)
+      sym.content.number += ntokens;
+
+    symbols[sym.content.number] = sym.content.symbol_;
+  }
+
+  void symbol_translation(symbol sym) {
+    if (sym.content.class_ == symbol_class_.token_sym && !sym.is_alias)
+      token_translations[sym.content.code] = sym.content.number;
+  }
+
+  void symbols_token_translations_init() {
+    bool code_256_available_p = true;
+
+    max_code = 0;
+    foreach (s; symbols[0..ntokens]) {
+      sym_content sym = s.content;
+      if (sym.code != CODE_UNDEFINED) {
+        if (sym.code > max_code)
+          max_code = sym.code;
+        if (sym.code == 256)
+          code_256_available_p = false;
+      }
+    }
+
+    if (code_256_available_p && errtoken.content.code == CODE_UNDEFINED)
+      errtoken.content.code = 256;
+
+    if (max_code < 256)
+      max_code = 256;
+
+    foreach (s; symbols[0..ntokens]) {
+      sym_content sym = s.content;
+      if (sym.code == CODE_UNDEFINED)
+        sym.code = ++max_code;
+      if (sym.code > max_code)
+        max_code = sym.code;
+    }
+
+    token_translations = new int[max_code + 1];
+    token_translations[] = undeftoken.content.number;
+
+    foreach (sym; symbols_sorted)
+      symbol_translation(sym);
+  }
+
+  void symbols_pack() {
+    symbols = new symbol[nsyms];
+    foreach (sym; symbols_sorted)
+      symbol_pack(sym);
+
+    symbols_token_translations_init;
+  }
+
   create_start_rules;
+  symbols_check_defined;
+
+  nsyms = ntokens + nnterms;
+
+  symbols_pack;
 }

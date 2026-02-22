@@ -8,11 +8,6 @@ enum symbol_class_ {
   nterm_sym
 }
 
-struct symbol_number {
-  int _;
-  alias _ this;
-}
-
 enum int CODE_UNDEFINED = -1;
 enum int NUMBER_UNDEFINED = -1;
 
@@ -42,13 +37,13 @@ class symbol {
 class sym_content {
   symbol symbol_;
   symbol_class_ class_;
-  symbol_number number;
+  int number;
   int code;
 
   this(symbol s) {
     symbol_ = s;
 
-    number = symbol_number(NUMBER_UNDEFINED);
+    number = NUMBER_UNDEFINED;
     code = CODE_UNDEFINED;
 
     class_ = symbol_class_.unknown_sym;
