@@ -1,6 +1,6 @@
 [
   {
-    "id": "translation_unit",
+    "id": "type_name_list",
     "rule": [
       {
         "token": [

@@ -1,6 +1,6 @@
 [
   {
-    "id": "expression_statement",
+    "id": "expression",
     "rule": [
       {
         "nterm": [

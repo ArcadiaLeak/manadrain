@@ -1,6 +1,6 @@
 [
   {
-    "id": "spirv_type_parameter",
+    "id": "spirv_type_specifier",
     "rule": [
       {
         "token": [
