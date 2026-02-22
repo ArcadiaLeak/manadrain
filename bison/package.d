@@ -1,5 +1,6 @@
 module bison;
 
+public import bison.derives;
 public import bison.gram;
 public import bison.json;
 public import bison.reader;
@@ -14,5 +15,6 @@ void main(string[] args) {
   args[args.length - 1]
     .symbols_new.expand
     .read_json.expand
-    .check_and_convert_grammar;
+    .check_and_convert_grammar.expand
+    .derives_compute;
 }

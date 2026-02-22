@@ -49,7 +49,7 @@ auto symbols_new(string gram_path) {
   );
 }
 
-void check_and_convert_grammar(
+auto check_and_convert_grammar(
   symbol[string] symbol_table,
   symbol_list start_symbols,
   symbol_list grammar,
@@ -204,4 +204,13 @@ void check_and_convert_grammar(
 
   symbols_pack;
   packgram;
+
+  return tuple(
+    symbols,
+    rules,
+    nrules,
+    ntokens,
+    nnterms,
+    nsyms
+  );
 }
