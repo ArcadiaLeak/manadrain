@@ -42,7 +42,8 @@ auto symbols_new(string gram_path) {
     nsyms,
     ntokens,
     nnterms,
-    symbol_table
+    symbol_table,
+    acceptsymbol
   );
 }
 

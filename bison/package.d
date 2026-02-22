@@ -12,5 +12,6 @@ enum bool TRACE_AUTOMATON = 0;
 void main(string[] args) {
   args[args.length - 1]
     .symbols_new.expand
-    .read_json;
+    .read_json.expand
+    .check_and_convert_grammar;
 }

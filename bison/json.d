@@ -9,12 +9,13 @@ import std.json;
 import std.path;
 import std.typecons;
 
-void read_json(
+auto read_json(
   string gram_path,
   int nsyms,
   int ntokens,
   int nnterms,
-  symbol[string] symbol_table
+  symbol[string] symbol_table,
+  symbol acceptsymbol
 ) {
   int dummy_count = 0;
   int order_of_appearance = 0;
@@ -182,7 +183,12 @@ void read_json(
     }
   }
 
-  import std.stdio;
-  writeln(nrules);
-  writeln(nritems);
+  return tuple(
+    symbol_table,
+    start_symbols,
+    grammar,
+    nrules,
+    nritems,
+    acceptsymbol
+  );
 }
