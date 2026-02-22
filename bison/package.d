@@ -2,6 +2,7 @@ module bison;
 
 public import bison.json;
 public import bison.reader;
+public import bison.symlist;
 public import bison.symtab;
 
 enum bool TRACE_SETS = 0;
