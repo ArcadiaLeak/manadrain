@@ -1,18 +1,22 @@
 module bison.derives;
 import bison;
 
+import std.typecons;
+
 struct rule_list {
   rule_list[] next;
   rule[] value;
 }
 
-void derives_compute(
+auto derives_compute(
   symbol[] symbols,
   rule[] rules,
   int nrules,
   int ntokens,
   int nnterms,
-  int nsyms
+  int nsyms,
+  int[] token_translations,
+  int nritems
 ) {
   rule[][][] derives;
 
@@ -63,4 +67,16 @@ void derives_compute(
 
     write("\n\n");
   }
+
+  return tuple(
+    ntokens,
+    nnterms,
+    nsyms,
+    rules,
+    nrules,
+    nritems,
+    symbols,
+    token_translations,
+    derives
+  );
 }

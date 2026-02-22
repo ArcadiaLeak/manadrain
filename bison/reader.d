@@ -211,6 +211,8 @@ auto check_and_convert_grammar(
     nrules,
     ntokens,
     nnterms,
-    nsyms
+    nsyms,
+    token_translations,
+    nritems
   );
 }
