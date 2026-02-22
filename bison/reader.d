@@ -66,6 +66,8 @@ void check_and_convert_grammar(
   symbol[] symbols;
   int nsyms;
   int max_code;
+  int[] ritem;
+  rule[] rules;
 
   symbol eoftoken = symbol_table.symbol_get("YYEOF");
   eoftoken.order_of_appearance = 0;
@@ -168,10 +170,38 @@ void check_and_convert_grammar(
     symbols_token_translations_init;
   }
 
+  void packgram() {
+    import std.range.primitives;
+
+    int itemno = 0;
+    ritem = new int[nritems];
+
+    int ruleno = 0;
+    rules = new rule[nrules];
+
+    for (symbol_list p = grammar; p; p = p.next) {
+      symbol_list lhs = p;
+
+      rules[ruleno].number = ruleno;
+      rules[ruleno].lhs = lhs.sym.content;
+      rules[ruleno].rhs = ritem[itemno..$];
+
+      size_t rule_length = 0;
+      for (p = lhs.next; p.sym; p = p.next) {
+        ++rule_length;
+        ritem[itemno++] = p.sym.content.number;
+      }
+
+      ritem[itemno++] = -1 - ruleno;
+      ++ruleno;
+    }
+  }
+
   create_start_rules;
   symbols_check_defined;
 
   nsyms = ntokens + nnterms;
 
   symbols_pack;
+  packgram;
 }

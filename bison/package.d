@@ -1,5 +1,6 @@
 module bison;
 
+public import bison.gram;
 public import bison.json;
 public import bison.reader;
 public import bison.symlist;
