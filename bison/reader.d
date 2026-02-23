@@ -214,6 +214,7 @@ auto check_and_convert_grammar(
     nsyms,
     token_translations,
     nritems,
-    ritem
+    ritem,
+    acceptsymbol
   );
 }

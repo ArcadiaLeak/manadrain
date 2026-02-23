@@ -3,24 +3,47 @@ import bison;
 
 import std.range.interfaces;
 
-auto closure_new(
-  const int nritems,
-  const int nrules,
-  const int ntokens,
-  const int nnterms,
-  const int nsyms,
-  const int[] ritem,
-  const rule[] rules,
-  const rule[][][] derives,
-  const symbol[] symbols
-) {
-  size_t[] itemset = new size_t[nritems];
+class closure {
+  const int nritems;
+  const int nrules;
+  const int ntokens;
+  const int nnterms;
+  const int nsyms;
+  const int[] ritem;
+  const rule[] rules;
+  const rule[][][] derives;
+  const symbol[] symbols;
+
+  size_t[] itemset;
   size_t nitemset;
-
-  bool[] ruleset = new bool[nrules];
-
+  bool[] ruleset;
   bool[][] fderives;
   bool[][] firsts;
+
+  this(
+    int nritems,
+    int nrules,
+    int ntokens,
+    int nnterms,
+    int nsyms,
+    int[] ritem,
+    rule[] rules,
+    rule[][][] derives,
+    symbol[] symbols
+  ) {
+    this.nritems = nritems;
+    this.nrules = nrules;
+    this.ntokens = ntokens;
+    this.nnterms = nnterms;
+    this.nsyms = nsyms;
+    this.ritem = ritem;
+    this.rules = rules;
+    this.derives = derives;
+    this.symbols = symbols;
+
+    itemset = new size_t[nritems];
+    ruleset = new bool[nrules];
+  }
 
   void print_firsts() {
     import std.stdio;
@@ -116,7 +139,7 @@ auto closure_new(
     write("\n\n");
   }
 
-  void closure(const state s) {
+  void run_closure(const state s) {
     if (TRACE_CLOSURE)
       closure_print("input", s.items);
 
@@ -150,8 +173,4 @@ auto closure_new(
     if (TRACE_CLOSURE)
       closure_print("output", itemset[0..nitemset]);
   }
-
-  set_fderives;
-
-  return &closure;
 }

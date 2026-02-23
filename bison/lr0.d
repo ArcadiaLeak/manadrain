@@ -1,6 +1,11 @@
 module bison.lr0;
 import bison;
 
+class state_list {
+  state_list next;
+  state state_;
+}
+
 void generate_states(
   rule[] rules,
   int nrules,
@@ -10,7 +15,8 @@ void generate_states(
   int nritems,
   symbol[] symbols,
   rule[][][] derives,
-  int[] ritem
+  int[] ritem,
+  symbol acceptsymbol
 ) {
   size_t[][] kernel_base;
   int[] kernel_size;
@@ -18,6 +24,9 @@ void generate_states(
   bool[] shift_symbol;
   rule[][] redset;
   state[] shiftset;
+  state_list first_state;
+  state_list last_state;
+  state final_state;
 
   void allocate_itemsets() {
     size_t count = 0;
@@ -50,8 +59,24 @@ void generate_states(
     shift_symbol = new bool[nsyms];
   }
 
+  state state_list_append(int sym, size_t[] core) {
+    state_list node = new state_list;
+    state res = new state(sym, core.idup);
+
+    node.next = null;
+    node.state_ = res;
+
+    if (!first_state)
+      first_state = node;
+    if (last_state)
+      last_state.next = node;
+    last_state = node;
+
+    return res;
+  }
+
   allocate_storage;
-  auto closure = closure_new(
+  auto cl = new closure(
     nritems,
     nrules,
     ntokens,
@@ -62,4 +87,35 @@ void generate_states(
     derives,
     symbols
   );
+  cl.set_fderives;
+
+  void save_reductions(state s) {
+    int count = 0;
+
+    foreach (i; cl.itemset[0..cl.nitemset]) {
+      int item = ritem[i];
+      if (item < 0) {
+        int r = -1 - item;
+        redset[count++] = rules[r..$];
+        if (r == 0)
+          final_state = s;
+      }
+    }
+
+    s.reductions = redset[0..count].dup;
+  }
+
+  {
+    kernel_size[0] = 0;
+    for (int r = 0; r < nrules && rules[r].lhs.symbol_ == acceptsymbol; ++r)
+      kernel_base[0][kernel_size[0]++] = ritem.length - rules[r].rhs.length;
+    state_list_append(0, kernel_base[0][0..kernel_size[0]]);
+  }
+
+  for (state_list list = first_state; list; list = list.next) {
+    state s = list.state_;
+
+    cl.run_closure(s);
+    save_reductions(s);
+  }
 }
