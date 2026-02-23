@@ -27,6 +27,9 @@ void generate_states(
   state_list first_state;
   state_list last_state;
   state final_state;
+  state[] states;
+  int nstates;
+  state[size_t[]] state_table;
 
   void allocate_itemsets() {
     size_t count = 0;
@@ -62,6 +65,8 @@ void generate_states(
   state state_list_append(int sym, size_t[] core) {
     state_list node = new state_list;
     state res = new state(sym, core.idup);
+    res.number = nstates++;
+    state_table[core.idup] = res;
 
     node.next = null;
     node.state_ = res;
@@ -143,6 +148,33 @@ void generate_states(
     }
   }
 
+  state get_state(int sym, size_t[] core) {
+    if (core !in state_table)
+      state_list_append(sym, core);
+
+    return state_table[core];
+  }
+
+  void append_states(state s) {
+    import std.stdio;
+
+    if (TRACE_AUTOMATON) 
+      writef("append_states: begin: state = %d\n", s.number);
+
+    int i = 0;
+    foreach(sym, flag; shift_symbol)
+      if (flag) {
+        shiftset[i] = get_state(
+          cast(int) sym,
+          kernel_base[sym][0..kernel_size[sym]]
+        );
+        ++i;
+      }
+
+    if (TRACE_AUTOMATON) 
+      writef("append_states: end: state = %d\n", s.number);
+  }
+
   {
     kernel_size[0] = 0;
     for (int r = 0; r < nrules && rules[r].lhs.symbol_ == acceptsymbol; ++r)
@@ -156,5 +188,32 @@ void generate_states(
     cl.run_closure(s);
     save_reductions(s);
     new_itemsets(s);
+    append_states(s);
+
+    import std.algorithm.searching;
+    symbols.state_transitions_set(s, shiftset[0..shift_symbol.count(1)]);
   }
+
+  void set_states() {
+    states = new state[nstates];
+
+    while (first_state) {
+      state_list self = first_state;
+
+      state s = self.state_;
+      states[s.number] = s;
+      
+      first_state = self.next;
+    }
+    first_state = null;
+    last_state = null;
+  }
+
+  set_states;
+}
+
+void state_transitions_set(symbol[] symbols, state s, state[] dst) {
+  s.transitions = dst.dup;
+  if (TRACE_AUTOMATON)
+    symbols.state_transitions_print(s);
 }

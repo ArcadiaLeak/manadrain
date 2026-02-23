@@ -16,3 +16,16 @@ class state {
     items = core;
   }
 }
+
+void state_transitions_print(symbol[] symbols, state s) {
+  import std.stdio;
+  writef("transitions of %d (%d):\n", s.number, s.transitions.length);
+  foreach (i, trans; s.transitions)
+    writef(
+      "  %d: (%d, %s, %d)\n",
+      i,
+      s.number,
+      symbols[trans.accessing_symbol].tag,
+      trans.number
+    );
+}
