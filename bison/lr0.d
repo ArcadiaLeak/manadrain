@@ -4,7 +4,13 @@ import bison;
 void generate_states(
   rule[] rules,
   int nrules,
-  int nsyms
+  int nsyms,
+  int ntokens,
+  int nnterms,
+  int nritems,
+  symbol[] symbols,
+  rule[][][] derives,
+  int[] ritem
 ) {
   size_t[][] kernel_base;
   int[] kernel_size;
@@ -45,4 +51,15 @@ void generate_states(
   }
 
   allocate_storage;
+  auto closure = closure_new(
+    nritems,
+    nrules,
+    ntokens,
+    nnterms,
+    nsyms,
+    ritem,
+    rules,
+    derives,
+    symbols
+  );
 }

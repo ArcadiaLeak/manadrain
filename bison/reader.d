@@ -213,6 +213,7 @@ auto check_and_convert_grammar(
     nnterms,
     nsyms,
     token_translations,
-    nritems
+    nritems,
+    ritem
   );
 }

@@ -1,5 +1,6 @@
 module bison;
 
+package import bison.closure;
 package import bison.derives;
 package import bison.gram;
 package import bison.json;

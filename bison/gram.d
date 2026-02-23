@@ -10,7 +10,7 @@ struct rule {
   bool useful;
 }
 
-void rule_rhs_print(symbol[] symbols, rule r) {
+void rule_rhs_print(const symbol[] symbols, const rule r) {
   import std.stdio;
 
   if (r.rhs[0] >= 0)

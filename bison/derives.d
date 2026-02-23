@@ -16,7 +16,8 @@ auto derives_compute(
   int nnterms,
   int nsyms,
   int[] token_translations,
-  int nritems
+  int nritems,
+  int[] ritem
 ) {
   rule[][][] derives;
 
@@ -77,6 +78,7 @@ auto derives_compute(
     nritems,
     symbols,
     token_translations,
-    derives
+    derives,
+    ritem
   );
 }

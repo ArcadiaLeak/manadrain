@@ -12,7 +12,8 @@ auto nullable_compute(
   int nritems,
   symbol[] symbols,
   int[] token_translations,
-  rule[][][] derives
+  rule[][][] derives,
+  int[] ritem
 ) {
   bool[] nullable = new bool[nnterms];
 
@@ -84,6 +85,12 @@ auto nullable_compute(
   return tuple(
     rules,
     nrules,
-    nsyms
+    nsyms,
+    ntokens,
+    nnterms,
+    nritems,
+    symbols,
+    derives,
+    ritem
   );
 }
