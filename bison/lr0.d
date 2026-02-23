@@ -104,6 +104,44 @@ void generate_states(
 
     s.reductions = redset[0..count].dup;
   }
+  
+  void core_print(size_t[] core) {
+    foreach (c; core) {
+      import std.stdio;
+      item_print(symbols, rules, ritem[c..$]);
+      write("\n");
+    }
+  }
+
+  void kernel_print() {
+    for (int i = 0; i < nsyms; ++i)
+      if (kernel_size[i]) {
+        import std.stdio;
+        writef("kernel[%s] =\n", symbols[i].tag);
+        core_print(kernel_base[i][0..kernel_size[i]]);
+      }
+  }
+
+  void new_itemsets(state s) {
+    kernel_size[] = 0;
+    shift_symbol[] = 0;
+
+    foreach (i; cl.itemset[0..cl.nitemset]) {
+      if (ritem[i] >= 0) {
+        int sym = ritem[i];
+        shift_symbol[sym] = true;
+        kernel_base[sym][kernel_size[sym]] = i + 1;
+        kernel_size[sym]++;
+      }
+    }
+
+    if (TRACE_AUTOMATON) {
+      import std.stdio;
+      write("final kernel:\n");
+      kernel_print();
+      writef("new_itemsets: end: state = %d\n\n", s.number);
+    }
+  }
 
   {
     kernel_size[0] = 0;
@@ -117,5 +155,6 @@ void generate_states(
 
     cl.run_closure(s);
     save_reductions(s);
+    new_itemsets(s);
   }
 }

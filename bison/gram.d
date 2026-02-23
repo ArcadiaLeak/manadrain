@@ -10,6 +10,12 @@ struct rule {
   bool useful;
 }
 
+void rule_lhs_print(in rule r) {
+  import std.stdio;
+  writef("  %3d ", r.number);
+  writef("%s:", r.lhs.symbol_.tag);
+}
+
 void rule_rhs_print(const symbol[] symbols, const rule r) {
   import std.stdio;
 
@@ -18,4 +24,28 @@ void rule_rhs_print(const symbol[] symbols, const rule r) {
       writef(" %s", symbols[r.rhs[k]].tag);
   else
     writef(" %s", '\u03B5');
+}
+
+void item_print(symbol[] symbols, rule[] rules, int[] item) {
+  const ref rule r = rules.item_rule(item);
+  r.rule_lhs_print;
+
+  import std.stdio;
+  if (r.rhs[0] >= 0) {
+    foreach (sym; r.rhs[0..r.rhs.length - item.length])
+      writef(" %s", symbols[sym].tag);
+    writef(" %s", '\u2022');
+    foreach (sym; item)
+      if (sym >= 0) writef(" %s", symbols[sym].tag);
+      else break;
+  } else
+    writef(" %s %s", '\u03B5', '\u2022');
+}
+
+ref rule item_rule(rule[] rules, int[] item) {
+  int[] sp = item;
+  while (sp[0] >= 0)
+    sp = sp[1..$];
+  int r = -1 - sp[0];
+  return rules[r];
 }
