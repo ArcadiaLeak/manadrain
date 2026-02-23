@@ -222,7 +222,8 @@ auto generate_states(
     symbols,
     nullable,
     derives,
-    rules
+    rules,
+    nstates
   );
 }
 

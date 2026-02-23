@@ -1,6 +1,7 @@
 module bison;
 
 package import bison.closure;
+package import bison.conflicts;
 package import bison.derives;
 package import bison.gram;
 package import bison.json;
@@ -25,5 +26,6 @@ void main(string[] args) {
     .derives_compute.expand
     .nullable_compute.expand
     .generate_states.expand
-    .lalr;
+    .lalr.expand
+    .conflicts_solve;
 }

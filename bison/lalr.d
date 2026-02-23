@@ -1,6 +1,8 @@
 module bison.lalr;
 import bison;
 
+import std.typecons;
+
 class goto_list {
   goto_list next;
   int value;
@@ -11,7 +13,7 @@ class goto_list {
   }
 }
 
-void lalr(
+auto lalr(
   state[] states,
   int ntokens,
   int nnterms,
@@ -19,7 +21,8 @@ void lalr(
   symbol[] symbols,
   bool[] nullable,
   rule[][][] derives,
-  rule[] rules
+  rule[] rules,
+  int nstates
 ) {
   bool[][] LA;
   size_t nLA;
@@ -343,7 +346,7 @@ void lalr(
   void lookaheads_print() {
     import std.stdio;
     write("Lookaheads:\n");
-    foreach (i; 0..states.length) {
+    foreach (i; 0..nstates) {
       rule[][] reds = states[i].reductions;
       if (reds.length) {
         writef("  State %d:\n", i);
@@ -370,4 +373,12 @@ void lalr(
 
   if (TRACE_SETS)
     lookaheads_print;
+
+  return tuple(
+    nstates,
+    ntokens,
+    nnterms,
+    nsyms,
+    states
+  );
 }
