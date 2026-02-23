@@ -8,8 +8,10 @@ void generate_states(
 ) {
   size_t[][] kernel_base;
   int[] kernel_size;
-
   size_t[] kernel_items;
+  bool[] shift_symbol;
+  rule[][] redset;
+  state[] shiftset;
 
   void allocate_itemsets() {
     size_t count = 0;
@@ -34,5 +36,13 @@ void generate_states(
     kernel_size = new int[nsyms];
   }
 
-  allocate_itemsets;
+  void allocate_storage() {
+    allocate_itemsets();
+
+    shiftset = new state[nsyms];
+    redset = new rule[][nrules];
+    shift_symbol = new bool[nsyms];
+  }
+
+  allocate_storage;
 }

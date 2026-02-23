@@ -6,6 +6,7 @@ package import bison.json;
 package import bison.lr0;
 package import bison.nullable;
 package import bison.reader;
+package import bison.state;
 package import bison.symlist;
 package import bison.symtab;
 
