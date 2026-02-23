@@ -1,7 +1,9 @@
 module bison.nullable;
 import bison;
 
-void nullable_compute(
+import std.typecons;
+
+auto nullable_compute(
   int ntokens,
   int nnterms,
   int nsyms,
@@ -78,4 +80,10 @@ void nullable_compute(
     
     write("\n\n");
   }
+
+  return tuple(
+    rules,
+    nrules,
+    nsyms
+  );
 }

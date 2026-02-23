@@ -3,6 +3,7 @@ module bison;
 package import bison.derives;
 package import bison.gram;
 package import bison.json;
+package import bison.lr0;
 package import bison.nullable;
 package import bison.reader;
 package import bison.symlist;
@@ -18,5 +19,6 @@ void main(string[] args) {
     .read_json.expand
     .check_and_convert_grammar.expand
     .derives_compute.expand
-    .nullable_compute;
+    .nullable_compute.expand
+    .generate_states;
 }
