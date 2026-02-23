@@ -13,6 +13,7 @@ package import bison.relation;
 package import bison.state;
 package import bison.symlist;
 package import bison.symtab;
+package import bison.tables;
 
 enum bool TRACE_SETS = 0;
 enum bool TRACE_CLOSURE = 0;
@@ -27,5 +28,6 @@ void main(string[] args) {
     .nullable_compute.expand
     .generate_states.expand
     .lalr.expand
-    .conflicts_solve;
+    .conflicts_solve.expand
+    .tables_generate;
 }

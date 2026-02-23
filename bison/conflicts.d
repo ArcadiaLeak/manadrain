@@ -1,7 +1,9 @@
 module bison.conflicts;
 import bison;
 
-void conflicts_solve(
+import std.typecons;
+
+auto conflicts_solve(
   int nstates,
   int ntokens,
   int nnterms,
@@ -46,4 +48,11 @@ void conflicts_solve(
 
   foreach (s; states)
     set_conflicts(s, errors);
+
+  return tuple(
+    ntokens,
+    nnterms,
+    nsyms,
+    nstates
+  );
 }
