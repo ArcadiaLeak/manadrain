@@ -4,6 +4,7 @@ package import bison.closure;
 package import bison.derives;
 package import bison.gram;
 package import bison.json;
+package import bison.lalr;
 package import bison.lr0;
 package import bison.nullable;
 package import bison.reader;
@@ -22,5 +23,6 @@ void main(string[] args) {
     .check_and_convert_grammar.expand
     .derives_compute.expand
     .nullable_compute.expand
-    .generate_states;
+    .generate_states.expand
+    .lalr;
 }

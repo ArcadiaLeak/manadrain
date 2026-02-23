@@ -1,12 +1,14 @@
 module bison.lr0;
 import bison;
 
+import std.typecons;
+
 class state_list {
   state_list next;
   state state_;
 }
 
-void generate_states(
+auto generate_states(
   rule[] rules,
   int nrules,
   int nsyms,
@@ -210,6 +212,13 @@ void generate_states(
   }
 
   set_states;
+
+  return tuple(
+    states,
+    ntokens,
+    nnterms,
+    nsyms
+  );
 }
 
 void state_transitions_set(symbol[] symbols, state s, state[] dst) {
