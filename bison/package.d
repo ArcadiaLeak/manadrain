@@ -8,6 +8,7 @@ package import bison.lalr;
 package import bison.lr0;
 package import bison.nullable;
 package import bison.reader;
+package import bison.relation;
 package import bison.state;
 package import bison.symlist;
 package import bison.symtab;

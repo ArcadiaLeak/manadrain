@@ -18,7 +18,8 @@ auto generate_states(
   symbol[] symbols,
   rule[][][] derives,
   int[] ritem,
-  symbol acceptsymbol
+  symbol acceptsymbol,
+  bool[] nullable
 ) {
   size_t[][] kernel_base;
   int[] kernel_size;
@@ -218,7 +219,8 @@ auto generate_states(
     ntokens,
     nnterms,
     nsyms,
-    symbols
+    symbols,
+    nullable
   );
 }
 

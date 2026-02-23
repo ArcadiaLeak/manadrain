@@ -6,7 +6,8 @@ void lalr(
   int ntokens,
   int nnterms,
   int nsyms,
-  symbol[] symbols
+  symbol[] symbols,
+  bool[] nullable
 ) {
   bool[][] LA;
   size_t nLA;
@@ -14,6 +15,7 @@ void lalr(
   int ngotos;
   int[] from_state;
   int[] to_state;
+  bool[][] goto_follows;
 
   int state_lookaheads_count(state s) {
     rule[][] reds = s.reductions;
@@ -116,6 +118,88 @@ void lalr(
     }
   }
 
+  void follows_print(string title) {
+    import std.stdio;
+    writef("%s:\n", title);
+    foreach (i; 0..ngotos) {
+      write("    FOLLOWS[");
+      goto_print(i);
+      write("] =");
+      foreach (sym, flag; goto_follows[i])
+        if (flag)
+          writef(" %s", symbols[sym].tag);
+      write("\n");
+    }
+    write("\n");
+  }
+
+  int map_goto(int src, int sym) {
+    int low = goto_map[sym - ntokens];
+    int high = goto_map[sym - ntokens + 1];
+    high -= 1;
+
+    while (true) {
+      int middle = (low + high) / 2;
+      int s = from_state[middle];
+      if (s == src)
+        return middle;
+      else if (s < src)
+        low = middle + 1;
+      else
+        high = middle - 1;
+    }
+  }
+
+  void initialize_goto_follows() {
+    int[][] reads = new int[][ngotos];
+    int[] edge = new int[ngotos];
+    
+    import std.array;
+    import std.range;
+    goto_follows = new bool[ngotos * ntokens].chunks(ntokens).array;
+
+    foreach (size_t i; 0..ngotos) {
+      int dst = to_state[i];
+    
+      state[] trans = states[dst].transitions;
+      while (trans.length > 0) {
+        if (trans[0] is null)
+          continue;
+        if (trans[0].accessing_symbol >= ntokens)
+          break;
+
+        goto_follows[i][trans[0].accessing_symbol] = true;
+        trans = trans[1..$];
+      }
+        
+      int nedges = 0;
+      while (trans.length > 0) {
+        int sym = trans[0].accessing_symbol;
+        if (nullable[sym - ntokens])
+          edge[nedges++] = map_goto(dst, sym);
+        trans = trans[1..$];
+      }
+
+      if (nedges == 0)
+        reads[i] = null;
+      else {
+        reads[i] = edge[0..nedges];
+        reads[i].length++;
+        reads[i][nedges] = -1;
+      }
+    }
+
+    if (TRACE_AUTOMATON) {
+      follows_print("follows after shifts");
+      relation_print!goto_print("reads", reads);
+    }
+
+    relation_digraph(reads, goto_follows);
+    if (TRACE_AUTOMATON)
+      follows_print("follows after read");
+  }
+
   initialize_LA;
   set_goto_map;
+  initialize_goto_follows;
 }

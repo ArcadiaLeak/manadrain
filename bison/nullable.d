@@ -93,6 +93,7 @@ auto nullable_compute(
     symbols,
     derives,
     ritem,
-    acceptsymbol
+    acceptsymbol,
+    nullable
   );
 }
