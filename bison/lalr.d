@@ -290,9 +290,84 @@ void lalr(
       relation_print!goto_print("includes", includes);
   }
 
+  void compute_follows() {
+    relation_digraph(includes, goto_follows);
+    if (TRACE_SETS)
+      follows_print("follows after includes");
+  }
+
+  state lookback_find_state(size_t lookback_index) {
+    state res = null;
+    foreach (s; states)
+      if (s.reductions && s.lookaheads) {
+        if (LA.length - s.lookaheads.length > lookback_index)
+          break;
+        else
+          res = s;
+      }
+    if (!res)
+      assert(0);
+    return res;
+  }
+
+  void lookback_print() {
+    import std.stdio;
+    write("lookback:\n");
+    foreach (i; 0..nLA)
+      if (lookback[i]) {
+        writef("   %3d = ", i);
+        state s = lookback_find_state(i);
+        size_t rnum = i - (LA.length - s.lookaheads.length);
+        rule[] r = s.reductions[rnum];
+        writef("(%3d, ", s.number);
+        r[0].rule_lhs_print;
+        symbols.rule_rhs_print(r[0]);
+        write(") ->");
+        for (goto_list sp = lookback[i]; sp; sp = sp.next) {
+          write(" ");
+          goto_print(sp.value);
+        }
+        write("\n");
+      }
+    write("\n");
+  }
+
+  void compute_lookaheads() {
+    if (TRACE_AUTOMATON)
+      lookback_print;
+    foreach (i; 0..nLA)
+      for (goto_list sp = lookback[i]; sp; sp = sp.next)
+        LA[i][] |= goto_follows[sp.value][];
+  }
+
+  void lookaheads_print() {
+    import std.stdio;
+    write("Lookaheads:\n");
+    foreach (i; 0..states.length) {
+      rule[][] reds = states[i].reductions;
+      if (reds.length) {
+        writef("  State %d:\n", i);
+        foreach (j; 0..reds.length) {
+          writef("    rule %d:", reds[j][0].number);
+          if (states[i].lookaheads)
+            foreach (k, flag; states[i].lookaheads[j])
+              if (flag)
+                writef(" %s", symbols[k].tag);
+          write("\n");
+        }
+      }
+    }
+    write("\n");
+  }
+
   initialize_LA;
   set_goto_map;
   initialize_goto_follows;
   lookback = new goto_list[nLA];
   build_relations;
+  compute_follows;
+  compute_lookaheads;
+
+  if (TRACE_SETS)
+    lookaheads_print;
 }
