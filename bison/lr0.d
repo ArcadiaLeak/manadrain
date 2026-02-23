@@ -217,7 +217,8 @@ auto generate_states(
     states,
     ntokens,
     nnterms,
-    nsyms
+    nsyms,
+    symbols
   );
 }
 
