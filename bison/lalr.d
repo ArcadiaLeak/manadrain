@@ -1,13 +1,25 @@
 module bison.lalr;
 import bison;
 
+class goto_list {
+  goto_list next;
+  int value;
+
+  this(int v, goto_list n) {
+    next = n;
+    value = v;
+  }
+}
+
 void lalr(
   state[] states,
   int ntokens,
   int nnterms,
   int nsyms,
   symbol[] symbols,
-  bool[] nullable
+  bool[] nullable,
+  rule[][][] derives,
+  rule[] rules
 ) {
   bool[][] LA;
   size_t nLA;
@@ -16,6 +28,8 @@ void lalr(
   int[] from_state;
   int[] to_state;
   bool[][] goto_follows;
+  int[][] includes;
+  goto_list[] lookback;
 
   int state_lookaheads_count(state s) {
     rule[][] reds = s.reductions;
@@ -199,7 +213,86 @@ void lalr(
       follows_print("follows after read");
   }
 
+  void add_lookback_edge(state s, rule[] r, int gotono) {
+    int ri = state_reduction_find(s, r);
+    int idx = cast(int) (LA.length - s.lookaheads.length) + ri;
+    lookback[idx] = new goto_list(gotono, lookback[idx]);
+  }
+
+  void build_relations() {
+    int[] edge = new int[ngotos];
+    int[] path = new int[rules.ritem_longest_rhs + 1];
+
+    includes = new int[][ngotos];
+
+    foreach (i; 0..ngotos) {
+      int src = from_state[i];
+      int dst = to_state[i];
+      int var = states[dst].accessing_symbol;
+
+      int nedges = 0;
+      foreach (r; derives[var - ntokens]) {
+        if (r is null)
+          break;
+        state s = states[src];
+        path[0] = s.number;
+
+        int length = 1;
+        for (int rp = 0; r[0].rhs[rp] >= 0; rp++) {
+          int sym = r[0].rhs[rp];
+          s = transitions_to(s, sym);
+          path[length++] = s.number;
+        }
+
+        if (!s.consistent)
+          add_lookback_edge(s, r, i);
+
+        foreach_reverse (p; 0..length - 1) {
+          if (r[0].rhs[p] < ntokens)
+            break;
+          int sym = r[0].rhs[p];
+          int g = map_goto(path[p], sym);
+          {
+            bool found = false;
+            foreach (j; 0..nedges)
+              found = edge[j] == g;
+            if (!found)
+              edge[nedges++] = g;
+          }
+          if (!nullable[sym - ntokens])
+            break;
+        }
+      }
+
+      if (TRACE_AUTOMATON) {
+        import std.stdio;
+        goto_print(i);
+        write(" edges = ");
+        foreach (j; 0..nedges) {
+          write(" ");
+          goto_print(edge[j]);
+        }
+        write("\n");
+      }
+
+      if (nedges == 0)
+        includes[i] = null;
+      else {
+        includes[i] = new int[nedges + 1];
+        foreach (j; 0..nedges)
+          includes[i][j] = edge[j];
+        includes[i][nedges] = -1;
+      }
+    }
+
+    includes.relation_transpose;
+    if (TRACE_AUTOMATON)
+      relation_print!goto_print("includes", includes);
+  }
+
   initialize_LA;
   set_goto_map;
   initialize_goto_follows;
+  lookback = new goto_list[nLA];
+  build_relations;
 }

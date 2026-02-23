@@ -220,7 +220,9 @@ auto generate_states(
     nnterms,
     nsyms,
     symbols,
-    nullable
+    nullable,
+    derives,
+    rules
   );
 }
 

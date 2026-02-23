@@ -88,7 +88,7 @@ void relation_transpose(RNode)(ref RNode[][] r) {
   foreach (i; 0..r.length)
     if (r[i])
       for (size_t j = 0; r[i][j] != -1; ++j) {
-        end_R[r[i][j]][0] = i;
+        end_R[r[i][j]][0] = cast(RNode) i;
         end_R[r[i][j]] = end_R[r[i][j]][1..$];
       }
 

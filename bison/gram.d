@@ -49,3 +49,21 @@ ref rule item_rule(rule[] rules, int[] item) {
   int r = -1 - sp[0];
   return rules[r];
 }
+
+size_t ritem_longest_rhs(rule[] rules) {
+  size_t max = 0;
+  foreach (r; 0..rules.length) {
+    size_t length = rule_rhs_length(rules[r..$]);
+    if (length > max)
+      max = length;
+  }
+
+  return max;
+}
+
+size_t rule_rhs_length(const rule[] r) {
+  size_t res = 0;
+  for (size_t i = 0; r[0].rhs[i] >= 0; ++i)
+    ++res;
+  return res;
+}
