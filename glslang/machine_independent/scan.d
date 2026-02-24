@@ -49,13 +49,13 @@ class TInputScanner {
 
   bool scanVersion(
     out int version_,
-    out glslang_profile_t profile,
+    out profile_t profile,
     out bool notFirstToken
   ) {
     bool versionNotFirst = false;
     notFirstToken = false;
     version_ = 0;
-    profile = glslang_profile_t.NO_PROFILE;
+    profile = profile_t.NO_PROFILE;
 
     bool foundNonSpaceTab = false;
     bool lookingInMiddle = false;
@@ -128,11 +128,11 @@ class TInputScanner {
       }
 
       if (profileLength == 2 && strncmp(profileString.ptr, "es", profileLength) == 0)
-        profile = glslang_profile_t.ES_PROFILE;
+        profile = profile_t.ES_PROFILE;
       else if (profileLength == 4 && strncmp(profileString.ptr, "core", profileLength) == 0)
-        profile = glslang_profile_t.CORE_PROFILE;
+        profile = profile_t.CORE_PROFILE;
       else if (profileLength == 13 && strncmp(profileString.ptr, "compatibility", profileLength) == 0)
-        profile = glslang_profile_t.COMPATIBILITY_PROFILE;
+        profile = profile_t.COMPATIBILITY_PROFILE;
 
       return versionNotFirst;
     } while (true);

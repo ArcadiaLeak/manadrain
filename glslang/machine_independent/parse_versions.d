@@ -6,7 +6,7 @@ import std.conv;
 
 class TParseVersions {
   bool forwardCompatible;
-  glslang_profile_t profile;
+  profile_t profile;
 
   TInfoSink infoSink;
 
@@ -15,15 +15,15 @@ class TParseVersions {
   SpvVersion spvVersion;
   TIntermediate intermediate;
 
-  glslang_messages_t messages;
+  messages_t messages;
   int numErrors;
   TInputScanner currentScanner;
   TExtensionBehavior[string] extensionBehavior;
 
   this(
-    TIntermediate interm, int version_, glslang_profile_t profile,
+    TIntermediate interm, int version_, profile_t profile,
     in SpvVersion spvVersion, EShLanguage language, TInfoSink infoSink,
-    bool forwardCompatible, glslang_messages_t messages
+    bool forwardCompatible, messages_t messages
   ) @safe {
     this.forwardCompatible = forwardCompatible; this.profile = profile;
     this.infoSink = infoSink; this.version_ = version_; this.language = language;
@@ -32,11 +32,11 @@ class TParseVersions {
   }
 
   bool isEsProfile() const {
-    return profile == glslang_profile_t.ES_PROFILE;
+    return profile == profile_t.ES_PROFILE;
   }
 
   bool relaxedErrors() const {
-    return (messages & glslang_messages_t.MSG_RELAXED_ERRORS_BIT) != 0;
+    return (messages & messages_t.MSG_RELAXED_ERRORS_BIT) != 0;
   }
 
   bool extensionTurnedOn(string extension) {
@@ -96,7 +96,7 @@ class TParseVersions {
               TPrefixType.EPrefixWarning,
               i"extension $(ext) is being used for $(featureDesc)".text,
               loc,
-              cast(bool) (messages & glslang_messages_t.MSG_DISPLAY_ERROR_COLUMN)
+              cast(bool) (messages & messages_t.MSG_DISPLAY_ERROR_COLUMN)
             );
             goto case;
           case TExtensionBehavior.EBhRequire:

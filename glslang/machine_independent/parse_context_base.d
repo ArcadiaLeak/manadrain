@@ -38,8 +38,8 @@ class TParseContextBase : TParseVersions {
 
   this(
     TSymbolTable symbolTable, TIntermediate interm, bool parsingBuiltins, int version_,
-    glslang_profile_t profile, in SpvVersion, EShLanguage language,
-    TInfoSink infoSink, bool forwardCompatible, glslang_messages_t messages,
+    profile_t profile, in SpvVersion, EShLanguage language,
+    TInfoSink infoSink, bool forwardCompatible, messages_t messages,
     string entryPoint = null
   ) @safe {
     super(
@@ -54,7 +54,7 @@ class TParseContextBase : TParseVersions {
     globalUniformBlock = null; globalUniformBinding = TQualifier.layoutBindingEnd;
     globalUniformSet = TQualifier.layoutSetEnd; atomicCounterBlockSet = TQualifier.layoutSetEnd;
 
-    if (spvVersion.spv >= glslang_target_language_version_t.TARGET_SPV_1_3)
+    if (spvVersion.spv >= target_language_version_t.TARGET_SPV_1_3)
       intermediate.setUseStorageBuffer();
     
     if (entryPoint != null)
@@ -74,7 +74,7 @@ class TParseContextBase : TParseVersions {
     sformat(szExtraInfo, szExtraInfoFormat, args);
 
     infoSink.info.prefix = prefix;
-    infoSink.info.location(loc, cast(bool) (glslang_messages_t.MSG_DISPLAY_ERROR_COLUMN));
+    infoSink.info.location(loc, cast(bool) (messages_t.MSG_DISPLAY_ERROR_COLUMN));
     infoSink.info.append = "'" ~ szToken ~ "' : " ~ szReason ~ " " ~ szExtraInfo ~ "\n";
 
     if (prefix == TPrefixType.EPrefixError) {
@@ -96,9 +96,9 @@ class TParseContextBase : TParseVersions {
     in TSourceLoc loc, string szReason,
     string szToken, string szExtraInfo
   ) {
-    if (messages & glslang_messages_t.MSG_ONLY_PREPROCESSOR_BIT)
+    if (messages & messages_t.MSG_ONLY_PREPROCESSOR_BIT)
       return;
-    if (messages & glslang_messages_t.MSG_ENHANCED && numErrors > 0)
+    if (messages & messages_t.MSG_ENHANCED && numErrors > 0)
       return;
 
     outputMessage(
@@ -106,7 +106,7 @@ class TParseContextBase : TParseVersions {
       TPrefixType.EPrefixError
     );
 
-    if ((messages & glslang_messages_t.MSG_CASCADING_ERRORS_BIT) == 0)
+    if ((messages & messages_t.MSG_CASCADING_ERRORS_BIT) == 0)
       currentScanner.setEndOfInput;
   }
 
@@ -119,7 +119,7 @@ class TParseContextBase : TParseVersions {
       TPrefixType.EPrefixError
     );
 
-    if ((messages & glslang_messages_t.MSG_CASCADING_ERRORS_BIT) == 0)
+    if ((messages & messages_t.MSG_CASCADING_ERRORS_BIT) == 0)
       currentScanner.setEndOfInput;
   }
 

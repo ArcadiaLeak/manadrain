@@ -46,12 +46,12 @@ class TIntermediate {
 
   DList!TCall callGraph;
 
-  glslang_profile_t profile;
+  profile_t profile;
   int version_;
   SpvVersion spvVersion;
   bool useStorageBuffer;
 
-  glslang_source_t source;
+  source_t source;
 
   bool originUpperLeft;
   string sourceFile;
@@ -61,19 +61,19 @@ class TIntermediate {
 
   this(
     EShLanguage l, int v = 0,
-    glslang_profile_t p = glslang_profile_t.NO_PROFILE
+    profile_t p = profile_t.NO_PROFILE
   ) @safe {
     language = l;
   }
 
-  void setSource(glslang_source_t s) @safe { source = s; }
-  glslang_source_t getSource() const { return source; }
+  void setSource(source_t s) @safe { source = s; }
+  source_t getSource() const { return source; }
 
   void setVersion(int v) { version_ = v; }
   int getVersion() const { return profile; }
 
-  void setProfile(glslang_profile_t p) { profile = p; }
-  glslang_profile_t getProfile() const { return profile; }
+  void setProfile(profile_t p) { profile = p; }
+  profile_t getProfile() const { return profile; }
 
   void setSourceFile(string file) { if (file != null) sourceFile = file; }
   string getSourceFile() const { return sourceFile; }
@@ -103,24 +103,24 @@ class TIntermediate {
     switch (spvVersion.spv) {
       case 0:
         break;
-      case glslang_target_language_version_t.TARGET_SPV_1_0:
+      case target_language_version_t.TARGET_SPV_1_0:
         break;
-      case glslang_target_language_version_t.TARGET_SPV_1_1:
+      case target_language_version_t.TARGET_SPV_1_1:
         processes.addProcess("target-env spirv1.1");
         break;
-      case glslang_target_language_version_t.TARGET_SPV_1_2:
+      case target_language_version_t.TARGET_SPV_1_2:
         processes.addProcess("target-env spirv1.2");
         break;
-      case glslang_target_language_version_t.TARGET_SPV_1_3:
+      case target_language_version_t.TARGET_SPV_1_3:
         processes.addProcess("target-env spirv1.3");
         break;
-      case glslang_target_language_version_t.TARGET_SPV_1_4:
+      case target_language_version_t.TARGET_SPV_1_4:
         processes.addProcess("target-env spirv1.4");
         break;
-      case glslang_target_language_version_t.TARGET_SPV_1_5:
+      case target_language_version_t.TARGET_SPV_1_5:
         processes.addProcess("target-env spirv1.5");
         break;
-      case glslang_target_language_version_t.TARGET_SPV_1_6:
+      case target_language_version_t.TARGET_SPV_1_6:
         processes.addProcess("target-env spirv1.6");
         break;
       default:
@@ -131,19 +131,19 @@ class TIntermediate {
     switch (spvVersion.vulkan) {
       case 0:
         break;
-      case glslang_target_client_version_t.TARGET_VULKAN_1_0:
+      case target_client_version_t.TARGET_VULKAN_1_0:
         processes.addProcess("target-env vulkan1.0");
         break;
-      case glslang_target_client_version_t.TARGET_VULKAN_1_1:
+      case target_client_version_t.TARGET_VULKAN_1_1:
         processes.addProcess("target-env vulkan1.1");
         break;
-      case glslang_target_client_version_t.TARGET_VULKAN_1_2:
+      case target_client_version_t.TARGET_VULKAN_1_2:
         processes.addProcess("target-env vulkan1.2");
         break;
-      case glslang_target_client_version_t.TARGET_VULKAN_1_3:
+      case target_client_version_t.TARGET_VULKAN_1_3:
         processes.addProcess("target-env vulkan1.3");
         break;
-      case glslang_target_client_version_t.TARGET_VULKAN_1_4:
+      case target_client_version_t.TARGET_VULKAN_1_4:
         processes.addProcess("target-env vulkan1.4");
         break;
       default:

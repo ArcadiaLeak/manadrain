@@ -1,6 +1,6 @@
 module glslang.c_shader_types;
 
-enum glslang_messages_t {
+enum messages_t {
   MSG_DEFAULT_BIT = 0,
   MSG_RELAXED_ERRORS_BIT = 1 << 0,
   MSG_SUPPRESS_WARNINGS_BIT = 1 << 1,
@@ -24,7 +24,7 @@ enum glslang_messages_t {
   MSG_VALIDATE_CROSS_STAGE_IO_BIT = 1 << 19
 }
 
-enum glslang_target_language_version_t {
+enum target_language_version_t {
   TARGET_SPV_1_0 = (1 << 16),
   TARGET_SPV_1_1 = (1 << 16) | (1 << 8),
   TARGET_SPV_1_2 = (1 << 16) | (2 << 8),
@@ -34,12 +34,12 @@ enum glslang_target_language_version_t {
   TARGET_SPV_1_6 = (1 << 16) | (6 << 8)
 }
 
-enum glslang_target_language_t {
+enum target_language_t {
   TARGET_NONE,
   TARGET_SPV
 }
 
-enum glslang_target_client_version_t {
+enum target_client_version_t {
   TARGET_VULKAN_1_0 = (1 << 22),
   TARGET_VULKAN_1_1 = (1 << 22) | (1 << 12),
   TARGET_VULKAN_1_2 = (1 << 22) | (2 << 12),
@@ -48,7 +48,7 @@ enum glslang_target_client_version_t {
   TARGET_OPENGL_450 = 450
 }
 
-enum glslang_client_t {
+enum client_t {
   CLIENT_NONE,
   CLIENT_VULKAN,
   CLIENT_OPENGL
@@ -71,7 +71,7 @@ enum EShLanguage {
   STAGE_MESH
 }
 
-enum glslang_source_t {
+enum source_t {
   SOURCE_NONE,
   SOURCE_GLSL,
   SOURCE_HLSL

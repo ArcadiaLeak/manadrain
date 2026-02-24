@@ -1,114 +1,241 @@
 module glslang.resource_limits;
 
-enum bool nonInductiveForLoops = 1;
-enum bool whileLoops = 1;
-enum bool doWhileLoops = 1;
-enum bool generalUniformIndexing = 1;
-enum bool generalAttributeMatrixVectorIndexing = 1;
-enum bool generalVaryingIndexing = 1;
-enum bool generalSamplerIndexing = 1;
-enum bool generalVariableIndexing = 1;
-enum bool generalConstantMatrixVectorIndexing = 1;
+struct TLimits {
+  bool nonInductiveForLoops;
+  bool whileLoops;
+  bool doWhileLoops;
+  bool generalUniformIndexing;
+  bool generalAttributeMatrixVectorIndexing;
+  bool generalVaryingIndexing;
+  bool generalSamplerIndexing;
+  bool generalVariableIndexing;
+  bool generalConstantMatrixVectorIndexing;
+}
 
-enum int maxLights = 32;
-enum int maxClipPlanes = 6;
-enum int maxTextureUnits = 32;
-enum int maxTextureCoords = 32;
-enum int maxVertexAttribs = 64;
-enum int maxVertexUniformComponents = 4096;
-enum int maxVaryingFloats = 64;
-enum int maxVertexTextureImageUnits = 32;
-enum int maxCombinedTextureImageUnits = 80;
-enum int maxTextureImageUnits = 32;
-enum int maxFragmentUniformComponents = 4096;
-enum int maxDrawBuffers = 32;
-enum int maxVertexUniformVectors = 128;
-enum int maxVaryingVectors = 8;
-enum int maxFragmentUniformVectors = 16;
-enum int maxVertexOutputVectors = 16;
-enum int maxFragmentInputVectors = 15;
-enum int minProgramTexelOffset = -8;
-enum int maxProgramTexelOffset = 7;
-enum int maxClipDistances = 8;
-enum int maxComputeWorkGroupCountX = 65535;
-enum int maxComputeWorkGroupCountY = 65535;
-enum int maxComputeWorkGroupCountZ = 65535;
-enum int maxComputeWorkGroupSizeX = 1024;
-enum int maxComputeWorkGroupSizeY = 1024;
-enum int maxComputeWorkGroupSizeZ = 64;
-enum int maxComputeUniformComponents = 1024;
-enum int maxComputeTextureImageUnits = 16;
-enum int maxComputeImageUniforms = 8;
-enum int maxComputeAtomicCounters = 8;
-enum int maxComputeAtomicCounterBuffers = 1;
-enum int maxVaryingComponents = 60;
-enum int maxVertexOutputComponents = 64;
-enum int maxGeometryInputComponents = 64;
-enum int maxGeometryOutputComponents = 128;
-enum int maxFragmentInputComponents = 128;
-enum int maxImageUnits = 8;
-enum int maxCombinedImageUnitsAndFragmentOutputs = 8;
-enum int maxCombinedShaderOutputResources = 8;
-enum int maxImageSamples = 0;
-enum int maxVertexImageUniforms = 0;
-enum int maxTessControlImageUniforms = 0;
-enum int maxTessEvaluationImageUniforms = 0;
-enum int maxGeometryImageUniforms = 0;
-enum int maxFragmentImageUniforms = 8;
-enum int maxCombinedImageUniforms = 8;
-enum int maxGeometryTextureImageUnits = 16;
-enum int maxGeometryOutputVertices = 256;
-enum int maxGeometryTotalOutputComponents = 1024;
-enum int maxGeometryUniformComponents = 1024;
-enum int maxGeometryVaryingComponents = 64;
-enum int maxTessControlInputComponents = 128;
-enum int maxTessControlOutputComponents = 128;
-enum int maxTessControlTextureImageUnits = 16;
-enum int maxTessControlUniformComponents = 1024;
-enum int maxTessControlTotalOutputComponents = 4096;
-enum int maxTessEvaluationInputComponents = 128;
-enum int maxTessEvaluationOutputComponents = 128;
-enum int maxTessEvaluationTextureImageUnits = 16;
-enum int maxTessEvaluationUniformComponents = 1024;
-enum int maxTessPatchComponents = 120;
-enum int maxPatchVertices = 32;
-enum int maxTessGenLevel = 64;
-enum int maxViewports = 16;
-enum int maxVertexAtomicCounters = 0;
-enum int maxTessControlAtomicCounters = 0;
-enum int maxTessEvaluationAtomicCounters = 0;
-enum int maxGeometryAtomicCounters = 0;
-enum int maxFragmentAtomicCounters = 8;
-enum int maxCombinedAtomicCounters = 8;
-enum int maxAtomicCounterBindings = 1;
-enum int maxVertexAtomicCounterBuffers = 0;
-enum int maxTessControlAtomicCounterBuffers = 0;
-enum int maxTessEvaluationAtomicCounterBuffers = 0;
-enum int maxGeometryAtomicCounterBuffers = 0;
-enum int maxFragmentAtomicCounterBuffers = 1;
-enum int maxCombinedAtomicCounterBuffers = 1;
-enum int maxAtomicCounterBufferSize = 16384;
-enum int maxTransformFeedbackBuffers = 4;
-enum int maxTransformFeedbackInterleavedComponents = 64;
-enum int maxCullDistances = 8;
-enum int maxCombinedClipAndCullDistances = 8;
-enum int maxSamples = 4;
-enum int maxMeshOutputVerticesNV = 256;
-enum int maxMeshOutputPrimitivesNV = 512;
-enum int maxMeshWorkGroupSizeX_NV = 32;
-enum int maxMeshWorkGroupSizeY_NV = 1;
-enum int maxMeshWorkGroupSizeZ_NV = 1;
-enum int maxTaskWorkGroupSizeX_NV = 32;
-enum int maxTaskWorkGroupSizeY_NV = 1;
-enum int maxTaskWorkGroupSizeZ_NV = 1;
-enum int maxMeshViewCountNV = 4;
-enum int maxMeshOutputVerticesEXT = 256;
-enum int maxMeshOutputPrimitivesEXT = 256;
-enum int maxMeshWorkGroupSizeX_EXT = 128;
-enum int maxMeshWorkGroupSizeY_EXT = 128;
-enum int maxMeshWorkGroupSizeZ_EXT = 128;
-enum int maxTaskWorkGroupSizeX_EXT = 128;
-enum int maxTaskWorkGroupSizeY_EXT = 128;
-enum int maxTaskWorkGroupSizeZ_EXT = 128;
-enum int maxMeshViewCountEXT = 4;
-enum int maxDualSourceDrawBuffersEXT = 1;
+struct TBuiltInResource {
+  int maxLights;
+  int maxClipPlanes;
+  int maxTextureUnits;
+  int maxTextureCoords;
+  int maxVertexAttribs;
+  int maxVertexUniformComponents;
+  int maxVaryingFloats;
+  int maxVertexTextureImageUnits;
+  int maxCombinedTextureImageUnits;
+  int maxTextureImageUnits;
+  int maxFragmentUniformComponents;
+  int maxDrawBuffers;
+  int maxVertexUniformVectors;
+  int maxVaryingVectors;
+  int maxFragmentUniformVectors;
+  int maxVertexOutputVectors;
+  int maxFragmentInputVectors;
+  int minProgramTexelOffset;
+  int maxProgramTexelOffset;
+  int maxClipDistances;
+  int maxComputeWorkGroupCountX;
+  int maxComputeWorkGroupCountY;
+  int maxComputeWorkGroupCountZ;
+  int maxComputeWorkGroupSizeX;
+  int maxComputeWorkGroupSizeY;
+  int maxComputeWorkGroupSizeZ;
+  int maxComputeUniformComponents;
+  int maxComputeTextureImageUnits;
+  int maxComputeImageUniforms;
+  int maxComputeAtomicCounters;
+  int maxComputeAtomicCounterBuffers;
+  int maxVaryingComponents;
+  int maxVertexOutputComponents;
+  int maxGeometryInputComponents;
+  int maxGeometryOutputComponents;
+  int maxFragmentInputComponents;
+  int maxImageUnits;
+  int maxCombinedImageUnitsAndFragmentOutputs;
+  int maxCombinedShaderOutputResources;
+  int maxImageSamples;
+  int maxVertexImageUniforms;
+  int maxTessControlImageUniforms;
+  int maxTessEvaluationImageUniforms;
+  int maxGeometryImageUniforms;
+  int maxFragmentImageUniforms;
+  int maxCombinedImageUniforms;
+  int maxGeometryTextureImageUnits;
+  int maxGeometryOutputVertices;
+  int maxGeometryTotalOutputComponents;
+  int maxGeometryUniformComponents;
+  int maxGeometryVaryingComponents;
+  int maxTessControlInputComponents;
+  int maxTessControlOutputComponents;
+  int maxTessControlTextureImageUnits;
+  int maxTessControlUniformComponents;
+  int maxTessControlTotalOutputComponents;
+  int maxTessEvaluationInputComponents;
+  int maxTessEvaluationOutputComponents;
+  int maxTessEvaluationTextureImageUnits;
+  int maxTessEvaluationUniformComponents;
+  int maxTessPatchComponents;
+  int maxPatchVertices;
+  int maxTessGenLevel;
+  int maxViewports;
+  int maxVertexAtomicCounters;
+  int maxTessControlAtomicCounters;
+  int maxTessEvaluationAtomicCounters;
+  int maxGeometryAtomicCounters;
+  int maxFragmentAtomicCounters;
+  int maxCombinedAtomicCounters;
+  int maxAtomicCounterBindings;
+  int maxVertexAtomicCounterBuffers;
+  int maxTessControlAtomicCounterBuffers;
+  int maxTessEvaluationAtomicCounterBuffers;
+  int maxGeometryAtomicCounterBuffers;
+  int maxFragmentAtomicCounterBuffers;
+  int maxCombinedAtomicCounterBuffers;
+  int maxAtomicCounterBufferSize;
+  int maxTransformFeedbackBuffers;
+  int maxTransformFeedbackInterleavedComponents;
+  int maxCullDistances;
+  int maxCombinedClipAndCullDistances;
+  int maxSamples;
+  int maxMeshOutputVerticesNV;
+  int maxMeshOutputPrimitivesNV;
+  int maxMeshWorkGroupSizeX_NV;
+  int maxMeshWorkGroupSizeY_NV;
+  int maxMeshWorkGroupSizeZ_NV;
+  int maxTaskWorkGroupSizeX_NV;
+  int maxTaskWorkGroupSizeY_NV;
+  int maxTaskWorkGroupSizeZ_NV;
+  int maxMeshViewCountNV;
+  int maxMeshOutputVerticesEXT;
+  int maxMeshOutputPrimitivesEXT;
+  int maxMeshWorkGroupSizeX_EXT;
+  int maxMeshWorkGroupSizeY_EXT;
+  int maxMeshWorkGroupSizeZ_EXT;
+  int maxTaskWorkGroupSizeX_EXT;
+  int maxTaskWorkGroupSizeY_EXT;
+  int maxTaskWorkGroupSizeZ_EXT;
+  int maxMeshViewCountEXT;
+  int maxDualSourceDrawBuffersEXT;
+
+  TLimits limits;
+}
+
+TBuiltInResource DefaultTBuiltInResource = TBuiltInResource(
+  maxLights: 32,
+  maxClipPlanes: 6,
+  maxTextureUnits: 32,
+  maxTextureCoords: 32,
+  maxVertexAttribs: 64,
+  maxVertexUniformComponents: 4096,
+  maxVaryingFloats: 64,
+  maxVertexTextureImageUnits: 32,
+  maxCombinedTextureImageUnits: 80,
+  maxTextureImageUnits: 32,
+  maxFragmentUniformComponents: 4096,
+  maxDrawBuffers: 32,
+  maxVertexUniformVectors: 128,
+  maxVaryingVectors: 8,
+  maxFragmentUniformVectors: 16,
+  maxVertexOutputVectors: 16,
+  maxFragmentInputVectors: 15,
+  minProgramTexelOffset: -8,
+  maxProgramTexelOffset: 7,
+  maxClipDistances: 8,
+  maxComputeWorkGroupCountX: 65535,
+  maxComputeWorkGroupCountY: 65535,
+  maxComputeWorkGroupCountZ: 65535,
+  maxComputeWorkGroupSizeX: 1024,
+  maxComputeWorkGroupSizeY: 1024,
+  maxComputeWorkGroupSizeZ: 64,
+  maxComputeUniformComponents: 1024,
+  maxComputeTextureImageUnits: 16,
+  maxComputeImageUniforms: 8,
+  maxComputeAtomicCounters: 8,
+  maxComputeAtomicCounterBuffers: 1,
+  maxVaryingComponents: 60,
+  maxVertexOutputComponents: 64,
+  maxGeometryInputComponents: 64,
+  maxGeometryOutputComponents: 128,
+  maxFragmentInputComponents: 128,
+  maxImageUnits: 8,
+  maxCombinedImageUnitsAndFragmentOutputs: 8,
+  maxCombinedShaderOutputResources: 8,
+  maxImageSamples: 0,
+  maxVertexImageUniforms: 0,
+  maxTessControlImageUniforms: 0,
+  maxTessEvaluationImageUniforms: 0,
+  maxGeometryImageUniforms: 0,
+  maxFragmentImageUniforms: 8,
+  maxCombinedImageUniforms: 8,
+  maxGeometryTextureImageUnits: 16,
+  maxGeometryOutputVertices: 256,
+  maxGeometryTotalOutputComponents: 1024,
+  maxGeometryUniformComponents: 1024,
+  maxGeometryVaryingComponents: 64,
+  maxTessControlInputComponents: 128,
+  maxTessControlOutputComponents: 128,
+  maxTessControlTextureImageUnits: 16,
+  maxTessControlUniformComponents: 1024,
+  maxTessControlTotalOutputComponents: 4096,
+  maxTessEvaluationInputComponents: 128,
+  maxTessEvaluationOutputComponents: 128,
+  maxTessEvaluationTextureImageUnits: 16,
+  maxTessEvaluationUniformComponents: 1024,
+  maxTessPatchComponents: 120,
+  maxPatchVertices: 32,
+  maxTessGenLevel: 64,
+  maxViewports: 16,
+  maxVertexAtomicCounters: 0,
+  maxTessControlAtomicCounters: 0,
+  maxTessEvaluationAtomicCounters: 0,
+  maxGeometryAtomicCounters: 0,
+  maxFragmentAtomicCounters: 8,
+  maxCombinedAtomicCounters: 8,
+  maxAtomicCounterBindings: 1,
+  maxVertexAtomicCounterBuffers: 0,
+  maxTessControlAtomicCounterBuffers: 0,
+  maxTessEvaluationAtomicCounterBuffers: 0,
+  maxGeometryAtomicCounterBuffers: 0,
+  maxFragmentAtomicCounterBuffers: 1,
+  maxCombinedAtomicCounterBuffers: 1,
+  maxAtomicCounterBufferSize: 16384,
+  maxTransformFeedbackBuffers: 4,
+  maxTransformFeedbackInterleavedComponents: 64,
+  maxCullDistances: 8,
+  maxCombinedClipAndCullDistances: 8,
+  maxSamples: 4,
+  maxMeshOutputVerticesNV: 256,
+  maxMeshOutputPrimitivesNV: 512,
+  maxMeshWorkGroupSizeX_NV: 32,
+  maxMeshWorkGroupSizeY_NV: 1,
+  maxMeshWorkGroupSizeZ_NV: 1,
+  maxTaskWorkGroupSizeX_NV: 32,
+  maxTaskWorkGroupSizeY_NV: 1,
+  maxTaskWorkGroupSizeZ_NV: 1,
+  maxMeshViewCountNV: 4,
+  maxMeshOutputVerticesEXT: 256,
+  maxMeshOutputPrimitivesEXT: 256,
+  maxMeshWorkGroupSizeX_EXT: 128,
+  maxMeshWorkGroupSizeY_EXT: 128,
+  maxMeshWorkGroupSizeZ_EXT: 128,
+  maxTaskWorkGroupSizeX_EXT: 128,
+  maxTaskWorkGroupSizeY_EXT: 128,
+  maxTaskWorkGroupSizeZ_EXT: 128,
+  maxMeshViewCountEXT: 4,
+  maxDualSourceDrawBuffersEXT: 1,
+
+  limits: TLimits(
+    nonInductiveForLoops: 1,
+    whileLoops: 1,
+    doWhileLoops: 1,
+    generalUniformIndexing: 1,
+    generalAttributeMatrixVectorIndexing: 1,
+    generalVaryingIndexing: 1,
+    generalSamplerIndexing: 1,
+    generalVariableIndexing: 1,
+    generalConstantMatrixVectorIndexing: 1,
+  )
+);
+
+const(TBuiltInResource)* GetDefaultResources() {
+  return &DefaultTBuiltInResource;
+}

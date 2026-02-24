@@ -7,21 +7,21 @@ import std.range;
 import std.traits;
 
 struct TTarget {
-  glslang_target_language_t language;
-  glslang_target_language_version_t version_;
+  target_language_t language;
+  target_language_version_t version_;
 }
 
 struct TInputLanguage {
-  glslang_source_t languageFamily;
+  source_t languageFamily;
   EShLanguage stage;
-  glslang_client_t dialect;
+  client_t dialect;
   int dialectVersion;
   bool vulkanRulesRelaxed;
 }
 
 struct TClient {
-  glslang_client_t client;
-  glslang_target_client_version_t version_;
+  client_t client;
+  target_client_version_t version_;
 }
 
 struct TEnvironment {
@@ -59,17 +59,17 @@ class TShader {
   }
 
   void setEnvTarget(
-    glslang_target_language_t lang,
-    glslang_target_language_version_t version_
+    target_language_t lang,
+    target_language_version_t version_
   ) {
     environment.target.language = lang;
     environment.target.version_ = version_;
   }
 
   void setEnvInput(
-    glslang_source_t lang,
+    source_t lang,
     EShLanguage envStage,
-    glslang_client_t client,
+    client_t client,
     int version_
   ) {
     environment.input.languageFamily = lang;
@@ -79,17 +79,17 @@ class TShader {
   }
 
   void setEnvClient(
-    glslang_client_t client,
-    glslang_target_client_version_t version_
+    client_t client,
+    target_client_version_t version_
   ) {
     environment.client.client = client;
     environment.client.version_ = version_;
   }
 
   bool preprocess(
-    int defaultVersion, glslang_profile_t defaultProfile,
+    int defaultVersion, profile_t defaultProfile,
     bool forceDefaultVersionAndProfile,
-    bool forwardCompatible, glslang_messages_t message,
+    bool forwardCompatible, messages_t message,
     out string output_string
   ) {
     return PreprocessDeferred(
@@ -112,11 +112,11 @@ bool PreprocessDeferred(
   in string[] shaderStrings,
   in string[] stringNames,
   int defaultVersion,
-  glslang_profile_t defaultProfile,
+  profile_t defaultProfile,
   bool forceDefaultVersionAndProfile,
   int overrideVersion,
   bool forwardCompatible,
-  glslang_messages_t messages,
+  messages_t messages,
   TIntermediate intermediate,
   out string outputString,
   in TEnvironment environment
@@ -134,11 +134,11 @@ bool ProcessDeferred(ProcessingContext)(
   const string[] shaderStrings,
   const string[] stringNames,
   int defaultVersion,
-  glslang_profile_t defaultProfile,
+  profile_t defaultProfile,
   bool forceDefaultVersionAndProfile,
   int overrideVersion,
   bool forwardCompatible,
-  glslang_messages_t messages,
+  messages_t messages,
   TIntermediate intermediate,
   ProcessingContext processingContext,
   bool requireNonempty,
@@ -165,19 +165,19 @@ bool ProcessDeferred(ProcessingContext)(
   }
 
   SpvVersion spvVersion;
-  glslang_source_t source = glslang_source_t.SOURCE_GLSL;
+  source_t source = source_t.SOURCE_GLSL;
   EShLanguage stage = compiler.getLanguage;
   TranslateEnvironment(environment, messages, source, stage, spvVersion);
 
   auto userInput = new TInputScanner(strings.drop(numPre));
   int version_ = 0;
-  glslang_profile_t profile = glslang_profile_t.NO_PROFILE;
+  profile_t profile = profile_t.NO_PROFILE;
   bool versionNotFirstToken = false;
   bool versionNotFirst = userInput.scanVersion(version_, profile, versionNotFirstToken);
   bool versionNotFound = version_ == 0;
-  if (forceDefaultVersionAndProfile && source == glslang_source_t.SOURCE_GLSL) {
+  if (forceDefaultVersionAndProfile && source == source_t.SOURCE_GLSL) {
     if (
-      !(messages & glslang_messages_t.MSG_SUPPRESS_WARNINGS_BIT) &&
+      !(messages & messages_t.MSG_SUPPRESS_WARNINGS_BIT) &&
       !versionNotFound &&
       (version_ != defaultVersion || profile != defaultProfile)
     ) {
@@ -196,7 +196,7 @@ bool ProcessDeferred(ProcessingContext)(
     version_ = defaultVersion;
     profile = defaultProfile;
   }
-  if (source == glslang_source_t.SOURCE_GLSL && overrideVersion != 0) {
+  if (source == source_t.SOURCE_GLSL && overrideVersion != 0) {
     version_ = overrideVersion;
   }
 
@@ -206,12 +206,12 @@ bool ProcessDeferred(ProcessingContext)(
   );
   bool versionWillBeError = (
     versionNotFound ||
-    (profile == glslang_profile_t.ES_PROFILE &&
+    (profile == profile_t.ES_PROFILE &&
       version_ >= 300 && versionNotFirst)
   );
   bool warnVersionNotFirst = false;
   if (!versionWillBeError && versionNotFirstToken) {
-    if (messages & glslang_messages_t.MSG_RELAXED_ERRORS_BIT)
+    if (messages & messages_t.MSG_RELAXED_ERRORS_BIT)
       warnVersionNotFirst = true;
     else
       versionWillBeError = true;
@@ -224,7 +224,7 @@ bool ProcessDeferred(ProcessingContext)(
   RecordProcesses(intermediate, messages, sourceEntryPointName);
   if (spvVersion.vulkan > 0) intermediate.setOriginUpperLeft();
 
-  if (messages & glslang_messages_t.MSG_DEBUG_INFO_BIT) {
+  if (messages & messages_t.MSG_DEBUG_INFO_BIT) {
     intermediate.setSourceFile(names[numPre]);
     for (int s = 0; s < shaderStrings.length; ++s) {
       intermediate.addSourceText(strings[numPre + s]);
@@ -239,49 +239,49 @@ bool ProcessDeferred(ProcessingContext)(
 
 void TranslateEnvironment(
   in TEnvironment environment,
-  ref glslang_messages_t messages,
-  ref glslang_source_t source,
+  ref messages_t messages,
+  ref source_t source,
   ref EShLanguage stage,
   ref SpvVersion spvVersion
 ) {
-  if (messages & glslang_messages_t.MSG_SPV_RULES_BIT)
-    spvVersion.spv = glslang_target_language_version_t.TARGET_SPV_1_0;
-  if (messages & glslang_messages_t.MSG_VULKAN_RULES_BIT) {
-    spvVersion.vulkan = glslang_target_client_version_t.TARGET_VULKAN_1_0;
+  if (messages & messages_t.MSG_SPV_RULES_BIT)
+    spvVersion.spv = target_language_version_t.TARGET_SPV_1_0;
+  if (messages & messages_t.MSG_VULKAN_RULES_BIT) {
+    spvVersion.vulkan = target_client_version_t.TARGET_VULKAN_1_0;
     spvVersion.vulkanGlsl = 100;
   } else if (spvVersion.spv != 0)
     spvVersion.openGl = 100;
 
-  if (environment.input.languageFamily != glslang_source_t.SOURCE_NONE) {
+  if (environment.input.languageFamily != source_t.SOURCE_NONE) {
     stage = environment.input.stage;
     final switch (environment.input.dialect) {
-      case glslang_client_t.CLIENT_NONE:
+      case client_t.CLIENT_NONE:
         break;
-      case glslang_client_t.CLIENT_VULKAN:
+      case client_t.CLIENT_VULKAN:
         spvVersion.vulkanGlsl = environment.input.dialectVersion;
         spvVersion.vulkanRelaxed = environment.input.vulkanRulesRelaxed;
         break;
-      case glslang_client_t.CLIENT_OPENGL:
+      case client_t.CLIENT_OPENGL:
         spvVersion.openGl = environment.input.dialectVersion;
     }
     final switch (environment.input.languageFamily) {
-      case glslang_source_t.SOURCE_NONE:
+      case source_t.SOURCE_NONE:
         break;
-      case glslang_source_t.SOURCE_GLSL:
-        source = glslang_source_t.SOURCE_GLSL;
-        messages = messages & ~glslang_messages_t.MSG_READ_HLSL_BIT;
+      case source_t.SOURCE_GLSL:
+        source = source_t.SOURCE_GLSL;
+        messages = messages & ~messages_t.MSG_READ_HLSL_BIT;
         break;
-      case glslang_source_t.SOURCE_HLSL:
-        source = glslang_source_t.SOURCE_HLSL;
-        messages = messages | glslang_messages_t.MSG_READ_HLSL_BIT;
+      case source_t.SOURCE_HLSL:
+        source = source_t.SOURCE_HLSL;
+        messages = messages | messages_t.MSG_READ_HLSL_BIT;
         break;
     }
   }
 
-  if (environment.client.client == glslang_client_t.CLIENT_VULKAN)
+  if (environment.client.client == client_t.CLIENT_VULKAN)
     spvVersion.vulkan = environment.client.version_;
 
-  if (environment.target.language == glslang_target_language_t.TARGET_SPV)
+  if (environment.target.language == target_language_t.TARGET_SPV)
     spvVersion.spv = environment.target.version_;
 }
 
@@ -290,9 +290,9 @@ bool DeduceVersionProfile(
   EShLanguage stage,
   bool versionNotFirst,
   int defaultVersion,
-  glslang_source_t source,
+  source_t source,
   ref int version_,
-  ref glslang_profile_t profile,
+  ref profile_t profile,
   in SpvVersion spvVersion
 ) {
   const int FirstProfileVersion = 150;
@@ -302,20 +302,20 @@ bool DeduceVersionProfile(
     version_ = defaultVersion;
   }
 
-  if (profile == glslang_profile_t.NO_PROFILE) {
+  if (profile == profile_t.NO_PROFILE) {
     if (version_ == 300 || version_ == 310 || version_ == 320) {
       correct = false;
       infoSink.info.message(
         TPrefixType.EPrefixError,
         "#version: versions 300, 310, and 320 require specifying the 'es' profile"
       );
-      profile = glslang_profile_t.ES_PROFILE;
+      profile = profile_t.ES_PROFILE;
     } else if (version_ == 100)
-      profile = glslang_profile_t.ES_PROFILE;
+      profile = profile_t.ES_PROFILE;
     else if (version_ >= FirstProfileVersion)
-      profile = glslang_profile_t.CORE_PROFILE;
+      profile = profile_t.CORE_PROFILE;
     else
-      profile = glslang_profile_t.NO_PROFILE;
+      profile = profile_t.NO_PROFILE;
   } else {
     if (version_ < 150) {
       correct = false;
@@ -324,29 +324,29 @@ bool DeduceVersionProfile(
         "#version: versions before 150 do not allow a profile token"
       );
       if (version_ == 100)
-        profile = glslang_profile_t.ES_PROFILE;
+        profile = profile_t.ES_PROFILE;
       else
-        profile = glslang_profile_t.NO_PROFILE;
+        profile = profile_t.NO_PROFILE;
     } else if (version_ == 300 || version_ == 310 || version_ == 320) {
-      if (profile != glslang_profile_t.ES_PROFILE) {
+      if (profile != profile_t.ES_PROFILE) {
         correct = false;
         infoSink.info.message(
           TPrefixType.EPrefixError,
           "#version: versions 300, 310, and 320 support only the es profile"
         );
       }
-      profile = glslang_profile_t.ES_PROFILE;
+      profile = profile_t.ES_PROFILE;
     } else {
-      if (profile == glslang_profile_t.ES_PROFILE) {
+      if (profile == profile_t.ES_PROFILE) {
         correct = false;
         infoSink.info.message(
           TPrefixType.EPrefixError,
           "#version: only version 300, 310, and 320 support the es profile"
         );
         if (version_ >= FirstProfileVersion)
-          profile = glslang_profile_t.CORE_PROFILE;
+          profile = profile_t.CORE_PROFILE;
         else
-          profile = glslang_profile_t.NO_PROFILE;
+          profile = profile_t.NO_PROFILE;
       }
     }
   }
@@ -374,17 +374,17 @@ bool DeduceVersionProfile(
     default:
       correct = false;
       infoSink.info.message(TPrefixType.EPrefixError, "version not supported");
-      if (profile == glslang_profile_t.ES_PROFILE)
+      if (profile == profile_t.ES_PROFILE)
         version_ = 310;
       else {
         version_ = 450;
-        profile = glslang_profile_t.CORE_PROFILE;
+        profile = profile_t.CORE_PROFILE;
       }
       break;
   }
 
   if (
-    profile == glslang_profile_t.ES_PROFILE &&
+    profile == profile_t.ES_PROFILE &&
     version_ >= 300 && versionNotFirst
   ) {
     correct = false;
@@ -396,7 +396,7 @@ bool DeduceVersionProfile(
 
   if (spvVersion.spv != 0) {
     switch (profile) {
-      case glslang_profile_t.ES_PROFILE:
+      case profile_t.ES_PROFILE:
         if (version_ < 310) {
           correct = false;
           infoSink.info.message(
@@ -406,7 +406,7 @@ bool DeduceVersionProfile(
           version_ = 310;
         }
         break;
-      case glslang_profile_t.COMPATIBILITY_PROFILE:
+      case profile_t.COMPATIBILITY_PROFILE:
         infoSink.info.message(
           TPrefixType.EPrefixError,
           "#version: compilation for SPIR-V does not support the compatibility profile"
@@ -437,14 +437,14 @@ bool DeduceVersionProfile(
 
 void RecordProcesses(
   TIntermediate intermediate,
-  glslang_messages_t messages,
+  messages_t messages,
   string sourceEntryPointName
 ) {
-  if ((messages & glslang_messages_t.MSG_RELAXED_ERRORS_BIT) != 0)
+  if ((messages & messages_t.MSG_RELAXED_ERRORS_BIT) != 0)
     intermediate.addProcess = "relaxed-errors";
-  if ((messages & glslang_messages_t.MSG_SUPPRESS_WARNINGS_BIT) != 0)
+  if ((messages & messages_t.MSG_SUPPRESS_WARNINGS_BIT) != 0)
     intermediate.addProcess = "suppress-warnings";
-  if ((messages & glslang_messages_t.MSG_KEEP_UNCALLED_BIT) != 0)
+  if ((messages & messages_t.MSG_KEEP_UNCALLED_BIT) != 0)
     intermediate.addProcess = "keep-uncalled";
   if (sourceEntryPointName.length > 0) {
     intermediate.addProcess = "source-entrypoint";
@@ -454,9 +454,9 @@ void RecordProcesses(
 
 bool SetupBuiltinSymbolTable(
   int version_,
-  glslang_profile_t profile,
+  profile_t profile,
   in SpvVersion spvVersion,
-  glslang_source_t source
+  source_t source
 ) {
   auto infoSink = new TInfoSink;
   bool success;
@@ -549,14 +549,14 @@ int MapSpvVersionToIndex(in SpvVersion spvVersion) {
 
 enum int ProfileCount = 4;
 
-int MapProfileToIndex(glslang_profile_t profile) {
+int MapProfileToIndex(profile_t profile) {
   int index = 0;
 
   switch (profile) {
-    case glslang_profile_t.NO_PROFILE: index = 0; break;
-    case glslang_profile_t.CORE_PROFILE: index = 1; break;
-    case glslang_profile_t.COMPATIBILITY_PROFILE: index = 2; break;
-    case glslang_profile_t.ES_PROFILE: index = 3; break;
+    case profile_t.NO_PROFILE: index = 0; break;
+    case profile_t.CORE_PROFILE: index = 1; break;
+    case profile_t.COMPATIBILITY_PROFILE: index = 2; break;
+    case profile_t.ES_PROFILE: index = 3; break;
     default: break;
   }
 
@@ -567,12 +567,12 @@ int MapProfileToIndex(glslang_profile_t profile) {
 
 enum int SourceCount = 2;
 
-int MapSourceToIndex(glslang_source_t source) {
+int MapSourceToIndex(source_t source) {
   int index = 0;
 
   switch (source) {
-    case glslang_source_t.SOURCE_GLSL: index = 0; break;
-    case glslang_source_t.SOURCE_HLSL: index = 1; break;
+    case source_t.SOURCE_GLSL: index = 0; break;
+    case source_t.SOURCE_HLSL: index = 1; break;
     default: break;
   }
 
@@ -601,16 +601,16 @@ TSymbolTable
   [EnumMembers!EShLanguage.length] SharedSymbolTables;
 
 TBuiltInParseables CreateBuiltInParseables(
-  TInfoSink infoSink, glslang_source_t source
+  TInfoSink infoSink, source_t source
 ) {
   return new TBuiltIns();
 }
 
 TParseContextBase CreateParseContext(
   TSymbolTable symbolTable, TIntermediate intermediate, int version_,
-  glslang_profile_t profile, glslang_source_t source, EShLanguage language,
+  profile_t profile, source_t source, EShLanguage language,
   TInfoSink infoSink, in SpvVersion spvVersion, bool forwardCompatible,
-  glslang_messages_t messages, bool parsingBuiltIns, string sourceEntryPointName = ""
+  messages_t messages, bool parsingBuiltIns, string sourceEntryPointName = ""
 ) @safe {
   if (sourceEntryPointName.length == 0)
     intermediate.setEntryPointName = "main";
@@ -623,8 +623,8 @@ TParseContextBase CreateParseContext(
 
 bool InitializeSymbolTables(
   TInfoSink infoSink, TSymbolTable[] commonTable,
-  TSymbolTable[] symbolTables, int version_, glslang_profile_t profile,
-  in SpvVersion spvVersion, glslang_source_t source
+  TSymbolTable[] symbolTables, int version_, profile_t profile,
+  in SpvVersion spvVersion, source_t source
 ) {
   bool success = true;
   auto builtInParseables = CreateBuiltInParseables(infoSink, source);
@@ -643,8 +643,8 @@ bool InitializeSymbolTables(
 }
 
 bool InitializeSymbolTable(
-  string builtIns, int version_, glslang_profile_t profile,
-  in SpvVersion spvVersion, EShLanguage language, glslang_source_t source,
+  string builtIns, int version_, profile_t profile,
+  in SpvVersion spvVersion, EShLanguage language, source_t source,
   TInfoSink infoSink, TSymbolTable symbolTable
 ) @safe {
   auto intermediate = new TIntermediate(language, version_, profile);
@@ -652,7 +652,7 @@ bool InitializeSymbolTable(
 
   auto parseContext = CreateParseContext(
     symbolTable, intermediate, version_, profile, source, language,
-    infoSink, spvVersion, true, glslang_messages_t.MSG_DEFAULT_BIT, true
+    infoSink, spvVersion, true, messages_t.MSG_DEFAULT_BIT, true
   );
 
   auto includer = new TShader.ForbidIncluder();
