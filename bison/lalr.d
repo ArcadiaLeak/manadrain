@@ -385,6 +385,7 @@ auto lalr(
     errtoken,
     goto_map,
     from_state,
-    to_state
+    to_state,
+    symbols
   );
 }

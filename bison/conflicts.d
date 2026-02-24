@@ -13,7 +13,8 @@ auto conflicts_solve(
   symbol errtoken,
   int[] goto_map,
   int[] from_state,
-  int[] to_state
+  int[] to_state,
+  symbol[] symbols
 ) {
   symbol[] errors = new symbol[ntokens + 1];
   
@@ -64,6 +65,7 @@ auto conflicts_solve(
     errtoken,
     goto_map,
     from_state,
-    to_state
+    to_state,
+    symbols
   );
 }

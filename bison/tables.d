@@ -1,7 +1,9 @@
 module bison.tables;
 import bison;
 
-void tables_generate(
+import std.typecons;
+
+auto tables_generate(
   int ntokens,
   int nnterms,
   int nsyms,
@@ -11,7 +13,8 @@ void tables_generate(
   symbol errtoken,
   int[] goto_map,
   int[] from_state,
-  int[] to_state
+  int[] to_state,
+  symbol[] symbols
 ) {
   const int nvectors = nstates + nnterms;
 
@@ -387,4 +390,9 @@ void tables_generate(
 
   sort_actions;
   pack_table;
+
+  return tuple(
+    symbols,
+    ntokens
+  );
 }

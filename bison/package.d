@@ -1,6 +1,7 @@
 module bison;
 
 package import bison.closure;
+package import bison.codegen;
 package import bison.conflicts;
 package import bison.derives;
 package import bison.gram;
@@ -29,5 +30,6 @@ void main(string[] args) {
     .generate_states.expand
     .lalr.expand
     .conflicts_solve.expand
-    .tables_generate;
+    .tables_generate.expand
+    .write_yytokentype;
 }
