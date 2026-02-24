@@ -2,6 +2,7 @@ module glslang.machine_independent;
 
 public import glslang.machine_independent.preprocessor;
 
+public import glslang.machine_independent.glslang_tab;
 public import glslang.machine_independent.info_sink;
 public import glslang.machine_independent.initialize;
 public import glslang.machine_independent.intermediate;
