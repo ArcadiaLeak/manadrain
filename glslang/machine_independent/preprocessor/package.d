@@ -83,7 +83,7 @@ enum EFixedAtoms {
   PpAtomLast,
 }
 
-class TPpToken {
+struct TPpToken {
   char[MaxTokenLength + 1] name;
   union {
     int val;

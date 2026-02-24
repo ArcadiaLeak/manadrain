@@ -1,6 +1,8 @@
 module glslang.machine_independent.preprocessor.pp_context;
 import glslang;
 
+import std.container.slist;
+
 class TPpContext {
   string preamble;
   string[] strings;
@@ -23,6 +25,8 @@ class TPpContext {
 
   bool disableEscapeSequences;
   bool inElseSkip;
+
+  SList!tInput inputStack;
   
   this(
     TParseContextBase pc, string rootFileName, TShader.Includer inclr
@@ -38,7 +42,31 @@ class TPpContext {
     elsetracker = 0;
   }
 
-  int tokenize(TPpToken ppToken) {
+  int tokenize(ref TPpToken ppToken) {
+    int stringifyDepth = 0;
+    TPpToken stringifiedToken;
+    while (true) {
+      int token = scanToken(ppToken);
+    }
+
     return -1;
+  }
+
+  int scanToken(ref TPpToken ppToken) {
+    int token = EndOfInput;
+
+    while (!inputStack.empty) {
+      token = inputStack.front.scan(ppToken);
+      if (token != EndOfInput || inputStack.empty)
+        break;
+      popInput;
+    }
+
+    return token;
+  }
+
+  void popInput() {
+    inputStack.front.notifyDeleted;
+    inputStack.removeFront;
   }
 }

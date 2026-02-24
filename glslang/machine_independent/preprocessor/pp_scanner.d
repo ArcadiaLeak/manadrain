@@ -6,6 +6,10 @@ class tInput {
   TPpContext pp;
 
   this(TPpContext p) { done = false; pp = p; }
+
+  abstract int scan(ref TPpToken ppToken);
+
+  void notifyDeleted() {}
 }
 
 class tStringInput : tInput {
@@ -67,7 +71,7 @@ class tStringInput : tInput {
     } while (true);
   }
 
-  int scan(TPpToken ppToken) {
+  override int scan(ref TPpToken ppToken) {
     int AlreadyComplained = 0;
     int len = 0;
     int ch = 0;
@@ -93,12 +97,12 @@ class tStringInput : tInput {
       E_GL_EXT_shader_explicit_arithmetic_types_int16
     ];
 
-    ppToken.clear();
-    ch = getch();
+    ppToken.clear;
+    ch = getch;
     while (true) {
       while (ch == ' ' || ch == '\t') {
         ppToken.space = true;
-        ch = getch();
+        ch = getch;
       }
 
       ppToken.loc = pp.parseContext.getCurrentLoc;
@@ -124,13 +128,13 @@ class tStringInput : tInput {
           do {
             if (len < MaxTokenLength) {
               ppToken.name[len++] = cast(char) ch;
-              ch = getch();
+              ch = getch;
             } else {
               if (!AlreadyComplained) {
                 pp.parseContext.ppError(ppToken.loc, "name too long", "", "");
                 AlreadyComplained = 1;
               }
-              ch = getch();
+              ch = getch;
             }
           } while (
             (ch >= 'a' && ch <= 'z') ||
@@ -142,17 +146,17 @@ class tStringInput : tInput {
           if (len == 0) continue;
 
           ppToken.name[len] = '\0';
-          ungetch();
+          ungetch;
           return EFixedAtoms.PpAtomIdentifier;
         case '0':
           ppToken.name[len++] = cast(char) ch;
-          ch = getch();
+          ch = getch;
           if (ch == 'x' || ch == 'X') {
             bool isUnsigned = false;
             bool isInt64 = false;
             bool isInt16 = false;
             ppToken.name[len++] = cast(char) ch;
-            ch = getch();
+            ch = getch;
             if (
               (ch >= '0' && ch <= '9') ||
               (ch >= 'A' && ch <= 'F') ||
@@ -173,7 +177,7 @@ class tStringInput : tInput {
           }
       }
 
-      ch = getch();
+      ch = getch;
     }
   }
 }
