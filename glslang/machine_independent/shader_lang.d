@@ -35,18 +35,16 @@ class TShader {
 
   static class ForbidIncluder : Includer {}
 
-  protected {
-    string[] strings;
-    string[] stringNames;
+  string[] strings;
+  string[] stringNames;
 
-    EShLanguage stage;
-    int overrideVersion;
+  EShLanguage stage;
+  int overrideVersion;
 
-    TEnvironment environment;
-    TInfoSink infoSink;
-    TCompiler compiler;
-    TIntermediate intermediate;
-  }
+  TEnvironment environment;
+  TInfoSink infoSink;
+  TCompiler compiler;
+  TIntermediate intermediate;
 
   this(EShLanguage s) {
     stage = s;

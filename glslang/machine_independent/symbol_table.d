@@ -5,13 +5,11 @@ class TVariable {}
 class TSymbolTableLevel {}
 
 class TSymbolTable {
-  protected {
-    enum uint LevelFlagBitOffset = 56;
+  enum uint LevelFlagBitOffset = 56;
 
-    int currentLevel() @safe const => cast(int) table.length - 1;
-    TSymbolTableLevel[] table;
-    long uniqueId;
-  }
+  int currentLevel() @safe const => cast(int) table.length - 1;
+  TSymbolTableLevel[] table;
+  long uniqueId;
 
   enum ulong uniqueIdMask = (1L << LevelFlagBitOffset) - 1;
   enum uint MaxLevelInUniqueID = 127;

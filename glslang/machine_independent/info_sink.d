@@ -14,10 +14,8 @@ enum TPrefixType {
 }
 
 struct TInfoSinkBase {
-  protected {
-    string sink;
-    string shaderFileName;
-  }
+  string sink;
+  string shaderFileName;
 
   void append(const(char[]) s) {
     sink ~= s;

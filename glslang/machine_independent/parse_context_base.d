@@ -12,33 +12,29 @@ struct TPragma {
 }
 
 class TParseContextBase : TParseVersions {
-  public {
-    string scopeMangler;
-    TSymbolTable symbolTable;
-    int statementNestingLevel;
-    int loopNestingLevel;
-    int structNestingLevel;
-    int blockNestingLevel;
-    int controlFlowNestingLevel;
-    TType currentFunctionType;
-    bool postEntryPointReturn;
-    TPragma contextPragma;
-    int beginInvocationInterlockCount;
-    int endInvocationInterlockCount;
-  }
+  string scopeMangler;
+  TSymbolTable symbolTable;
+  int statementNestingLevel;
+  int loopNestingLevel;
+  int structNestingLevel;
+  int blockNestingLevel;
+  int controlFlowNestingLevel;
+  TType currentFunctionType;
+  bool postEntryPointReturn;
+  TPragma contextPragma;
+  int beginInvocationInterlockCount;
+  int endInvocationInterlockCount;
   
-  protected {
-    const bool parsingBuiltins;
-    TScanContext scanContext;
-    TPpContext ppContext;
-    string sourceEntryPointName;
+  const bool parsingBuiltins;
+  TScanContext scanContext;
+  TPpContext ppContext;
+  string sourceEntryPointName;
 
-    TVariable globalUniformBlock;
-    uint globalUniformBinding;
-    uint globalUniformSet;
+  TVariable globalUniformBlock;
+  uint globalUniformBinding;
+  uint globalUniformSet;
 
-    uint atomicCounterBlockSet;
-  }
+  uint atomicCounterBlockSet;
 
   this(
     TSymbolTable symbolTable, TIntermediate interm, bool parsingBuiltins, int version_,

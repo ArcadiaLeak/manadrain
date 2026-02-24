@@ -5,24 +5,20 @@ import glslang;
 import std.conv;
 
 class TParseVersions {
-  public {
-    bool forwardCompatible;
-    glslang_profile_t profile;
+  bool forwardCompatible;
+  glslang_profile_t profile;
 
-    TInfoSink infoSink;
+  TInfoSink infoSink;
 
-    int version_;
-    EShLanguage language;
-    SpvVersion spvVersion;
-    TIntermediate intermediate;
-  }
+  int version_;
+  EShLanguage language;
+  SpvVersion spvVersion;
+  TIntermediate intermediate;
 
-  protected {
-    glslang_messages_t messages;
-    int numErrors;
-    TInputScanner currentScanner;
-    TExtensionBehavior[string] extensionBehavior;
-  }
+  glslang_messages_t messages;
+  int numErrors;
+  TInputScanner currentScanner;
+  TExtensionBehavior[string] extensionBehavior;
 
   this(
     TIntermediate interm, int version_, glslang_profile_t profile,

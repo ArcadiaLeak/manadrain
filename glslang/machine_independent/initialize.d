@@ -140,10 +140,8 @@ class TBuiltInParseables {
     }
   }
 
-  protected {
-    Appender!(char[]) commonBuiltins;
-    StageBuiltins stageBuiltins;
-  }
+  Appender!(char[]) commonBuiltins;
+  StageBuiltins stageBuiltins;
 
   abstract void initialize(
     int version_, glslang_profile_t, in SpvVersion spvVersion);
@@ -155,11 +153,9 @@ class TBuiltInParseables {
 }
 
 class TBuiltIns : TBuiltInParseables {
-  protected {
-    string[5] postfixes;
-    string[TBasicType.EbtNumTypes] prefixes;
-    int[TSamplerDim.EsdNumDims] dimMap;
-  }
+  string[5] postfixes;
+  string[TBasicType.EbtNumTypes] prefixes;
+  int[TSamplerDim.EsdNumDims] dimMap;
 
   this() {
     prefixes[TBasicType.EbtFloat] =  "";
@@ -6574,7 +6570,7 @@ class TBuiltIns : TBuiltInParseables {
     throw new Exception("unimplemented");
   }
 
-  protected void add2ndGenerationSamplingImaging(
+  void add2ndGenerationSamplingImaging(
     int version_, glslang_profile_t profile, in SpvVersion spvVersion
   ) {
     enum TBasicType[] bTypes = [
@@ -6694,7 +6690,7 @@ class TBuiltIns : TBuiltInParseables {
     }
   }
 
-  protected void addSubpassSampling(TSampler sampler, string typeName, int, glslang_profile_t) {
+  void addSubpassSampling(TSampler sampler, string typeName, int, glslang_profile_t) {
     stageBuiltins.STAGE_FRAGMENT.put(prefixes[sampler.type]);
     stageBuiltins.STAGE_FRAGMENT.put("vec4 subpassLoad");
     stageBuiltins.STAGE_FRAGMENT.put("(");
@@ -6703,7 +6699,7 @@ class TBuiltIns : TBuiltInParseables {
     stageBuiltins.STAGE_FRAGMENT.put(");\n");
   }
 
-  protected void addImageFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
+  void addImageFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
     int dims = dimMap[sampler.dim];
     if (sampler.arrayed && sampler.dim != TSamplerDim.EsdCube)
       ++dims;
@@ -6917,7 +6913,7 @@ class TBuiltIns : TBuiltInParseables {
     }
   }
 
-  protected void addQueryFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
+  void addQueryFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
     int sizeDims = dimMap[sampler.dim] + (sampler.arrayed ? 1 : 0) - (sampler.dim == TSamplerDim.EsdCube ? 1 : 0);
 
     if (sampler.isImage() && ((profile == glslang_profile_t.ES_PROFILE && version_ < 310) || (profile != glslang_profile_t.ES_PROFILE && version_ < 420)))
@@ -6997,7 +6993,7 @@ class TBuiltIns : TBuiltInParseables {
     }
   }
 
-  protected void addGatherFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
+  void addGatherFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
     switch (sampler.dim) {
       case TSamplerDim.Esd2D:
       case TSamplerDim.EsdRect:
@@ -7202,7 +7198,7 @@ class TBuiltIns : TBuiltInParseables {
     }
   }
 
-  protected void addSamplingFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
+  void addSamplingFunctions(TSampler sampler, string typeName, int version_, glslang_profile_t profile) {
     for (int proj = 0; proj <= 1; ++proj) {
       if (proj && (sampler.dim == TSamplerDim.EsdCube || sampler.isBuffer() || sampler.arrayed || sampler.isMultiSample()
         || !sampler.isCombined()))

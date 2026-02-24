@@ -10,6 +10,5 @@ class TCompiler {
   }
 
   TInfoSink infoSink;
-protected:
   EShLanguage language;
 }

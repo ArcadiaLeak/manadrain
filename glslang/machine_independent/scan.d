@@ -8,21 +8,19 @@ import std.algorithm.comparison;
 enum int EndOfInput = -1;
 
 class TInputScanner {
-  protected {
-    string[] sources;
-    int currentSource;
-    size_t currentChar;
+  string[] sources;
+  int currentSource;
+  size_t currentChar;
 
-    TSourceLoc[] loc;
+  TSourceLoc[] loc;
 
-    int stringBias;
-    int finale;
+  int stringBias;
+  int finale;
 
-    TSourceLoc logicalSourceLoc;
-    bool singleLogical;
+  TSourceLoc logicalSourceLoc;
+  bool singleLogical;
 
-    bool endOfFileReached;
-  }
+  bool endOfFileReached;
 
   this(
     string[] s, string[] names = null,
@@ -293,7 +291,7 @@ class TInputScanner {
     }
   }
 
-  protected void advance() {
+  void advance() {
     ++currentChar;
     if (currentChar >= sources[currentSource].length) {
       ++currentSource;

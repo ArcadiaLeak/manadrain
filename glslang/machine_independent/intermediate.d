@@ -39,27 +39,25 @@ private:
 };
 
 class TIntermediate {
-  protected {
-    const EShLanguage language;
+  const EShLanguage language;
 
-    string entryPointName;
-    string entryPointMangledName;
+  string entryPointName;
+  string entryPointMangledName;
 
-    DList!TCall callGraph;
+  DList!TCall callGraph;
 
-    glslang_profile_t profile;
-    int version_;
-    SpvVersion spvVersion;
-    bool useStorageBuffer;
+  glslang_profile_t profile;
+  int version_;
+  SpvVersion spvVersion;
+  bool useStorageBuffer;
 
-    glslang_source_t source;
+  glslang_source_t source;
 
-    bool originUpperLeft;
-    string sourceFile;
-    string sourceText;
+  bool originUpperLeft;
+  string sourceFile;
+  string sourceText;
 
-    TProcesses processes;
-  }
+  TProcesses processes;
 
   this(
     EShLanguage l, int v = 0,
