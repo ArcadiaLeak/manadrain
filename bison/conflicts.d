@@ -8,7 +8,12 @@ auto conflicts_solve(
   int ntokens,
   int nnterms,
   int nsyms,
-  state[] states
+  state[] states,
+  rule[] rules,
+  symbol errtoken,
+  int[] goto_map,
+  int[] from_state,
+  int[] to_state
 ) {
   symbol[] errors = new symbol[ntokens + 1];
   
@@ -53,6 +58,12 @@ auto conflicts_solve(
     ntokens,
     nnterms,
     nsyms,
-    nstates
+    nstates,
+    states,
+    rules,
+    errtoken,
+    goto_map,
+    from_state,
+    to_state
   );
 }

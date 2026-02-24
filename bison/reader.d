@@ -215,6 +215,7 @@ auto check_and_convert_grammar(
     token_translations,
     nritems,
     ritem,
-    acceptsymbol
+    acceptsymbol,
+    errtoken
   );
 }

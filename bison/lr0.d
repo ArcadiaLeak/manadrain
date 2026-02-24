@@ -19,7 +19,8 @@ auto generate_states(
   rule[][][] derives,
   int[] ritem,
   symbol acceptsymbol,
-  bool[] nullable
+  bool[] nullable,
+  symbol errtoken
 ) {
   size_t[][] kernel_base;
   int[] kernel_size;
@@ -223,7 +224,8 @@ auto generate_states(
     nullable,
     derives,
     rules,
-    nstates
+    nstates,
+    errtoken
   );
 }
 

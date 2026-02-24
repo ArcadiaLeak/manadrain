@@ -14,7 +14,8 @@ auto nullable_compute(
   int[] token_translations,
   rule[][][] derives,
   int[] ritem,
-  symbol acceptsymbol
+  symbol acceptsymbol,
+  symbol errtoken
 ) {
   bool[] nullable = new bool[nnterms];
 
@@ -94,6 +95,7 @@ auto nullable_compute(
     derives,
     ritem,
     acceptsymbol,
-    nullable
+    nullable,
+    errtoken
   );
 }

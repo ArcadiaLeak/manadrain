@@ -22,7 +22,8 @@ auto lalr(
   bool[] nullable,
   rule[][][] derives,
   rule[] rules,
-  int nstates
+  int nstates,
+  symbol errtoken
 ) {
   bool[][] LA;
   size_t nLA;
@@ -379,6 +380,11 @@ auto lalr(
     ntokens,
     nnterms,
     nsyms,
-    states
+    states,
+    rules,
+    errtoken,
+    goto_map,
+    from_state,
+    to_state
   );
 }
