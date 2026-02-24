@@ -25,7 +25,7 @@ class TInputScanner {
   this(
     string[] s, string[] names = null,
     int b = 0, int f = 0, bool single = false
-  ) @safe {
+  ) {
     sources = s;
     currentSource = 0;
     currentChar = 0;

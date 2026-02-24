@@ -30,7 +30,7 @@ class TPpContext {
   
   this(
     TParseContextBase pc, string rootFileName, TShader.Includer inclr
-  ) @safe {
+  ) {
     preamble = null; strings = null; previous_token = '\n'; parseContext = pc;
     includer = inclr; inComment = false; this.rootFileName = rootFileName;
     currentSourceFile = rootFileName; disableEscapeSequences = false;

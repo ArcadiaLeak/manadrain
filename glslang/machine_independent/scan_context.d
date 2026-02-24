@@ -18,7 +18,7 @@ class TScanContext {
 
   char[] tokenText;
 
-  this(TParseContextBase pc) @safe {
+  this(TParseContextBase pc) {
     parseContext = pc; afterType = false; afterStruct = false; field = false;
     afterBuffer = false; inDeclaratorList = false; afterDeclarator = false;
     angleBracketDepth = 0; squareBracketDepth = 0; parenDepth = 0;

@@ -8,14 +8,14 @@ struct TSourceLoc {
   int line;
   int column;
 
-  void init() @safe {
+  void init() {
     name = null;
     string_ = 0;
     line = 0;
     column = 0;
   }
 
-  void init(int stringNum) @safe {
+  void init(int stringNum) {
     init();
     string_ = stringNum;
   }

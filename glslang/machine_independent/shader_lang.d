@@ -1,9 +1,7 @@
 module glslang.machine_independent.shader_lang;
-
 import glslang;
 
 import std.conv;
-import std.range;
 import std.traits;
 
 struct TTarget {
@@ -87,13 +85,14 @@ class TShader {
   }
 
   bool preprocess(
+    const(TBuiltInResource)* builtInResources,
     int defaultVersion, profile_t defaultProfile,
     bool forceDefaultVersionAndProfile,
     bool forwardCompatible, messages_t message,
     out string output_string
   ) {
     return PreprocessDeferred(
-      compiler, strings, stringNames,
+      compiler, strings, stringNames, builtInResources,
       defaultVersion, defaultProfile, forceDefaultVersionAndProfile,
       overrideVersion, forwardCompatible, message, intermediate,
       output_string, environment
@@ -111,6 +110,7 @@ bool PreprocessDeferred(
   TCompiler compiler,
   in string[] shaderStrings,
   in string[] stringNames,
+  const(TBuiltInResource)* builtInResources,
   int defaultVersion,
   profile_t defaultProfile,
   bool forceDefaultVersionAndProfile,
@@ -122,7 +122,7 @@ bool PreprocessDeferred(
   in TEnvironment environment
 ) {
   return ProcessDeferred(
-    compiler, shaderStrings, stringNames,
+    compiler, shaderStrings, stringNames, builtInResources,
     defaultVersion, defaultProfile, forceDefaultVersionAndProfile,
     overrideVersion, forwardCompatible, messages, intermediate,
     0, false, "", environment
@@ -133,6 +133,7 @@ bool ProcessDeferred(ProcessingContext)(
   TCompiler compiler,
   const string[] shaderStrings,
   const string[] stringNames,
+  const(TBuiltInResource)* builtInResources,
   int defaultVersion,
   profile_t defaultProfile,
   bool forceDefaultVersionAndProfile,
@@ -155,12 +156,16 @@ bool ProcessDeferred(ProcessingContext)(
 
   string[] strings = new string[numTotal];
   string[] names = new string[numTotal];
-  foreach(s, shaderString; shaderStrings) {
-    strings[s + numPre] = shaderString;
+  foreach(s, str; shaderStrings) {
+    strings[s + numPre] = str;
   }
-  if (stringNames.length > 0) {
-    foreach(s, stringName; stringNames) {
-      names[s + numPre] = stringName;
+  if (stringNames !is null) {
+    foreach(s, str; stringNames) {
+      names[s + numPre] = str;
+    }
+  } else {
+    foreach(s, str; shaderStrings) {
+      names[s + numPre] = null;
     }
   }
 
@@ -169,7 +174,7 @@ bool ProcessDeferred(ProcessingContext)(
   EShLanguage stage = compiler.getLanguage;
   TranslateEnvironment(environment, messages, source, stage, spvVersion);
 
-  auto userInput = new TInputScanner(strings.drop(numPre));
+  TInputScanner userInput = new TInputScanner(strings[numPre..$]);
   int version_ = 0;
   profile_t profile = profile_t.NO_PROFILE;
   bool versionNotFirstToken = false;
@@ -471,15 +476,14 @@ bool SetupBuiltinSymbolTable(
       [spvVersionIndex]
       [profileIndex]
       [sourceIndex]
-      [EPrecisionClass.EPcGeneral]) {
-    return true;
-  }
+      [EPrecisionClass.EPcGeneral]
+  ) return true;
 
   TSymbolTable[EnumMembers!EPrecisionClass.length] commonTable;
   TSymbolTable[EnumMembers!EShLanguage.length] stageTables;
-  for (int precClass = 0; precClass < EnumMembers!EPrecisionClass.length; ++precClass)
+  foreach (precClass; 0..EnumMembers!EPrecisionClass.length)
     commonTable[precClass] = new TSymbolTable;
-  for (int stage = 0; stage < EnumMembers!EShLanguage.length; ++stage)
+  foreach (stage; 0..EnumMembers!EShLanguage.length)
     stageTables[stage] = new TSymbolTable;
   
   if (
@@ -487,13 +491,18 @@ bool SetupBuiltinSymbolTable(
       infoSink, commonTable, stageTables,
       version_, profile, spvVersion, source
     )
-  ) {
-    success = false;
-    goto cleanup;
-  }
+  ) return false;
 
-cleanup:
-  return false;
+  foreach (precClass; 0..EnumMembers!EPrecisionClass.length) {
+    if (!commonTable[precClass].isEmpty) {
+      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex][sourceIndex][precClass] = new TSymbolTable;
+      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex][sourceIndex][precClass].copyTable = commonTable[precClass];
+      // CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex][sourceIndex][precClass].readOnly;
+    }
+  }
+  success = true;
+
+  return success;
 }
 
 enum int VersionCount = 17;
@@ -611,7 +620,7 @@ TParseContextBase CreateParseContext(
   profile_t profile, source_t source, EShLanguage language,
   TInfoSink infoSink, in SpvVersion spvVersion, bool forwardCompatible,
   messages_t messages, bool parsingBuiltIns, string sourceEntryPointName = ""
-) @safe {
+) {
   if (sourceEntryPointName.length == 0)
     intermediate.setEntryPointName = "main";
   auto parseContext = new TParseContext(
@@ -646,7 +655,7 @@ bool InitializeSymbolTable(
   string builtIns, int version_, profile_t profile,
   in SpvVersion spvVersion, EShLanguage language, source_t source,
   TInfoSink infoSink, TSymbolTable symbolTable
-) @safe {
+) {
   auto intermediate = new TIntermediate(language, version_, profile);
   intermediate.setSource = source;
 

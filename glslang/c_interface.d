@@ -84,6 +84,7 @@ shader_t shader_create(ref input_t input) {
 
 bool shader_preprocess(ref shader_t shader, ref input_t input) {
   return shader.shader.preprocess(
+    input.resource,
     input.default_version,
     input.default_profile,
     input.force_default_version_and_profile != 0,

@@ -24,7 +24,7 @@ class TParseVersions {
     TIntermediate interm, int version_, profile_t profile,
     in SpvVersion spvVersion, EShLanguage language, TInfoSink infoSink,
     bool forwardCompatible, messages_t messages
-  ) @safe {
+  ) {
     this.forwardCompatible = forwardCompatible; this.profile = profile;
     this.infoSink = infoSink; this.version_ = version_; this.language = language;
     this.spvVersion = spvVersion; intermediate = interm; this.messages = messages;

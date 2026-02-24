@@ -9,7 +9,7 @@ class TParseContext : TParseContextBase {
     EShLanguage language, TInfoSink, bool forwardCompatible,
     messages_t messages = messages_t.MSG_DEFAULT_BIT,
     string entryPoint = null
-  ) @safe {
+  ) {
     super(
       symbolTable, interm, parsingBuiltIns, version_, profile, spvVersion,
       language, infoSink, forwardCompatible, messages, entryPoint

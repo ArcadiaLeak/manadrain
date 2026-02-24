@@ -23,11 +23,11 @@ struct TCall {
 }
 
 struct TProcesses {
-  void addProcess(string process) @safe {
+  void addProcess(string process) {
     processes ~= process;
   }
 
-  void addArgument(string arg) @safe {
+  void addArgument(string arg) {
     processes.back ~= " ";
     processes.back ~= arg;
   }
@@ -62,11 +62,11 @@ class TIntermediate {
   this(
     EShLanguage l, int v = 0,
     profile_t p = profile_t.NO_PROFILE
-  ) @safe {
+  ) {
     language = l;
   }
 
-  void setSource(source_t s) @safe { source = s; }
+  void setSource(source_t s) { source = s; }
   source_t getSource() const { return source; }
 
   void setVersion(int v) { version_ = v; }
@@ -84,13 +84,13 @@ class TIntermediate {
   void setOriginUpperLeft() { originUpperLeft = true; }
   bool getOriginUpperLeft() const { return originUpperLeft; }
 
-  void setEntryPointName(string ep) @safe {
+  void setEntryPointName(string ep) {
     entryPointName = ep;
     processes.addProcess("entry-point");
     processes.addArgument(entryPointName);
   }
 
-  void setUseStorageBuffer() @safe { useStorageBuffer = true; }
+  void setUseStorageBuffer() { useStorageBuffer = true; }
 
   void setSpv(in SpvVersion s) {
     spvVersion = s;
