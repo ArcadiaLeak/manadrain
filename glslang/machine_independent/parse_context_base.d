@@ -30,6 +30,12 @@ class TParseContextBase : TParseVersions {
   TPpContext ppContext;
   string sourceEntryPointName;
 
+  void delegate(int, int, bool, int, string) lineCallback;
+  void delegate(int, const string[]) pragmaCallback;
+  void delegate(int, int, string) versionCallback;
+  void delegate(int, string, string) extensionCallback;
+  void delegate(int, string) errorCallback;
+
   TVariable globalUniformBlock;
   uint globalUniformBinding;
   uint globalUniformSet;
@@ -63,6 +69,12 @@ class TParseContextBase : TParseVersions {
 
   void setScanContext(TScanContext c) { scanContext = c; }
   void setPpContext(TPpContext c) { ppContext = c; }
+
+  void setLineCallback(void delegate(int, int, bool, int, string) func) { lineCallback = func; }
+  void setExtensionCallback(void delegate(int, string, string) func) { extensionCallback = func; }
+  void setVersionCallback(void delegate(int, int, string) func) { versionCallback = func; }
+  void setPragmaCallback(void delegate(int, const string[]) func) { pragmaCallback = func; }
+  void setErrorCallback(void delegate(int, string) func) { errorCallback = func; }
 
   void outputMessage(Args...)(
     in TSourceLoc loc, string szReason, string szToken,
@@ -124,6 +136,7 @@ class TParseContextBase : TParseVersions {
   }
 
   abstract bool lineContinuationCheck(in TSourceLoc, bool endOfComment);
+  abstract bool lineDirectiveShouldSetNextLine() const;
 
   TPpContext getPpContext() => ppContext;
   TScanContext getScanContext() => scanContext;

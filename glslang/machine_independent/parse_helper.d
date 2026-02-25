@@ -42,4 +42,7 @@ class TParseContext : TParseContextBase {
 
     return lineContinuationAllowed;
   }
+
+  override bool lineDirectiveShouldSetNextLine() const =>
+    isEsProfile || version_ >= 330;
 }

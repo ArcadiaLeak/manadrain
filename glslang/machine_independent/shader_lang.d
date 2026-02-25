@@ -154,6 +154,106 @@ auto ppClosure(ref string outputString) {
       return newLineStarted;
     }
 
+    parseContext.setExtensionCallback = (
+      int line, string extension,
+      string behavior
+    ) {
+      syncToLine(line);
+      outputBuffer ~= "#extension ";
+      outputBuffer ~= extension;
+      outputBuffer ~= " : ";
+      outputBuffer ~= behavior;
+    };
+
+    parseContext.setLineCallback = (
+      int curLineNum, int newLineNum, bool hasSource,
+      int sourceNum, string sourceName
+    ) {
+      syncToLine(curLineNum);
+
+      import std.conv;
+      outputBuffer ~= "#line ";
+      outputBuffer ~= newLineNum.to!string;
+      if (hasSource) {
+        outputBuffer ~= " ";
+        if (sourceName !is null) {
+          outputBuffer ~= "\"";
+          outputBuffer ~= sourceName;
+          outputBuffer ~= "\"";
+        } else {
+          outputBuffer ~= sourceNum.to!string;
+        }
+      }
+      if (parseContext.lineDirectiveShouldSetNextLine)
+        newLineNum -= 1;
+      outputBuffer ~= "\n";
+      lastLine = newLineNum + 1;
+    };
+
+    parseContext.setVersionCallback = (
+      int line, int version_,
+      string str
+    ) {
+      syncToLine(line);
+      outputBuffer ~= "#version ";
+      outputBuffer ~= version_.to!string;
+      if (str) {
+        outputBuffer ~= " ";
+        outputBuffer ~= str;
+      }
+    };
+
+    parseContext.setPragmaCallback = (
+      int line, const string[] ops
+    ) {
+      syncToLine(line);
+      outputBuffer ~= "#pragma ";
+      foreach (op; ops) outputBuffer ~= op;
+    };
+
+    parseContext.setErrorCallback = (
+      int line, string errorMessage
+    ) {
+      syncToLine(line);
+      outputBuffer ~= "#error ";
+      outputBuffer ~= errorMessage;
+    };
+
+    int lastToken = EndOfInput;
+    string lastTokenName;
+    do {
+      int token = ppContext.tokenize(ppToken);
+      if (token == EndOfInput)
+        break;
+
+      bool isNewString = syncToMostRecentString;
+      bool isNewLine = syncToLine(ppToken.loc.line);
+
+      if (isNewLine) {
+        char[] buf = new char[ppToken.loc.column - 1];
+        buf[] = ' ';
+        outputBuffer ~= buf.idup;
+      }
+      
+      if (!isNewString && !isNewLine && lastToken != EndOfInput) {
+        import std.algorithm.searching;
+        import std.range.primitives;
+        if (token == '(') {
+          if (
+            lastToken != EFixedAtoms.PpAtomIdentifier ||
+            lastTokenName == "if" ||
+            lastTokenName == "for" ||
+            lastTokenName == "while" ||
+            lastTokenName == "switch"
+          ) outputBuffer ~= " ";
+        } else if (
+          noNeededSpaceBeforeTokens.find(cast(char) token).empty &&
+          noNeededSpaceAfterTokens.find(cast(char) lastToken).empty
+        ) outputBuffer ~= " ";
+      }
+      //
+    } while (true);
+
     return false;
   }
 
