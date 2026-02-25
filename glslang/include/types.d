@@ -216,10 +216,28 @@ string getBasicString(TBasicType t) {
   }
 }
 
-class TType {}
+class TType {
+  TBasicType basicType;
+  uint vectorSize;
+  uint matrixCols;
+  uint matrixRows;
+  bool vector1;
+  bool coopmatNV;
+  bool coopmatKHR;
+  uint coopmatKHRuse;
+  bool coopmatKHRUseValid;
+  bool coopvecNV;
+  bool tileAttachmentQCOM;
+  uint tensorRankARM;
+  TQualifier qualifier;
+  TArraySizes arraySizes;
 
-class TQualifier {
+  void shallowCopy(const TType copyOf) {
+
+  }
+}
+
+struct TQualifier {
   enum uint layoutSetEnd = 0x3F;
-
   enum uint layoutBindingEnd = 0xFFFF;
 }

@@ -4,6 +4,13 @@ import glslang;
 import std.conv;
 import std.traits;
 
+enum EShOptimizationLevel {
+  EShOptNoGeneration,
+  EShOptNone,
+  EShOptSimple,
+  EShOptFull
+}
+
 struct TTarget {
   target_language_t language;
   target_language_version_t version_;
@@ -48,7 +55,7 @@ class TShader {
     stage = s;
 
     infoSink = new TInfoSink;
-    compiler = new TDeferredCompiled(stage, infoSink);
+    compiler = new TDeferredCompiler(stage, infoSink);
     intermediate = new TIntermediate(s);
   }
 
@@ -89,7 +96,7 @@ class TShader {
     int defaultVersion, profile_t defaultProfile,
     bool forceDefaultVersionAndProfile,
     bool forwardCompatible, messages_t message,
-    out string output_string
+    ref string output_string
   ) {
     return PreprocessDeferred(
       compiler, strings, stringNames, builtInResources,
@@ -100,10 +107,26 @@ class TShader {
   }
 }
 
-class TDeferredCompiled : TCompiler {
+class TDeferredCompiler : TCompiler {
   this(EShLanguage s, TInfoSink i) {
     super(s, i);
   }
+}
+
+auto ppClosure(ref string outputString) {
+  bool preprocess(
+    TParseContextBase parseContext, TPpContext ppContext,
+    TInputScanner input, bool versionWillBeError,
+    TSymbolTable, TIntermediate, EShOptimizationLevel, messages_t
+  ) {
+    if (outputString) {
+      return true;
+    }
+
+    return false;
+  }
+
+  return &preprocess;
 }
 
 bool PreprocessDeferred(
@@ -118,14 +141,15 @@ bool PreprocessDeferred(
   bool forwardCompatible,
   messages_t messages,
   TIntermediate intermediate,
-  out string outputString,
+  ref string outputString,
   in TEnvironment environment
 ) {
+  auto parser = outputString.ppClosure;
   return ProcessDeferred(
     compiler, shaderStrings, stringNames, builtInResources,
     defaultVersion, defaultProfile, forceDefaultVersionAndProfile,
     overrideVersion, forwardCompatible, messages, intermediate,
-    0, false, "", environment
+    parser, false, "", environment
   );
 }
 

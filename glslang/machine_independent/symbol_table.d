@@ -1,6 +1,26 @@
 module glslang.machine_independent.symbol_table;
 
-class TVariable {}
+class TSymbol {
+  const(TAnonMember) getAsAnonMember() const => null;
+}
+
+class TVariable : TSymbol {
+  this(const TVariable variable) {
+    //
+  }
+
+  TVariable clone() const => new TVariable(this);
+}
+
+class TAnonMember : TSymbol {
+  int anonId;
+  TVariable anonContainer;
+
+  override const(TAnonMember) getAsAnonMember() const => this;
+
+  int getAnonId() const => anonId;
+  const(TVariable) getAnonContainer() const => anonContainer;
+}
 
 class TSymbolTableLevel {
   import std.typecons;
@@ -8,6 +28,7 @@ class TSymbolTableLevel {
   int anonId;
   bool thisLevel;
   Tuple!(string, string)[] retargetedSymbols;
+  TSymbol[string] level;
 
   TSymbolTableLevel clone() const {
     TSymbolTableLevel symTableLevel = new TSymbolTableLevel;
@@ -16,7 +37,15 @@ class TSymbolTableLevel {
     symTableLevel.retargetedSymbols.length = retargetedSymbols.length;
     symTableLevel.retargetedSymbols[] = retargetedSymbols[];
 
-    //
+    bool[] containerCopied = new bool[anonId];
+    foreach (name, sym; level) {
+      const TAnonMember anon = sym.getAsAnonMember;
+      if (anon) {
+        if (!containerCopied[anon.getAnonId]) {
+          const TVariable container = anon.getAnonContainer;
+        }
+      }
+    }
 
     return symTableLevel;
   }
