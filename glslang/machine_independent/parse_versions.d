@@ -111,4 +111,6 @@ class TParseVersions {
           featureDesc, "");
     }
   }
+
+  void setScanner(TInputScanner scanner) { currentScanner = scanner; }
 }

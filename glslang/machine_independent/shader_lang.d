@@ -119,8 +119,39 @@ auto ppClosure(ref string outputString) {
     TInputScanner input, bool versionWillBeError,
     TSymbolTable, TIntermediate, EShOptimizationLevel, messages_t
   ) {
-    if (outputString) {
-      return true;
+    import std.container.dlist;
+
+    enum string noNeededSpaceBeforeTokens = ";)[].,";
+    enum string noNeededSpaceAfterTokens = ".([";
+    TPpToken ppToken;
+
+    parseContext.setScanner(input);
+    ppContext.setInput(input, versionWillBeError);
+
+    int lastSource = -1;
+    int lastLine = 0;
+
+    DList!string outputBuffer;
+
+    bool syncToMostRecentString() {
+      if (input.getLastValidSourceIndex != lastSource) {
+        if (lastSource != -1 || lastLine != 0)
+          outputBuffer ~= "\n";
+        lastSource = input.getLastValidSourceIndex;
+        lastLine = -1;
+        return true;
+      }
+      return false;
+    }
+
+    bool syncToLine(int tokenLine) {
+      syncToMostRecentString;
+      const bool newLineStarted = lastLine < tokenLine;
+      while (lastLine < tokenLine) {
+        if (lastLine > 0) outputBuffer ~= "\n";
+        ++lastLine;
+      }
+      return newLineStarted;
     }
 
     return false;

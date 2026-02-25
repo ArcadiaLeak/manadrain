@@ -311,6 +311,11 @@ class TInputScanner {
       currentChar = 0;
     }
   }
+
+  int getLastValidSourceIndex() const {
+    import std.algorithm.comparison;
+    return min(currentSource, sources.length - 1);
+  }
 }
 
 class TParserToken {}

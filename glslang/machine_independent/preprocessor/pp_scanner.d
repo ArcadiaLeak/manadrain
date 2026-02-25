@@ -9,6 +9,7 @@ class tInput {
 
   abstract int scan(ref TPpToken ppToken);
 
+  void notifyActivated() {}
   void notifyDeleted() {}
 }
 

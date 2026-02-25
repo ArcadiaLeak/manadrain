@@ -27,6 +27,8 @@ class TPpContext {
   bool inElseSkip;
 
   SList!tInput inputStack;
+  bool errorOnVersion;
+  bool versionSeen;
   
   this(
     TParseContextBase pc, string rootFileName, TShader.Includer inclr
@@ -65,8 +67,22 @@ class TPpContext {
     return token;
   }
 
+  void pushInput(tInput in_) {
+    inputStack.insert = in_;
+    in_.notifyActivated;
+  }
+
   void popInput() {
     inputStack.front.notifyDeleted;
     inputStack.removeFront;
+  }
+
+  void setInput(TInputScanner input, bool versionWillBeError) {
+    assert(inputStack.empty);
+
+    pushInput(new tStringInput(this, input));
+
+    errorOnVersion = versionWillBeError;
+    versionSeen = false;
   }
 }
