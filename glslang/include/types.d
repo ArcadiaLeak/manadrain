@@ -254,7 +254,7 @@ class TType {
   bool isCoopMatKHR() const { return coopmatKHR; }
   bool isCoopVecNV() const { return coopvecNV; }
 
-  void shallowCopy(TType copyOf) {
+  void shallowCopy(const TType copyOf) {
     basicType = copyOf.basicType;
     sampler = copyOf.sampler;
     qualifier = copyOf.qualifier;
@@ -262,16 +262,8 @@ class TType {
     matrixCols = copyOf.matrixCols;
     matrixRows = copyOf.matrixRows;
     vector1 = copyOf.vector1;
-    arraySizes = copyOf.arraySizes;
     fieldName = copyOf.fieldName;
     typeName = copyOf.typeName;
-    if (isStruct) {
-      structure = copyOf.structure;
-    } else {
-      referentType = copyOf.referentType;
-    }
-    typeParameters = copyOf.typeParameters;
-    spirvType = copyOf.spirvType;
     coopmatNV = copyOf.isCoopMatNV;
     coopmatKHR = copyOf.isCoopMatKHR;
     coopmatKHRuse = copyOf.coopmatKHRuse;
@@ -281,12 +273,12 @@ class TType {
     tensorRankARM = copyOf.tensorRankARM;
   }
 
-  void deepCopy(TType copyOf) {
+  void deepCopy(const TType copyOf) {
     TTypeList[TTypeList] copied;
     deepCopy(copyOf, copied);
   }
 
-  void deepCopy(TType copyOf, TTypeList[TTypeList] copiedMap) {
+  void deepCopy(const TType copyOf, TTypeList[TTypeList] copiedMap) {
     shallowCopy(copyOf);
   }
 }

@@ -416,7 +416,12 @@ bool ProcessDeferred(ProcessingContext)(
     [MapSourceToIndex(source)]
     [stage];
 
-  return false;
+  bool success = processingContext(
+    TParseContextBase.init, TPpContext.init, TInputScanner.init,
+    versionWillBeError, null, null, EShOptimizationLevel.init, messages
+  );
+
+  return success;
 }
 
 void TranslateEnvironment(
@@ -647,6 +652,9 @@ bool SetupBuiltinSymbolTable(
   int spvVersionIndex = MapSpvVersionToIndex(spvVersion);
   int profileIndex = MapProfileToIndex(profile);
   int sourceIndex = MapSourceToIndex(source);
+  import std.stdio;
+  writeln(spvVersionIndex);
+  writeln(CommonSymbolTable.length);
   if (
     CommonSymbolTable
       [versionIndex]
@@ -813,7 +821,7 @@ bool InitializeSymbolTables(
   in SpvVersion spvVersion, source_t source
 ) {
   bool success = true;
-  auto builtInParseables = CreateBuiltInParseables(infoSink, source);
+  TBuiltInParseables builtInParseables = CreateBuiltInParseables(infoSink, source);
 
   if (builtInParseables is null) return false;
 

@@ -1,13 +1,10 @@
 module glslang.machine_independent.initialize;
-
 import glslang;
 
 import std.algorithm.searching;
+import std.container.dlist;
 import std.conv;
-import std.format;
-import std.range;
 import std.string;
-import std.traits;
 
 enum string[] TypeString = [
   "bool", "bvec2", "bvec3", "bvec4",
@@ -135,12 +132,23 @@ enum Versioning[] Es310Desktop450Version = [
 
 class TBuiltInParseables {
   struct StageBuiltins {
-    static foreach (stage; EnumMembers!EShLanguage) {
-      mixin(i"Appender!(char[]) $(stage.to!string);".text);
-    }
+    DList!string STAGE_VERTEX;
+    DList!string STAGE_TESSCONTROL;
+    DList!string STAGE_TESSEVALUATION;
+    DList!string STAGE_GEOMETRY;
+    DList!string STAGE_FRAGMENT;
+    DList!string STAGE_COMPUTE;
+    DList!string STAGE_RAYGEN;
+    DList!string STAGE_INTERSECT;
+    DList!string STAGE_ANYHIT;
+    DList!string STAGE_CLOSESTHIT;
+    DList!string STAGE_MISS;
+    DList!string STAGE_CALLABLE;
+    DList!string STAGE_TASK;
+    DList!string STAGE_MESH;
   }
 
-  Appender!(char[]) commonBuiltins;
+  DList!string commonBuiltins;
   StageBuiltins stageBuiltins;
 
   abstract void initialize(
@@ -148,7 +156,7 @@ class TBuiltInParseables {
   abstract void initialize(
     int version_, profile_t, in SpvVersion spvVersion, EShLanguage);
 
-  string getCommonString() const { return commonBuiltins[].idup; }
+  string getCommonString() => commonBuiltins[].join;
   
 }
 
@@ -187,7 +195,7 @@ class TBuiltIns : TBuiltInParseables {
     int version_, profile_t profile,
     in SpvVersion spvVersion
   ) {
-    auto forEachFunction(ref Appender!(char[]) decls, const(BuiltInFunction[]) functions) {
+    auto forEachFunction(ref DList!string decls, const(BuiltInFunction[]) functions) {
       foreach (const ref fn; functions) {
         if (ValidVersion(fn, version_, profile, spvVersion))
           AddTabledBuiltin(decls, fn);
@@ -2153,34 +2161,20 @@ class TBuiltIns : TBuiltInParseables {
         bool mathOp = canFind(op, "Add") || canFind(op, "Mul") ||
           canFind(op, "Min") || canFind(op, "Max");
 
-        Appender!(char[]) buf = appender!(char[]);
-
         if (!logicalOp) {
-          foreach (floatType; floatTypes) {
-            formattedWrite(buf, op, floatType, floatType);
-            commonBuiltins ~= buf[];
-            buf.clear;
-          }
+          foreach (floatType; floatTypes)
+            commonBuiltins ~= op.format(floatType, floatType);
           if (profile != profile_t.ES_PROFILE && version_ >= 400) {
-            foreach (doubleType; doubleTypes) {
-              formattedWrite(buf, op, doubleType, doubleType);
-              commonBuiltins ~= buf[];
-              buf.clear;
-            }
+            foreach (doubleType; doubleTypes)
+              commonBuiltins ~= op.format(doubleType, doubleType);
           }
         }
         if (!mathOp) {
-          foreach (boolType; boolTypes) {
-            formattedWrite(buf, op, boolType, boolType);
-            commonBuiltins ~= buf[];
-            buf.clear;
-          }
+          foreach (boolType; boolTypes)
+            commonBuiltins ~= op.format(boolType, boolType);
         }
-        foreach (intType; intTypes) {
-          formattedWrite(buf, op, intType, intType);
-          commonBuiltins ~= buf[];
-          buf.clear;
-        }
+        foreach (intType; intTypes)
+          commonBuiltins ~= op.format(intType, intType);
       }
 
       stageBuiltins.STAGE_COMPUTE ~= (
@@ -4271,63 +4265,66 @@ class TBuiltIns : TBuiltInParseables {
 
     if (spvVersion.vulkan == 0 && IncludeLegacy(version_, profile, spvVersion))
       stageBuiltins.STAGE_VERTEX ~= "vec4 ftransform();";
-
-    Appender!(char[])* s;
-    if (version_ == 100)
-      s = &stageBuiltins.STAGE_VERTEX;
-    else
-      s = &commonBuiltins;
-    if ((profile == profile_t.ES_PROFILE && version_ == 100) ||
-      (profile == profile_t.CORE_PROFILE && version_ < 420) ||
-      profile == profile_t.COMPATIBILITY_PROFILE ||
-      profile == profile_t.NO_PROFILE) {
-      if (spvVersion.spv == 0) {
-        s.put = (
-          "vec4 texture2DLod(sampler2D, vec2, float);" ~
-          "vec4 texture2DProjLod(sampler2D, vec3, float);" ~
-          "vec4 texture2DProjLod(sampler2D, vec4, float);" ~
-          "vec4 texture3DLod(sampler3D, vec3, float);" ~
-          "vec4 texture3DProjLod(sampler3D, vec4, float);" ~
-          "vec4 textureCubeLod(samplerCube, vec3, float);" ~
-
-          "\n"
-        );
+  
+    {
+      void insert(string str) {
+        if (version_ == 100)
+          stageBuiltins.STAGE_VERTEX.insert = str;
+        else
+          commonBuiltins.insert = str;
       }
-    }
-    if ((profile == profile_t.CORE_PROFILE && version_ < 420) ||
-      profile == profile_t.COMPATIBILITY_PROFILE ||
-      profile == profile_t.NO_PROFILE) {
-      if (spvVersion.spv == 0) {
-        s.put = (
-          "vec4 texture1DLod(sampler1D, float, float);" ~
-          "vec4 texture1DProjLod(sampler1D, vec2, float);" ~
-          "vec4 texture1DProjLod(sampler1D, vec4, float);" ~
-          "vec4 shadow1DLod(sampler1DShadow, vec3, float);" ~
-          "vec4 shadow2DLod(sampler2DShadow, vec3, float);" ~
-          "vec4 shadow1DProjLod(sampler1DShadow, vec4, float);" ~
-          "vec4 shadow2DProjLod(sampler2DShadow, vec4, float);" ~
+      if ((profile == profile_t.ES_PROFILE && version_ == 100) ||
+        (profile == profile_t.CORE_PROFILE && version_ < 420) ||
+        profile == profile_t.COMPATIBILITY_PROFILE ||
+        profile == profile_t.NO_PROFILE) {
+        if (spvVersion.spv == 0) {
+          insert(
+            "vec4 texture2DLod(sampler2D, vec2, float);" ~
+            "vec4 texture2DProjLod(sampler2D, vec3, float);" ~
+            "vec4 texture2DProjLod(sampler2D, vec4, float);" ~
+            "vec4 texture3DLod(sampler3D, vec3, float);" ~
+            "vec4 texture3DProjLod(sampler3D, vec4, float);" ~
+            "vec4 textureCubeLod(samplerCube, vec3, float);" ~
 
-          "vec4 texture1DGradARB(sampler1D, float, float, float);" ~
-          "vec4 texture1DProjGradARB(sampler1D, vec2, float, float);" ~
-          "vec4 texture1DProjGradARB(sampler1D, vec4, float, float);" ~
-          "vec4 texture2DGradARB(sampler2D, vec2, vec2, vec2);" ~
-          "vec4 texture2DProjGradARB(sampler2D, vec3, vec2, vec2);" ~
-          "vec4 texture2DProjGradARB(sampler2D, vec4, vec2, vec2);" ~
-          "vec4 texture3DGradARB(sampler3D, vec3, vec3, vec3);" ~
-          "vec4 texture3DProjGradARB(sampler3D, vec4, vec3, vec3);" ~
-          "vec4 textureCubeGradARB(samplerCube, vec3, vec3, vec3);" ~
-          "vec4 shadow1DGradARB(sampler1DShadow, vec3, float, float);" ~
-          "vec4 shadow1DProjGradARB(sampler1DShadow, vec4, float, float);" ~
-          "vec4 shadow2DGradARB(sampler2DShadow, vec3, vec2, vec2);" ~
-          "vec4 shadow2DProjGradARB(sampler2DShadow, vec4, vec2, vec2);" ~
-          "vec4 texture2DRectGradARB(sampler2DRect, vec2, vec2, vec2);" ~
-          "vec4 texture2DRectProjGradARB(sampler2DRect, vec3, vec2, vec2);" ~
-          "vec4 texture2DRectProjGradARB(sampler2DRect, vec4, vec2, vec2);" ~
-          "vec4 shadow2DRectGradARB(sampler2DRectShadow, vec3, vec2, vec2);" ~
-          "vec4 shadow2DRectProjGradARB(sampler2DRectShadow, vec4, vec2, vec2);" ~
+            "\n"
+          );
+        }
+      }
+      if ((profile == profile_t.CORE_PROFILE && version_ < 420) ||
+        profile == profile_t.COMPATIBILITY_PROFILE ||
+        profile == profile_t.NO_PROFILE) {
+        if (spvVersion.spv == 0) {
+          insert(
+            "vec4 texture1DLod(sampler1D, float, float);" ~
+            "vec4 texture1DProjLod(sampler1D, vec2, float);" ~
+            "vec4 texture1DProjLod(sampler1D, vec4, float);" ~
+            "vec4 shadow1DLod(sampler1DShadow, vec3, float);" ~
+            "vec4 shadow2DLod(sampler2DShadow, vec3, float);" ~
+            "vec4 shadow1DProjLod(sampler1DShadow, vec4, float);" ~
+            "vec4 shadow2DProjLod(sampler2DShadow, vec4, float);" ~
 
-          "\n"
-        );
+            "vec4 texture1DGradARB(sampler1D, float, float, float);" ~
+            "vec4 texture1DProjGradARB(sampler1D, vec2, float, float);" ~
+            "vec4 texture1DProjGradARB(sampler1D, vec4, float, float);" ~
+            "vec4 texture2DGradARB(sampler2D, vec2, vec2, vec2);" ~
+            "vec4 texture2DProjGradARB(sampler2D, vec3, vec2, vec2);" ~
+            "vec4 texture2DProjGradARB(sampler2D, vec4, vec2, vec2);" ~
+            "vec4 texture3DGradARB(sampler3D, vec3, vec3, vec3);" ~
+            "vec4 texture3DProjGradARB(sampler3D, vec4, vec3, vec3);" ~
+            "vec4 textureCubeGradARB(samplerCube, vec3, vec3, vec3);" ~
+            "vec4 shadow1DGradARB(sampler1DShadow, vec3, float, float);" ~
+            "vec4 shadow1DProjGradARB(sampler1DShadow, vec4, float, float);" ~
+            "vec4 shadow2DGradARB(sampler2DShadow, vec3, vec2, vec2);" ~
+            "vec4 shadow2DProjGradARB(sampler2DShadow, vec4, vec2, vec2);" ~
+            "vec4 texture2DRectGradARB(sampler2DRect, vec2, vec2, vec2);" ~
+            "vec4 texture2DRectProjGradARB(sampler2DRect, vec3, vec2, vec2);" ~
+            "vec4 texture2DRectProjGradARB(sampler2DRect, vec4, vec2, vec2);" ~
+            "vec4 shadow2DRectGradARB(sampler2DRectShadow, vec3, vec2, vec2);" ~
+            "vec4 shadow2DRectProjGradARB(sampler2DRectShadow, vec4, vec2, vec2);" ~
+
+            "\n"
+          );
+        }
       }
     }
 
@@ -4479,7 +4476,7 @@ class TBuiltIns : TBuiltInParseables {
         "ucoopmatNV coopMatMulAddNV(ucoopmatNV A, ucoopmatNV B, ucoopmatNV C);\n"
       );
 
-      Appender!(char[]) cooperativeMatrixFuncs = appender!(char[]);
+      DList!string cooperativeMatrixFuncs;
 
       {
         enum string[] allTypes = [
@@ -4550,7 +4547,7 @@ class TBuiltIns : TBuiltInParseables {
       );
 
       {
-        Appender!(char[]) coopMatConvFuncs = appender!(char[]);
+        DList!string coopMatConvFuncs;
 
         enum string[] eltTypes = [
           "uint32_t", "uint", "int32_t", "int", "float32_t", "float", "float16_t"
@@ -6164,21 +6161,21 @@ class TBuiltIns : TBuiltInParseables {
 
     if ((profile != profile_t.ES_PROFILE && version_ >= 140) ||
       (profile == profile_t.ES_PROFILE && version_ >= 310)) {
-      stageBuiltins.STAGE_FRAGMENT.put(
+      stageBuiltins.STAGE_FRAGMENT.insert(
         "flat in highp int gl_DeviceIndex;" ~
         "flat in highp int gl_ViewIndex;" ~
         "\n");
     }
 
     if (version_ >= 300 /* both ES and non-ES */) {
-      stageBuiltins.STAGE_FRAGMENT.put(
+      stageBuiltins.STAGE_FRAGMENT.insert(
         "flat in highp uint gl_ViewID_OVR;" ~
         "\n");
     }
     
     if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
       (profile != profile_t.ES_PROFILE && version_ >= 460)) {
-      stageBuiltins.STAGE_FRAGMENT.put(
+      stageBuiltins.STAGE_FRAGMENT.insert(
         "flat in highp uvec2 gl_TileOffsetQCOM;" ~
         "flat in highp uvec3 gl_TileDimensionQCOM;" ~
         "flat in highp uvec2 gl_TileApronSizeQCOM;" ~
@@ -6214,21 +6211,21 @@ class TBuiltIns : TBuiltInParseables {
         "flat in uint64_t gl_SubGroupLeMaskARB;" ~
         "flat in uint64_t gl_SubGroupLtMaskARB;" ~
         "\n";
-      stageBuiltins.STAGE_VERTEX.put(ballotDecls);
-      stageBuiltins.STAGE_TESSCONTROL.put(ballotDecls);
-      stageBuiltins.STAGE_TESSEVALUATION.put(ballotDecls);
-      stageBuiltins.STAGE_GEOMETRY.put(ballotDecls);
-      stageBuiltins.STAGE_COMPUTE.put(ballotDecls);
-      stageBuiltins.STAGE_FRAGMENT.put(fragmentBallotDecls);
-      stageBuiltins.STAGE_MESH.put(ballotDecls);
-      stageBuiltins.STAGE_TASK.put(ballotDecls);
-      stageBuiltins.STAGE_RAYGEN.put(rtBallotDecls);
-      stageBuiltins.STAGE_INTERSECT.put(rtBallotDecls);
+      stageBuiltins.STAGE_VERTEX.insert(ballotDecls);
+      stageBuiltins.STAGE_TESSCONTROL.insert(ballotDecls);
+      stageBuiltins.STAGE_TESSEVALUATION.insert(ballotDecls);
+      stageBuiltins.STAGE_GEOMETRY.insert(ballotDecls);
+      stageBuiltins.STAGE_COMPUTE.insert(ballotDecls);
+      stageBuiltins.STAGE_FRAGMENT.insert(fragmentBallotDecls);
+      stageBuiltins.STAGE_MESH.insert(ballotDecls);
+      stageBuiltins.STAGE_TASK.insert(ballotDecls);
+      stageBuiltins.STAGE_RAYGEN.insert(rtBallotDecls);
+      stageBuiltins.STAGE_INTERSECT.insert(rtBallotDecls);
       
-      stageBuiltins.STAGE_ANYHIT.put(ballotDecls);
-      stageBuiltins.STAGE_CLOSESTHIT.put(rtBallotDecls);
-      stageBuiltins.STAGE_MISS.put(rtBallotDecls);
-      stageBuiltins.STAGE_CALLABLE.put(rtBallotDecls);
+      stageBuiltins.STAGE_ANYHIT.insert(ballotDecls);
+      stageBuiltins.STAGE_CLOSESTHIT.insert(rtBallotDecls);
+      stageBuiltins.STAGE_MISS.insert(rtBallotDecls);
+      stageBuiltins.STAGE_CALLABLE.insert(rtBallotDecls);
     }
 
     
@@ -6300,23 +6297,23 @@ class TBuiltIns : TBuiltInParseables {
         "in highp uint gl_WarpMaxIDARM;" ~
         "\n";
 
-      stageBuiltins.STAGE_VERTEX.put(subgroupDecls);
-      stageBuiltins.STAGE_TESSCONTROL.put(subgroupDecls);
-      stageBuiltins.STAGE_TESSEVALUATION.put(subgroupDecls);
-      stageBuiltins.STAGE_GEOMETRY.put(subgroupDecls);
-      stageBuiltins.STAGE_COMPUTE.put(subgroupDecls);
-      stageBuiltins.STAGE_COMPUTE.put(computeSubgroupDecls);
-      stageBuiltins.STAGE_FRAGMENT.put(fragmentSubgroupDecls);
-      stageBuiltins.STAGE_MESH.put(subgroupDecls);
-      stageBuiltins.STAGE_MESH.put(computeSubgroupDecls);
-      stageBuiltins.STAGE_TASK.put(subgroupDecls);
-      stageBuiltins.STAGE_TASK.put(computeSubgroupDecls);
-      stageBuiltins.STAGE_RAYGEN.put(rtSubgroupDecls);
-      stageBuiltins.STAGE_INTERSECT.put(rtSubgroupDecls);
-      stageBuiltins.STAGE_ANYHIT.put(subgroupDecls);
-      stageBuiltins.STAGE_CLOSESTHIT.put(rtSubgroupDecls);
-      stageBuiltins.STAGE_MISS.put(rtSubgroupDecls);
-      stageBuiltins.STAGE_CALLABLE.put(rtSubgroupDecls);
+      stageBuiltins.STAGE_VERTEX.insert(subgroupDecls);
+      stageBuiltins.STAGE_TESSCONTROL.insert(subgroupDecls);
+      stageBuiltins.STAGE_TESSEVALUATION.insert(subgroupDecls);
+      stageBuiltins.STAGE_GEOMETRY.insert(subgroupDecls);
+      stageBuiltins.STAGE_COMPUTE.insert(subgroupDecls);
+      stageBuiltins.STAGE_COMPUTE.insert(computeSubgroupDecls);
+      stageBuiltins.STAGE_FRAGMENT.insert(fragmentSubgroupDecls);
+      stageBuiltins.STAGE_MESH.insert(subgroupDecls);
+      stageBuiltins.STAGE_MESH.insert(computeSubgroupDecls);
+      stageBuiltins.STAGE_TASK.insert(subgroupDecls);
+      stageBuiltins.STAGE_TASK.insert(computeSubgroupDecls);
+      stageBuiltins.STAGE_RAYGEN.insert(rtSubgroupDecls);
+      stageBuiltins.STAGE_INTERSECT.insert(rtSubgroupDecls);
+      stageBuiltins.STAGE_ANYHIT.insert(subgroupDecls);
+      stageBuiltins.STAGE_CLOSESTHIT.insert(rtSubgroupDecls);
+      stageBuiltins.STAGE_MISS.insert(rtSubgroupDecls);
+      stageBuiltins.STAGE_CALLABLE.insert(rtSubgroupDecls);
     }
 
     
@@ -6477,15 +6474,15 @@ class TBuiltIns : TBuiltInParseables {
         "\n";
 
 
-      commonBuiltins.put(constRayQueryIntersection);
-      commonBuiltins.put(constRayFlags);
+      commonBuiltins.insert(constRayQueryIntersection);
+      commonBuiltins.insert(constRayFlags);
 
-      stageBuiltins.STAGE_RAYGEN.put(rayGenDecls);
-      stageBuiltins.STAGE_INTERSECT.put(intersectDecls);
-      stageBuiltins.STAGE_ANYHIT.put(hitDecls);
-      stageBuiltins.STAGE_CLOSESTHIT.put(hitDecls);
-      stageBuiltins.STAGE_MISS.put(missDecls);
-      stageBuiltins.STAGE_CALLABLE.put(callableDecls);
+      stageBuiltins.STAGE_RAYGEN.insert(rayGenDecls);
+      stageBuiltins.STAGE_INTERSECT.insert(intersectDecls);
+      stageBuiltins.STAGE_ANYHIT.insert(hitDecls);
+      stageBuiltins.STAGE_CLOSESTHIT.insert(hitDecls);
+      stageBuiltins.STAGE_MISS.insert(missDecls);
+      stageBuiltins.STAGE_CALLABLE.insert(callableDecls);
     }
 
     if ((profile != profile_t.ES_PROFILE && version_ >= 140)) {
@@ -6493,43 +6490,43 @@ class TBuiltIns : TBuiltInParseables {
         "in highp int gl_DeviceIndex;" ~
         "\n";
 
-      stageBuiltins.STAGE_RAYGEN.put(deviceIndex);
-      stageBuiltins.STAGE_INTERSECT.put(deviceIndex);
-      stageBuiltins.STAGE_ANYHIT.put(deviceIndex);
-      stageBuiltins.STAGE_CLOSESTHIT.put(deviceIndex);
-      stageBuiltins.STAGE_MISS.put(deviceIndex);
+      stageBuiltins.STAGE_RAYGEN.insert(deviceIndex);
+      stageBuiltins.STAGE_INTERSECT.insert(deviceIndex);
+      stageBuiltins.STAGE_ANYHIT.insert(deviceIndex);
+      stageBuiltins.STAGE_CLOSESTHIT.insert(deviceIndex);
+      stageBuiltins.STAGE_MISS.insert(deviceIndex);
     }
 
     if ((profile != profile_t.ES_PROFILE && version_ >= 420) ||
       (profile == profile_t.ES_PROFILE && version_ >= 310)) {
-      commonBuiltins.put("const int gl_ScopeDevice = 1;\n");
-      commonBuiltins.put("const int gl_ScopeWorkgroup = 2;\n");
-      commonBuiltins.put("const int gl_ScopeSubgroup = 3;\n");
-      commonBuiltins.put("const int gl_ScopeInvocation = 4;\n");
-      commonBuiltins.put("const int gl_ScopeQueueFamily = 5;\n");
-      commonBuiltins.put("const int gl_ScopeShaderCallEXT = 6;\n");
+      commonBuiltins.insert("const int gl_ScopeDevice = 1;\n");
+      commonBuiltins.insert("const int gl_ScopeWorkgroup = 2;\n");
+      commonBuiltins.insert("const int gl_ScopeSubgroup = 3;\n");
+      commonBuiltins.insert("const int gl_ScopeInvocation = 4;\n");
+      commonBuiltins.insert("const int gl_ScopeQueueFamily = 5;\n");
+      commonBuiltins.insert("const int gl_ScopeShaderCallEXT = 6;\n");
 
-      commonBuiltins.put("const int gl_SemanticsRelaxed = 0x0;\n");
-      commonBuiltins.put("const int gl_SemanticsAcquire = 0x2;\n");
-      commonBuiltins.put("const int gl_SemanticsRelease = 0x4;\n");
-      commonBuiltins.put("const int gl_SemanticsAcquireRelease = 0x8;\n");
-      commonBuiltins.put("const int gl_SemanticsMakeAvailable = 0x2000;\n");
-      commonBuiltins.put("const int gl_SemanticsMakeVisible = 0x4000;\n");
-      commonBuiltins.put("const int gl_SemanticsVolatile = 0x8000;\n");
+      commonBuiltins.insert("const int gl_SemanticsRelaxed = 0x0;\n");
+      commonBuiltins.insert("const int gl_SemanticsAcquire = 0x2;\n");
+      commonBuiltins.insert("const int gl_SemanticsRelease = 0x4;\n");
+      commonBuiltins.insert("const int gl_SemanticsAcquireRelease = 0x8;\n");
+      commonBuiltins.insert("const int gl_SemanticsMakeAvailable = 0x2000;\n");
+      commonBuiltins.insert("const int gl_SemanticsMakeVisible = 0x4000;\n");
+      commonBuiltins.insert("const int gl_SemanticsVolatile = 0x8000;\n");
 
-      commonBuiltins.put("const int gl_StorageSemanticsNone = 0x0;\n");
-      commonBuiltins.put("const int gl_StorageSemanticsBuffer = 0x40;\n");
-      commonBuiltins.put("const int gl_StorageSemanticsShared = 0x100;\n");
-      commonBuiltins.put("const int gl_StorageSemanticsImage = 0x800;\n");
-      commonBuiltins.put("const int gl_StorageSemanticsOutput = 0x1000;\n");
+      commonBuiltins.insert("const int gl_StorageSemanticsNone = 0x0;\n");
+      commonBuiltins.insert("const int gl_StorageSemanticsBuffer = 0x40;\n");
+      commonBuiltins.insert("const int gl_StorageSemanticsShared = 0x100;\n");
+      commonBuiltins.insert("const int gl_StorageSemanticsImage = 0x800;\n");
+      commonBuiltins.insert("const int gl_StorageSemanticsOutput = 0x1000;\n");
     }
 
     if ((profile != profile_t.ES_PROFILE && version_ >= 450) || (profile == profile_t.ES_PROFILE && version_ >= 310)) {
-      static foreach (stage; EnumMembers!EShLanguage) {
-        mixin(i`stageBuiltins.$(stage.to!string).put("const highp int gl_ShadingRateFlag2VerticalPixelsEXT = 1;\n");`.text);
-        mixin(i`stageBuiltins.$(stage.to!string).put("const highp int gl_ShadingRateFlag4VerticalPixelsEXT = 2;\n");`.text);
-        mixin(i`stageBuiltins.$(stage.to!string).put("const highp int gl_ShadingRateFlag2HorizontalPixelsEXT = 4;\n");`.text);
-        mixin(i`stageBuiltins.$(stage.to!string).put("const highp int gl_ShadingRateFlag4HorizontalPixelsEXT = 8;\n");`.text);
+      static foreach (i; 0..stageBuiltins.tupleof.length) {
+        stageBuiltins.tupleof[i].insert("const highp int gl_ShadingRateFlag2VerticalPixelsEXT = 1;\n");
+        stageBuiltins.tupleof[i].insert("const highp int gl_ShadingRateFlag4VerticalPixelsEXT = 2;\n");
+        stageBuiltins.tupleof[i].insert("const highp int gl_ShadingRateFlag2HorizontalPixelsEXT = 4;\n");
+        stageBuiltins.tupleof[i].insert("const highp int gl_ShadingRateFlag4HorizontalPixelsEXT = 8;\n");
       }
     }
     
@@ -6691,12 +6688,12 @@ class TBuiltIns : TBuiltInParseables {
   }
 
   void addSubpassSampling(TSampler sampler, string typeName, int, profile_t) {
-    stageBuiltins.STAGE_FRAGMENT.put(prefixes[sampler.type]);
-    stageBuiltins.STAGE_FRAGMENT.put("vec4 subpassLoad");
-    stageBuiltins.STAGE_FRAGMENT.put("(");
-    stageBuiltins.STAGE_FRAGMENT.put(typeName.dup);
-    if (sampler.isMultiSample()) stageBuiltins.STAGE_FRAGMENT.put(", int");
-    stageBuiltins.STAGE_FRAGMENT.put(");\n");
+    stageBuiltins.STAGE_FRAGMENT.insert(prefixes[sampler.type]);
+    stageBuiltins.STAGE_FRAGMENT.insert("vec4 subpassLoad");
+    stageBuiltins.STAGE_FRAGMENT.insert("(");
+    stageBuiltins.STAGE_FRAGMENT.insert(typeName);
+    if (sampler.isMultiSample()) stageBuiltins.STAGE_FRAGMENT.insert(", int");
+    stageBuiltins.STAGE_FRAGMENT.insert(");\n");
   }
 
   void addImageFunctions(TSampler sampler, string typeName, int version_, profile_t profile) {
@@ -6704,36 +6701,36 @@ class TBuiltIns : TBuiltInParseables {
     if (sampler.arrayed && sampler.dim != TSamplerDim.EsdCube)
       ++dims;
 
-    Appender!(char[]) imageParams = appender!(char[])(typeName.dup);
+    DList!string imageParams = DList!string([typeName]);
     if (dims == 1)
-      imageParams.put(", int");
+      imageParams.insert(", int");
     else {
-      imageParams.put(", ivec");
-      imageParams.put(postfixes[dims]);
+      imageParams.insert(", ivec");
+      imageParams.insert(postfixes[dims]);
     }
     if (sampler.isMultiSample())
-      imageParams.put(", int");
+      imageParams.insert(", int");
 
     if (profile == profile_t.ES_PROFILE)
-      commonBuiltins.put("highp ");
-    commonBuiltins.put(prefixes[sampler.type]);
-    commonBuiltins.put("vec4 imageLoad(readonly volatile coherent nontemporal ");
-    commonBuiltins.put(imageParams[]);
-    commonBuiltins.put(");\n");
+      commonBuiltins.insert("highp ");
+    commonBuiltins.insert(prefixes[sampler.type]);
+    commonBuiltins.insert("vec4 imageLoad(readonly volatile coherent nontemporal ");
+    commonBuiltins.insert(imageParams[]);
+    commonBuiltins.insert(");\n");
 
-    commonBuiltins.put("void imageStore(writeonly volatile coherent nontemporal ");
-    commonBuiltins.put(imageParams[]);
-    commonBuiltins.put(", ");
-    commonBuiltins.put(prefixes[sampler.type]);
-    commonBuiltins.put("vec4);\n");
+    commonBuiltins.insert("void imageStore(writeonly volatile coherent nontemporal ");
+    commonBuiltins.insert(imageParams[]);
+    commonBuiltins.insert(", ");
+    commonBuiltins.insert(prefixes[sampler.type]);
+    commonBuiltins.insert("vec4);\n");
 
     if (!sampler.is1D() && !sampler.isBuffer() && profile != profile_t.ES_PROFILE && version_ >= 450) {
-      commonBuiltins.put("int sparseImageLoadARB(readonly volatile coherent nontemporal ");
-      commonBuiltins.put(imageParams[]);
-      commonBuiltins.put(", out ");
-      commonBuiltins.put(prefixes[sampler.type]);
-      commonBuiltins.put("vec4");
-      commonBuiltins.put(");\n");
+      commonBuiltins.insert("int sparseImageLoadARB(readonly volatile coherent nontemporal ");
+      commonBuiltins.insert(imageParams[]);
+      commonBuiltins.insert(", out ");
+      commonBuiltins.insert(prefixes[sampler.type]);
+      commonBuiltins.insert("vec4");
+      commonBuiltins.insert(");\n");
     }
 
     if (profile != profile_t.ES_PROFILE ||
@@ -6762,45 +6759,45 @@ class TBuiltIns : TBuiltInParseables {
 
         for (int j = 0; j < 2; ++j) {
           for (size_t i = 0; i < numBuiltins; ++i) {
-            commonBuiltins.put(dataType.dup);
-            commonBuiltins.put(atomicFunc[i]);
-            commonBuiltins.put(imageParams[]);
-            commonBuiltins.put(", ");
-            commonBuiltins.put(dataType.dup);
+            commonBuiltins.insert(dataType);
+            commonBuiltins.insert(atomicFunc[i]);
+            commonBuiltins.insert(imageParams[]);
+            commonBuiltins.insert(", ");
+            commonBuiltins.insert(dataType);
             if (j == 1) {
-              commonBuiltins.put(", int, int, int");
+              commonBuiltins.insert(", int, int, int");
             }
-            commonBuiltins.put(");\n");
+            commonBuiltins.insert(");\n");
           }
 
-          commonBuiltins.put(dataType.dup);
-          commonBuiltins.put(" imageAtomicCompSwap(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", ");
-          commonBuiltins.put(dataType.dup);
-          commonBuiltins.put(", ");
-          commonBuiltins.put(dataType.dup);
+          commonBuiltins.insert(dataType);
+          commonBuiltins.insert(" imageAtomicCompSwap(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", ");
+          commonBuiltins.insert(dataType);
+          commonBuiltins.insert(", ");
+          commonBuiltins.insert(dataType);
           if (j == 1) {
-            commonBuiltins.put(", int, int, int, int, int");
+            commonBuiltins.insert(", int, int, int, int, int");
           }
-          commonBuiltins.put(");\n");
+          commonBuiltins.insert(");\n");
         }
 
-        commonBuiltins.put(dataType.dup);
-        commonBuiltins.put(" imageAtomicLoad(volatile coherent nontemporal ");
-        commonBuiltins.put(imageParams[]);
-        commonBuiltins.put(", int, int, int);\n");
+        commonBuiltins.insert(dataType);
+        commonBuiltins.insert(" imageAtomicLoad(volatile coherent nontemporal ");
+        commonBuiltins.insert(imageParams[]);
+        commonBuiltins.insert(", int, int, int);\n");
 
-        commonBuiltins.put("void imageAtomicStore(volatile coherent nontemporal ");
-        commonBuiltins.put(imageParams[]);
-        commonBuiltins.put(", ");
-        commonBuiltins.put(dataType.dup);
-        commonBuiltins.put(", int, int, int);\n");
+        commonBuiltins.insert("void imageAtomicStore(volatile coherent nontemporal ");
+        commonBuiltins.insert(imageParams[]);
+        commonBuiltins.insert(", ");
+        commonBuiltins.insert(dataType);
+        commonBuiltins.insert(", int, int, int);\n");
       } else {
         if (profile == profile_t.ES_PROFILE && version_ >= 310) {
-          commonBuiltins.put("float imageAtomicExchange(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float);\n");
+          commonBuiltins.insert("float imageAtomicExchange(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float);\n");
         }
 
         if (profile != profile_t.ES_PROFILE && version_ >= 430) {
@@ -6818,61 +6815,61 @@ class TBuiltIns : TBuiltInParseables {
           ];
           for (int j = 0; j < numFp16DataTypes; ++j) {
             for (int i = 0; i < numFp16Builtins; ++i) {
-              commonBuiltins.put(atomicFp16DataTypes[j]);
-              commonBuiltins.put(atomicFp16Func[i]);
-              commonBuiltins.put(imageParams[]);
-              commonBuiltins.put(", ");
-              commonBuiltins.put(atomicFp16DataTypes[j]);
-              commonBuiltins.put(");\n");
+              commonBuiltins.insert(atomicFp16DataTypes[j]);
+              commonBuiltins.insert(atomicFp16Func[i]);
+              commonBuiltins.insert(imageParams[]);
+              commonBuiltins.insert(", ");
+              commonBuiltins.insert(atomicFp16DataTypes[j]);
+              commonBuiltins.insert(");\n");
             }
           }
         }
 
         if (profile != profile_t.ES_PROFILE && version_ >= 450) {
-          commonBuiltins.put("float imageAtomicAdd(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float);\n");
+          commonBuiltins.insert("float imageAtomicAdd(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float);\n");
 
-          commonBuiltins.put("float imageAtomicAdd(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float");
-          commonBuiltins.put(", int, int, int);\n");
+          commonBuiltins.insert("float imageAtomicAdd(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float");
+          commonBuiltins.insert(", int, int, int);\n");
 
-          commonBuiltins.put("float imageAtomicExchange(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float);\n");
+          commonBuiltins.insert("float imageAtomicExchange(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float);\n");
 
-          commonBuiltins.put("float imageAtomicExchange(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float");
-          commonBuiltins.put(", int, int, int);\n");
+          commonBuiltins.insert("float imageAtomicExchange(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float");
+          commonBuiltins.insert(", int, int, int);\n");
 
-          commonBuiltins.put("float imageAtomicLoad(readonly volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", int, int, int);\n");
+          commonBuiltins.insert("float imageAtomicLoad(readonly volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", int, int, int);\n");
 
-          commonBuiltins.put("void imageAtomicStore(writeonly volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float");
-          commonBuiltins.put(", int, int, int);\n");
+          commonBuiltins.insert("void imageAtomicStore(writeonly volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float");
+          commonBuiltins.insert(", int, int, int);\n");
 
-          commonBuiltins.put("float imageAtomicMin(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float);\n");
+          commonBuiltins.insert("float imageAtomicMin(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float);\n");
 
-          commonBuiltins.put("float imageAtomicMin(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float");
-          commonBuiltins.put(", int, int, int);\n");
+          commonBuiltins.insert("float imageAtomicMin(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float");
+          commonBuiltins.insert(", int, int, int);\n");
 
-          commonBuiltins.put("float imageAtomicMax(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float);\n");
+          commonBuiltins.insert("float imageAtomicMax(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float);\n");
 
-          commonBuiltins.put("float imageAtomicMax(volatile coherent nontemporal ");
-          commonBuiltins.put(imageParams[]);
-          commonBuiltins.put(", float");
-          commonBuiltins.put(", int, int, int);\n");
+          commonBuiltins.insert("float imageAtomicMax(volatile coherent nontemporal ");
+          commonBuiltins.insert(imageParams[]);
+          commonBuiltins.insert(", float");
+          commonBuiltins.insert(", int, int, int);\n");
         }
       }
     }
@@ -6883,33 +6880,33 @@ class TBuiltIns : TBuiltInParseables {
     if (profile == profile_t.ES_PROFILE || version_ < 450)
       return;
 
-    Appender!(char[]) imageLodParams = appender!(char[])(typeName.dup);;
+    DList!string imageLodParams = DList!string([typeName]);
     if (dims == 1)
-      imageLodParams.put(", int");
+      imageLodParams.insert(", int");
     else {
-      imageLodParams.put(", ivec");
-      imageLodParams.put(postfixes[dims]);
+      imageLodParams.insert(", ivec");
+      imageLodParams.insert(postfixes[dims]);
     }
-    imageLodParams.put(", int");
+    imageLodParams.insert(", int");
 
-    commonBuiltins.put(prefixes[sampler.type]);
-    commonBuiltins.put("vec4 imageLoadLodAMD(readonly volatile coherent nontemporal ");
-    commonBuiltins.put(imageLodParams[]);
-    commonBuiltins.put(");\n");
+    commonBuiltins.insert(prefixes[sampler.type]);
+    commonBuiltins.insert("vec4 imageLoadLodAMD(readonly volatile coherent nontemporal ");
+    commonBuiltins.insert(imageLodParams[]);
+    commonBuiltins.insert(");\n");
 
-    commonBuiltins.put("void imageStoreLodAMD(writeonly volatile coherent nontemporal ");
-    commonBuiltins.put(imageLodParams[]);
-    commonBuiltins.put(", ");
-    commonBuiltins.put(prefixes[sampler.type]);
-    commonBuiltins.put("vec4);\n");
+    commonBuiltins.insert("void imageStoreLodAMD(writeonly volatile coherent nontemporal ");
+    commonBuiltins.insert(imageLodParams[]);
+    commonBuiltins.insert(", ");
+    commonBuiltins.insert(prefixes[sampler.type]);
+    commonBuiltins.insert("vec4);\n");
 
     if (!sampler.is1D()) {
-      commonBuiltins.put("int sparseImageLoadLodAMD(readonly volatile coherent nontemporal ");
-      commonBuiltins.put(imageLodParams[]);
-      commonBuiltins.put(", out ");
-      commonBuiltins.put(prefixes[sampler.type]);
-      commonBuiltins.put("vec4");
-      commonBuiltins.put(");\n");
+      commonBuiltins.insert("int sparseImageLoadLodAMD(readonly volatile coherent nontemporal ");
+      commonBuiltins.insert(imageLodParams[]);
+      commonBuiltins.insert(", out ");
+      commonBuiltins.insert(prefixes[sampler.type]);
+      commonBuiltins.insert("vec4");
+      commonBuiltins.insert(");\n");
     }
   }
 
@@ -6920,31 +6917,31 @@ class TBuiltIns : TBuiltInParseables {
       return;
 
     if (profile == profile_t.ES_PROFILE)
-      commonBuiltins.put("highp ");
+      commonBuiltins.insert("highp ");
     if (sizeDims == 1)
-      commonBuiltins.put("int");
+      commonBuiltins.insert("int");
     else {
-      commonBuiltins.put("ivec");
-      commonBuiltins.put(postfixes[sizeDims]);
+      commonBuiltins.insert("ivec");
+      commonBuiltins.insert(postfixes[sizeDims]);
     }
     if (sampler.isImage())
-      commonBuiltins.put(" imageSize(readonly writeonly volatile coherent nontemporal ");
+      commonBuiltins.insert(" imageSize(readonly writeonly volatile coherent nontemporal ");
     else
-      commonBuiltins.put(" textureSize(");
-    commonBuiltins.put(typeName);
+      commonBuiltins.insert(" textureSize(");
+    commonBuiltins.insert(typeName);
     if (!sampler.isImage() && !sampler.isRect() && !sampler.isBuffer() && !sampler.isMultiSample())
-      commonBuiltins.put(",int);\n");
+      commonBuiltins.insert(",int);\n");
     else
-      commonBuiltins.put(");\n");
+      commonBuiltins.insert(");\n");
   
     if (profile != profile_t.ES_PROFILE && version_ >= 430 && sampler.isMultiSample()) {
-      commonBuiltins.put("int ");
+      commonBuiltins.insert("int ");
       if (sampler.isImage())
-        commonBuiltins.put("imageSamples(readonly writeonly volatile coherent nontemporal ");
+        commonBuiltins.insert("imageSamples(readonly writeonly volatile coherent nontemporal ");
       else
-        commonBuiltins.put("textureSamples(");
-      commonBuiltins.put(typeName);
-      commonBuiltins.put(");\n");
+        commonBuiltins.insert("textureSamples(");
+      commonBuiltins.insert(typeName);
+      commonBuiltins.insert(");\n");
     }
 
     if (profile != profile_t.ES_PROFILE && version_ >= 150 && sampler.isCombined() && sampler.dim != TSamplerDim.EsdRect &&
@@ -6956,40 +6953,40 @@ class TBuiltIns : TBuiltInParseables {
         for (int f16TexAddr = 0; f16TexAddr < 2; ++f16TexAddr) {
           if (f16TexAddr && sampler.type != TBasicType.EbtFloat16)
             continue;
-          stageBuiltins.STAGE_FRAGMENT.put(funcName[i]);
-          stageBuiltins.STAGE_FRAGMENT.put(typeName);
+          stageBuiltins.STAGE_FRAGMENT.insert(funcName[i]);
+          stageBuiltins.STAGE_FRAGMENT.insert(typeName);
           if (dimMap[sampler.dim] == 1)
             if (f16TexAddr)
-              stageBuiltins.STAGE_FRAGMENT.put(", float16_t");
+              stageBuiltins.STAGE_FRAGMENT.insert(", float16_t");
             else
-              stageBuiltins.STAGE_FRAGMENT.put(", float");
+              stageBuiltins.STAGE_FRAGMENT.insert(", float");
           else {
             if (f16TexAddr)
-              stageBuiltins.STAGE_FRAGMENT.put(", f16vec");
+              stageBuiltins.STAGE_FRAGMENT.insert(", f16vec");
             else
-              stageBuiltins.STAGE_FRAGMENT.put(", vec");
-            stageBuiltins.STAGE_FRAGMENT.put(postfixes[dimMap[sampler.dim]]);
+              stageBuiltins.STAGE_FRAGMENT.insert(", vec");
+            stageBuiltins.STAGE_FRAGMENT.insert(postfixes[dimMap[sampler.dim]]);
           }
-          stageBuiltins.STAGE_FRAGMENT.put(");\n");
+          stageBuiltins.STAGE_FRAGMENT.insert(");\n");
         }
 
-        stageBuiltins.STAGE_COMPUTE.put(funcName[i]);
-        stageBuiltins.STAGE_COMPUTE.put(typeName);
+        stageBuiltins.STAGE_COMPUTE.insert(funcName[i]);
+        stageBuiltins.STAGE_COMPUTE.insert(typeName);
         if (dimMap[sampler.dim] == 1)
-          stageBuiltins.STAGE_COMPUTE.put(", float");
+          stageBuiltins.STAGE_COMPUTE.insert(", float");
         else {
-          stageBuiltins.STAGE_COMPUTE.put(", vec");
-          stageBuiltins.STAGE_COMPUTE.put(postfixes[dimMap[sampler.dim]]);
+          stageBuiltins.STAGE_COMPUTE.insert(", vec");
+          stageBuiltins.STAGE_COMPUTE.insert(postfixes[dimMap[sampler.dim]]);
         }
-        stageBuiltins.STAGE_COMPUTE.put(");\n");
+        stageBuiltins.STAGE_COMPUTE.insert(");\n");
       }
     }
 
     if (profile != profile_t.ES_PROFILE && version_ >= 430 && !sampler.isImage() && sampler.dim != TSamplerDim.EsdRect &&
       !sampler.isMultiSample() && !sampler.isBuffer()) {
-      commonBuiltins.put("int textureQueryLevels(");
-      commonBuiltins.put(typeName);
-      commonBuiltins.put(");\n");
+      commonBuiltins.insert("int textureQueryLevels(");
+      commonBuiltins.insert(typeName);
+      commonBuiltins.insert(");\n");
     }
   }
 
@@ -7024,62 +7021,62 @@ class TBuiltIns : TBuiltInParseables {
             if (sparse && (profile == profile_t.ES_PROFILE || version_ < 450))
               continue;
 
-            Appender!(char[]) s;
+            DList!string s;
 
             if (sparse)
-              s.put("int ");
+              s.insert("int ");
             else {
-              s.put(prefixes[sampler.type]);
-              s.put("vec4 ");
+              s.insert(prefixes[sampler.type]);
+              s.insert("vec4 ");
             }
 
             if (sparse)
-              s.put("sparseTextureGather");
+              s.insert("sparseTextureGather");
             else
-              s.put("textureGather");
+              s.insert("textureGather");
             switch (offset) {
               case 1:
-                s.put("Offset");
+                s.insert("Offset");
                 break;
               case 2:
-                s.put("Offsets");
+                s.insert("Offsets");
                 break;
               default:
                 break;
             }
             if (sparse)
-              s.put("ARB");
-            s.put("(");
+              s.insert("ARB");
+            s.insert("(");
 
-            s.put(typeName);
+            s.insert(typeName);
 
             if (f16TexAddr)
-              s.put(",f16vec");
+              s.insert(",f16vec");
             else
-              s.put(",vec");
+              s.insert(",vec");
             int totalDims = dimMap[sampler.dim] + (sampler.arrayed ? 1 : 0);
-            s.put(postfixes[totalDims]);
+            s.insert(postfixes[totalDims]);
 
             if (sampler.shadow)
-              s.put(",float");
+              s.insert(",float");
 
             if (offset > 0) {
-              s.put(",ivec2");
+              s.insert(",ivec2");
               if (offset == 2)
-                s.put("[4]");
+                s.insert("[4]");
             }
 
             if (sparse) {
-              s.put(",out ");
-              s.put(prefixes[sampler.type]);
-              s.put("vec4 ");
+              s.insert(",out ");
+              s.insert(prefixes[sampler.type]);
+              s.insert("vec4 ");
             }
 
             if (comp)
-              s.put(",int");
+              s.insert(",int");
 
-            s.put(");\n");
-            commonBuiltins.put(s[]);
+            s.insert(");\n");
+            commonBuiltins.insert(s[]);
           }
         }
       }
@@ -7112,84 +7109,84 @@ class TBuiltIns : TBuiltInParseables {
                 if (sparse && (profile == profile_t.ES_PROFILE || version_ < 450))
                   continue;
 
-                Appender!(char[]) s;
+                DList!string s;
 
                 if (sparse)
-                  s.put("int ");
+                  s.insert("int ");
                 else {
-                  s.put(prefixes[sampler.type]);
-                  s.put("vec4 ");
+                  s.insert(prefixes[sampler.type]);
+                  s.insert("vec4 ");
                 }
 
                 if (sparse)
-                  s.put("sparseTextureGather");
+                  s.insert("sparseTextureGather");
                 else
-                  s.put("textureGather");
+                  s.insert("textureGather");
 
                 if (lod)
-                  s.put("Lod");
+                  s.insert("Lod");
 
                 switch (offset) {
                   case 1:
-                    s.put("Offset");
+                    s.insert("Offset");
                     break;
                   case 2:
-                    s.put("Offsets");
+                    s.insert("Offsets");
                     break;
                   default:
                     break;
                 }
 
                 if (lod)
-                  s.put("AMD");
+                  s.insert("AMD");
                 else if (sparse)
-                  s.put("ARB");
+                  s.insert("ARB");
 
-                s.put("(");
+                s.insert("(");
 
-                s.put(typeName);
+                s.insert(typeName);
 
                 if (f16TexAddr)
-                  s.put(",f16vec");
+                  s.insert(",f16vec");
                 else
-                  s.put(",vec");
+                  s.insert(",vec");
                 int totalDims = dimMap[sampler.dim] + (sampler.arrayed ? 1 : 0);
-                s.put(postfixes[totalDims]);
+                s.insert(postfixes[totalDims]);
 
                 if (lod) {
                   if (f16TexAddr)
-                    s.put(",float16_t");
+                    s.insert(",float16_t");
                   else
-                    s.put(",float");
+                    s.insert(",float");
                 }
 
                 if (offset > 0) {
-                  s.put(",ivec2");
+                  s.insert(",ivec2");
                   if (offset == 2)
-                    s.put("[4]");
+                    s.insert("[4]");
                 }
 
                 if (sparse) {
-                  s.put(",out ");
-                  s.put(prefixes[sampler.type]);
-                  s.put("vec4 ");
+                  s.insert(",out ");
+                  s.insert(prefixes[sampler.type]);
+                  s.insert("vec4 ");
                 }
 
                 if (comp)
-                  s.put(",int");
+                  s.insert(",int");
 
                 if (bias) {
                   if (f16TexAddr)
-                    s.put(",float16_t");
+                    s.insert(",float16_t");
                   else
-                    s.put(",float");
+                    s.insert(",float");
                 }
 
-                s.put(");\n");
+                s.insert(");\n");
                 if (bias)
-                  stageBuiltins.STAGE_FRAGMENT.put(s[]);
+                  stageBuiltins.STAGE_FRAGMENT.insert(s[]);
                 else
-                  commonBuiltins.put(s[]);
+                  commonBuiltins.insert(s[]);
               }
             }
           }
@@ -7281,144 +7278,144 @@ class TBuiltIns : TBuiltInParseables {
                         if (sparse && (sampler.is1D() || sampler.isBuffer() || proj))
                           continue;
 
-                        Appender!(char[]) s;
+                        DList!string s;
 
                         if (sparse)
-                          s.put("int ");
+                          s.insert("int ");
                         else {
                           if (sampler.shadow)
                             if (sampler.type == TBasicType.EbtFloat16)
-                              s.put("float16_t ");
+                              s.insert("float16_t ");
                             else
-                              s.put("float ");
+                              s.insert("float ");
                           else {
-                            s.put(prefixes[sampler.type]);
-                            s.put("vec4 ");
+                            s.insert(prefixes[sampler.type]);
+                            s.insert("vec4 ");
                           }
                         }
 
                         if (sparse) {
                           if (fetch)
-                            s.put("sparseTexel");
+                            s.insert("sparseTexel");
                           else
-                            s.put("sparseTexture");
+                            s.insert("sparseTexture");
                         } else {
                           if (fetch)
-                            s.put("texel");
+                            s.insert("texel");
                           else
-                            s.put("texture");
+                            s.insert("texture");
                         }
                         if (proj)
-                          s.put("Proj");
+                          s.insert("Proj");
                         if (lod)
-                          s.put("Lod");
+                          s.insert("Lod");
                         if (grad)
-                          s.put("Grad");
+                          s.insert("Grad");
                         if (fetch)
-                          s.put("Fetch");
+                          s.insert("Fetch");
                         if (offset)
-                          s.put("Offset");
+                          s.insert("Offset");
                         if (lodClamp)
-                          s.put("Clamp");
+                          s.insert("Clamp");
                         if (lodClamp != 0 || sparse)
-                          s.put("ARB");
-                        s.put("(");
+                          s.insert("ARB");
+                        s.insert("(");
 
-                        s.put(typeName);
+                        s.insert(typeName);
                         if (extraProj) {
                           if (f16TexAddr)
-                            s.put(",f16vec4");
+                            s.insert(",f16vec4");
                           else
-                            s.put(",vec4");
+                            s.insert(",vec4");
                         } else {
-                          s.put(",");
+                          s.insert(",");
                           TBasicType t = fetch ? TBasicType.EbtInt : (f16TexAddr ? TBasicType.EbtFloat16 : TBasicType.EbtFloat);
                           if (totalDims == 1)
-                            s.put(getBasicString(t));
+                            s.insert(getBasicString(t));
                           else {
-                            s.put(prefixes[t]);
-                            s.put("vec");
-                            s.put(postfixes[totalDims]);
+                            s.insert(prefixes[t]);
+                            s.insert("vec");
+                            s.insert(postfixes[totalDims]);
                           }
                         }
 
                         if (compare)
-                          s.put(",float");
+                          s.insert(",float");
 
                         if ((fetch && !sampler.isBuffer() &&
                           !sampler.isRect() && !sampler.isMultiSample())
                           || (sampler.isMultiSample() && fetch))
-                          s.put(",int");
+                          s.insert(",int");
 
                         if (lod) {
                           if (f16TexAddr)
-                            s.put(",float16_t");
+                            s.insert(",float16_t");
                           else
-                            s.put(",float");
+                            s.insert(",float");
                         }
 
                         if (grad) {
                           if (dimMap[sampler.dim] == 1) {
                             if (f16TexAddr)
-                              s.put(",float16_t,float16_t");
+                              s.insert(",float16_t,float16_t");
                             else
-                              s.put(",float,float");
+                              s.insert(",float,float");
                           } else {
                             if (f16TexAddr)
-                              s.put(",f16vec");
+                              s.insert(",f16vec");
                             else
-                              s.put(",vec");
-                            s.put(postfixes[dimMap[sampler.dim]]);
+                              s.insert(",vec");
+                            s.insert(postfixes[dimMap[sampler.dim]]);
                             if (f16TexAddr)
-                              s.put(",f16vec");
+                              s.insert(",f16vec");
                             else
-                              s.put(",vec");
-                            s.put(postfixes[dimMap[sampler.dim]]);
+                              s.insert(",vec");
+                            s.insert(postfixes[dimMap[sampler.dim]]);
                           }
                         }
 
                         if (offset) {
                           if (dimMap[sampler.dim] == 1)
-                            s.put(",int");
+                            s.insert(",int");
                           else {
-                            s.put(",ivec");
-                            s.put(postfixes[dimMap[sampler.dim]]);
+                            s.insert(",ivec");
+                            s.insert(postfixes[dimMap[sampler.dim]]);
                           }
                         }
 
                         if (lodClamp) {
                           if (f16TexAddr)
-                            s.put(",float16_t");
+                            s.insert(",float16_t");
                           else
-                            s.put(",float");
+                            s.insert(",float");
                         }
 
                         if (sparse) {
-                          s.put(",out ");
+                          s.insert(",out ");
                           if (sampler.shadow)
                             if (sampler.type == TBasicType.EbtFloat16)
-                              s.put("float16_t");
+                              s.insert("float16_t");
                             else
-                              s.put("float");
+                              s.insert("float");
                           else {
-                            s.put(prefixes[sampler.type]);
-                            s.put("vec4");
+                            s.insert(prefixes[sampler.type]);
+                            s.insert("vec4");
                           }
                         }
 
                         if (bias) {
                           if (f16TexAddr)
-                            s.put(",float16_t");
+                            s.insert(",float16_t");
                           else
-                            s.put(",float");
+                            s.insert(",float");
                         }
-                        s.put(");\n");
+                        s.insert(");\n");
 
                         if (!grad && (bias || lodClamp != 0)) {
-                          stageBuiltins.STAGE_FRAGMENT.put(s[]);
-                          stageBuiltins.STAGE_COMPUTE.put(s[]);
+                          stageBuiltins.STAGE_FRAGMENT.insert(s[]);
+                          stageBuiltins.STAGE_COMPUTE.insert(s[]);
                         } else
-                          commonBuiltins.put(s[]);
+                          commonBuiltins.insert(s[]);
                       }
                     }
                   }
@@ -7508,7 +7505,7 @@ bool ValidVersion(
   return false;
 }
 
-void AddTabledBuiltin(ref Appender!(char[]) decls, in BuiltInFunction func) {
+void AddTabledBuiltin(ref DList!string decls, in BuiltInFunction func) {
   static auto isScalarType(int type) {
     return (type & TypeStringColumnMask) == 0;
   }

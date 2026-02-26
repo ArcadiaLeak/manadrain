@@ -7,12 +7,14 @@ class TSymbol {
 
 class TVariable : TSymbol {
   TType type;
+  bool userType;
 
-  this(TVariable copyOf) {
+  this(const TVariable copyOf) {
     type.deepCopy = copyOf.type;
+    userType = copyOf.userType;
   }
 
-  TVariable clone() => new TVariable(this);
+  TVariable clone() const => new TVariable(this);
 }
 
 class TAnonMember : TSymbol {
