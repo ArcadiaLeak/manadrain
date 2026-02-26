@@ -130,6 +130,102 @@ enum Versioning[] Es310Desktop450Version = [
   Versioning(EDesktopProfile, 0, 450, 0, null),
 ];
 
+ bool logicalOp(string op) => canFind(op, "Or") || canFind(op, "And") ||
+  (canFind(op, "Xor") && !canFind(op, "ShuffleXor"));
+
+bool mathOp(string op) => canFind(op, "Add") || canFind(op, "Mul") ||
+  canFind(op, "Min") || canFind(op, "Max");
+
+enum string[] subgroupOps = [
+  "bool subgroupAllEqual(%1$s);\n",
+  "%1$s subgroupBroadcast(%1$s, uint);\n",
+  "%1$s subgroupBroadcastFirst(%1$s);\n",
+  "%1$s subgroupShuffle(%1$s, uint);\n",
+  "%1$s subgroupShuffleXor(%1$s, uint);\n",
+  "%1$s subgroupShuffleUp(%1$s, uint delta);\n",
+  "%1$s subgroupShuffleDown(%1$s, uint delta);\n",
+  "%1$s subgroupRotate(%1$s, uint);\n",
+  "%1$s subgroupClusteredRotate(%1$s, uint, uint);\n",
+  "%1$s subgroupAdd(%1$s);\n",
+  "%1$s subgroupMul(%1$s);\n",
+  "%1$s subgroupMin(%1$s);\n",
+  "%1$s subgroupMax(%1$s);\n",
+  "%1$s subgroupAnd(%1$s);\n",
+  "%1$s subgroupOr(%1$s);\n",
+  "%1$s subgroupXor(%1$s);\n",
+  "%1$s subgroupInclusiveAdd(%1$s);\n",
+  "%1$s subgroupInclusiveMul(%1$s);\n",
+  "%1$s subgroupInclusiveMin(%1$s);\n",
+  "%1$s subgroupInclusiveMax(%1$s);\n",
+  "%1$s subgroupInclusiveAnd(%1$s);\n",
+  "%1$s subgroupInclusiveOr(%1$s);\n",
+  "%1$s subgroupInclusiveXor(%1$s);\n",
+  "%1$s subgroupExclusiveAdd(%1$s);\n",
+  "%1$s subgroupExclusiveMul(%1$s);\n",
+  "%1$s subgroupExclusiveMin(%1$s);\n",
+  "%1$s subgroupExclusiveMax(%1$s);\n",
+  "%1$s subgroupExclusiveAnd(%1$s);\n",
+  "%1$s subgroupExclusiveOr(%1$s);\n",
+  "%1$s subgroupExclusiveXor(%1$s);\n",
+  "%1$s subgroupClusteredAdd(%1$s, uint);\n",
+  "%1$s subgroupClusteredMul(%1$s, uint);\n",
+  "%1$s subgroupClusteredMin(%1$s, uint);\n",
+  "%1$s subgroupClusteredMax(%1$s, uint);\n",
+  "%1$s subgroupClusteredAnd(%1$s, uint);\n",
+  "%1$s subgroupClusteredOr(%1$s, uint);\n",
+  "%1$s subgroupClusteredXor(%1$s, uint);\n",
+  "%1$s subgroupQuadBroadcast(%1$s, uint);\n",
+  "%1$s subgroupQuadSwapHorizontal(%1$s);\n",
+  "%1$s subgroupQuadSwapVertical(%1$s);\n",
+  "%1$s subgroupQuadSwapDiagonal(%1$s);\n",
+  "uvec4 subgroupPartitionNV(%1$s);\n",
+  "%1$s subgroupPartitionedAddNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedMulNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedMinNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedMaxNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedAndNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedOrNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedXorNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedInclusiveAddNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedInclusiveMulNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedInclusiveMinNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedInclusiveMaxNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedInclusiveAndNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedInclusiveOrNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedInclusiveXorNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedExclusiveAddNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedExclusiveMulNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedExclusiveMinNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedExclusiveMaxNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedExclusiveAndNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedExclusiveOrNV(%1$s, uvec4 ballot);\n",
+  "%1$s subgroupPartitionedExclusiveXorNV(%1$s, uvec4 ballot);\n",
+];
+
+enum string[] floatTypes = [
+  "float", "vec2", "vec3", "vec4",
+  "float16_t", "f16vec2", "f16vec3", "f16vec4"
+];
+
+enum string[] doubleTypes = [
+  "double", "dvec2", "dvec3", "dvec4"
+];
+
+enum string[] intTypes = [
+  "int8_t", "i8vec2", "i8vec3", "i8vec4", 
+  "int16_t", "i16vec2", "i16vec3", "i16vec4", 
+  "int", "ivec2", "ivec3", "ivec4", 
+  "int64_t", "i64vec2", "i64vec3", "i64vec4", 
+  "uint8_t", "u8vec2", "u8vec3", "u8vec4", 
+  "uint16_t", "u16vec2", "u16vec3", "u16vec4", 
+  "uint", "uvec2", "uvec3", "uvec4", 
+  "uint64_t", "u64vec2", "u64vec3", "u64vec4"
+];
+
+enum string[] boolTypes = [
+  "bool", "bvec2", "bvec3", "bvec4"
+];
+
 class TBuiltInParseables {
   struct StageBuiltins {
     DList!string STAGE_VERTEX;
@@ -2068,113 +2164,21 @@ class TBuiltIns : TBuiltInParseables {
         "uint subgroupBallotFindMSB(uvec4);\n"
       );
 
-      enum string[] subgroupOps = [
-        "bool subgroupAllEqual(%s);\n",
-        "%s subgroupBroadcast(%s, uint);\n",
-        "%s subgroupBroadcastFirst(%s);\n",
-        "%s subgroupShuffle(%s, uint);\n",
-        "%s subgroupShuffleXor(%s, uint);\n",
-        "%s subgroupShuffleUp(%s, uint delta);\n",
-        "%s subgroupShuffleDown(%s, uint delta);\n",
-        "%s subgroupRotate(%s, uint);\n",
-        "%s subgroupClusteredRotate(%s, uint, uint);\n",
-        "%s subgroupAdd(%s);\n",
-        "%s subgroupMul(%s);\n",
-        "%s subgroupMin(%s);\n",
-        "%s subgroupMax(%s);\n",
-        "%s subgroupAnd(%s);\n",
-        "%s subgroupOr(%s);\n",
-        "%s subgroupXor(%s);\n",
-        "%s subgroupInclusiveAdd(%s);\n",
-        "%s subgroupInclusiveMul(%s);\n",
-        "%s subgroupInclusiveMin(%s);\n",
-        "%s subgroupInclusiveMax(%s);\n",
-        "%s subgroupInclusiveAnd(%s);\n",
-        "%s subgroupInclusiveOr(%s);\n",
-        "%s subgroupInclusiveXor(%s);\n",
-        "%s subgroupExclusiveAdd(%s);\n",
-        "%s subgroupExclusiveMul(%s);\n",
-        "%s subgroupExclusiveMin(%s);\n",
-        "%s subgroupExclusiveMax(%s);\n",
-        "%s subgroupExclusiveAnd(%s);\n",
-        "%s subgroupExclusiveOr(%s);\n",
-        "%s subgroupExclusiveXor(%s);\n",
-        "%s subgroupClusteredAdd(%s, uint);\n",
-        "%s subgroupClusteredMul(%s, uint);\n",
-        "%s subgroupClusteredMin(%s, uint);\n",
-        "%s subgroupClusteredMax(%s, uint);\n",
-        "%s subgroupClusteredAnd(%s, uint);\n",
-        "%s subgroupClusteredOr(%s, uint);\n",
-        "%s subgroupClusteredXor(%s, uint);\n",
-        "%s subgroupQuadBroadcast(%s, uint);\n",
-        "%s subgroupQuadSwapHorizontal(%s);\n",
-        "%s subgroupQuadSwapVertical(%s);\n",
-        "%s subgroupQuadSwapDiagonal(%s);\n",
-        "uvec4 subgroupPartitionNV(%s);\n",
-        "%s subgroupPartitionedAddNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedMulNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedMinNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedMaxNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedAndNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedOrNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedXorNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedInclusiveAddNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedInclusiveMulNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedInclusiveMinNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedInclusiveMaxNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedInclusiveAndNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedInclusiveOrNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedInclusiveXorNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedExclusiveAddNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedExclusiveMulNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedExclusiveMinNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedExclusiveMaxNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedExclusiveAndNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedExclusiveOrNV(%s, uvec4 ballot);\n",
-        "%s subgroupPartitionedExclusiveXorNV(%s, uvec4 ballot);\n",
-      ];
-
-      enum string[] floatTypes = [
-        "float", "vec2", "vec3", "vec4",
-        "float16_t", "f16vec2", "f16vec3", "f16vec4"
-      ];
-      enum string[] doubleTypes = [
-        "double", "dvec2", "dvec3", "dvec4"
-      ];
-      enum string[] intTypes = [
-        "int8_t", "i8vec2", "i8vec3", "i8vec4", 
-        "int16_t", "i16vec2", "i16vec3", "i16vec4", 
-        "int", "ivec2", "ivec3", "ivec4", 
-        "int64_t", "i64vec2", "i64vec3", "i64vec4", 
-        "uint8_t", "u8vec2", "u8vec3", "u8vec4", 
-        "uint16_t", "u16vec2", "u16vec3", "u16vec4", 
-        "uint", "uvec2", "uvec3", "uvec4", 
-        "uint64_t", "u64vec2", "u64vec3", "u64vec4"
-      ];
-      enum string[] boolTypes = [
-        "bool", "bvec2", "bvec3", "bvec4"
-      ];
-
-      foreach (op; subgroupOps) {
-        bool logicalOp = canFind(op, "Or") || canFind(op, "And") ||
-          (canFind(op, "Xor") && !canFind(op, "ShuffleXor"));
-        bool mathOp = canFind(op, "Add") || canFind(op, "Mul") ||
-          canFind(op, "Min") || canFind(op, "Max");
-
-        if (!logicalOp) {
-          foreach (floatType; floatTypes)
-            commonBuiltins ~= op.format(floatType, floatType);
+      static foreach (op; subgroupOps) {
+        if (!op.logicalOp) {
+          static foreach (floatType; floatTypes)
+            commonBuiltins ~= format!op(floatType);
           if (profile != profile_t.ES_PROFILE && version_ >= 400) {
-            foreach (doubleType; doubleTypes)
-              commonBuiltins ~= op.format(doubleType, doubleType);
+            static foreach (doubleType; doubleTypes)
+              commonBuiltins ~= format!op(doubleType);
           }
         }
-        if (!mathOp) {
-          foreach (boolType; boolTypes)
-            commonBuiltins ~= op.format(boolType, boolType);
+        if (!op.mathOp) {
+          static foreach (boolType; boolTypes)
+            commonBuiltins ~= format!op(boolType);
         }
-        foreach (intType; intTypes)
-          commonBuiltins ~= op.format(intType, intType);
+        static foreach (intType; intTypes)
+          commonBuiltins ~= format!op(intType);
       }
 
       stageBuiltins.STAGE_COMPUTE ~= (
