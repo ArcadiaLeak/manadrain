@@ -12,21 +12,20 @@ enum EShOptimizationLevel {
 }
 
 struct TTarget {
-  target_language_t language;
-  target_language_version_t version_;
+  EShTargetLanguage language;
+  uint version_;
 }
 
 struct TInputLanguage {
-  source_t languageFamily;
   EShLanguage stage;
-  client_t dialect;
+  EShClient dialect;
   int dialectVersion;
   bool vulkanRulesRelaxed;
 }
 
 struct TClient {
-  client_t client;
-  target_client_version_t version_;
+  EShClient client;
+  uint version_;
 }
 
 struct TEnvironment {
@@ -64,28 +63,26 @@ class TShader {
   }
 
   void setEnvTarget(
-    target_language_t lang,
-    target_language_version_t version_
+    EShTargetLanguage lang,
+    uint version_
   ) {
     environment.target.language = lang;
     environment.target.version_ = version_;
   }
 
   void setEnvInput(
-    source_t lang,
     EShLanguage envStage,
-    client_t client,
+    EShClient client,
     int version_
   ) {
-    environment.input.languageFamily = lang;
     environment.input.stage = envStage;
     environment.input.dialect = client;
     environment.input.dialectVersion = version_;
   }
 
   void setEnvClient(
-    client_t client,
-    target_client_version_t version_
+    EShClient client,
+    uint version_
   ) {
     environment.client.client = client;
     environment.client.version_ = version_;
@@ -95,7 +92,7 @@ class TShader {
     const(TBuiltInResource)* builtInResources,
     int defaultVersion, profile_t defaultProfile,
     bool forceDefaultVersionAndProfile,
-    bool forwardCompatible, messages_t message,
+    bool forwardCompatible, EShMessages message,
     ref string output_string
   ) {
     return PreprocessDeferred(
@@ -117,7 +114,7 @@ auto ppClosure(ref string outputString) {
   bool preprocess(
     TParseContextBase parseContext, TPpContext ppContext,
     TInputScanner input, bool versionWillBeError,
-    TSymbolTable, TIntermediate, EShOptimizationLevel, messages_t
+    TSymbolTable, TIntermediate, EShOptimizationLevel, EShMessages
   ) {
     import std.container.dlist;
     enum string noNeededSpaceBeforeTokens = ";)[].,";
@@ -286,7 +283,7 @@ bool PreprocessDeferred(
   bool forceDefaultVersionAndProfile,
   int overrideVersion,
   bool forwardCompatible,
-  messages_t messages,
+  EShMessages messages,
   TIntermediate intermediate,
   ref string outputString,
   in TEnvironment environment
@@ -310,7 +307,7 @@ bool ProcessDeferred(ProcessingContext)(
   bool forceDefaultVersionAndProfile,
   int overrideVersion,
   bool forwardCompatible,
-  messages_t messages,
+  EShMessages messages,
   TIntermediate intermediate,
   ProcessingContext processingContext,
   bool requireNonempty,
@@ -341,9 +338,8 @@ bool ProcessDeferred(ProcessingContext)(
   }
 
   SpvVersion spvVersion;
-  source_t source = source_t.SOURCE_GLSL;
   EShLanguage stage = compiler.getLanguage;
-  TranslateEnvironment(environment, messages, source, stage, spvVersion);
+  TranslateEnvironment(environment, messages, stage, spvVersion);
 
   TInputScanner userInput = new TInputScanner(strings[numPre..$]);
   int version_ = 0;
@@ -351,9 +347,9 @@ bool ProcessDeferred(ProcessingContext)(
   bool versionNotFirstToken = false;
   bool versionNotFirst = userInput.scanVersion(version_, profile, versionNotFirstToken);
   bool versionNotFound = version_ == 0;
-  if (forceDefaultVersionAndProfile && source == source_t.SOURCE_GLSL) {
+  if (forceDefaultVersionAndProfile) {
     if (
-      !(messages & messages_t.MSG_SUPPRESS_WARNINGS_BIT) &&
+      !messages.MSG_SUPPRESS_WARNINGS_BIT &&
       !versionNotFound &&
       (version_ != defaultVersion || profile != defaultProfile)
     ) {
@@ -372,13 +368,13 @@ bool ProcessDeferred(ProcessingContext)(
     version_ = defaultVersion;
     profile = defaultProfile;
   }
-  if (source == source_t.SOURCE_GLSL && overrideVersion != 0) {
+  if (overrideVersion != 0) {
     version_ = overrideVersion;
   }
 
   bool goodVersion = DeduceVersionProfile(
-    compiler.infoSink, stage, versionNotFirst, defaultVersion,
-    source, version_, profile, spvVersion
+    compiler.infoSink, stage, versionNotFirst,
+    defaultVersion, version_, profile, spvVersion
   );
   bool versionWillBeError = (
     versionNotFound ||
@@ -387,31 +383,30 @@ bool ProcessDeferred(ProcessingContext)(
   );
   bool warnVersionNotFirst = false;
   if (!versionWillBeError && versionNotFirstToken) {
-    if (messages & messages_t.MSG_RELAXED_ERRORS_BIT)
+    if (messages.MSG_RELAXED_ERRORS_BIT)
       warnVersionNotFirst = true;
     else
       versionWillBeError = true;
   }
 
-  intermediate.setSource = source;
   intermediate.setVersion = version_;
   intermediate.setProfile = profile;
   intermediate.setSpv = spvVersion;
   RecordProcesses(intermediate, messages, sourceEntryPointName);
   if (spvVersion.vulkan > 0) intermediate.setOriginUpperLeft();
 
-  if (messages & messages_t.MSG_DEBUG_INFO_BIT) {
+  if (messages.MSG_DEBUG_INFO_BIT) {
     intermediate.setSourceFile(names[numPre]);
     foreach (s; 0..shaderStrings.length)
       intermediate.addSourceText(strings[numPre + s]);
   }
 
-  if (!SetupBuiltinSymbolTable(version_, profile, spvVersion, source))
+  if (!SetupBuiltinSymbolTable(version_, profile, spvVersion))
     return false;
 
   TSymbolTable cachedTable = SharedSymbolTables
     [MapVersionToIndex(version_)][MapSpvVersionToIndex(spvVersion)]
-    [MapProfileToIndex(profile)][MapSourceToIndex(source)].MapEShLanguage(stage);
+    [MapProfileToIndex(profile)].MapEShLanguage(stage);
 
   bool success = processingContext(
     TParseContextBase.init, TPpContext.init, TInputScanner.init,
@@ -423,49 +418,34 @@ bool ProcessDeferred(ProcessingContext)(
 
 void TranslateEnvironment(
   in TEnvironment environment,
-  ref messages_t messages,
-  ref source_t source,
+  ref EShMessages messages,
   ref EShLanguage stage,
   ref SpvVersion spvVersion
 ) {
-  if (messages & messages_t.MSG_SPV_RULES_BIT)
-    spvVersion.spv = target_language_version_t.TARGET_SPV_1_0;
-  if (messages & messages_t.MSG_VULKAN_RULES_BIT) {
-    spvVersion.vulkan = target_client_version_t.TARGET_VULKAN_1_0;
+  if (messages.MSG_SPV_RULES_BIT)
+    spvVersion.spv = TARGET_SPV_1_0;
+  if (messages.MSG_VULKAN_RULES_BIT) {
+    spvVersion.vulkan = TARGET_VULKAN_1_0;
     spvVersion.vulkanGlsl = 100;
   } else if (spvVersion.spv != 0)
     spvVersion.openGl = 100;
 
-  if (environment.input.languageFamily != source_t.SOURCE_NONE) {
-    stage = environment.input.stage;
-    final switch (environment.input.dialect) {
-      case client_t.CLIENT_NONE:
-        break;
-      case client_t.CLIENT_VULKAN:
-        spvVersion.vulkanGlsl = environment.input.dialectVersion;
-        spvVersion.vulkanRelaxed = environment.input.vulkanRulesRelaxed;
-        break;
-      case client_t.CLIENT_OPENGL:
-        spvVersion.openGl = environment.input.dialectVersion;
-    }
-    final switch (environment.input.languageFamily) {
-      case source_t.SOURCE_NONE:
-        break;
-      case source_t.SOURCE_GLSL:
-        source = source_t.SOURCE_GLSL;
-        messages = messages & ~messages_t.MSG_READ_HLSL_BIT;
-        break;
-      case source_t.SOURCE_HLSL:
-        source = source_t.SOURCE_HLSL;
-        messages = messages | messages_t.MSG_READ_HLSL_BIT;
-        break;
-    }
+  stage = environment.input.stage;
+  final switch (environment.input.dialect) {
+    case EShClient.CLIENT_NONE:
+      break;
+    case EShClient.CLIENT_VULKAN:
+      spvVersion.vulkanGlsl = environment.input.dialectVersion;
+      spvVersion.vulkanRelaxed = environment.input.vulkanRulesRelaxed;
+      break;
+    case EShClient.CLIENT_OPENGL:
+      spvVersion.openGl = environment.input.dialectVersion;
   }
 
-  if (environment.client.client == client_t.CLIENT_VULKAN)
+  if (environment.client.client == EShClient.CLIENT_VULKAN)
     spvVersion.vulkan = environment.client.version_;
 
-  if (environment.target.language == target_language_t.TARGET_SPV)
+  if (environment.target.language == EShTargetLanguage.TARGET_SPV)
     spvVersion.spv = environment.target.version_;
 }
 
@@ -474,7 +454,6 @@ bool DeduceVersionProfile(
   EShLanguage stage,
   bool versionNotFirst,
   int defaultVersion,
-  source_t source,
   ref int version_,
   ref profile_t profile,
   in SpvVersion spvVersion
@@ -621,14 +600,14 @@ bool DeduceVersionProfile(
 
 void RecordProcesses(
   TIntermediate intermediate,
-  messages_t messages,
+  EShMessages messages,
   string sourceEntryPointName
 ) {
-  if ((messages & messages_t.MSG_RELAXED_ERRORS_BIT) != 0)
+  if (messages.MSG_RELAXED_ERRORS_BIT)
     intermediate.addProcess = "relaxed-errors";
-  if ((messages & messages_t.MSG_SUPPRESS_WARNINGS_BIT) != 0)
+  if (messages.MSG_SUPPRESS_WARNINGS_BIT)
     intermediate.addProcess = "suppress-warnings";
-  if ((messages & messages_t.MSG_KEEP_UNCALLED_BIT) != 0)
+  if (messages.MSG_KEEP_UNCALLED_BIT)
     intermediate.addProcess = "keep-uncalled";
   if (sourceEntryPointName.length > 0) {
     intermediate.addProcess = "source-entrypoint";
@@ -639,8 +618,7 @@ void RecordProcesses(
 bool SetupBuiltinSymbolTable(
   int version_,
   profile_t profile,
-  in SpvVersion spvVersion,
-  source_t source
+  in SpvVersion spvVersion
 ) {
   auto infoSink = new TInfoSink;
   bool success;
@@ -648,10 +626,9 @@ bool SetupBuiltinSymbolTable(
   int versionIndex = MapVersionToIndex(version_);
   int spvVersionIndex = MapSpvVersionToIndex(spvVersion);
   int profileIndex = MapProfileToIndex(profile);
-  int sourceIndex = MapSourceToIndex(source);
   if (
     CommonSymbolTable[versionIndex][spvVersionIndex]
-      [profileIndex][sourceIndex].CLASS_GENERAL
+      [profileIndex].CLASS_GENERAL
   ) return true;
 
   TPrecisionClass commonTable;
@@ -664,15 +641,15 @@ bool SetupBuiltinSymbolTable(
   if (
     !InitializeSymbolTables(
       infoSink, commonTable, stageTables,
-      version_, profile, spvVersion, source
+      version_, profile, spvVersion
     )
   ) return false;
 
   static foreach (precClass; 0..commonTable.tupleof.length) {
     if (!commonTable.tupleof[precClass].isEmpty) {
-      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex][sourceIndex].tupleof[precClass] = new TSymbolTable;
-      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex][sourceIndex].tupleof[precClass].copyTable = commonTable.tupleof[precClass];
-      // CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex][sourceIndex][precClass].readOnly;
+      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex].tupleof[precClass] = new TSymbolTable;
+      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex].tupleof[precClass].copyTable = commonTable.tupleof[precClass];
+      // CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex].tupleof[precClass].readOnly;
     }
   }
   success = true;
@@ -704,7 +681,7 @@ int MapVersionToIndex(int version_) {
     case 500: index = 0; break;
     case 320: index = 15; break;
     case 460: index = 16; break;
-    default: assert(0); break;
+    default: assert(0);
   }
 
   assert(index < VersionCount);
@@ -741,26 +718,10 @@ int MapProfileToIndex(profile_t profile) {
     case profile_t.CORE_PROFILE: index = 1; break;
     case profile_t.COMPATIBILITY_PROFILE: index = 2; break;
     case profile_t.ES_PROFILE: index = 3; break;
-    default: break;
+    default: assert(0);
   }
 
   assert(index < ProfileCount);
-
-  return index;
-}
-
-enum int SourceCount = 2;
-
-int MapSourceToIndex(source_t source) {
-  int index = 0;
-
-  switch (source) {
-    case source_t.SOURCE_GLSL: index = 0; break;
-    case source_t.SOURCE_HLSL: index = 1; break;
-    default: break;
-  }
-
-  assert(index < SourceCount);
 
   return index;
 }
@@ -821,28 +782,20 @@ struct TShLanguage {
 }
 
 TPrecisionClass
-  [SourceCount]
   [ProfileCount]
   [SpvVersionCount]
   [VersionCount] CommonSymbolTable;
 
 TShLanguage
-  [SourceCount]
   [ProfileCount]
   [SpvVersionCount]
   [VersionCount] SharedSymbolTables;
 
-TBuiltInParseables CreateBuiltInParseables(
-  TInfoSink infoSink, source_t source
-) {
-  return new TBuiltIns();
-}
-
 TParseContextBase CreateParseContext(
-  TSymbolTable symbolTable, TIntermediate intermediate, int version_,
-  profile_t profile, source_t source, EShLanguage language,
-  TInfoSink infoSink, in SpvVersion spvVersion, bool forwardCompatible,
-  messages_t messages, bool parsingBuiltIns, string sourceEntryPointName = ""
+  TSymbolTable symbolTable, TIntermediate intermediate,
+  int version_, profile_t profile, EShLanguage language, TInfoSink infoSink,
+  in SpvVersion spvVersion,bool forwardCompatible, EShMessages messages,
+  bool parsingBuiltIns, string sourceEntryPointName = ""
 ) {
   if (sourceEntryPointName.length == 0)
     intermediate.setEntryPointName = "main";
@@ -856,10 +809,10 @@ TParseContextBase CreateParseContext(
 bool InitializeSymbolTables(
   TInfoSink infoSink, TPrecisionClass commonTable,
   TShLanguage symbolTables, int version_, profile_t profile,
-  in SpvVersion spvVersion, source_t source
+  in SpvVersion spvVersion
 ) {
   bool success = true;
-  auto builtInParseables = CreateBuiltInParseables(infoSink, source);
+  TBuiltIns builtInParseables = new TBuiltIns();
 
   if (builtInParseables is null) return false;
 
@@ -867,7 +820,7 @@ bool InitializeSymbolTables(
 
   success &= InitializeSymbolTable(
     builtInParseables.getCommonString,
-    version_, profile, spvVersion, EShLanguage.STAGE_VERTEX, source,
+    version_, profile, spvVersion, EShLanguage.STAGE_VERTEX,
     infoSink, commonTable.CLASS_GENERAL
   );
 
@@ -876,15 +829,13 @@ bool InitializeSymbolTables(
 
 bool InitializeSymbolTable(
   string builtIns, int version_, profile_t profile,
-  in SpvVersion spvVersion, EShLanguage language, source_t source,
+  in SpvVersion spvVersion, EShLanguage language,
   TInfoSink infoSink, TSymbolTable symbolTable
 ) {
-  auto intermediate = new TIntermediate(language, version_, profile);
-  intermediate.setSource = source;
-
-  auto parseContext = CreateParseContext(
-    symbolTable, intermediate, version_, profile, source, language,
-    infoSink, spvVersion, true, messages_t.MSG_DEFAULT_BIT, true
+  TIntermediate intermediate = new TIntermediate(language, version_, profile);
+  TParseContextBase parseContext = CreateParseContext(
+    symbolTable, intermediate, version_, profile, language,
+    infoSink, spvVersion, true, EShMessages(MSG_DEFAULT_BIT: 1), true
   );
 
   TShader.ForbidIncluder includer = new TShader.ForbidIncluder;

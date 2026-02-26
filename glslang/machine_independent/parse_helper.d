@@ -7,7 +7,7 @@ class TParseContext : TParseContextBase {
     TSymbolTable symbolTable, TIntermediate interm, bool parsingBuiltIns,
     int version_, profile_t profile, in SpvVersion spvVersion,
     EShLanguage language, TInfoSink, bool forwardCompatible,
-    messages_t messages = messages_t.MSG_DEFAULT_BIT,
+    EShMessages messages = EShMessages(MSG_DEFAULT_BIT: 1),
     string entryPoint = null
   ) {
     super(

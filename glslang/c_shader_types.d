@@ -1,54 +1,45 @@
 module glslang.c_shader_types;
 
-enum messages_t {
-  MSG_DEFAULT_BIT = 0,
-  MSG_RELAXED_ERRORS_BIT = 1 << 0,
-  MSG_SUPPRESS_WARNINGS_BIT = 1 << 1,
-  MSG_AST_BIT = 1 << 2,
-  MSG_SPV_RULES_BIT = 1 << 3,
-  MSG_VULKAN_RULES_BIT = 1 << 4,
-  MSG_ONLY_PREPROCESSOR_BIT = 1 << 5,
-  MSG_READ_HLSL_BIT = 1 << 6,
-  MSG_CASCADING_ERRORS_BIT = 1 << 7,
-  MSG_KEEP_UNCALLED_BIT = 1 << 8,
-  MSG_HLSL_OFFSETS_BIT = 1 << 9,
-  MSG_DEBUG_INFO_BIT = 1 << 10,
-  MSG_HLSL_ENABLE_16BIT_TYPES_BIT = 1 << 11,
-  MSG_HLSL_LEGALIZATION_BIT = 1 << 12,
-  MSG_HLSL_DX9_COMPATIBLE_BIT = 1 << 13,
-  MSG_BUILTIN_SYMBOL_TABLE_BIT = 1 << 14,
-  MSG_ENHANCED = 1 << 15,
-  MSG_ABSOLUTE_PATH = 1 << 16,
-  MSG_DISPLAY_ERROR_COLUMN = 1 << 17,
-  MSG_LINK_TIME_OPTIMIZATION_BIT = 1 << 18,
-  MSG_VALIDATE_CROSS_STAGE_IO_BIT = 1 << 19
+struct EShMessages {
+  bool MSG_DEFAULT_BIT;
+  bool MSG_RELAXED_ERRORS_BIT;
+  bool MSG_SUPPRESS_WARNINGS_BIT;
+  bool MSG_AST_BIT;
+  bool MSG_SPV_RULES_BIT;
+  bool MSG_VULKAN_RULES_BIT;
+  bool MSG_ONLY_PREPROCESSOR_BIT;
+  bool MSG_CASCADING_ERRORS_BIT;
+  bool MSG_KEEP_UNCALLED_BIT;
+  bool MSG_DEBUG_INFO_BIT;
+  bool MSG_BUILTIN_SYMBOL_TABLE_BIT;
+  bool MSG_ENHANCED;
+  bool MSG_ABSOLUTE_PATH;
+  bool MSG_DISPLAY_ERROR_COLUMN;
+  bool MSG_LINK_TIME_OPTIMIZATION_BIT;
+  bool MSG_VALIDATE_CROSS_STAGE_IO_BIT;
 }
 
-enum target_language_version_t {
-  TARGET_SPV_1_0 = (1 << 16),
-  TARGET_SPV_1_1 = (1 << 16) | (1 << 8),
-  TARGET_SPV_1_2 = (1 << 16) | (2 << 8),
-  TARGET_SPV_1_3 = (1 << 16) | (3 << 8),
-  TARGET_SPV_1_4 = (1 << 16) | (4 << 8),
-  TARGET_SPV_1_5 = (1 << 16) | (5 << 8),
-  TARGET_SPV_1_6 = (1 << 16) | (6 << 8)
-}
+enum uint TARGET_SPV_1_0 = (1 << 16);
+enum uint TARGET_SPV_1_1 = (1 << 16) | (1 << 8);
+enum uint TARGET_SPV_1_2 = (1 << 16) | (2 << 8);
+enum uint TARGET_SPV_1_3 = (1 << 16) | (3 << 8);
+enum uint TARGET_SPV_1_4 = (1 << 16) | (4 << 8);
+enum uint TARGET_SPV_1_5 = (1 << 16) | (5 << 8);
+enum uint TARGET_SPV_1_6 = (1 << 16) | (6 << 8);
 
-enum target_language_t {
+enum EShTargetLanguage {
   TARGET_NONE,
   TARGET_SPV
 }
 
-enum target_client_version_t {
-  TARGET_VULKAN_1_0 = (1 << 22),
-  TARGET_VULKAN_1_1 = (1 << 22) | (1 << 12),
-  TARGET_VULKAN_1_2 = (1 << 22) | (2 << 12),
-  TARGET_VULKAN_1_3 = (1 << 22) | (3 << 12),
-  TARGET_VULKAN_1_4 = (1 << 22) | (4 << 12),
-  TARGET_OPENGL_450 = 450
-}
+enum uint TARGET_VULKAN_1_0 = (1 << 22);
+enum uint TARGET_VULKAN_1_1 = (1 << 22) | (1 << 12);
+enum uint TARGET_VULKAN_1_2 = (1 << 22) | (2 << 12);
+enum uint TARGET_VULKAN_1_3 = (1 << 22) | (3 << 12);
+enum uint TARGET_VULKAN_1_4 = (1 << 22) | (4 << 12);
+enum uint TARGET_OPENGL_450 = 450;
 
-enum client_t {
+enum EShClient {
   CLIENT_NONE,
   CLIENT_VULKAN,
   CLIENT_OPENGL
@@ -69,10 +60,4 @@ enum EShLanguage {
   STAGE_CALLABLE,
   STAGE_TASK,
   STAGE_MESH
-}
-
-enum source_t {
-  SOURCE_NONE,
-  SOURCE_GLSL,
-  SOURCE_HLSL
 }

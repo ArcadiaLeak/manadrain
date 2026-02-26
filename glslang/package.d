@@ -28,18 +28,17 @@ void main() {
     "}\n";
 
   input_t input;
-  input.language = source_t.SOURCE_GLSL;
   input.stage = stage;
-  input.client = client_t.CLIENT_VULKAN;
-  input.client_version = target_client_version_t.TARGET_VULKAN_1_0;
-  input.target_language = target_language_t.TARGET_SPV;
-  input.target_language_version = target_language_version_t.TARGET_SPV_1_0;
+  input.client = EShClient.CLIENT_VULKAN;
+  input.client_version = TARGET_VULKAN_1_0;
+  input.target_language = EShTargetLanguage.TARGET_SPV;
+  input.target_language_version = TARGET_SPV_1_0;
   input.code = vertexShaderCode;
   input.default_version = 310;
   input.default_profile = profile_t.ES_PROFILE;
   input.force_default_version_and_profile = false;
   input.forward_compatible = false;
-  input.messages = messages_t.MSG_DEFAULT_BIT;
+  input.messages = EShMessages(MSG_DEFAULT_BIT: 1);
   input.resource = default_resource;
 
   shader_t shader = input.shader_create;

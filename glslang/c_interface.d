@@ -11,18 +11,17 @@ private struct vec(T) {
 }
 
 struct input_t {
-  source_t language;
   EShLanguage stage;
-  client_t client;
-  target_client_version_t client_version;
-  target_language_t target_language;
-  target_language_version_t target_language_version;
+  EShClient client;
+  uint client_version;
+  EShTargetLanguage target_language;
+  uint target_language_version;
   string code;
   int default_version;
   profile_t default_profile;
   int force_default_version_and_profile;
   int forward_compatible;
-  messages_t messages;
+  EShMessages messages;
   const(TBuiltInResource)* resource;
   glsl_include_callbacks_t callbacks;
   void* callbacks_ctx;
@@ -72,10 +71,7 @@ shader_t shader_create(ref input_t input) {
   shader.shader.setStrings(
     [input.code]
   );
-  shader.shader.setEnvInput(
-    input.language, input.stage,
-    input.client, input.default_version
-  );
+  shader.shader.setEnvInput(input.stage, input.client, input.default_version);
   shader.shader.setEnvClient(input.client, input.client_version);
   shader.shader.setEnvTarget(input.target_language, input.target_language_version);
 

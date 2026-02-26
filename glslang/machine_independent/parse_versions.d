@@ -15,7 +15,7 @@ class TParseVersions {
   SpvVersion spvVersion;
   TIntermediate intermediate;
 
-  messages_t messages;
+  EShMessages messages;
   int numErrors;
   TInputScanner currentScanner;
   TExtensionBehavior[string] extensionBehavior;
@@ -23,7 +23,7 @@ class TParseVersions {
   this(
     TIntermediate interm, int version_, profile_t profile,
     in SpvVersion spvVersion, EShLanguage language, TInfoSink infoSink,
-    bool forwardCompatible, messages_t messages
+    bool forwardCompatible, EShMessages messages
   ) {
     this.forwardCompatible = forwardCompatible; this.profile = profile;
     this.infoSink = infoSink; this.version_ = version_; this.language = language;
@@ -35,7 +35,7 @@ class TParseVersions {
 
   int getNumErrors() const => numErrors;
 
-  bool relaxedErrors() const => (messages & messages_t.MSG_RELAXED_ERRORS_BIT) != 0;
+  bool relaxedErrors() const => messages.MSG_RELAXED_ERRORS_BIT;
 
   ref const(TSourceLoc) getCurrentLoc() const => currentScanner.getSourceLoc();
 
@@ -97,7 +97,7 @@ class TParseVersions {
               TPrefixType.EPrefixWarning,
               i"extension $(ext) is being used for $(featureDesc)".text,
               loc,
-              cast(bool) (messages & messages_t.MSG_DISPLAY_ERROR_COLUMN)
+              messages.MSG_DISPLAY_ERROR_COLUMN
             );
             goto case;
           case TExtensionBehavior.EBhRequire:

@@ -45,7 +45,7 @@ class TParseContextBase : TParseVersions {
   this(
     TSymbolTable symbolTable, TIntermediate interm, bool parsingBuiltins, int version_,
     profile_t profile, in SpvVersion, EShLanguage language,
-    TInfoSink infoSink, bool forwardCompatible, messages_t messages,
+    TInfoSink infoSink, bool forwardCompatible, EShMessages messages,
     string entryPoint = null
   ) {
     super(
@@ -60,7 +60,7 @@ class TParseContextBase : TParseVersions {
     globalUniformBlock = null; globalUniformBinding = TQualifier.layoutBindingEnd;
     globalUniformSet = TQualifier.layoutSetEnd; atomicCounterBlockSet = TQualifier.layoutSetEnd;
 
-    if (spvVersion.spv >= target_language_version_t.TARGET_SPV_1_3)
+    if (spvVersion.spv >= TARGET_SPV_1_3)
       intermediate.setUseStorageBuffer();
     
     if (entryPoint != null)
@@ -86,7 +86,7 @@ class TParseContextBase : TParseVersions {
     sformat(szExtraInfo, szExtraInfoFormat, args);
 
     infoSink.info.prefix = prefix;
-    infoSink.info.location(loc, cast(bool) (messages_t.MSG_DISPLAY_ERROR_COLUMN));
+    infoSink.info.location(loc, messages.MSG_DISPLAY_ERROR_COLUMN);
     infoSink.info.append = "'" ~ szToken ~ "' : " ~ szReason ~ " " ~ szExtraInfo ~ "\n";
 
     if (prefix == TPrefixType.EPrefixError) {
@@ -108,9 +108,9 @@ class TParseContextBase : TParseVersions {
     in TSourceLoc loc, string szReason,
     string szToken, string szExtraInfo
   ) {
-    if (messages & messages_t.MSG_ONLY_PREPROCESSOR_BIT)
+    if (messages.MSG_ONLY_PREPROCESSOR_BIT)
       return;
-    if (messages & messages_t.MSG_ENHANCED && numErrors > 0)
+    if (messages.MSG_ENHANCED && numErrors > 0)
       return;
 
     outputMessage(
@@ -118,7 +118,7 @@ class TParseContextBase : TParseVersions {
       TPrefixType.EPrefixError
     );
 
-    if ((messages & messages_t.MSG_CASCADING_ERRORS_BIT) == 0)
+    if (messages.MSG_CASCADING_ERRORS_BIT)
       currentScanner.setEndOfInput;
   }
 
@@ -131,7 +131,7 @@ class TParseContextBase : TParseVersions {
       TPrefixType.EPrefixError
     );
 
-    if ((messages & messages_t.MSG_CASCADING_ERRORS_BIT) == 0)
+    if (messages.MSG_CASCADING_ERRORS_BIT)
       currentScanner.setEndOfInput;
   }
 
