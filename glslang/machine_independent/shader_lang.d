@@ -406,7 +406,7 @@ bool ProcessDeferred(ProcessingContext)(
 
   TSymbolTable cachedTable = SharedSymbolTables
     [MapVersionToIndex(version_)][MapSpvVersionToIndex(spvVersion)]
-    [MapProfileToIndex(profile)].MapEShLanguage(stage);
+    .MapEProfile(profile).MapEShLanguage(stage);
 
   bool success = processingContext(
     TParseContextBase.init, TPpContext.init, TInputScanner.init,
@@ -621,14 +621,12 @@ bool SetupBuiltinSymbolTable(
 
   int versionIndex = MapVersionToIndex(version_);
   int spvVersionIndex = MapSpvVersionToIndex(spvVersion);
-  int profileIndex = MapProfileToIndex(profile);
   if (
-    CommonSymbolTable[versionIndex][spvVersionIndex]
-      [profileIndex].CLASS_GENERAL
+    CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).CLASS_GENERAL
   ) return true;
 
-  TPrecisionClass commonTable;
-  TShLanguage stageTables;
+  TPrecisionClass!TSymbolTable commonTable;
+  TShLanguage!TSymbolTable stageTables;
   static foreach (precClass; 0..commonTable.tupleof.length)
     commonTable.tupleof[precClass] = new TSymbolTable;
   static foreach (stage; 0..stageTables.tupleof.length)
@@ -643,9 +641,9 @@ bool SetupBuiltinSymbolTable(
 
   static foreach (precClass; 0..commonTable.tupleof.length) {
     if (!commonTable.tupleof[precClass].isEmpty) {
-      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex].tupleof[precClass] = new TSymbolTable;
-      CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex].tupleof[precClass].copyTable = commonTable.tupleof[precClass];
-      // CommonSymbolTable[versionIndex][spvVersionIndex][profileIndex].tupleof[precClass].readOnly;
+      CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).tupleof[precClass] = new TSymbolTable;
+      CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).tupleof[precClass].copyTable = commonTable.tupleof[precClass];
+      // CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).tupleof[precClass].readOnly;
     }
   }
   success = true;
@@ -704,48 +702,48 @@ int MapSpvVersionToIndex(in SpvVersion spvVersion) {
   return index;
 }
 
-enum int ProfileCount = 4;
+struct TProfile(T) {
+  T NO_PROFILE;
+  T CORE_PROFILE;
+  T COMPATIBILITY_PROFILE;
+  T ES_PROFILE;
 
-int MapProfileToIndex(EProfile profile) {
-  int index = 0;
-
-  if (profile == EProfile(NO_PROFILE: 1))
-    index = 0;
-  else if (profile == EProfile(CORE_PROFILE: 1))
-    index = 1;
-  else if (profile == EProfile(COMPATIBILITY_PROFILE: 1))
-    index = 2;
-  if (profile == EProfile(ES_PROFILE: 1))
-    index = 3;
-  else
-    assert(0);
-
-  assert(index < ProfileCount);
-  return index;
+  T MapEProfile(EProfile profile) {
+    if (profile == EProfile(NO_PROFILE: 1))
+      return NO_PROFILE;
+    else if (profile == EProfile(CORE_PROFILE: 1))
+      return CORE_PROFILE;
+    else if (profile == EProfile(COMPATIBILITY_PROFILE: 1))
+      return COMPATIBILITY_PROFILE;
+    if (profile == EProfile(ES_PROFILE: 1))
+      return ES_PROFILE;
+    else
+      assert(0);
+  }
 }
 
-struct TPrecisionClass {
+struct TPrecisionClass(T) {
   TSymbolTable CLASS_GENERAL;
   TSymbolTable CLASS_FRAGMENT;
 }
 
-struct TShLanguage {
-  TSymbolTable STAGE_VERTEX;
-  TSymbolTable STAGE_TESSCONTROL;
-  TSymbolTable STAGE_TESSEVALUATION;
-  TSymbolTable STAGE_GEOMETRY;
-  TSymbolTable STAGE_FRAGMENT;
-  TSymbolTable STAGE_COMPUTE;
-  TSymbolTable STAGE_RAYGEN;
-  TSymbolTable STAGE_INTERSECT;
-  TSymbolTable STAGE_ANYHIT;
-  TSymbolTable STAGE_CLOSESTHIT;
-  TSymbolTable STAGE_MISS;
-  TSymbolTable STAGE_CALLABLE;
-  TSymbolTable STAGE_TASK;
-  TSymbolTable STAGE_MESH;
+struct TShLanguage(T) {
+  T STAGE_VERTEX;
+  T STAGE_TESSCONTROL;
+  T STAGE_TESSEVALUATION;
+  T STAGE_GEOMETRY;
+  T STAGE_FRAGMENT;
+  T STAGE_COMPUTE;
+  T STAGE_RAYGEN;
+  T STAGE_INTERSECT;
+  T STAGE_ANYHIT;
+  T STAGE_CLOSESTHIT;
+  T STAGE_MISS;
+  T STAGE_CALLABLE;
+  T STAGE_TASK;
+  T STAGE_MESH;
 
-  TSymbolTable MapEShLanguage(EShLanguage language) {
+  T MapEShLanguage(EShLanguage language) {
     final switch (language) {
       case EShLanguage.STAGE_VERTEX:
         return STAGE_VERTEX;
@@ -779,13 +777,11 @@ struct TShLanguage {
   }
 }
 
-TPrecisionClass
-  [ProfileCount]
+TProfile!(TPrecisionClass!TSymbolTable)
   [SpvVersionCount]
   [VersionCount] CommonSymbolTable;
 
-TShLanguage
-  [ProfileCount]
+TProfile!(TShLanguage!TSymbolTable)
   [SpvVersionCount]
   [VersionCount] SharedSymbolTables;
 
@@ -805,8 +801,8 @@ TParseContextBase CreateParseContext(
 }
 
 bool InitializeSymbolTables(
-  TInfoSink infoSink, TPrecisionClass commonTable,
-  TShLanguage symbolTables, int version_, EProfile profile,
+  TInfoSink infoSink, TPrecisionClass!TSymbolTable commonTable,
+  TShLanguage!TSymbolTable symbolTables, int version_, EProfile profile,
   in SpvVersion spvVersion
 ) {
   bool success = true;
