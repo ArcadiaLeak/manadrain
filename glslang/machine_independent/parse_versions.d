@@ -31,13 +31,15 @@ class TParseVersions {
     numErrors = 0; currentScanner = null;
   }
 
-  bool isEsProfile() const {
-    return profile == profile_t.ES_PROFILE;
-  }
+  bool isEsProfile() const => profile == profile_t.ES_PROFILE;
 
-  bool relaxedErrors() const {
-    return (messages & messages_t.MSG_RELAXED_ERRORS_BIT) != 0;
-  }
+  int getNumErrors() const => numErrors;
+
+  bool relaxedErrors() const => (messages & messages_t.MSG_RELAXED_ERRORS_BIT) != 0;
+
+  ref const(TSourceLoc) getCurrentLoc() const => currentScanner.getSourceLoc();
+
+  void setScanner(TInputScanner scanner) { currentScanner = scanner; }
 
   bool extensionTurnedOn(string extension) {
     switch (getExtensionBehavior(extension)) {
@@ -70,8 +72,7 @@ class TParseVersions {
     );
   }
 
-  ref const(TSourceLoc) getCurrentLoc() const =>
-    currentScanner.getSourceLoc();
+  
 
   abstract void warn(
     in TSourceLoc loc, string szReason,
@@ -111,6 +112,4 @@ class TParseVersions {
           featureDesc, "");
     }
   }
-
-  void setScanner(TInputScanner scanner) { currentScanner = scanner; }
 }

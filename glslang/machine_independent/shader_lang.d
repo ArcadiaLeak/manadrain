@@ -120,7 +120,6 @@ auto ppClosure(ref string outputString) {
     TSymbolTable, TIntermediate, EShOptimizationLevel, messages_t
   ) {
     import std.container.dlist;
-
     enum string noNeededSpaceBeforeTokens = ";)[].,";
     enum string noNeededSpaceAfterTokens = ".([";
     TPpToken ppToken;
@@ -170,8 +169,6 @@ auto ppClosure(ref string outputString) {
       int sourceNum, string sourceName
     ) {
       syncToLine(curLineNum);
-
-      import std.conv;
       outputBuffer ~= "#line ";
       outputBuffer ~= newLineNum.to!string;
       if (hasSource) {
@@ -251,10 +248,29 @@ auto ppClosure(ref string outputString) {
           noNeededSpaceAfterTokens.find(cast(char) lastToken).empty
         ) outputBuffer ~= " ";
       }
-      //
+      import std.string;
+      if (token == EFixedAtoms.PpAtomIdentifier)
+        lastTokenName = ppToken.name.fromStringz.idup;
+      lastToken = token;
+      if (token == EFixedAtoms.PpAtomConstString)
+        outputBuffer ~= "\"";
+      outputBuffer ~= ppToken.name.fromStringz.idup;
+      if (token == EFixedAtoms.PpAtomConstString)
+        outputBuffer ~= "\"";
     } while (true);
+    outputBuffer ~= "\n";
 
-    return false;
+    import std.array;
+    outputString = outputBuffer[].join;
+
+    bool success = true;
+    if (parseContext.getNumErrors > 0) {
+      success = false;
+      parseContext.infoSink.info.prefix = TPrefixType.EPrefixError;
+      parseContext.infoSink.info.append = parseContext.getNumErrors.to!string
+        ~ " compilation errors.  No code generated.\n\n";
+    }
+    return success;
   }
 
   return &preprocess;
