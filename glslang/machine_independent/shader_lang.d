@@ -656,30 +656,31 @@ enum int VersionCount = 17;
 int MapVersionToIndex(int version_) {
   int index = 0;
 
-  switch (version_) {
-    case 100: index = 0; break;
-    case 110: index = 1; break;
-    case 120: index = 2; break;
-    case 130: index = 3; break;
-    case 140: index = 4; break;
-    case 150: index = 5; break;
-    case 300: index = 6; break;
-    case 330: index = 7; break;
-    case 400: index = 8; break;
-    case 410: index = 9; break;
-    case 420: index = 10; break;
-    case 430: index = 11; break;
-    case 440: index = 12; break;
-    case 310: index = 13; break;
-    case 450: index = 14; break;
-    case 500: index = 0; break;
-    case 320: index = 15; break;
-    case 460: index = 16; break;
-    default: assert(0);
-  }
+  if (version_ == 100) index = 0;
+  else if (version_ == 110) index = 1;
+  else if (version_ == 120) index = 2;
+  else if (version_ == 130) index = 3;
+  else if (version_ == 140) index = 4;
+  else if (version_ == 150) index = 5;
+  else if (version_ == 300) index = 6;
+  else if (version_ == 330) index = 7;
+  else if (version_ == 400) index = 8;
+  else if (version_ == 410) index = 9;
+  else if (version_ == 420) index = 10;
+  else if (version_ == 430) index = 11;
+  else if (version_ == 440) index = 12;
+  else if (version_ == 310) index = 13;
+  else if (version_ == 450) index = 14;
+  else if (version_ == 500) index = 0;
+  else if (version_ == 320) index = 15;
+  else if (version_ == 460) index = 16;
+  else index = VersionCount;
 
-  assert(index < VersionCount);
-
+  if (index >= VersionCount)
+    throw new Exception(
+      "MapVersionToIndex failed!"
+    );
+  
   return index;
 }
 
@@ -697,7 +698,10 @@ int MapSpvVersionToIndex(in SpvVersion spvVersion) {
       index = 3;
   }
 
-  assert(index < SpvVersionCount);
+  if (index >= SpvVersionCount)
+    throw new Exception(
+      "MapSpvVersionToIndex failed!"
+    );
 
   return index;
 }
@@ -717,8 +721,7 @@ struct TProfile(T) {
       return COMPATIBILITY_PROFILE;
     if (profile == EProfile(ES_PROFILE: 1))
       return ES_PROFILE;
-    else
-      assert(0);
+    else throw new Exception("MapEProfile failed!");
   }
 }
 

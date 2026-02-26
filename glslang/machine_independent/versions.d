@@ -154,7 +154,7 @@ struct EProfile {
       return "compatibility";
     if (this == EProfile(ES_PROFILE: 1))
       return "es";
-    assert(0);
+    throw new Exception("getName failed!");
   }
 
   EProfile opUnary(string op : "~")() const {
