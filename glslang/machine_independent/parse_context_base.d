@@ -44,7 +44,7 @@ class TParseContextBase : TParseVersions {
 
   this(
     TSymbolTable symbolTable, TIntermediate interm, bool parsingBuiltins, int version_,
-    profile_t profile, in SpvVersion, EShLanguage language,
+    EProfile profile, in SpvVersion, EShLanguage language,
     TInfoSink infoSink, bool forwardCompatible, EShMessages messages,
     string entryPoint = null
   ) {

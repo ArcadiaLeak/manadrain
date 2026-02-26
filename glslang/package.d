@@ -35,10 +35,10 @@ void main() {
   input.target_language_version = TARGET_SPV_1_0;
   input.code = vertexShaderCode;
   input.default_version = 310;
-  input.default_profile = profile_t.ES_PROFILE;
+  input.default_profile = EProfile(ES_PROFILE: 1);
   input.force_default_version_and_profile = false;
   input.forward_compatible = false;
-  input.messages = EShMessages(MSG_DEFAULT_BIT: 1);
+  input.messages = EShMessages();
   input.resource = default_resource;
 
   shader_t shader = input.shader_create;

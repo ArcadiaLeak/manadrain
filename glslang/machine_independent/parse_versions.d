@@ -6,7 +6,7 @@ import std.conv;
 
 class TParseVersions {
   bool forwardCompatible;
-  profile_t profile;
+  EProfile profile;
 
   TInfoSink infoSink;
 
@@ -21,7 +21,7 @@ class TParseVersions {
   TExtensionBehavior[string] extensionBehavior;
 
   this(
-    TIntermediate interm, int version_, profile_t profile,
+    TIntermediate interm, int version_, EProfile profile,
     in SpvVersion spvVersion, EShLanguage language, TInfoSink infoSink,
     bool forwardCompatible, EShMessages messages
   ) {
@@ -31,7 +31,7 @@ class TParseVersions {
     numErrors = 0; currentScanner = null;
   }
 
-  bool isEsProfile() const => profile == profile_t.ES_PROFILE;
+  bool isEsProfile() const => profile == EProfile(ES_PROFILE: 1);
 
   int getNumErrors() const => numErrors;
 
@@ -63,7 +63,7 @@ class TParseVersions {
   }
 
   void profileRequires(
-    in TSourceLoc loc, int profileMask, int minVersion, string extension,
+    in TSourceLoc loc, EProfile profileMask, int minVersion, string extension,
     string featureDesc
   ) {
     profileRequires(
@@ -85,7 +85,7 @@ class TParseVersions {
   );
 
   void profileRequires(
-    in TSourceLoc loc, int profileMask, int minVersion, string[] extensions,
+    in TSourceLoc loc, EProfile profileMask, int minVersion, string[] extensions,
     string featureDesc
   ) {
     if (profile & profileMask) {

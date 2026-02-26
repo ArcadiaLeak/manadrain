@@ -5,9 +5,9 @@ import glslang;
 class TParseContext : TParseContextBase {
   this(
     TSymbolTable symbolTable, TIntermediate interm, bool parsingBuiltIns,
-    int version_, profile_t profile, in SpvVersion spvVersion,
+    int version_, EProfile profile, in SpvVersion spvVersion,
     EShLanguage language, TInfoSink, bool forwardCompatible,
-    EShMessages messages = EShMessages(MSG_DEFAULT_BIT: 1),
+    EShMessages messages = EShMessages(),
     string entryPoint = null
   ) {
     super(
@@ -36,8 +36,8 @@ class TParseContext : TParseContextBase {
         warn(loc, "not allowed in this version", message, "");
       return true;
     } else {
-      profileRequires(loc, profile_t.ES_PROFILE, 300, "", message);
-      profileRequires(loc, ~profile_t.ES_PROFILE, 420, E_GL_ARB_shading_language_420pack, message);
+      profileRequires(loc, EProfile(ES_PROFILE: 1), 300, "", message);
+      profileRequires(loc, ~EProfile(ES_PROFILE: 1), 420, E_GL_ARB_shading_language_420pack, message);
     }
 
     return lineContinuationAllowed;

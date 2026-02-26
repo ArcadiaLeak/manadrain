@@ -46,7 +46,7 @@ class TIntermediate {
 
   DList!TCall callGraph;
 
-  profile_t profile;
+  EProfile profile;
   int version_;
   SpvVersion spvVersion;
   bool useStorageBuffer;
@@ -58,16 +58,16 @@ class TIntermediate {
 
   this(
     EShLanguage l, int v = 0,
-    profile_t p = profile_t.NO_PROFILE
+    EProfile p = EProfile(NO_PROFILE: 1)
   ) {
     language = l;
   }
 
   void setVersion(int v) { version_ = v; }
-  int getVersion() const { return profile; }
+  EProfile getVersion() const { return profile; }
 
-  void setProfile(profile_t p) { profile = p; }
-  profile_t getProfile() const { return profile; }
+  void setProfile(EProfile p) { profile = p; }
+  EProfile getProfile() const { return profile; }
 
   void setSourceFile(string file) { if (file != null) sourceFile = file; }
   string getSourceFile() const { return sourceFile; }

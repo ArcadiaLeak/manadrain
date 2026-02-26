@@ -139,19 +139,36 @@ enum TExtensionBehavior {
   EBhDisablePartial
 }
 
-enum profile_t {
-  NO_PROFILE = 1 << 0,
-  CORE_PROFILE = 1 << 1,
-  COMPATIBILITY_PROFILE = 1 << 2,
-  ES_PROFILE = 1 << 3
-}
+struct EProfile {
+  bool NO_PROFILE;
+  bool CORE_PROFILE;
+  bool COMPATIBILITY_PROFILE;
+  bool ES_PROFILE;
 
-string ProfileName(profile_t profile) {
-  final switch (profile) {
-    case profile_t.NO_PROFILE: return "none";
-    case profile_t.CORE_PROFILE: return "core";
-    case profile_t.COMPATIBILITY_PROFILE: return "compatibility";
-    case profile_t.ES_PROFILE: return "es";
+  string getName() {
+    if (this == EProfile(NO_PROFILE: 1))
+      return "none";
+    if (this == EProfile(CORE_PROFILE: 1))
+      return "core";
+    if (this == EProfile(COMPATIBILITY_PROFILE: 1))
+      return "compatibility";
+    if (this == EProfile(ES_PROFILE: 1))
+      return "es";
+    assert(0);
+  }
+
+  EProfile opUnary(string op : "~")() const {
+    EProfile ret;
+    static foreach (i; 0..this.tupleof.length)
+      ret.tupleof[i] = !this.tupleof[i];
+    return ret;
+  }
+
+  bool opBinary(string op : "&")(EProfile rhs) const {
+    bool fitsMask = true;
+    static foreach (i; 0..this.tupleof.length)
+      fitsMask &= this.tupleof[i] && rhs.tupleof[i];
+    return fitsMask;
   }
 }
 

@@ -18,7 +18,7 @@ struct input_t {
   uint target_language_version;
   string code;
   int default_version;
-  profile_t default_profile;
+  EProfile default_profile;
   int force_default_version_and_profile;
   int forward_compatible;
   EShMessages messages;

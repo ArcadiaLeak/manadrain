@@ -90,7 +90,7 @@ class TShader {
 
   bool preprocess(
     const(TBuiltInResource)* builtInResources,
-    int defaultVersion, profile_t defaultProfile,
+    int defaultVersion, EProfile defaultProfile,
     bool forceDefaultVersionAndProfile,
     bool forwardCompatible, EShMessages message,
     ref string output_string
@@ -279,7 +279,7 @@ bool PreprocessDeferred(
   in string[] stringNames,
   const(TBuiltInResource)* builtInResources,
   int defaultVersion,
-  profile_t defaultProfile,
+  EProfile defaultProfile,
   bool forceDefaultVersionAndProfile,
   int overrideVersion,
   bool forwardCompatible,
@@ -303,7 +303,7 @@ bool ProcessDeferred(ProcessingContext)(
   const string[] stringNames,
   const(TBuiltInResource)* builtInResources,
   int defaultVersion,
-  profile_t defaultProfile,
+  EProfile defaultProfile,
   bool forceDefaultVersionAndProfile,
   int overrideVersion,
   bool forwardCompatible,
@@ -343,7 +343,7 @@ bool ProcessDeferred(ProcessingContext)(
 
   TInputScanner userInput = new TInputScanner(strings[numPre..$]);
   int version_ = 0;
-  profile_t profile = profile_t.NO_PROFILE;
+  EProfile profile = EProfile(NO_PROFILE: 1);
   bool versionNotFirstToken = false;
   bool versionNotFirst = userInput.scanVersion(version_, profile, versionNotFirstToken);
   bool versionNotFound = version_ == 0;
@@ -355,9 +355,9 @@ bool ProcessDeferred(ProcessingContext)(
     ) {
       compiler.infoSink.info.append =
         "Warning, (version, profile) forced to be (" ~
-        defaultVersion.to!string ~ ", " ~ ProfileName(defaultProfile) ~
+        defaultVersion.to!string ~ ", " ~ defaultProfile.getName ~
         "), while in source code it is (" ~
-        version_.to!string ~ ", " ~ ProfileName(profile) ~ ")\n";
+        version_.to!string ~ ", " ~ profile.getName ~ ")\n";
     }
 
     if (versionNotFound) {
@@ -378,7 +378,7 @@ bool ProcessDeferred(ProcessingContext)(
   );
   bool versionWillBeError = (
     versionNotFound ||
-    (profile == profile_t.ES_PROFILE &&
+    (profile == EProfile(ES_PROFILE: 1) &&
       version_ >= 300 && versionNotFirst)
   );
   bool warnVersionNotFirst = false;
@@ -455,7 +455,7 @@ bool DeduceVersionProfile(
   bool versionNotFirst,
   int defaultVersion,
   ref int version_,
-  ref profile_t profile,
+  ref EProfile profile,
   in SpvVersion spvVersion
 ) {
   const int FirstProfileVersion = 150;
@@ -465,20 +465,20 @@ bool DeduceVersionProfile(
     version_ = defaultVersion;
   }
 
-  if (profile == profile_t.NO_PROFILE) {
+  if (profile == EProfile(NO_PROFILE: 1)) {
     if (version_ == 300 || version_ == 310 || version_ == 320) {
       correct = false;
       infoSink.info.message(
         TPrefixType.EPrefixError,
         "#version: versions 300, 310, and 320 require specifying the 'es' profile"
       );
-      profile = profile_t.ES_PROFILE;
+      profile = EProfile(ES_PROFILE: 1);
     } else if (version_ == 100)
-      profile = profile_t.ES_PROFILE;
+      profile = EProfile(ES_PROFILE: 1);
     else if (version_ >= FirstProfileVersion)
-      profile = profile_t.CORE_PROFILE;
+      profile = EProfile(CORE_PROFILE: 1);
     else
-      profile = profile_t.NO_PROFILE;
+      profile = EProfile(NO_PROFILE: 1);
   } else {
     if (version_ < 150) {
       correct = false;
@@ -487,29 +487,29 @@ bool DeduceVersionProfile(
         "#version: versions before 150 do not allow a profile token"
       );
       if (version_ == 100)
-        profile = profile_t.ES_PROFILE;
+        profile = EProfile(ES_PROFILE: 1);
       else
-        profile = profile_t.NO_PROFILE;
+        profile = EProfile(NO_PROFILE: 1);
     } else if (version_ == 300 || version_ == 310 || version_ == 320) {
-      if (profile != profile_t.ES_PROFILE) {
+      if (profile != EProfile(ES_PROFILE: 1)) {
         correct = false;
         infoSink.info.message(
           TPrefixType.EPrefixError,
           "#version: versions 300, 310, and 320 support only the es profile"
         );
       }
-      profile = profile_t.ES_PROFILE;
+      profile = EProfile(ES_PROFILE: 1);
     } else {
-      if (profile == profile_t.ES_PROFILE) {
+      if (profile == EProfile(ES_PROFILE: 1)) {
         correct = false;
         infoSink.info.message(
           TPrefixType.EPrefixError,
           "#version: only version 300, 310, and 320 support the es profile"
         );
         if (version_ >= FirstProfileVersion)
-          profile = profile_t.CORE_PROFILE;
+          profile = EProfile(CORE_PROFILE: 1);
         else
-          profile = profile_t.NO_PROFILE;
+          profile = EProfile(NO_PROFILE: 1);
       }
     }
   }
@@ -537,17 +537,17 @@ bool DeduceVersionProfile(
     default:
       correct = false;
       infoSink.info.message(TPrefixType.EPrefixError, "version not supported");
-      if (profile == profile_t.ES_PROFILE)
+      if (profile == EProfile(ES_PROFILE: 1))
         version_ = 310;
       else {
         version_ = 450;
-        profile = profile_t.CORE_PROFILE;
+        profile = EProfile(CORE_PROFILE: 1);
       }
       break;
   }
 
   if (
-    profile == profile_t.ES_PROFILE &&
+    profile == EProfile(ES_PROFILE: 1) &&
     version_ >= 300 && versionNotFirst
   ) {
     correct = false;
@@ -558,40 +558,36 @@ bool DeduceVersionProfile(
   }
 
   if (spvVersion.spv != 0) {
-    switch (profile) {
-      case profile_t.ES_PROFILE:
-        if (version_ < 310) {
-          correct = false;
-          infoSink.info.message(
-            TPrefixType.EPrefixError,
-            "#version: ES shaders for SPIR-V require version 310 or higher"
-          );
-          version_ = 310;
-        }
-        break;
-      case profile_t.COMPATIBILITY_PROFILE:
+    if (profile == EProfile(ES_PROFILE: 1)) {
+      if (version_ < 310) {
+        correct = false;
         infoSink.info.message(
           TPrefixType.EPrefixError,
-          "#version: compilation for SPIR-V does not support the compatibility profile"
+          "#version: ES shaders for SPIR-V require version 310 or higher"
         );
-        break;
-      default:
-        if (spvVersion.vulkan > 0 && version_ < 140) {
-          correct = false;
-          infoSink.info.message(
-            TPrefixType.EPrefixError,
-            "#version: Desktop shaders for Vulkan SPIR-V require version 140 or higher"
-          );
-          version_ = 140;
-        }
-        if (spvVersion.openGl >= 100 && version_ < 330) {
-          correct = false;
-          infoSink.info.message(
-            TPrefixType.EPrefixError,
-            "#version: Desktop shaders for OpenGL SPIR-V require version 330 or higher"
-          );
-        }
-        break;
+        version_ = 310;
+      }
+    } else if (profile == EProfile(COMPATIBILITY_PROFILE: 1)) {
+      infoSink.info.message(
+        TPrefixType.EPrefixError,
+        "#version: compilation for SPIR-V does not support the compatibility profile"
+      );
+    } else {
+      if (spvVersion.vulkan > 0 && version_ < 140) {
+        correct = false;
+        infoSink.info.message(
+          TPrefixType.EPrefixError,
+          "#version: Desktop shaders for Vulkan SPIR-V require version 140 or higher"
+        );
+        version_ = 140;
+      }
+      if (spvVersion.openGl >= 100 && version_ < 330) {
+        correct = false;
+        infoSink.info.message(
+          TPrefixType.EPrefixError,
+          "#version: Desktop shaders for OpenGL SPIR-V require version 330 or higher"
+        );
+      }
     }
   }
 
@@ -617,7 +613,7 @@ void RecordProcesses(
 
 bool SetupBuiltinSymbolTable(
   int version_,
-  profile_t profile,
+  EProfile profile,
   in SpvVersion spvVersion
 ) {
   auto infoSink = new TInfoSink;
@@ -710,19 +706,21 @@ int MapSpvVersionToIndex(in SpvVersion spvVersion) {
 
 enum int ProfileCount = 4;
 
-int MapProfileToIndex(profile_t profile) {
+int MapProfileToIndex(EProfile profile) {
   int index = 0;
 
-  switch (profile) {
-    case profile_t.NO_PROFILE: index = 0; break;
-    case profile_t.CORE_PROFILE: index = 1; break;
-    case profile_t.COMPATIBILITY_PROFILE: index = 2; break;
-    case profile_t.ES_PROFILE: index = 3; break;
-    default: assert(0);
-  }
+  if (profile == EProfile(NO_PROFILE: 1))
+    index = 0;
+  else if (profile == EProfile(CORE_PROFILE: 1))
+    index = 1;
+  else if (profile == EProfile(COMPATIBILITY_PROFILE: 1))
+    index = 2;
+  if (profile == EProfile(ES_PROFILE: 1))
+    index = 3;
+  else
+    assert(0);
 
   assert(index < ProfileCount);
-
   return index;
 }
 
@@ -793,7 +791,7 @@ TShLanguage
 
 TParseContextBase CreateParseContext(
   TSymbolTable symbolTable, TIntermediate intermediate,
-  int version_, profile_t profile, EShLanguage language, TInfoSink infoSink,
+  int version_, EProfile profile, EShLanguage language, TInfoSink infoSink,
   in SpvVersion spvVersion,bool forwardCompatible, EShMessages messages,
   bool parsingBuiltIns, string sourceEntryPointName = ""
 ) {
@@ -808,7 +806,7 @@ TParseContextBase CreateParseContext(
 
 bool InitializeSymbolTables(
   TInfoSink infoSink, TPrecisionClass commonTable,
-  TShLanguage symbolTables, int version_, profile_t profile,
+  TShLanguage symbolTables, int version_, EProfile profile,
   in SpvVersion spvVersion
 ) {
   bool success = true;
@@ -828,14 +826,14 @@ bool InitializeSymbolTables(
 }
 
 bool InitializeSymbolTable(
-  string builtIns, int version_, profile_t profile,
+  string builtIns, int version_, EProfile profile,
   in SpvVersion spvVersion, EShLanguage language,
   TInfoSink infoSink, TSymbolTable symbolTable
 ) {
   TIntermediate intermediate = new TIntermediate(language, version_, profile);
   TParseContextBase parseContext = CreateParseContext(
     symbolTable, intermediate, version_, profile, language,
-    infoSink, spvVersion, true, EShMessages(MSG_DEFAULT_BIT: 1), true
+    infoSink, spvVersion, true, EShMessages(), true
   );
 
   TShader.ForbidIncluder includer = new TShader.ForbidIncluder;
@@ -852,7 +850,7 @@ bool InitializeSymbolTable(
   if (builtInShaders[0].length == 0)
     return true;
 
-  auto input = new TInputScanner(builtInShaders);
+  TInputScanner input = new TInputScanner(builtInShaders);
 
   return false;
 }

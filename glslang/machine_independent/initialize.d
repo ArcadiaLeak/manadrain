@@ -112,21 +112,23 @@ enum BuiltInFunction[] DerivativeFunctions = [
   BuiltInFunction(TOperator.EOpFwidth, "fwidth", 1, ArgType.TypeF, ArgClass.ClassRegular, [])
 ];
 
-enum profile_t EDesktopProfile =
-  profile_t.NO_PROFILE | profile_t.CORE_PROFILE | profile_t.COMPATIBILITY_PROFILE;
+enum EProfile EEsProfile =
+  EProfile(ES_PROFILE: 1);
+enum EProfile EDesktopProfile =
+  EProfile(NO_PROFILE: 1, CORE_PROFILE: 1, COMPATIBILITY_PROFILE: 1);
 
 enum Versioning[] Es300Desktop130Version = [
-  Versioning(profile_t.ES_PROFILE, 0, 300, 0, null),
+  Versioning(EEsProfile, 0, 300, 0, null),
   Versioning(EDesktopProfile, 0, 130, 0, null),
 ];
 
 enum Versioning[] Es310Desktop400Version = [
-  Versioning(profile_t.ES_PROFILE, 0, 310, 0, null),
+  Versioning(EEsProfile, 0, 310, 0, null),
   Versioning(EDesktopProfile, 0, 400, 0, null),
 ];
 
 enum Versioning[] Es310Desktop450Version = [
-  Versioning(profile_t.ES_PROFILE, 0, 310, 0, null),
+  Versioning(EEsProfile, 0, 310, 0, null),
   Versioning(EDesktopProfile, 0, 450, 0, null),
 ];
 
@@ -248,9 +250,9 @@ class TBuiltInParseables {
   StageBuiltins stageBuiltins;
 
   abstract void initialize(
-    int version_, profile_t, in SpvVersion spvVersion);
+    int version_, EProfile, in SpvVersion spvVersion);
   abstract void initialize(
-    int version_, profile_t, in SpvVersion spvVersion, EShLanguage);
+    int version_, EProfile, in SpvVersion spvVersion, EShLanguage);
 
   string getCommonString() => commonBuiltins[].join;
   
@@ -288,7 +290,7 @@ class TBuiltIns : TBuiltInParseables {
   }
 
   void addTabledBuiltins(
-    int version_, profile_t profile,
+    int version_, EProfile profile,
     in SpvVersion spvVersion
   ) {
     auto forEachFunction(ref DList!string decls, const(BuiltInFunction[]) functions) {
@@ -301,13 +303,13 @@ class TBuiltIns : TBuiltInParseables {
     forEachFunction(commonBuiltins, BaseFunctions);
     forEachFunction(stageBuiltins.STAGE_FRAGMENT, DerivativeFunctions);
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 320) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 450))
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 320) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 450))
       forEachFunction(stageBuiltins.STAGE_COMPUTE, DerivativeFunctions);
   }
 
   override void initialize(
-    int version_, profile_t profile,
+    int version_, EProfile profile,
     in SpvVersion spvVersion
   ) {
     addTabledBuiltins(version_, profile, spvVersion);
@@ -438,7 +440,7 @@ class TBuiltIns : TBuiltInParseables {
       "f64vec4 fwidthCoarse(f64vec4);"
     );
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "double sqrt(double);" ~
         "dvec2 sqrt(dvec2);" ~
@@ -668,7 +670,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       commonBuiltins ~= (
         "float64_t sqrt(float64_t);" ~
         "f64vec2 sqrt(f64vec2);" ~
@@ -864,8 +866,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       commonBuiltins ~= (
         "int64_t abs(int64_t);" ~
         "i64vec2 abs(i64vec2);" ~
@@ -1032,7 +1034,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 430) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 430) {
       commonBuiltins ~= (
         "float min3(float, float, float);" ~
         "vec2 min3(vec2, vec2, vec2);" ~
@@ -1128,8 +1130,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 430)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 430)) {
       commonBuiltins ~= (
         "uint atomicAdd(coherent volatile nontemporal inout uint, uint, int, int, int);" ~
         "int atomicAdd(coherent volatile nontemporal inout int, int, int, int, int);" ~
@@ -1165,7 +1167,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 440) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 440) {
       commonBuiltins ~= (
         "uint64_t atomicMin(coherent volatile nontemporal inout uint64_t, uint64_t);" ~
         "int64_t atomicMin(coherent volatile nontemporal inout int64_t, int64_t);" ~
@@ -1247,7 +1249,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 430) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 430) {
       commonBuiltins ~= (
         "f16vec2 atomicAdd(coherent volatile nontemporal inout f16vec2, f16vec2);" ~
         "f16vec4 atomicAdd(coherent volatile nontemporal inout f16vec4, f16vec4);" ~
@@ -1261,8 +1263,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 300) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 300) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       commonBuiltins ~= (
         "int floatBitsToInt(highp float value);" ~
         "ivec2 floatBitsToInt(highp vec2 value);" ~
@@ -1288,8 +1290,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 150) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 150) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       commonBuiltins ~= (
         "float fma(float, float, float);" ~
         "vec2 fma(vec2, vec2, vec2);" ~
@@ -1299,7 +1301,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "double fma(double, double, double);" ~
         "dvec2 fma(dvec2, dvec2, dvec2);" ~
@@ -1309,7 +1311,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       commonBuiltins ~= (
         "float64_t fma(float64_t, float64_t, float64_t);" ~
         "f64vec2 fma(f64vec2, f64vec2, f64vec2);" ~
@@ -1319,8 +1321,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       commonBuiltins ~= (
         "float frexp(highp float, out highp int);" ~
         "vec2 frexp(highp vec2, out highp ivec2);" ~
@@ -1336,7 +1338,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "double frexp(double, out int);" ~
         "dvec2 frexp(dvec2, out ivec2);" ~
@@ -1355,7 +1357,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       commonBuiltins ~= (
         "float64_t frexp(float64_t, out int);" ~
         "f64vec2 frexp(f64vec2, out ivec2);" ~
@@ -1371,8 +1373,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 300) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 300) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       commonBuiltins ~= (
         "highp uint packUnorm2x16(vec2);" ~
         "vec2 unpackUnorm2x16(highp uint);" ~
@@ -1380,8 +1382,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 300) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 300) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       commonBuiltins ~= (
         "highp uint packSnorm2x16(vec2);" ~
         "vec2 unpackSnorm2x16(highp uint);" ~
@@ -1390,20 +1392,20 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile == profile_t.ES_PROFILE && version_ >= 300) {
+    if (profile == EProfile(ES_PROFILE: 1) && version_ >= 300) {
       commonBuiltins ~= (
         "mediump vec2 unpackHalf2x16(highp uint);" ~
         "\n"
       );
-    } else if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    } else if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "vec2 unpackHalf2x16(highp uint);" ~
         "\n"
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       commonBuiltins ~= (
         "highp uint packSnorm4x8(vec4);" ~
         "highp uint packUnorm4x8(vec4);" ~
@@ -1411,13 +1413,13 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       commonBuiltins ~= (
         "mediump vec4 unpackSnorm4x8(highp uint);" ~
         "mediump vec4 unpackUnorm4x8(highp uint);" ~
         "\n"
       );
-    } else if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    } else if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "vec4 unpackSnorm4x8(highp uint);" ~
         "vec4 unpackUnorm4x8(highp uint);" ~
@@ -1480,10 +1482,10 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ == 100) ||
-      (profile == profile_t.CORE_PROFILE && version_ < 420) ||
-      profile == profile_t.COMPATIBILITY_PROFILE ||
-      profile == profile_t.NO_PROFILE) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ == 100) ||
+      (profile == EProfile(CORE_PROFILE: 1) && version_ < 420) ||
+      profile == EProfile(COMPATIBILITY_PROFILE: 1) ||
+      profile == EProfile(NO_PROFILE: 1)) {
       if (spvVersion.spv == 0) {
         commonBuiltins ~= (
           "vec4 texture2D(sampler2D, vec2);" ~
@@ -1501,9 +1503,9 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if ((profile == profile_t.CORE_PROFILE && version_ < 420) ||
-      profile == profile_t.COMPATIBILITY_PROFILE ||
-      profile == profile_t.NO_PROFILE) {
+    if ((profile == EProfile(CORE_PROFILE: 1) && version_ < 420) ||
+      profile == EProfile(COMPATIBILITY_PROFILE: 1) ||
+      profile == EProfile(NO_PROFILE: 1)) {
       if (spvVersion.spv == 0) {
         commonBuiltins ~= (
           "vec4 texture1D(sampler1D, float);" ~
@@ -1537,7 +1539,7 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if (profile == profile_t.ES_PROFILE) {
+    if (profile == EProfile(ES_PROFILE: 1)) {
       if (spvVersion.spv == 0) {
         if (version_ < 300) {
           commonBuiltins ~= (
@@ -1584,7 +1586,7 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if (spvVersion.spv == 0 && profile != profile_t.ES_PROFILE) {
+    if (spvVersion.spv == 0 && profile != EProfile(ES_PROFILE: 1)) {
       commonBuiltins ~= (
         "float noise1(float x);" ~
         "float noise1(vec2 x);" ~
@@ -1611,8 +1613,8 @@ class TBuiltIns : TBuiltInParseables {
     }
 
     if (spvVersion.vulkan == 0) {
-      if ((profile != profile_t.ES_PROFILE && version_ >= 300) ||
-        (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+      if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 300) ||
+        (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
         commonBuiltins ~= (
           "uint atomicCounterIncrement(atomic_uint);" ~
           "uint atomicCounterDecrement(atomic_uint);" ~
@@ -1621,7 +1623,7 @@ class TBuiltIns : TBuiltInParseables {
           "\n"
         );
       }
-      if (profile != profile_t.ES_PROFILE && version_ == 450) {
+      if (profile != EProfile(ES_PROFILE: 1) && version_ == 450) {
         commonBuiltins ~= (
           "uint atomicCounterAddARB(atomic_uint, uint);" ~
           "uint atomicCounterSubtractARB(atomic_uint, uint);" ~
@@ -1637,7 +1639,7 @@ class TBuiltIns : TBuiltInParseables {
         );
       }
 
-      if (profile != profile_t.ES_PROFILE && version_ >= 460) {
+      if (profile != EProfile(ES_PROFILE: 1) && version_ >= 460) {
         commonBuiltins ~= (
           "uint atomicCounterAdd(atomic_uint, uint);" ~
           "uint atomicCounterSubtract(atomic_uint, uint);" ~
@@ -1653,8 +1655,8 @@ class TBuiltIns : TBuiltInParseables {
         );
       }
     } else if (spvVersion.vulkanRelaxed) {
-      if ((profile != profile_t.ES_PROFILE && version_ >= 300) ||
-        (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+      if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 300) ||
+        (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
         commonBuiltins ~= (
           "uint atomicCounterIncrement(volatile coherent nontemporal uint);" ~
           "uint atomicCounterDecrement(volatile coherent nontemporal uint);" ~
@@ -1663,7 +1665,7 @@ class TBuiltIns : TBuiltInParseables {
           "\n"
         );
       }
-      if (profile != profile_t.ES_PROFILE && version_ >= 460) {
+      if (profile != EProfile(ES_PROFILE: 1) && version_ >= 460) {
         commonBuiltins ~= (
           "uint atomicCounterAdd(volatile coherent nontemporal uint, uint);" ~
           "uint atomicCounterSubtract(volatile coherent nontemporal uint, uint);" ~
@@ -1680,8 +1682,8 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       commonBuiltins ~= (
         "int bitfieldExtract(int, int, int);" ~
         "ivec2 bitfieldExtract(ivec2, int, int);" ~
@@ -1707,7 +1709,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "int findLSB(int);" ~
         "ivec2 findLSB(ivec2);" ~
@@ -1721,7 +1723,7 @@ class TBuiltIns : TBuiltInParseables {
 
         "\n"
       );
-    } else if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    } else if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       commonBuiltins ~= (
         "lowp int findLSB(int);" ~
         "lowp ivec2 findLSB(ivec2);" ~
@@ -1737,7 +1739,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "int bitCount(int);" ~
         "ivec2 bitCount(ivec2);" ~
@@ -1762,7 +1764,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150 && version_ < 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150 && version_ < 450) {
       commonBuiltins ~= (
         "int64_t packInt2x32(ivec2);" ~
         "uint64_t packUint2x32(uvec2);" ~
@@ -1886,7 +1888,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       commonBuiltins ~= (
         "bool anyThreadNV(bool);" ~
         "bool allThreadsNV(bool);" ~
@@ -1896,8 +1898,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       commonBuiltins ~= (
         "uint uaddCarry(highp uint, highp uint, out lowp uint carry);" ~
         "uvec2 uaddCarry(highp uvec2, highp uvec2, out lowp uvec2 carry);" ~
@@ -1933,7 +1935,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       commonBuiltins ~= (
         "lowp int bitCount(int);" ~
         "lowp ivec2 bitCount(ivec2);" ~
@@ -1959,7 +1961,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       commonBuiltins ~= (
         "uint64_t ballotARB(bool);" ~
 
@@ -1997,7 +1999,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 430) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 430) {
       commonBuiltins ~= (
         "bool anyInvocationARB(bool);" ~
         "bool allInvocationsARB(bool);" ~
@@ -2007,8 +2009,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 300) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 450)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 300) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 450)) {
       commonBuiltins ~= (
         "uint dotEXT(uvec2 a, uvec2 b);" ~
         "int dotEXT(ivec2 a, ivec2 b);" ~
@@ -2143,8 +2145,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 140)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 140)) {
       commonBuiltins ~= (
         "void subgroupBarrier();" ~
         "void subgroupMemoryBarrier();" ~
@@ -2168,7 +2170,7 @@ class TBuiltIns : TBuiltInParseables {
         static if (!op.logicalOp) {
           static foreach (floatType; floatTypes)
             commonBuiltins ~= format!op(floatType);
-          if (profile != profile_t.ES_PROFILE && version_ >= 400) {
+          if (profile != EProfile(ES_PROFILE: 1) && version_ >= 400) {
             static foreach (doubleType; doubleTypes)
               commonBuiltins ~= format!op(doubleType);
           }
@@ -2196,15 +2198,15 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 140)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 140)) {
       commonBuiltins ~= (
         "bool subgroupQuadAll(bool);\n" ~
         "bool subgroupQuadAny(bool);\n"
       );   
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 460) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 460) {
       commonBuiltins ~= (
         "bool anyInvocation(bool);" ~
         "bool allInvocations(bool);" ~
@@ -2214,7 +2216,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       commonBuiltins ~= (
         "float minInvocationsAMD(float);" ~
         "vec2 minInvocationsAMD(vec2);" ~
@@ -3077,7 +3079,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 440) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 440) {
       commonBuiltins ~= (
         "float cubeFaceIndexAMD(vec3);" ~
         "vec2 cubeFaceCoordAMD(vec3);" ~
@@ -3088,7 +3090,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       commonBuiltins ~= (
         "uint fragmentMaskFetchAMD(sampler2DMS, ivec2);" ~
         "uint fragmentMaskFetchAMD(isampler2DMS, ivec2);" ~
@@ -3110,8 +3112,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 130) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 300)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 130) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 300)) {
       commonBuiltins ~= (
         "uint countLeadingZeros(uint);" ~
         "uvec2 countLeadingZeros(uvec2);" ~
@@ -3286,8 +3288,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 320)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 320)) {
       commonBuiltins ~= (
         "struct gl_TextureFootprint2DNV {" ~
           "uvec2 anchor;" ~
@@ -3321,8 +3323,8 @@ class TBuiltIns : TBuiltInParseables {
       );   
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 300 && version_ < 310) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 150 && version_ < 450)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 300 && version_ < 310) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 150 && version_ < 450)) {
       commonBuiltins ~= (
         "int mix(int, int, bool);" ~
         "ivec2 mix(ivec2, ivec2, bvec2);" ~
@@ -3341,8 +3343,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       commonBuiltins ~= (
         "float16_t radians(float16_t);" ~
         "f16vec2 radians(f16vec2);" ~
@@ -3756,8 +3758,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       commonBuiltins ~= (
         "int8_t abs(int8_t);" ~
         "i8vec2 abs(i8vec2);" ~
@@ -4191,8 +4193,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 300) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 130)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 300) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 130)) {
       commonBuiltins ~= (
         "float texture(sampler2DArrayShadow, vec4, float);" ~
         "float texture(samplerCubeArrayShadow, vec4, float, float);" ~
@@ -4205,7 +4207,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       stageBuiltins.STAGE_FRAGMENT ~= derivativesAndControl64bits;
       stageBuiltins.STAGE_FRAGMENT ~= (
         "float64_t interpolateAtCentroid(float64_t);" ~
@@ -4227,8 +4229,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 140)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 140)) {
       commonBuiltins ~= (
         "void assumeEXT(bool);" ~
 
@@ -4250,8 +4252,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 140)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 140)) {
       commonBuiltins ~= (
         "vec4 textureWeightedQCOM(sampler2D, vec2, sampler2DArray);" ~
         "vec4 textureWeightedQCOM(sampler2D, vec2, sampler1DArray);" ~
@@ -4277,10 +4279,10 @@ class TBuiltIns : TBuiltInParseables {
         else
           commonBuiltins.insert = str;
       }
-      if ((profile == profile_t.ES_PROFILE && version_ == 100) ||
-        (profile == profile_t.CORE_PROFILE && version_ < 420) ||
-        profile == profile_t.COMPATIBILITY_PROFILE ||
-        profile == profile_t.NO_PROFILE) {
+      if ((profile == EProfile(ES_PROFILE: 1) && version_ == 100) ||
+        (profile == EProfile(CORE_PROFILE: 1) && version_ < 420) ||
+        profile == EProfile(COMPATIBILITY_PROFILE: 1) ||
+        profile == EProfile(NO_PROFILE: 1)) {
         if (spvVersion.spv == 0) {
           insert(
             "vec4 texture2DLod(sampler2D, vec2, float);" ~
@@ -4294,9 +4296,9 @@ class TBuiltIns : TBuiltInParseables {
           );
         }
       }
-      if ((profile == profile_t.CORE_PROFILE && version_ < 420) ||
-        profile == profile_t.COMPATIBILITY_PROFILE ||
-        profile == profile_t.NO_PROFILE) {
+      if ((profile == EProfile(CORE_PROFILE: 1) && version_ < 420) ||
+        profile == EProfile(COMPATIBILITY_PROFILE: 1) ||
+        profile == EProfile(NO_PROFILE: 1)) {
         if (spvVersion.spv == 0) {
           insert(
             "vec4 texture1DLod(sampler1D, float, float);" ~
@@ -4332,9 +4334,9 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 150) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
-      if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 150) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
+      if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
         stageBuiltins.STAGE_GEOMETRY ~= (
           "void EmitStreamVertex(int);" ~
           "void EndStreamPrimitive(int);"
@@ -4347,17 +4349,17 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    bool esBarrier = (profile == profile_t.ES_PROFILE && version_ >= 310);
-    if ((profile != profile_t.ES_PROFILE && version_ >= 150) || esBarrier)
+    bool esBarrier = (profile == EProfile(ES_PROFILE: 1) && version_ >= 310);
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 150) || esBarrier)
       stageBuiltins.STAGE_TESSCONTROL ~= (
         "void barrier();"
       );
-    if ((profile != profile_t.ES_PROFILE && version_ >= 420) || esBarrier)
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 420) || esBarrier)
       stageBuiltins.STAGE_COMPUTE ~= (
         "void barrier();"
       );
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 320)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 320)) {
       stageBuiltins.STAGE_MESH ~= (
         "void barrier();"
       );
@@ -4365,11 +4367,11 @@ class TBuiltIns : TBuiltInParseables {
         "void barrier();"
       );
     }
-    if ((profile != profile_t.ES_PROFILE && version_ >= 130) || esBarrier)
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 130) || esBarrier)
       commonBuiltins ~= (
         "void memoryBarrier();"
       );
-    if ((profile != profile_t.ES_PROFILE && version_ >= 420) || esBarrier) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 420) || esBarrier) {
       commonBuiltins ~= (
         "void memoryBarrierBuffer();"
       );
@@ -4378,14 +4380,14 @@ class TBuiltIns : TBuiltInParseables {
         "void groupMemoryBarrier();"
       );
     }
-    if ((profile != profile_t.ES_PROFILE && version_ >= 420) || esBarrier) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 420) || esBarrier) {
       if (spvVersion.vulkan == 0 || spvVersion.vulkanRelaxed) {
         commonBuiltins ~= "void memoryBarrierAtomicCounter();";
       }
       commonBuiltins ~= "void memoryBarrierImage();";
     }
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 320)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 320)) {
       stageBuiltins.STAGE_MESH ~= (
         "void memoryBarrierShared();" ~
         "void groupMemoryBarrier();"
@@ -4402,7 +4404,7 @@ class TBuiltIns : TBuiltInParseables {
       "void debugPrintfEXT();\n"
     );
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       stageBuiltins.STAGE_COMPUTE ~= (
         "void coopMatLoadNV(out fcoopmatNV m, volatile coherent nontemporal float16_t[] buf, uint element, uint stride, bool colMajor);\n" ~
         "void coopMatLoadNV(out fcoopmatNV m, volatile coherent nontemporal float[] buf, uint element, uint stride, bool colMajor);\n" ~
@@ -4649,7 +4651,7 @@ class TBuiltIns : TBuiltInParseables {
       commonBuiltins ~= "uint tensorSizeARM(readonly writeonly tensorARM t, uint dim);\n";
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       enum string[] basicTypes = [
         "int8_t",
         "int16_t",
@@ -4783,7 +4785,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (spvVersion.spv == 0 && (profile != profile_t.ES_PROFILE || version_ == 100)) {
+    if (spvVersion.spv == 0 && (profile != EProfile(ES_PROFILE: 1) || version_ == 100)) {
       stageBuiltins.STAGE_FRAGMENT ~= (
         "vec4 texture2D(sampler2D, vec2, float);" ~
         "vec4 texture2DProj(sampler2D, vec3, float);" ~
@@ -4795,7 +4797,7 @@ class TBuiltIns : TBuiltInParseables {
         "\n"
       );
     }
-    if (spvVersion.spv == 0 && (profile != profile_t.ES_PROFILE && version_ > 100)) {
+    if (spvVersion.spv == 0 && (profile != EProfile(ES_PROFILE: 1) && version_ > 100)) {
       stageBuiltins.STAGE_FRAGMENT ~= (
         "vec4 texture1D(sampler1D, float, float);" ~
         "vec4 texture1DProj(sampler1D, vec2, float);" ~
@@ -4808,7 +4810,7 @@ class TBuiltIns : TBuiltInParseables {
         "\n"
       );
     }
-    if (spvVersion.spv == 0 && profile == profile_t.ES_PROFILE) {
+    if (spvVersion.spv == 0 && profile == EProfile(ES_PROFILE: 1)) {
       stageBuiltins.STAGE_FRAGMENT ~= (
         "vec4 texture2DLodEXT(sampler2D, vec2, float);" ~
         "vec4 texture2DProjLodEXT(sampler2D, vec3, float);" ~
@@ -4837,13 +4839,13 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 400) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 400) {
       stageBuiltins.STAGE_FRAGMENT ~= derivativeControls;
       stageBuiltins.STAGE_FRAGMENT ~= "\n";
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 150)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 150)) {
       stageBuiltins.STAGE_FRAGMENT ~= (
         "float interpolateAtCentroid(float);" ~
         "vec2 interpolateAtCentroid(vec2);" ~
@@ -4872,7 +4874,7 @@ class TBuiltIns : TBuiltInParseables {
       "\n"
     );
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       stageBuiltins.STAGE_FRAGMENT ~= (
         "float interpolateAtVertexAMD(float, uint);" ~
         "vec2 interpolateAtVertexAMD(vec2, uint);" ~
@@ -4898,7 +4900,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       stageBuiltins.STAGE_FRAGMENT ~= derivativesAndControl16bits;
       stageBuiltins.STAGE_FRAGMENT ~= "\n";
 
@@ -4922,7 +4924,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       commonBuiltins ~= (
         "uvec2 clock2x32ARB();" ~
         "uint64_t clockARB();" ~
@@ -4932,7 +4934,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450 && spvVersion.vulkan > 0) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450 && spvVersion.vulkan > 0) {
       stageBuiltins.STAGE_FRAGMENT ~= (
         "uint fragmentMaskFetchAMD(subpassInputMS);" ~
         "uint fragmentMaskFetchAMD(isubpassInputMS);" ~
@@ -4946,7 +4948,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 460) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 460) {
       commonBuiltins ~= (
         "void rayQueryInitializeEXT(rayQueryEXT, accelerationStructureEXT, uint, uint, vec3, float, vec3, float);" ~
         "void rayQueryTerminateEXT(rayQueryEXT);" ~
@@ -5239,26 +5241,26 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 320) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 450)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 320) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 450)) {
       stageBuiltins.STAGE_COMPUTE ~= derivativeControls;
       stageBuiltins.STAGE_COMPUTE ~= "\n";
     }
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       stageBuiltins.STAGE_COMPUTE ~= derivativesAndControl16bits;
       stageBuiltins.STAGE_COMPUTE ~= derivativesAndControl64bits;
       stageBuiltins.STAGE_COMPUTE ~= "\n";
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 320)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 320)) {
       stageBuiltins.STAGE_MESH ~= (
         "void writePackedPrimitiveIndices4x8NV(uint, uint);" ~
         "\n"
       );
     }
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 320)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 320)) {
       stageBuiltins.STAGE_TASK ~= (
         "void EmitMeshTasksEXT(uint, uint, uint);" ~
         "\n"
@@ -5268,8 +5270,8 @@ class TBuiltIns : TBuiltInParseables {
         "\n"
       );
     }
-    if ((profile != profile_t.ES_PROFILE && version_ >= 460) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 320)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 460) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 320)) {
       stageBuiltins.STAGE_MESH ~= (
         "vec3 fetchMicroTriangleVertexPositionNV(accelerationStructureEXT, int, int, int, ivec2);" ~
         "vec2 fetchMicroTriangleVertexBarycentricNV(accelerationStructureEXT, int, int, int, ivec2);" ~
@@ -5284,7 +5286,7 @@ class TBuiltIns : TBuiltInParseables {
 
     if (spvVersion.spv == 0) {
       commonBuiltins ~= "struct gl_DepthRangeParameters {";
-      if (profile == profile_t.ES_PROFILE) {
+      if (profile == EProfile(ES_PROFILE: 1)) {
         commonBuiltins ~= (
           "highp float near;" ~
           "highp float far;" ~
@@ -5396,8 +5398,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 420) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 420) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_COMPUTE ~= (
         "in highp uvec3 gl_NumWorkGroups;" ~
         "const highp uvec3 gl_WorkGroupSize = uvec3(1,1,1);" ~
@@ -5412,16 +5414,16 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 140) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 140) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_COMPUTE ~= (
         "in highp int gl_DeviceIndex;" ~
         "\n"
       );
     }
 
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 460)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 460)) {
       stageBuiltins.STAGE_COMPUTE ~= (
         "in highp uvec2 gl_TileOffsetQCOM;" ~
         "in highp uvec3 gl_TileDimensionQCOM;" ~
@@ -5430,8 +5432,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 320)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 320)) {
       stageBuiltins.STAGE_MESH ~= (
         "out gl_MeshPerVertexNV {" ~
           "vec4 gl_Position;" ~
@@ -5507,7 +5509,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       stageBuiltins.STAGE_MESH ~= (
         "in highp int gl_DeviceIndex;" ~
         "in int gl_DrawIDARB;" ~
@@ -5533,7 +5535,7 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if (profile != profile_t.ES_PROFILE) {
+    if (profile != EProfile(ES_PROFILE: 1)) {
       if (version_ < 130) {
         stageBuiltins.STAGE_VERTEX ~= (
           "attribute vec4 gl_Color;" ~
@@ -5704,8 +5706,8 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 140) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 140) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_VERTEX ~= (
         "in highp int gl_DeviceIndex;" ~
         "in highp int gl_ViewIndex;"
@@ -5719,23 +5721,23 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_VERTEX ~= (
         "out highp int gl_PrimitiveShadingRateEXT;" ~
         "\n"
       );
     }
 
-    if (profile == profile_t.CORE_PROFILE ||
-      profile == profile_t.COMPATIBILITY_PROFILE) {
+    if (profile == EProfile(CORE_PROFILE: 1) ||
+      profile == EProfile(COMPATIBILITY_PROFILE: 1)) {
       stageBuiltins.STAGE_GEOMETRY ~= "in gl_PerVertex {";
       stageBuiltins.STAGE_GEOMETRY ~= (
         "vec4 gl_Position" ~
         "float gl_PointSize" ~
         "float gl_ClipDistance[]"
       );
-      if (profile == profile_t.COMPATIBILITY_PROFILE)
+      if (profile == EProfile(COMPATIBILITY_PROFILE: 1))
         stageBuiltins.STAGE_GEOMETRY ~= (
           "vec4 gl_ClipVertex;" ~
           "vec4 gl_FrontColor;" ~
@@ -5760,7 +5762,7 @@ class TBuiltIns : TBuiltInParseables {
         "float gl_ClipDistance[];" ~
         "\n"
       );
-      if (profile == profile_t.COMPATIBILITY_PROFILE && version_ >= 400)
+      if (profile == EProfile(COMPATIBILITY_PROFILE: 1) && version_ >= 400)
         stageBuiltins.STAGE_GEOMETRY ~= (
           "vec4 gl_ClipVertex;" ~
           "vec4 gl_FrontColor;" ~
@@ -5783,7 +5785,7 @@ class TBuiltIns : TBuiltInParseables {
         stageBuiltins.STAGE_GEOMETRY ~=
           "out int gl_ViewportIndex;";
 
-      if (profile == profile_t.COMPATIBILITY_PROFILE && version_ < 400)
+      if (profile == EProfile(COMPATIBILITY_PROFILE: 1) && version_ < 400)
         stageBuiltins.STAGE_GEOMETRY ~=
           "out vec4 gl_ClipVertex;";
 
@@ -5802,7 +5804,7 @@ class TBuiltIns : TBuiltInParseables {
           "out vec4 gl_PositionPerViewNV[];" ~
           "out int gl_ViewportMaskPerViewNV[];"
         );
-    } else if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    } else if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       stageBuiltins.STAGE_GEOMETRY ~= (
         "in gl_PerVertex {" ~
           "highp vec4 gl_Position;" ~
@@ -5823,8 +5825,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 140) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 140) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_GEOMETRY ~= (
         "in highp int gl_DeviceIndex;" ~
         "in highp int gl_ViewIndex;" ~
@@ -5832,15 +5834,15 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_GEOMETRY ~= (
         "out highp int gl_PrimitiveShadingRateEXT;" ~
         "\n"
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       stageBuiltins.STAGE_TESSCONTROL ~= (
         "in int gl_PatchVerticesIn;" ~
         "in int gl_PrimitiveID;" ~
@@ -5852,7 +5854,7 @@ class TBuiltIns : TBuiltInParseables {
         "float gl_PointSize;" ~
         "float gl_ClipDistance[];"
       );
-      if (profile == profile_t.COMPATIBILITY_PROFILE)
+      if (profile == EProfile(COMPATIBILITY_PROFILE: 1))
         stageBuiltins.STAGE_TESSCONTROL ~= (
           "vec4 gl_ClipVertex;" ~
           "vec4 gl_FrontColor;" ~
@@ -5905,7 +5907,7 @@ class TBuiltIns : TBuiltInParseables {
         "patch out highp vec4 gl_BoundingBoxEXT[2];" ~
         "\n"
       );
-      if (profile == profile_t.ES_PROFILE && version_ >= 320) {
+      if (profile == EProfile(ES_PROFILE: 1) && version_ >= 320) {
         stageBuiltins.STAGE_TESSCONTROL ~= (
           "patch out highp vec4 gl_BoundingBox[2];" ~
           "\n"
@@ -5913,8 +5915,8 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 140) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 140) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_TESSCONTROL ~= (
         "in highp int gl_DeviceIndex;" ~
         "in highp int gl_ViewIndex;" ~
@@ -5922,7 +5924,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150) {
       stageBuiltins.STAGE_TESSEVALUATION ~= (
         "in int gl_PatchVerticesIn;" ~
         "in int gl_PrimitiveID;" ~
@@ -5937,7 +5939,7 @@ class TBuiltIns : TBuiltInParseables {
         "float gl_PointSize;" ~
         "float gl_ClipDistance[];"
       );
-      if (version_ >= 400 && profile == profile_t.COMPATIBILITY_PROFILE)
+      if (version_ >= 400 && profile == EProfile(COMPATIBILITY_PROFILE: 1))
         stageBuiltins.STAGE_TESSEVALUATION ~= (
           "vec4 gl_ClipVertex;" ~
           "vec4 gl_FrontColor;" ~
@@ -5971,7 +5973,7 @@ class TBuiltIns : TBuiltInParseables {
           "out vec4 gl_PositionPerViewNV[];" ~
           "out int gl_ViewportMaskPerViewNV[];"
         );
-    } else if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+    } else if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
       stageBuiltins.STAGE_TESSEVALUATION ~= (
         "in highp int gl_PatchVerticesIn;" ~
         "in highp int gl_PrimitiveID;" ~
@@ -5988,8 +5990,8 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 140) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 140) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_TESSEVALUATION ~= (
         "in highp int gl_DeviceIndex;" ~
         "in highp int gl_ViewIndex;" ~
@@ -5997,7 +5999,7 @@ class TBuiltIns : TBuiltInParseables {
       );
     }
 
-    if (profile != profile_t.ES_PROFILE) {
+    if (profile != EProfile(ES_PROFILE: 1)) {
       stageBuiltins.STAGE_FRAGMENT ~= (
         "vec4 gl_FragCoord;" ~
         "bool gl_FrontFacing;" ~
@@ -6163,8 +6165,8 @@ class TBuiltIns : TBuiltInParseables {
     if (version_ >= 130)
       add2ndGenerationSamplingImaging(version_, profile, spvVersion);
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 140) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 140) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       stageBuiltins.STAGE_FRAGMENT.insert(
         "flat in highp int gl_DeviceIndex;" ~
         "flat in highp int gl_ViewIndex;" ~
@@ -6177,8 +6179,8 @@ class TBuiltIns : TBuiltInParseables {
         "\n");
     }
     
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 460)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 460)) {
       stageBuiltins.STAGE_FRAGMENT.insert(
         "flat in highp uvec2 gl_TileOffsetQCOM;" ~
         "flat in highp uvec3 gl_TileDimensionQCOM;" ~
@@ -6187,7 +6189,7 @@ class TBuiltIns : TBuiltInParseables {
     }
 
     
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       string ballotDecls =
         "uniform uint gl_SubGroupSizeARB;" ~
         "in uint gl_SubGroupInvocationARB;" ~
@@ -6233,8 +6235,8 @@ class TBuiltIns : TBuiltInParseables {
     }
 
     
-    if ((profile == profile_t.ES_PROFILE && version_ >= 310) ||
-      (profile != profile_t.ES_PROFILE && version_ >= 140)) {
+    if ((profile == EProfile(ES_PROFILE: 1) && version_ >= 310) ||
+      (profile != EProfile(ES_PROFILE: 1) && version_ >= 140)) {
       string subgroupDecls =
         "in mediump uint gl_SubgroupSize;" ~
         "in mediump uint gl_SubgroupInvocationID;" ~
@@ -6321,7 +6323,7 @@ class TBuiltIns : TBuiltInParseables {
     }
 
     
-    if (profile != profile_t.ES_PROFILE && version_ >= 460) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 460) {
       string constRayFlags =
         "const uint gl_RayFlagsNoneNV = 0U;" ~
         "const uint gl_RayFlagsNoneEXT = 0U;" ~
@@ -6489,7 +6491,7 @@ class TBuiltIns : TBuiltInParseables {
       stageBuiltins.STAGE_CALLABLE.insert(callableDecls);
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 140)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 140)) {
       string deviceIndex =
         "in highp int gl_DeviceIndex;" ~
         "\n";
@@ -6501,8 +6503,8 @@ class TBuiltIns : TBuiltInParseables {
       stageBuiltins.STAGE_MISS.insert(deviceIndex);
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 420) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 420) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       commonBuiltins.insert("const int gl_ScopeDevice = 1;\n");
       commonBuiltins.insert("const int gl_ScopeWorkgroup = 2;\n");
       commonBuiltins.insert("const int gl_ScopeSubgroup = 3;\n");
@@ -6525,7 +6527,7 @@ class TBuiltIns : TBuiltInParseables {
       commonBuiltins.insert("const int gl_StorageSemanticsOutput = 0x1000;\n");
     }
 
-    if ((profile != profile_t.ES_PROFILE && version_ >= 450) || (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 450) || (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       static foreach (i; 0..stageBuiltins.tupleof.length) {
         stageBuiltins.tupleof[i].insert("const highp int gl_ShadingRateFlag2VerticalPixelsEXT = 1;\n");
         stageBuiltins.tupleof[i].insert("const highp int gl_ShadingRateFlag4VerticalPixelsEXT = 2;\n");
@@ -6535,12 +6537,12 @@ class TBuiltIns : TBuiltInParseables {
     }
     
     
-    if ((profile != profile_t.ES_PROFILE && version_ >= 420) ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if ((profile != EProfile(ES_PROFILE: 1) && version_ >= 420) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       for (int ms = 0; ms <= 1; ++ms) { 
         for (int arrayed = 0; arrayed <= 1; ++arrayed) { 
           for (TSamplerDim dim = TSamplerDim.Esd1D; dim < TSamplerDim.EsdSubpass; ++dim) { 
-            if ((dim == TSamplerDim.Esd1D || dim == TSamplerDim.EsdRect) && profile == profile_t.ES_PROFILE)
+            if ((dim == TSamplerDim.Esd1D || dim == TSamplerDim.EsdRect) && profile == EProfile(ES_PROFILE: 1))
               continue;
                     
             if ((dim == TSamplerDim.Esd3D || dim == TSamplerDim.EsdRect || dim == TSamplerDim.EsdBuffer) && arrayed)
@@ -6566,29 +6568,29 @@ class TBuiltIns : TBuiltInParseables {
   }
 
   override void initialize(
-    int version_, profile_t, in SpvVersion spvVersion, EShLanguage
+    int version_, EProfile, in SpvVersion spvVersion, EShLanguage
   ) {
     throw new Exception("unimplemented");
   }
 
   void add2ndGenerationSamplingImaging(
-    int version_, profile_t profile, in SpvVersion spvVersion
+    int version_, EProfile profile, in SpvVersion spvVersion
   ) {
     enum TBasicType[] bTypes = [
       TBasicType.EbtFloat, TBasicType.EbtInt, TBasicType.EbtUint, TBasicType.EbtFloat16
     ];
-    bool skipBuffer = (profile == profile_t.ES_PROFILE && version_ < 310) || (profile != profile_t.ES_PROFILE && version_ < 140);
-    bool skipCubeArrayed = (profile == profile_t.ES_PROFILE && version_ < 310) || (profile != profile_t.ES_PROFILE && version_ < 130);
+    bool skipBuffer = (profile == EProfile(ES_PROFILE: 1) && version_ < 310) || (profile != EProfile(ES_PROFILE: 1) && version_ < 140);
+    bool skipCubeArrayed = (profile == EProfile(ES_PROFILE: 1) && version_ < 310) || (profile != EProfile(ES_PROFILE: 1) && version_ < 130);
     for (int image = 0; image <= 1; ++image) {
       for (int shadow = 0; shadow <= 1; ++shadow) {
         for (int ms = 0; ms <= 1; ++ms) {
           if ((ms || image) && shadow)
             continue;
-          if (ms && profile != profile_t.ES_PROFILE && version_ < 140)
+          if (ms && profile != EProfile(ES_PROFILE: 1) && version_ < 140)
             continue;
-          if (ms && image && profile == profile_t.ES_PROFILE)
+          if (ms && image && profile == EProfile(ES_PROFILE: 1))
             continue;
-          if (ms && profile == profile_t.ES_PROFILE && version_ < 310)
+          if (ms && profile == EProfile(ES_PROFILE: 1) && version_ < 310)
             continue;
 
           for (int arrayed = 0; arrayed <= 1; ++arrayed) {
@@ -6599,13 +6601,13 @@ class TBuiltIns : TBuiltInParseables {
                   continue;
               if (dim == TSamplerDim.EsdSubpass && (image || shadow || arrayed))
                   continue;
-              if ((dim == TSamplerDim.Esd1D || dim == TSamplerDim.EsdRect) && profile == profile_t.ES_PROFILE)
+              if ((dim == TSamplerDim.Esd1D || dim == TSamplerDim.EsdRect) && profile == EProfile(ES_PROFILE: 1))
                   continue;
               if (dim == TSamplerDim.EsdSubpass && spvVersion.vulkan == 0)
                   continue;
               if (dim == TSamplerDim.EsdSubpass && (image || shadow || arrayed))
                   continue;
-              if ((dim == TSamplerDim.Esd1D || dim == TSamplerDim.EsdRect) && profile == profile_t.ES_PROFILE)
+              if ((dim == TSamplerDim.Esd1D || dim == TSamplerDim.EsdRect) && profile == EProfile(ES_PROFILE: 1))
                   continue;
               if (dim != TSamplerDim.Esd2D && dim != TSamplerDim.EsdSubpass && ms)
                   continue;
@@ -6613,7 +6615,7 @@ class TBuiltIns : TBuiltInParseables {
                   continue;
               if (dim == TSamplerDim.EsdBuffer && (shadow || arrayed || ms))
                   continue;
-              if (ms && arrayed && profile == profile_t.ES_PROFILE && version_ < 310)
+              if (ms && arrayed && profile == EProfile(ES_PROFILE: 1) && version_ < 310)
                   continue;
               if (dim == TSamplerDim.Esd3D && shadow)
                   continue;
@@ -6623,7 +6625,7 @@ class TBuiltIns : TBuiltInParseables {
                   continue;
 
               for (size_t bType = 0; bType < bTypes.length; ++bType) {
-                if (bTypes[bType] == TBasicType.EbtFloat16 && (profile == profile_t.ES_PROFILE || version_ < 450))
+                if (bTypes[bType] == TBasicType.EbtFloat16 && (profile == EProfile(ES_PROFILE: 1) || version_ < 450))
                   continue;
                 if (dim == TSamplerDim.EsdRect && version_ < 140 && bType > 0)
                   continue;
@@ -6684,14 +6686,14 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       commonBuiltins ~= `
         bool sparseTexelsResidentARB(int code);
       `.outdent;
     }
   }
 
-  void addSubpassSampling(TSampler sampler, string typeName, int, profile_t) {
+  void addSubpassSampling(TSampler sampler, string typeName, int, EProfile) {
     stageBuiltins.STAGE_FRAGMENT.insert(prefixes[sampler.type]);
     stageBuiltins.STAGE_FRAGMENT.insert("vec4 subpassLoad");
     stageBuiltins.STAGE_FRAGMENT.insert("(");
@@ -6700,7 +6702,7 @@ class TBuiltIns : TBuiltInParseables {
     stageBuiltins.STAGE_FRAGMENT.insert(");\n");
   }
 
-  void addImageFunctions(TSampler sampler, string typeName, int version_, profile_t profile) {
+  void addImageFunctions(TSampler sampler, string typeName, int version_, EProfile profile) {
     int dims = dimMap[sampler.dim];
     if (sampler.arrayed && sampler.dim != TSamplerDim.EsdCube)
       ++dims;
@@ -6715,7 +6717,7 @@ class TBuiltIns : TBuiltInParseables {
     if (sampler.isMultiSample())
       imageParams.insert(", int");
 
-    if (profile == profile_t.ES_PROFILE)
+    if (profile == EProfile(ES_PROFILE: 1))
       commonBuiltins.insert("highp ");
     commonBuiltins.insert(prefixes[sampler.type]);
     commonBuiltins.insert("vec4 imageLoad(readonly volatile coherent nontemporal ");
@@ -6728,7 +6730,7 @@ class TBuiltIns : TBuiltInParseables {
     commonBuiltins.insert(prefixes[sampler.type]);
     commonBuiltins.insert("vec4);\n");
 
-    if (!sampler.is1D() && !sampler.isBuffer() && profile != profile_t.ES_PROFILE && version_ >= 450) {
+    if (!sampler.is1D() && !sampler.isBuffer() && profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
       commonBuiltins.insert("int sparseImageLoadARB(readonly volatile coherent nontemporal ");
       commonBuiltins.insert(imageParams[]);
       commonBuiltins.insert(", out ");
@@ -6737,8 +6739,8 @@ class TBuiltIns : TBuiltInParseables {
       commonBuiltins.insert(");\n");
     }
 
-    if (profile != profile_t.ES_PROFILE ||
-      (profile == profile_t.ES_PROFILE && version_ >= 310)) {
+    if (profile != EProfile(ES_PROFILE: 1) ||
+      (profile == EProfile(ES_PROFILE: 1) && version_ >= 310)) {
       if (sampler.type == TBasicType.EbtInt || sampler.type == TBasicType.EbtUint || sampler.type == TBasicType.EbtInt64 || sampler.type == TBasicType.EbtUint64 ) {
         string dataType;
         switch (sampler.type) {
@@ -6798,13 +6800,13 @@ class TBuiltIns : TBuiltInParseables {
         commonBuiltins.insert(dataType);
         commonBuiltins.insert(", int, int, int);\n");
       } else {
-        if (profile == profile_t.ES_PROFILE && version_ >= 310) {
+        if (profile == EProfile(ES_PROFILE: 1) && version_ >= 310) {
           commonBuiltins.insert("float imageAtomicExchange(volatile coherent nontemporal ");
           commonBuiltins.insert(imageParams[]);
           commonBuiltins.insert(", float);\n");
         }
 
-        if (profile != profile_t.ES_PROFILE && version_ >= 430) {
+        if (profile != EProfile(ES_PROFILE: 1) && version_ >= 430) {
           const int numFp16Builtins = 4;
           string[numFp16Builtins] atomicFp16Func = [
             " imageAtomicAdd(volatile coherent nontemporal ",
@@ -6829,7 +6831,7 @@ class TBuiltIns : TBuiltInParseables {
           }
         }
 
-        if (profile != profile_t.ES_PROFILE && version_ >= 450) {
+        if (profile != EProfile(ES_PROFILE: 1) && version_ >= 450) {
           commonBuiltins.insert("float imageAtomicAdd(volatile coherent nontemporal ");
           commonBuiltins.insert(imageParams[]);
           commonBuiltins.insert(", float);\n");
@@ -6881,7 +6883,7 @@ class TBuiltIns : TBuiltInParseables {
     if (sampler.dim == TSamplerDim.EsdRect || sampler.dim == TSamplerDim.EsdBuffer || sampler.shadow || sampler.isMultiSample())
       return;
 
-    if (profile == profile_t.ES_PROFILE || version_ < 450)
+    if (profile == EProfile(ES_PROFILE: 1) || version_ < 450)
       return;
 
     DList!string imageLodParams = DList!string([typeName]);
@@ -6914,13 +6916,13 @@ class TBuiltIns : TBuiltInParseables {
     }
   }
 
-  void addQueryFunctions(TSampler sampler, string typeName, int version_, profile_t profile) {
+  void addQueryFunctions(TSampler sampler, string typeName, int version_, EProfile profile) {
     int sizeDims = dimMap[sampler.dim] + (sampler.arrayed ? 1 : 0) - (sampler.dim == TSamplerDim.EsdCube ? 1 : 0);
 
-    if (sampler.isImage() && ((profile == profile_t.ES_PROFILE && version_ < 310) || (profile != profile_t.ES_PROFILE && version_ < 420)))
+    if (sampler.isImage() && ((profile == EProfile(ES_PROFILE: 1) && version_ < 310) || (profile != EProfile(ES_PROFILE: 1) && version_ < 420)))
       return;
 
-    if (profile == profile_t.ES_PROFILE)
+    if (profile == EProfile(ES_PROFILE: 1))
       commonBuiltins.insert("highp ");
     if (sizeDims == 1)
       commonBuiltins.insert("int");
@@ -6938,7 +6940,7 @@ class TBuiltIns : TBuiltInParseables {
     else
       commonBuiltins.insert(");\n");
   
-    if (profile != profile_t.ES_PROFILE && version_ >= 430 && sampler.isMultiSample()) {
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 430 && sampler.isMultiSample()) {
       commonBuiltins.insert("int ");
       if (sampler.isImage())
         commonBuiltins.insert("imageSamples(readonly writeonly volatile coherent nontemporal ");
@@ -6948,7 +6950,7 @@ class TBuiltIns : TBuiltInParseables {
       commonBuiltins.insert(");\n");
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 150 && sampler.isCombined() && sampler.dim != TSamplerDim.EsdRect &&
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 150 && sampler.isCombined() && sampler.dim != TSamplerDim.EsdRect &&
       !sampler.isMultiSample() && !sampler.isBuffer()) {
 
       const string[2] funcName = ["vec2 textureQueryLod(", "vec2 textureQueryLOD("];
@@ -6986,7 +6988,7 @@ class TBuiltIns : TBuiltInParseables {
       }
     }
 
-    if (profile != profile_t.ES_PROFILE && version_ >= 430 && !sampler.isImage() && sampler.dim != TSamplerDim.EsdRect &&
+    if (profile != EProfile(ES_PROFILE: 1) && version_ >= 430 && !sampler.isImage() && sampler.dim != TSamplerDim.EsdRect &&
       !sampler.isMultiSample() && !sampler.isBuffer()) {
       commonBuiltins.insert("int textureQueryLevels(");
       commonBuiltins.insert(typeName);
@@ -6994,7 +6996,7 @@ class TBuiltIns : TBuiltInParseables {
     }
   }
 
-  void addGatherFunctions(TSampler sampler, string typeName, int version_, profile_t profile) {
+  void addGatherFunctions(TSampler sampler, string typeName, int version_, EProfile profile) {
     switch (sampler.dim) {
       case TSamplerDim.Esd2D:
       case TSamplerDim.EsdRect:
@@ -7022,7 +7024,7 @@ class TBuiltIns : TBuiltInParseables {
             continue;
 
           for (int sparse = 0; sparse <= 1; ++sparse) {
-            if (sparse && (profile == profile_t.ES_PROFILE || version_ < 450))
+            if (sparse && (profile == EProfile(ES_PROFILE: 1) || version_ < 450))
               continue;
 
             DList!string s;
@@ -7089,7 +7091,7 @@ class TBuiltIns : TBuiltInParseables {
     if (sampler.dim == TSamplerDim.EsdRect || sampler.shadow)
       return;
 
-    if (profile == profile_t.ES_PROFILE || version_ < 450)
+    if (profile == EProfile(ES_PROFILE: 1) || version_ < 450)
       return;
 
     for (int bias = 0; bias < 2; ++bias) {
@@ -7110,7 +7112,7 @@ class TBuiltIns : TBuiltInParseables {
                 continue;
 
               for (int sparse = 0; sparse <= 1; ++sparse) {
-                if (sparse && (profile == profile_t.ES_PROFILE || version_ < 450))
+                if (sparse && (profile == EProfile(ES_PROFILE: 1) || version_ < 450))
                   continue;
 
                 DList!string s;
@@ -7199,7 +7201,7 @@ class TBuiltIns : TBuiltInParseables {
     }
   }
 
-  void addSamplingFunctions(TSampler sampler, string typeName, int version_, profile_t profile) {
+  void addSamplingFunctions(TSampler sampler, string typeName, int version_, EProfile profile) {
     for (int proj = 0; proj <= 1; ++proj) {
       if (proj && (sampler.dim == TSamplerDim.EsdCube || sampler.isBuffer() || sampler.arrayed || sampler.isMultiSample()
         || !sampler.isCombined()))
@@ -7271,13 +7273,13 @@ class TBuiltIns : TBuiltInParseables {
                       totalDims--;
                     }
                     for (int lodClamp = 0; lodClamp <= 1; ++lodClamp) {
-                      if (lodClamp && (profile == profile_t.ES_PROFILE || version_ < 450))
+                      if (lodClamp && (profile == EProfile(ES_PROFILE: 1) || version_ < 450))
                         continue;
                       if (lodClamp && (proj || lod || fetch))
                         continue;
 
                       for (int sparse = 0; sparse <= 1; ++sparse) {
-                        if (sparse && (profile == profile_t.ES_PROFILE || version_ < 450))
+                        if (sparse && (profile == EProfile(ES_PROFILE: 1) || version_ < 450))
                           continue;
                         if (sparse && (sampler.is1D() || sampler.isBuffer() || proj))
                           continue;
@@ -7477,7 +7479,7 @@ enum ArgClass {
 }
 
 struct Versioning {
-  profile_t profiles;
+  EProfile profiles;
   int minExtendedVersion;
   int minCoreVersion;
   int numExtensions;
@@ -7486,20 +7488,20 @@ struct Versioning {
 
 enum ARBCompatibility = true;
 
-bool IncludeLegacy(int version_, profile_t profile, in SpvVersion spvVersion) {
-  return profile != profile_t.ES_PROFILE && (version_ <= 130 ||
+bool IncludeLegacy(int version_, EProfile profile, in SpvVersion spvVersion) {
+  return profile != EProfile(ES_PROFILE: 1) && (version_ <= 130 ||
     (spvVersion.spv == 0 && version_ == 140 && ARBCompatibility) ||
-    profile == profile_t.COMPATIBILITY_PROFILE);
+    profile == EProfile(COMPATIBILITY_PROFILE: 1));
 }
 
 bool ValidVersion(
   in BuiltInFunction func, int version_,
-  profile_t profile, in SpvVersion
+  EProfile profile, in SpvVersion
 ) {
   if (func.versioning.empty) return true;
 
   foreach (const ref v; func.versioning) {
-    if ((v.profiles & profile) != 0) {
+    if (v.profiles & profile) {
       if (v.minCoreVersion <= version_ ||
         (v.numExtensions > 0 && v.minExtendedVersion <= version_))
         return true;

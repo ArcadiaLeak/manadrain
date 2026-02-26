@@ -49,13 +49,13 @@ class TInputScanner {
 
   bool scanVersion(
     out int version_,
-    out profile_t profile,
+    out EProfile profile,
     out bool notFirstToken
   ) {
     bool versionNotFirst = false;
     notFirstToken = false;
     version_ = 0;
-    profile = profile_t.NO_PROFILE;
+    profile = EProfile(NO_PROFILE: 1);
 
     bool foundNonSpaceTab = false;
     bool lookingInMiddle = false;
@@ -128,11 +128,11 @@ class TInputScanner {
       }
 
       if (profileLength == 2 && strncmp(profileString.ptr, "es", profileLength) == 0)
-        profile = profile_t.ES_PROFILE;
+        profile = EProfile(ES_PROFILE: 1);
       else if (profileLength == 4 && strncmp(profileString.ptr, "core", profileLength) == 0)
-        profile = profile_t.CORE_PROFILE;
+        profile = EProfile(CORE_PROFILE: 1);
       else if (profileLength == 13 && strncmp(profileString.ptr, "compatibility", profileLength) == 0)
-        profile = profile_t.COMPATIBILITY_PROFILE;
+        profile = EProfile(COMPATIBILITY_PROFILE: 1);
 
       return versionNotFirst;
     } while (true);

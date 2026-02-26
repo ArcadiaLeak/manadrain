@@ -1,7 +1,6 @@
 module glslang.c_shader_types;
 
 struct EShMessages {
-  bool MSG_DEFAULT_BIT;
   bool MSG_RELAXED_ERRORS_BIT;
   bool MSG_SUPPRESS_WARNINGS_BIT;
   bool MSG_AST_BIT;
