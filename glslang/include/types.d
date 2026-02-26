@@ -1,8 +1,5 @@
 module glslang.include.types;
-
 import glslang;
-
-import std.array;
 
 enum TSamplerDim {
   EsdNone,
@@ -115,68 +112,70 @@ struct TSampler {
   }
 
   string getString() const {
-    Appender!(char[]) s;
+    import std.array;
+    import std.container.dlist;
+    DList!string s;
 
     if (isPureSampler()) {
-      s.put("sampler");
-      return s[].idup;
+      s.insert("sampler");
+      return s[].join;
     }
 
     switch (type) {
-      case TBasicType.EbtInt: s.put("i");   break;
-      case TBasicType.EbtUint: s.put("u");   break;
-      case TBasicType.EbtFloat16: s.put("f16"); break;
-      case TBasicType.EbtBFloat16: s.put("bf16"); break;
-      case TBasicType.EbtFloatE5M2: s.put("fe5m2"); break;
-      case TBasicType.EbtFloatE4M3: s.put("fe4m3"); break;
-      case TBasicType.EbtInt8: s.put("i8");  break;
-      case TBasicType.EbtUint16: s.put("u8");  break;
-      case TBasicType.EbtInt16: s.put("i16"); break;
-      case TBasicType.EbtUint8: s.put("u16"); break;
-      case TBasicType.EbtInt64: s.put("i64"); break;
-      case TBasicType.EbtUint64: s.put("u64"); break;
+      case TBasicType.EbtInt: s.insert("i");   break;
+      case TBasicType.EbtUint: s.insert("u");   break;
+      case TBasicType.EbtFloat16: s.insert("f16"); break;
+      case TBasicType.EbtBFloat16: s.insert("bf16"); break;
+      case TBasicType.EbtFloatE5M2: s.insert("fe5m2"); break;
+      case TBasicType.EbtFloatE4M3: s.insert("fe4m3"); break;
+      case TBasicType.EbtInt8: s.insert("i8");  break;
+      case TBasicType.EbtUint16: s.insert("u8");  break;
+      case TBasicType.EbtInt16: s.insert("i16"); break;
+      case TBasicType.EbtUint8: s.insert("u16"); break;
+      case TBasicType.EbtInt64: s.insert("i64"); break;
+      case TBasicType.EbtUint64: s.insert("u64"); break;
       default: break;
     }
     if (isImageClass()) {
       if (isAttachmentEXT())
-        s.put("attachmentEXT");
+        s.insert("attachmentEXT");
       else if (isSubpass())
-        s.put("subpass");
+        s.insert("subpass");
       else if (isTileAttachmentQCOM())
-        s.put("attachmentQCOM");
+        s.insert("attachmentQCOM");
       else
-        s.put("image");
+        s.insert("image");
     } else if (isCombined()) {
-      s.put("sampler");
+      s.insert("sampler");
     } else {
-      s.put("texture");
+      s.insert("texture");
     }
     if (isExternal()) {
-      s.put("ExternalOES");
-      return s[].idup;
+      s.insert("ExternalOES");
+      return s[].join;
     }
     if (isYuv()) {
-      return "__" ~ s[].idup ~ "External2DY2YEXT";
+      return "__" ~ s[].join ~ "External2DY2YEXT";
     }
     switch (dim) {
-      case TSamplerDim.Esd2D: s.put("2D");      break;
-      case TSamplerDim.Esd3D: s.put("3D");      break;
-      case TSamplerDim.EsdCube: s.put("Cube");    break;
-      case TSamplerDim.Esd1D: s.put("1D");      break;
-      case TSamplerDim.EsdRect: s.put("2DRect");  break;
-      case TSamplerDim.EsdBuffer: s.put("Buffer");  break;
-      case TSamplerDim.EsdSubpass: s.put("Input"); break;
-      case TSamplerDim.EsdAttachmentEXT: s.put(""); break;
+      case TSamplerDim.Esd2D: s.insert("2D");      break;
+      case TSamplerDim.Esd3D: s.insert("3D");      break;
+      case TSamplerDim.EsdCube: s.insert("Cube");    break;
+      case TSamplerDim.Esd1D: s.insert("1D");      break;
+      case TSamplerDim.EsdRect: s.insert("2DRect");  break;
+      case TSamplerDim.EsdBuffer: s.insert("Buffer");  break;
+      case TSamplerDim.EsdSubpass: s.insert("Input"); break;
+      case TSamplerDim.EsdAttachmentEXT: s.insert(""); break;
       default: break;
     }
     if (isMultiSample())
-      s.put("MS");
+      s.insert("MS");
     if (arrayed)
-      s.put("Array");
+      s.insert("Array");
     if (shadow)
-      s.put("Shadow");
+      s.insert("Shadow");
 
-    return s[].idup;
+    return s[].join;
   }
 }
 
