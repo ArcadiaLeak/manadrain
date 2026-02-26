@@ -180,6 +180,10 @@ struct TSampler {
   }
 }
 
+class TTypeList {
+  void[] data;
+}
+
 string getBasicString(TBasicType t) {
   switch (t) {
     case TBasicType.EbtFloat: return "float";
@@ -216,6 +220,9 @@ string getBasicString(TBasicType t) {
   }
 }
 
+class TTypeParameters {}
+class TSpirvType {}
+
 class TType {
   TBasicType basicType;
   uint vectorSize;
@@ -231,9 +238,56 @@ class TType {
   uint tensorRankARM;
   TQualifier qualifier;
   TArraySizes arraySizes;
+  union {
+    TTypeList structure;
+    TType referentType;
+  }
+  string fieldName;
+  string typeName;
+  TSampler sampler;
+  TTypeParameters typeParameters;
+  TSpirvType spirvType;
+  
+  bool isStruct() const =>
+    basicType == TBasicType.EbtStruct || basicType == TBasicType.EbtBlock;
+  bool isCoopMatNV() const { return coopmatNV; }
+  bool isCoopMatKHR() const { return coopmatKHR; }
+  bool isCoopVecNV() const { return coopvecNV; }
 
-  void shallowCopy(const TType copyOf) {
+  void shallowCopy(TType copyOf) {
+    basicType = copyOf.basicType;
+    sampler = copyOf.sampler;
+    qualifier = copyOf.qualifier;
+    vectorSize = copyOf.vectorSize;
+    matrixCols = copyOf.matrixCols;
+    matrixRows = copyOf.matrixRows;
+    vector1 = copyOf.vector1;
+    arraySizes = copyOf.arraySizes;
+    fieldName = copyOf.fieldName;
+    typeName = copyOf.typeName;
+    if (isStruct) {
+      structure = copyOf.structure;
+    } else {
+      referentType = copyOf.referentType;
+    }
+    typeParameters = copyOf.typeParameters;
+    spirvType = copyOf.spirvType;
+    coopmatNV = copyOf.isCoopMatNV;
+    coopmatKHR = copyOf.isCoopMatKHR;
+    coopmatKHRuse = copyOf.coopmatKHRuse;
+    coopmatKHRUseValid = copyOf.coopmatKHRUseValid;
+    coopvecNV = copyOf.isCoopVecNV;
+    tileAttachmentQCOM = copyOf.tileAttachmentQCOM;
+    tensorRankARM = copyOf.tensorRankARM;
+  }
 
+  void deepCopy(TType copyOf) {
+    TTypeList[TTypeList] copied;
+    deepCopy(copyOf, copied);
+  }
+
+  void deepCopy(TType copyOf, TTypeList[TTypeList] copiedMap) {
+    shallowCopy(copyOf);
   }
 }
 

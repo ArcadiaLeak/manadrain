@@ -402,13 +402,19 @@ bool ProcessDeferred(ProcessingContext)(
 
   if (messages & messages_t.MSG_DEBUG_INFO_BIT) {
     intermediate.setSourceFile(names[numPre]);
-    for (int s = 0; s < shaderStrings.length; ++s) {
+    foreach (s; 0..shaderStrings.length)
       intermediate.addSourceText(strings[numPre + s]);
-    }
-    if (!SetupBuiltinSymbolTable(version_, profile, spvVersion, source)) {
-      return false;
-    }
   }
+
+  if (!SetupBuiltinSymbolTable(version_, profile, spvVersion, source))
+    return false;
+
+  TSymbolTable cachedTable = SharedSymbolTables
+    [MapVersionToIndex(version_)]
+    [MapSpvVersionToIndex(spvVersion)]
+    [MapProfileToIndex(profile)]
+    [MapSourceToIndex(source)]
+    [stage];
 
   return false;
 }
@@ -835,9 +841,9 @@ bool InitializeSymbolTable(
     infoSink, spvVersion, true, messages_t.MSG_DEFAULT_BIT, true
   );
 
-  auto includer = new TShader.ForbidIncluder();
-  auto ppContext = new TPpContext(parseContext, "", includer);
-  auto scanContext = new TScanContext(parseContext);
+  TShader.ForbidIncluder includer = new TShader.ForbidIncluder;
+  TPpContext ppContext = new TPpContext(parseContext, "", includer);
+  TScanContext scanContext = new TScanContext(parseContext);
   parseContext.setScanContext = scanContext;
   parseContext.setPpContext = ppContext;
 

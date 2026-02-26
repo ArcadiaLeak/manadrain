@@ -1,15 +1,18 @@
 module glslang.machine_independent.symbol_table;
+import glslang;
 
 class TSymbol {
   const(TAnonMember) getAsAnonMember() const => null;
 }
 
 class TVariable : TSymbol {
-  this(const TVariable variable) {
-    //
+  TType type;
+
+  this(TVariable copyOf) {
+    type.deepCopy = copyOf.type;
   }
 
-  TVariable clone() const => new TVariable(this);
+  TVariable clone() => new TVariable(this);
 }
 
 class TAnonMember : TSymbol {

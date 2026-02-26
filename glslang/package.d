@@ -43,4 +43,7 @@ void main() {
   input.resource = default_resource;
 
   shader_t shader = input.shader_create;
+
+  import std.stdio;
+  writeln(shader.preprocessedGLSL);
 }
