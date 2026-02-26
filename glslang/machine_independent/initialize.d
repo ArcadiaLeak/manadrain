@@ -2165,7 +2165,7 @@ class TBuiltIns : TBuiltInParseables {
       );
 
       static foreach (op; subgroupOps) {
-        if (!op.logicalOp) {
+        static if (!op.logicalOp) {
           static foreach (floatType; floatTypes)
             commonBuiltins ~= format!op(floatType);
           if (profile != profile_t.ES_PROFILE && version_ >= 400) {
@@ -2173,7 +2173,7 @@ class TBuiltIns : TBuiltInParseables {
               commonBuiltins ~= format!op(doubleType);
           }
         }
-        if (!op.mathOp) {
+        static if (!op.mathOp) {
           static foreach (boolType; boolTypes)
             commonBuiltins ~= format!op(boolType);
         }
