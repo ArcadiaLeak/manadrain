@@ -111,6 +111,7 @@ class TInputScanner {
       import std.array;
       import std.container.dlist;
       import std.conv;
+      import std.string;
       
       DList!uint profileCharList;
       while(
@@ -126,7 +127,7 @@ class TInputScanner {
         continue;
       }
 
-      string profileString = profileCharList[].array.to!string;
+      string profileString = profileCharList[].array.assumeUTF.to!string;
       if (profileString == "es")
         profile = EProfile(ES_PROFILE: 1);
       else if (profileString == "core")

@@ -103,4 +103,11 @@ struct TPpToken {
     name.clear;
     fullyExpanded = false;
   }
+
+  string nameAsString() {
+    import std.array;
+    import std.conv;
+    import std.string;
+    return name[].array.assumeUTF.to!string;
+  }
 }

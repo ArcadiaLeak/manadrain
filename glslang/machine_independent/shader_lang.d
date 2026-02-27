@@ -113,7 +113,6 @@ auto ppClosure(ref string outputString) {
     TInputScanner input, bool versionWillBeError,
     TSymbolTable, TIntermediate, EShOptimizationLevel, EShMessages
   ) {
-    import std.array;
     import std.container.dlist;
     import std.conv;
 
@@ -247,11 +246,11 @@ auto ppClosure(ref string outputString) {
         ) outputBuffer ~= " ";
       }
       if (token == EFixedAtoms.PpAtomIdentifier)
-        lastTokenName = ppToken.name[].array.to!string;
+        lastTokenName = ppToken.nameAsString;
       lastToken = token;
       if (token == EFixedAtoms.PpAtomConstString)
         outputBuffer ~= "\"";
-      outputBuffer ~= ppToken.name[].array.to!string;
+      outputBuffer ~= ppToken.nameAsString;
       if (token == EFixedAtoms.PpAtomConstString)
         outputBuffer ~= "\"";
     } while (true);
