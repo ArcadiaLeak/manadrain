@@ -1,9 +1,5 @@
 module glslang.machine_independent.scan;
-
 import glslang;
-
-import core.stdc.string;
-import std.algorithm.comparison;
 
 enum int EndOfInput = -1;
 
@@ -112,13 +108,16 @@ class TInputScanner {
 
       while (c == ' ' || c == '\t') c = get;
 
-      const int maxProfileLength = 13;
-      char[maxProfileLength] profileString;
-      int profileLength;
-      for (profileLength = 0; profileLength < maxProfileLength; ++profileLength) {
-        if (c == EndOfInput || c == ' ' || c == '\t' || c == '\n' || c == '\r')
-          break;
-        profileString[profileLength] = cast(char) c;
+      import std.array;
+      import std.container.dlist;
+      
+      DList!char profileCharList;
+      while(
+        c != EndOfInput &&
+        c != ' ' && c != '\t' &&
+        c != '\n' && c != '\r'
+      ) {
+        profileCharList ~= cast(char) c;
         c = get;
       }
       if (c != EndOfInput && c != ' ' && c != '\t' && c != '\n' && c != '\r') {
@@ -126,11 +125,12 @@ class TInputScanner {
         continue;
       }
 
-      if (profileLength == 2 && strncmp(profileString.ptr, "es", profileLength) == 0)
+      string profileString = profileCharList[].array;
+      if (profileString == "es")
         profile = EProfile(ES_PROFILE: 1);
-      else if (profileLength == 4 && strncmp(profileString.ptr, "core", profileLength) == 0)
+      else if (profileString == "core")
         profile = EProfile(CORE_PROFILE: 1);
-      else if (profileLength == 13 && strncmp(profileString.ptr, "compatibility", profileLength) == 0)
+      else if (profileString == "compatibility")
         profile = EProfile(COMPATIBILITY_PROFILE: 1);
 
       return versionNotFirst;
@@ -248,6 +248,7 @@ class TInputScanner {
     if (singleLogical) {
       return logicalSourceLoc;
     } else {
+      import std.algorithm.comparison;
       return loc[max(0, min(currentSource, sources.length - finale - 1))];
     }
   }

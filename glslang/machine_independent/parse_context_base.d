@@ -79,11 +79,10 @@ class TParseContextBase : TParseVersions {
     in TSourceLoc loc, string szReason, string szToken,
     string szExtraInfoFormat, TPrefixType prefix, Args args
   ) {
-    string szExtraInfo = szExtraInfoFormat.format(args);
-
     infoSink.info.prefix = prefix;
     infoSink.info.location(loc, messages.MSG_DISPLAY_ERROR_COLUMN);
-    infoSink.info.append = "'" ~ szToken ~ "' : " ~ szReason ~ " " ~ szExtraInfo ~ "\n";
+    infoSink.info.append = "'" ~ szToken ~ "' : " ~ szReason ~
+      " " ~ format(szExtraInfoFormat, args) ~ "\n";
 
     if (prefix == TPrefixType.EPrefixError) {
       ++numErrors;
