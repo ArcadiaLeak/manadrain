@@ -114,18 +114,20 @@ class TPpContext {
     stringMap[atom] = s;
   }
 
-  int tokenize(ref TPpToken ppToken) {
+  uint tokenize(ref TPpToken ppToken) {
     int stringifyDepth = 0;
     TPpToken stringifiedToken;
     while (true) {
       int token = scanToken(ppToken);
+      token = tokenPaste(token, ppToken);
 
       import std.stdio;
       writeln(token);
+
       break;
     }
 
-    return -1;
+    return EndOfInput;
   }
 
   int scanToken(ref TPpToken ppToken) {
@@ -189,9 +191,21 @@ class TPpContext {
           case EFixedAtoms.PpAtomRight: case EFixedAtoms.PpAtomLeft:
           case EFixedAtoms.PpAtomAnd: case EFixedAtoms.PpAtomOr:
           case EFixedAtoms.PpAtomXor:
+            ppToken.name = DList!uint(stringMap[resultToken]);
+            pastedPpToken.name = DList!uint(stringMap[token]);
             break;
           default:
-            assert(0);
+            parseContext.ppError(ppToken.loc, "not supported for these tokens", "##", "");
+            return resultToken;
+        }
+
+        ppToken.name ~= pastedPpToken.name[];
+        if (resultToken != EFixedAtoms.PpAtomIdentifier) {
+          uint newToken = get(atomMap, ppToken.nameAsString, 0);
+          if (newToken > 0)
+            resultToken = newToken;
+          else
+            parseContext.ppError(ppToken.loc, "combined token is invalid", "##", "");
         }
       } while (peekContinuedPasting(resultToken));
     }
