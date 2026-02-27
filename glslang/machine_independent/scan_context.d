@@ -31,8 +31,10 @@ class TScanContext {
       if (curToken == EndOfInput)
         return 0;
 
-      import std.string;
-      tokenText = ppToken.name.fromStringz.idup;
+      import std.array;
+      import std.conv;
+
+      tokenText = ppToken.name[].array.to!string;
       loc = ppToken.loc;
     } while(true);
   }

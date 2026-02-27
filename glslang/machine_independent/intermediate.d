@@ -52,7 +52,7 @@ class TIntermediate {
   bool useStorageBuffer;
   bool originUpperLeft;
   string sourceFile;
-  string sourceText;
+  immutable(uint)[] sourceText;
 
   TProcesses processes;
 
@@ -72,8 +72,8 @@ class TIntermediate {
   void setSourceFile(string file) { if (file != null) sourceFile = file; }
   string getSourceFile() const { return sourceFile; }
 
-  void addSourceText(string text) { sourceText ~= text; }
-  string getSourceText() const { return sourceText; }
+  void addSourceText(immutable(uint)[] text) { sourceText ~= text; }
+  immutable(uint)[] getSourceText() const { return sourceText; }
 
   void setOriginUpperLeft() { originUpperLeft = true; }
   bool getOriginUpperLeft() const { return originUpperLeft; }

@@ -81,7 +81,7 @@ class TSymbolTable {
   }
 
   bool isEmpty() => table.length == 0;
-  int currentLevel() const => cast(int) table.length - 1;
+  long currentLevel() const => table.length - 1;
 
   void copyTable(const TSymbolTable copyOf) {
     assert(adoptedLevels == copyOf.adoptedLevels);

@@ -84,7 +84,9 @@ enum EFixedAtoms {
 }
 
 struct TPpToken {
-  char[MaxTokenLength + 1] name;
+  import std.container.dlist;
+
+  DList!uint name;
   union {
     int val;
     double dval;
@@ -98,7 +100,7 @@ struct TPpToken {
     space = false;
     i64val = 0;
     loc.clear;
-    name[0] = 0;
+    name.clear;
     fullyExpanded = false;
   }
 }

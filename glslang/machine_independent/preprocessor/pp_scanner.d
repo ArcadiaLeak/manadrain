@@ -80,8 +80,6 @@ class tStringInput : tInput {
   }
 
   override int scan(ref TPpToken ppToken) {
-    int AlreadyComplained = 0;
-    int len = 0;
     int ch = 0;
     int ii = 0;
     ulong ival = 0;
@@ -114,7 +112,6 @@ class tStringInput : tInput {
       }
 
       ppToken.loc = pp.parseContext.getCurrentLoc;
-      len = 0;
       switch (ch) {
         default:
           if (ch > EFixedAtoms.PpAtomMaxSingle)
@@ -134,16 +131,8 @@ class tStringInput : tInput {
         case 'u': case 'v': case 'w': case 'x': case 'y':
         case 'z':
           do {
-            if (len < MaxTokenLength) {
-              ppToken.name[len++] = cast(char) ch;
-              ch = getch;
-            } else {
-              if (!AlreadyComplained) {
-                pp.parseContext.ppError(ppToken.loc, "name too long", "", "");
-                AlreadyComplained = 1;
-              }
-              ch = getch;
-            }
+            ppToken.name ~= ch;
+            ch = getch;
           } while (
             (ch >= 'a' && ch <= 'z') ||
             (ch >= 'A' && ch <= 'Z') ||
@@ -151,19 +140,18 @@ class tStringInput : tInput {
             ch == '_'
           );
 
-          if (len == 0) continue;
+          if (ppToken.name.empty) continue;
           
-          ppToken.name[len] = '\0';
           ungetch;
           return EFixedAtoms.PpAtomIdentifier;
         case '0':
-          ppToken.name[len++] = cast(char) ch;
+          ppToken.name ~= ch;
           ch = getch;
           if (ch == 'x' || ch == 'X') {
             bool isUnsigned = false;
             bool isInt64 = false;
             bool isInt16 = false;
-            ppToken.name[len++] = cast(char) ch;
+            ppToken.name ~= ch;
             ch = getch;
             if (
               (ch >= '0' && ch <= '9') ||

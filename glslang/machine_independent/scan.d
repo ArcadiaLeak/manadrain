@@ -1,11 +1,11 @@
 module glslang.machine_independent.scan;
 import glslang;
 
-enum int EndOfInput = -1;
+enum uint EndOfInput = dchar.max + 1;
 
 class TInputScanner {
-  string[] sources;
-  int currentSource;
+  immutable(uint)[][] sources;
+  size_t currentSource;
   size_t currentChar;
 
   TSourceLoc[] loc;
@@ -19,7 +19,7 @@ class TInputScanner {
   bool endOfFileReached;
 
   this(
-    string[] s, string[] names = null,
+    immutable(uint)[][] s, string[] names = null,
     int b = 0, int f = 0, bool single = false
   ) {
     sources = s;
@@ -54,7 +54,7 @@ class TInputScanner {
 
     bool foundNonSpaceTab = false;
     bool lookingInMiddle = false;
-    int c;
+    uint c;
     do {
       if (lookingInMiddle) {
         notFirstToken = true;
@@ -110,14 +110,15 @@ class TInputScanner {
 
       import std.array;
       import std.container.dlist;
+      import std.conv;
       
-      DList!char profileCharList;
+      DList!uint profileCharList;
       while(
         c != EndOfInput &&
         c != ' ' && c != '\t' &&
         c != '\n' && c != '\r'
       ) {
-        profileCharList ~= cast(char) c;
+        profileCharList ~= c;
         c = get;
       }
       if (c != EndOfInput && c != ' ' && c != '\t' && c != '\n' && c != '\r') {
@@ -125,7 +126,7 @@ class TInputScanner {
         continue;
       }
 
-      string profileString = profileCharList[].array;
+      string profileString = profileCharList[].array.to!string;
       if (profileString == "es")
         profile = EProfile(ES_PROFILE: 1);
       else if (profileString == "core")
@@ -141,7 +142,7 @@ class TInputScanner {
     do {
       consumeWhiteSpace(foundNonSpaceTab);
 
-      int c = peek;
+      uint c = peek;
       if (c != '/' || c == EndOfInput)
         return;
 
@@ -152,7 +153,7 @@ class TInputScanner {
   }
 
   void consumeWhiteSpace(out bool foundNonSpaceTab) {
-    int c = peek;
+    uint c = peek;
     while (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
       if (c == '\r' || c == '\n') foundNonSpaceTab = true;
       get;
@@ -164,7 +165,7 @@ class TInputScanner {
     if (peek != '/') return false;
 
     get;
-    int c = peek;
+    uint c = peek;
     if (c == '/') {
       get;
       c = get;
@@ -207,13 +208,13 @@ class TInputScanner {
     }
   }
 
-  int peek() {
+  uint peek() {
     if (currentSource >= sources.length) {
       endOfFileReached = true;
       return EndOfInput;
     }
 
-    int sourceToRead = currentSource;
+    size_t sourceToRead = currentSource;
     size_t charToRead = currentChar;
     while (charToRead >= sources[sourceToRead].length) {
       charToRead = 0;
@@ -226,8 +227,8 @@ class TInputScanner {
     return sources[sourceToRead][charToRead];
   }
 
-  int get() {
-    int ret = peek;
+  uint get() {
+    uint ret = peek;
     if (ret == EndOfInput)
       return ret;
 
@@ -255,7 +256,7 @@ class TInputScanner {
 
   void setEndOfInput() {
     endOfFileReached = true;
-    currentSource = cast(int) sources.length;
+    currentSource = sources.length;
   }
 
   void unget() {
@@ -273,8 +274,8 @@ class TInputScanner {
           }
           --chIndex;
         }
-        logicalSourceLoc.column = cast(int) (currentChar - chIndex);
-        loc[currentSource].column = cast(int) (currentChar - chIndex);
+        logicalSourceLoc.column = currentChar - chIndex;
+        loc[currentSource].column = currentChar - chIndex;
       }
     } else {
       do {
@@ -312,7 +313,7 @@ class TInputScanner {
     }
   }
 
-  int getLastValidSourceIndex() const {
+  size_t getLastValidSourceIndex() const {
     import std.algorithm.comparison;
     return min(currentSource, sources.length - 1);
   }

@@ -1,9 +1,6 @@
 module glslang.machine_independent.shader_lang;
 import glslang;
 
-import std.conv;
-import std.traits;
-
 enum EShOptimizationLevel {
   EShOptNoGeneration,
   EShOptNone,
@@ -116,16 +113,20 @@ auto ppClosure(ref string outputString) {
     TInputScanner input, bool versionWillBeError,
     TSymbolTable, TIntermediate, EShOptimizationLevel, EShMessages
   ) {
+    import std.array;
     import std.container.dlist;
-    enum string noNeededSpaceBeforeTokens = ";)[].,";
-    enum string noNeededSpaceAfterTokens = ".([";
+    import std.conv;
+
+    enum dstring noNeededSpaceBeforeTokens = ";)[].,"d;
+    enum dstring noNeededSpaceAfterTokens = ".(["d;
+
     TPpToken ppToken;
 
     parseContext.setScanner(input);
     ppContext.setInput(input, versionWillBeError);
 
-    int lastSource = -1;
-    int lastLine = 0;
+    long lastSource = -1;
+    long lastLine = 0;
 
     DList!string outputBuffer;
 
@@ -140,7 +141,7 @@ auto ppClosure(ref string outputString) {
       return false;
     }
 
-    bool syncToLine(int tokenLine) {
+    bool syncToLine(long tokenLine) {
       syncToMostRecentString;
       const bool newLineStarted = lastLine < tokenLine;
       while (lastLine < tokenLine) {
@@ -241,23 +242,21 @@ auto ppClosure(ref string outputString) {
             lastTokenName == "switch"
           ) outputBuffer ~= " ";
         } else if (
-          noNeededSpaceBeforeTokens.find(cast(char) token).empty &&
-          noNeededSpaceAfterTokens.find(cast(char) lastToken).empty
+          noNeededSpaceBeforeTokens.find(token).empty &&
+          noNeededSpaceAfterTokens.find(lastToken).empty
         ) outputBuffer ~= " ";
       }
-      import std.string;
       if (token == EFixedAtoms.PpAtomIdentifier)
-        lastTokenName = ppToken.name.fromStringz.idup;
+        lastTokenName = ppToken.name[].array.to!string;
       lastToken = token;
       if (token == EFixedAtoms.PpAtomConstString)
         outputBuffer ~= "\"";
-      outputBuffer ~= ppToken.name.fromStringz.idup;
+      outputBuffer ~= ppToken.name[].array.to!string;
       if (token == EFixedAtoms.PpAtomConstString)
         outputBuffer ~= "\"";
     } while (true);
     outputBuffer ~= "\n";
 
-    import std.array;
     outputString = outputBuffer[].join;
 
     bool success = true;
@@ -275,9 +274,9 @@ auto ppClosure(ref string outputString) {
 
 bool PreprocessDeferred(
   TCompiler compiler,
-  in string[] shaderStrings,
-  in string[] stringNames,
-  const(TBuiltInResource)* builtInResources,
+  const string[] shaderStrings,
+  const string[] stringNames,
+  const TBuiltInResource* builtInResources,
   int defaultVersion,
   EProfile defaultProfile,
   bool forceDefaultVersionAndProfile,
@@ -301,7 +300,7 @@ bool ProcessDeferred(ProcessingContext)(
   TCompiler compiler,
   const string[] shaderStrings,
   const string[] stringNames,
-  const(TBuiltInResource)* builtInResources,
+  const TBuiltInResource* builtInResources,
   int defaultVersion,
   EProfile defaultProfile,
   bool forceDefaultVersionAndProfile,
@@ -314,19 +313,22 @@ bool ProcessDeferred(ProcessingContext)(
   string sourceEntryPointName,
   in TEnvironment environment
 ) {
-  if (shaderStrings.length == 0) {
+  if (shaderStrings.length == 0)
     return true;
-  }
 
-  const int numPre = 2;
-  const int numPost = requireNonempty ? 1 : 0;
-  const int numTotal = numPre + cast(int) shaderStrings.length + numPost;
+  const long numPre = 2;
+  const long numPost = requireNonempty ? 1 : 0;
+  const long numTotal = numPre + shaderStrings.length + numPost;
 
-  string[] strings = new string[numTotal];
+  import std.conv;
+  import std.string;
+
+  immutable(uint)[][] strings = new immutable(uint)[][numTotal];
   string[] names = new string[numTotal];
-  foreach(s, str; shaderStrings) {
-    strings[s + numPre] = str;
-  }
+
+  foreach(s, str; shaderStrings)
+    strings[s + numPre] = str.to!dstring.representation;
+
   if (stringNames !is null) {
     foreach(s, str; stringNames) {
       names[s + numPre] = str;
@@ -860,15 +862,17 @@ bool InitializeSymbolTable(
   parseContext.setScanContext = scanContext;
   parseContext.setPpContext = ppContext;
 
-  symbolTable.push();
+  symbolTable.push;
 
-  string[] builtInShaders;
-  builtInShaders ~= builtIns;
+  import std.conv;
+  import std.string;
 
-  if (builtInShaders[0].length == 0)
+  immutable(uint)[][] builtInsArr = [builtIns.to!dstring.representation];
+
+  if (builtInsArr[0].length == 0)
     return true;
 
-  TInputScanner input = new TInputScanner(builtInShaders);
+  TInputScanner input = new TInputScanner(builtInsArr);
 
   return true;
 }
