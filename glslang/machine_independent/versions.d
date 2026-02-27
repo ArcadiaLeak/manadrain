@@ -130,8 +130,49 @@ enum string E_GL_NV_cluster_acceleration_structure = "GL_NV_cluster_acceleration
 enum string E_GL_NV_linear_swept_spheres = "GL_NV_linear_swept_spheres";
 enum string E_GL_NV_gpu_shader5 = "GL_NV_gpu_shader5";
 
+enum string E_GL_EXT_device_group = "GL_EXT_device_group";
+enum string E_GL_EXT_multiview = "GL_EXT_multiview";
+enum string E_GL_EXT_post_depth_coverage = "GL_EXT_post_depth_coverage";
+enum string E_GL_EXT_control_flow_attributes = "GL_EXT_control_flow_attributes";
+enum string E_GL_EXT_nonuniform_qualifier = "GL_EXT_nonuniform_qualifier";
+enum string E_GL_EXT_samplerless_texture_functions = "GL_EXT_samplerless_texture_functions";
+enum string E_GL_EXT_scalar_block_layout = "GL_EXT_scalar_block_layout";
+enum string E_GL_EXT_fragment_invocation_density = "GL_EXT_fragment_invocation_density";
+enum string E_GL_EXT_buffer_reference = "GL_EXT_buffer_reference";
+enum string E_GL_EXT_buffer_reference2 = "GL_EXT_buffer_reference2";
+enum string E_GL_EXT_buffer_reference_uvec2 = "GL_EXT_buffer_reference_uvec2";
+enum string E_GL_EXT_demote_to_helper_invocation = "GL_EXT_demote_to_helper_invocation";
+enum string E_GL_EXT_shader_realtime_clock = "GL_EXT_shader_realtime_clock";
+enum string E_GL_EXT_debug_printf = "GL_EXT_debug_printf";
+enum string E_GL_EXT_ray_tracing = "GL_EXT_ray_tracing";
+enum string E_GL_EXT_ray_query = "GL_EXT_ray_query";
+enum string E_GL_EXT_ray_flags_primitive_culling = "GL_EXT_ray_flags_primitive_culling";
+enum string E_GL_EXT_ray_cull_mask = "GL_EXT_ray_cull_mask";
+enum string E_GL_EXT_blend_func_extended = "GL_EXT_blend_func_extended";
+enum string E_GL_EXT_shader_implicit_conversions = "GL_EXT_shader_implicit_conversions";
+enum string E_GL_EXT_fragment_shading_rate = "GL_EXT_fragment_shading_rate";
+enum string E_GL_EXT_shader_image_int64 = "GL_EXT_shader_image_int64";
+enum string E_GL_EXT_null_initializer = "GL_EXT_null_initializer";
+enum string E_GL_EXT_shared_memory_block = "GL_EXT_shared_memory_block";
+enum string E_GL_EXT_subgroup_uniform_control_flow = "GL_EXT_subgroup_uniform_control_flow";
+enum string E_GL_EXT_spirv_intrinsics = "GL_EXT_spirv_intrinsics";
+enum string E_GL_EXT_fragment_shader_barycentric = "GL_EXT_fragment_shader_barycentric";
+enum string E_GL_EXT_mesh_shader = "GL_EXT_mesh_shader";
+enum string E_GL_EXT_opacity_micromap = "GL_EXT_opacity_micromap";
+enum string E_GL_EXT_shader_quad_control = "GL_EXT_shader_quad_control";
+enum string E_GL_EXT_draw_instanced = "GL_EXT_draw_instanced";
+enum string E_GL_EXT_texture_array = "GL_EXT_texture_array";
+enum string E_GL_EXT_maximal_reconvergence = "GL_EXT_maximal_reconvergence";
+enum string E_GL_EXT_expect_assume = "GL_EXT_expect_assume";
+enum string E_GL_EXT_control_flow_attributes2 = "GL_EXT_control_flow_attributes2";
+enum string E_GL_EXT_spec_constant_composites = "GL_EXT_spec_constant_composites";
+enum string E_GL_EXT_texture_offset_non_const = "GL_EXT_texture_offset_non_const";
+enum string E_GL_EXT_nontemporal_keyword = "GL_EXT_nontemporal_keyword";
+enum string E_GL_EXT_uniform_buffer_unsized_array = "GL_EXT_uniform_buffer_unsized_array";
+enum string E_GL_EXT_conservative_depth = "GL_EXT_conservative_depth";
+
 enum TExtensionBehavior {
-  EBhMissing = 0,
+  EBhMissing,
   EBhRequire,
   EBhEnable,
   EBhWarn,

@@ -114,12 +114,30 @@ class TPpContext {
     stringMap[atom] = s;
   }
 
-  uint tokenize(ref TPpToken ppToken) {
+  int tokenize(ref TPpToken ppToken) {
     int stringifyDepth = 0;
     TPpToken stringifiedToken;
     while (true) {
       int token = scanToken(ppToken);
       token = tokenPaste(token, ppToken);
+
+      if (token == EndOfInput) {
+        missingEndifCheck;
+        return EndOfInput;
+      }
+      if (token == '#') {
+        if (previous_token == '\n') {
+          token = readCPPline(ppToken);
+          if (token == EndOfInput) {
+              missingEndifCheck;
+              return EndOfInput;
+          }
+          continue;
+        } else {
+          parseContext.ppError(ppToken.loc, "preprocessor directive cannot be preceded by another token", "#", "");
+          return EndOfInput;
+        }
+      }
 
       import std.stdio;
       writeln(token);
@@ -128,6 +146,43 @@ class TPpContext {
     }
 
     return EndOfInput;
+  }
+
+  int readCPPline(ref TPpToken ppToken) {
+    int token = scanToken(ppToken);
+    
+    if (token == EFixedAtoms.PpAtomIdentifier) {
+      switch (get(atomMap, ppToken.nameAsString, 0)) {
+        case EFixedAtoms.PpAtomDefine:
+          token = CPPdefine(ppToken);
+          break;
+        default:
+          parseContext.ppError(ppToken.loc, "invalid directive:", "#", ppToken.nameAsString);
+          break;
+      }
+    } else if (token != '\n' && token != EndOfInput)
+      parseContext.ppError(ppToken.loc, "invalid directive", "#", "");
+
+    return token;
+  }
+
+  void missingEndifCheck() {
+    if (ifdepth > 0)
+      parseContext.ppError(parseContext.getCurrentLoc, "missing #endif", "", "");
+  }
+
+  int CPPdefine(ref TPpToken ppToken) {
+    MacroSymbol mac;
+
+    int token = scanToken(ppToken);
+    if (token != EFixedAtoms.PpAtomIdentifier) {
+      parseContext.ppError(ppToken.loc, "must be followed by macro name", "#define", "");
+      return token;
+    }
+    if (ppToken.loc.string_ >= 0)
+      parseContext.reservedPpErrorCheck(ppToken.loc, ppToken.nameAsString, "#define");
+
+    return '\n';
   }
 
   int scanToken(ref TPpToken ppToken) {
@@ -233,4 +288,24 @@ class TPpContext {
     errorOnVersion = versionWillBeError;
     versionSeen = false;
   }
+}
+
+struct TokenStream {
+  struct Token {
+    int atom;
+    bool space;
+    long i64val;
+    string name;
+  }
+
+  Token[] stream;
+  size_t currentPos;
+}
+
+struct MacroSymbol {
+  int[] args;
+  TokenStream body;
+  byte functionLike;
+  byte busy;
+  byte undef;
 }

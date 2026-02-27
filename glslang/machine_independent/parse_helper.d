@@ -1,5 +1,4 @@
 module glslang.machine_independent.parse_helper;
-
 import glslang;
 
 class TParseContext : TParseContextBase {
@@ -45,4 +44,33 @@ class TParseContext : TParseContextBase {
 
   override bool lineDirectiveShouldSetNextLine() const =>
     isEsProfile || version_ >= 330;
+
+  override void reservedPpErrorCheck(in TSourceLoc loc, string identifier, string op) {
+    import std.algorithm.searching;
+
+    if (identifier.startsWith("GL_") && !extensionTurnedOn(E_GL_EXT_spirv_intrinsics))
+      ppError(loc, "names beginning with \"GL_\" can't be (un)defined:", op,  identifier);
+    else if (identifier.startsWith("defined")) {
+      if (relaxedErrors)
+        ppWarn(loc, "\"defined\" is (un)defined:", op,  identifier);
+      else
+        ppError(loc, "\"defined\" can't be (un)defined:", op,  identifier);
+    }
+    else if (identifier.canFind("__") && !extensionTurnedOn(E_GL_EXT_spirv_intrinsics)) {
+      if (
+        isEsProfile && version_ >= 300 && (
+          identifier == "__LINE__" ||
+          identifier == "__FILE__" ||
+          identifier == "__VERSION__"
+        )
+      )
+        ppError(loc, "predefined names can't be (un)defined:", op,  identifier);
+      else {
+        if (isEsProfile && version_ < 300 && !relaxedErrors)
+          ppError(loc, "names containing consecutive underscores are reserved, and an error if version < 300:", op, identifier);
+        else
+          ppWarn(loc, "names containing consecutive underscores are reserved:", op, identifier);
+      }
+    }
+  }
 }

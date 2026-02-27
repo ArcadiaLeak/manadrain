@@ -130,6 +130,17 @@ class TParseContextBase : TParseVersions {
       currentScanner.setEndOfInput;
   }
 
+  void ppWarn(
+    in TSourceLoc loc, string szReason,
+    string szToken, string szExtraInfo
+  ) {
+    outputMessage(
+      loc, szReason, szToken, szExtraInfo,
+      TPrefixType.EPrefixWarning
+    );
+  }
+
+  abstract void reservedPpErrorCheck(in TSourceLoc, string name, string op);
   abstract bool lineContinuationCheck(in TSourceLoc, bool endOfComment);
   abstract bool lineDirectiveShouldSetNextLine() const;
 

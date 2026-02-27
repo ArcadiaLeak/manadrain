@@ -1,7 +1,7 @@
 module glslang.machine_independent.scan;
 import glslang;
 
-enum uint EndOfInput = dchar.max + 1;
+enum int EndOfInput = -1;
 
 class TInputScanner {
   immutable(uint)[][] sources;
