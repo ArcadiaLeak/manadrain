@@ -3,8 +3,66 @@ import glslang;
 
 import std.container.dlist;
 import std.container.slist;
+import std.typecons;
+
+enum Tuple!(EFixedAtoms, string)[] tokens = [
+  tuple(EFixedAtoms.PPAtomAddAssign, "+="),
+  tuple(EFixedAtoms.PPAtomSubAssign, "-="),
+  tuple(EFixedAtoms.PPAtomMulAssign, "*="),
+  tuple(EFixedAtoms.PPAtomDivAssign, "/="),
+  tuple(EFixedAtoms.PPAtomModAssign, "%="),
+
+  tuple(EFixedAtoms.PpAtomRight, ">>"),
+  tuple(EFixedAtoms.PpAtomLeft, "<<"),
+  tuple(EFixedAtoms.PpAtomAnd, "&&"),
+  tuple(EFixedAtoms.PpAtomOr, "||"),
+  tuple(EFixedAtoms.PpAtomXor, "^^"),
+
+  tuple(EFixedAtoms.PpAtomRightAssign, ">>="),
+  tuple(EFixedAtoms.PpAtomLeftAssign, "<<="),
+  tuple(EFixedAtoms.PpAtomAndAssign, "&="),
+  tuple(EFixedAtoms.PpAtomOrAssign, "|="),
+  tuple(EFixedAtoms.PpAtomXorAssign, "^="),
+
+  tuple(EFixedAtoms.PpAtomEQ, "=="),
+  tuple(EFixedAtoms.PpAtomNE, "!="),
+  tuple(EFixedAtoms.PpAtomGE, ">="),
+  tuple(EFixedAtoms.PpAtomLE, "<="),
+
+  tuple(EFixedAtoms.PpAtomDecrement, "--"),
+  tuple(EFixedAtoms.PpAtomIncrement, "++"),
+
+  tuple(EFixedAtoms.PpAtomColonColon, "::"),
+
+  tuple(EFixedAtoms.PpAtomDefine, "define"),
+  tuple(EFixedAtoms.PpAtomUndef, "undef"),
+  tuple(EFixedAtoms.PpAtomIf, "if"),
+  tuple(EFixedAtoms.PpAtomElif, "elif"),
+  tuple(EFixedAtoms.PpAtomElse, "else"),
+  tuple(EFixedAtoms.PpAtomEndif, "endif"),
+  tuple(EFixedAtoms.PpAtomIfdef, "ifdef"),
+  tuple(EFixedAtoms.PpAtomIfndef, "ifndef"),
+  tuple(EFixedAtoms.PpAtomLine, "line"),
+  tuple(EFixedAtoms.PpAtomPragma, "pragma"),
+  tuple(EFixedAtoms.PpAtomError, "error"),
+
+  tuple(EFixedAtoms.PpAtomVersion, "version"),
+  tuple(EFixedAtoms.PpAtomCore, "core"),
+  tuple(EFixedAtoms.PpAtomCompatibility, "compatibility"),
+  tuple(EFixedAtoms.PpAtomEs, "es"),
+  tuple(EFixedAtoms.PpAtomExtension, "extension"),
+
+  tuple(EFixedAtoms.PpAtomLineMacro, "__LINE__"),
+  tuple(EFixedAtoms.PpAtomFileMacro, "__FILE__"),
+  tuple(EFixedAtoms.PpAtomVersionMacro, "__VERSION__"),
+
+  tuple(EFixedAtoms.PpAtomInclude, "include"),
+];
 
 class TPpContext {
+  int[string] atomMap;
+  string[int] stringMap;
+
   string preamble;
   string[] strings;
   int currentString;
@@ -42,9 +100,18 @@ class TPpContext {
     inElseSkip = false;
 
     ifdepth = 0;
-    for (elsetracker = 0; elsetracker < maxIfNesting; elsetracker++)
-      elseSeen[elsetracker] = false;
     elsetracker = 0;
+
+    enum string s = "~!%^&*()-+=|,.<>/?;:[]{}#\\";
+    static foreach (ch; s)
+      addAtomFixed(ch, [ch]);
+    static foreach (token; tokens)
+      addAtomFixed(token.expand);
+  }
+
+  void addAtomFixed(int atom, string s) {
+    atomMap[s] = atom;
+    stringMap[atom] = s;
   }
 
   int tokenize(ref TPpToken ppToken) {
@@ -55,6 +122,7 @@ class TPpContext {
 
       import std.stdio;
       writeln(token);
+      break;
     }
 
     return -1;
