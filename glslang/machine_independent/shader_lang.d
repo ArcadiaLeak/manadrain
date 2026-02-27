@@ -408,8 +408,20 @@ bool ProcessDeferred(ProcessingContext)(
     [MapVersionToIndex(version_)][MapSpvVersionToIndex(spvVersion)]
     .MapEProfile(profile).MapEShLanguage(stage);
 
+  TSymbolTable symbolTable = new TSymbolTable;
+
+  TParseContextBase parseContext = CreateParseContext(
+    symbolTable, intermediate, version_, profile, stage,
+    compiler.infoSink, spvVersion, forwardCompatible, messages,
+    false, sourceEntryPointName
+  );
+  TPpContext ppContext = new TPpContext(parseContext, names[numPre], null);
+
+  TInputScanner fullInput = new TInputScanner(
+    strings[numPre..$], names[numPre..$]);
+
   bool success = processingContext(
-    TParseContextBase.init, TPpContext.init, TInputScanner.init,
+    parseContext, ppContext, fullInput,
     versionWillBeError, null, null, EShOptimizationLevel.init, messages
   );
 
@@ -616,14 +628,15 @@ bool SetupBuiltinSymbolTable(
   EProfile profile,
   in SpvVersion spvVersion
 ) {
-  auto infoSink = new TInfoSink;
-  bool success;
+  TInfoSink infoSink = new TInfoSink;
 
   int versionIndex = MapVersionToIndex(version_);
   int spvVersionIndex = MapSpvVersionToIndex(spvVersion);
-  if (
-    CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).CLASS_GENERAL
-  ) return true;
+
+  TSymbolTable specific = CommonSymbolTable
+    [versionIndex][spvVersionIndex].MapEProfile(profile)
+    .CLASS_GENERAL;
+  if (specific !is null) return true;
 
   TPrecisionClass!TSymbolTable commonTable;
   TShLanguage!TSymbolTable stageTables;
@@ -632,23 +645,31 @@ bool SetupBuiltinSymbolTable(
   static foreach (stage; 0..stageTables.tupleof.length)
     stageTables.tupleof[stage] = new TSymbolTable;
   
-  if (
-    !InitializeSymbolTables(
-      infoSink, commonTable, stageTables,
-      version_, profile, spvVersion
-    )
-  ) return false;
+  bool success = InitializeSymbolTables(
+    infoSink, commonTable, stageTables,
+    version_, profile, spvVersion
+  );
+  if (!success) return false;
 
   static foreach (precClass; 0..commonTable.tupleof.length) {
     if (!commonTable.tupleof[precClass].isEmpty) {
-      CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).tupleof[precClass] = new TSymbolTable;
-      CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).tupleof[precClass].copyTable = commonTable.tupleof[precClass];
-      // CommonSymbolTable[versionIndex][spvVersionIndex].MapEProfile(profile).tupleof[precClass].readOnly;
+      CommonSymbolTable[versionIndex][spvVersionIndex]
+        .MapEProfile(profile).tupleof[precClass] =
+          new TSymbolTable;
+
+      CommonSymbolTable[versionIndex][spvVersionIndex]
+        .MapEProfile(profile).tupleof[precClass]
+          .copyTable(commonTable.tupleof[precClass]);
+
+      /*  
+      CommonSymbolTable[versionIndex][spvVersionIndex]
+        .MapEProfile(profile).tupleof[precClass]
+          .readOnly;
+      */
     }
   }
-  success = true;
 
-  return success;
+  return true;
 }
 
 enum int VersionCount = 17;
@@ -712,7 +733,7 @@ struct TProfile(T) {
   T COMPATIBILITY_PROFILE;
   T ES_PROFILE;
 
-  T MapEProfile(EProfile profile) {
+  ref T MapEProfile(EProfile profile) {
     if (profile == EProfile(NO_PROFILE: 1))
       return NO_PROFILE;
     else if (profile == EProfile(CORE_PROFILE: 1))
@@ -746,7 +767,7 @@ struct TShLanguage(T) {
   T STAGE_TASK;
   T STAGE_MESH;
 
-  T MapEShLanguage(EShLanguage language) {
+  ref T MapEShLanguage(EShLanguage language) {
     final switch (language) {
       case EShLanguage.STAGE_VERTEX:
         return STAGE_VERTEX;
@@ -781,12 +802,10 @@ struct TShLanguage(T) {
 }
 
 TProfile!(TPrecisionClass!TSymbolTable)
-  [SpvVersionCount]
-  [VersionCount] CommonSymbolTable;
+  [SpvVersionCount][VersionCount] CommonSymbolTable;
 
 TProfile!(TShLanguage!TSymbolTable)
-  [SpvVersionCount]
-  [VersionCount] SharedSymbolTables;
+  [SpvVersionCount][VersionCount] SharedSymbolTables;
 
 TParseContextBase CreateParseContext(
   TSymbolTable symbolTable, TIntermediate intermediate,
@@ -851,5 +870,5 @@ bool InitializeSymbolTable(
 
   TInputScanner input = new TInputScanner(builtInShaders);
 
-  return false;
+  return true;
 }

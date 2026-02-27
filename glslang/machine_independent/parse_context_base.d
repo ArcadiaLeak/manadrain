@@ -1,5 +1,4 @@
 module glslang.machine_independent.parse_context_base;
-
 import glslang;
 
 import std.format;
@@ -80,10 +79,7 @@ class TParseContextBase : TParseVersions {
     in TSourceLoc loc, string szReason, string szToken,
     string szExtraInfoFormat, TPrefixType prefix, Args args
   ) {
-    enum int maxSize = MaxTokenLength + 200;
-    char[maxSize] szExtraInfo;
-
-    sformat(szExtraInfo, szExtraInfoFormat, args);
+    string szExtraInfo = szExtraInfoFormat.format(args);
 
     infoSink.info.prefix = prefix;
     infoSink.info.location(loc, messages.MSG_DISPLAY_ERROR_COLUMN);

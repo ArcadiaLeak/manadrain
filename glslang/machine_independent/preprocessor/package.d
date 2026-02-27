@@ -97,7 +97,7 @@ struct TPpToken {
   void clear() {
     space = false;
     i64val = 0;
-    loc.init();
+    loc.clear;
     name[0] = 0;
     fullyExpanded = false;
   }

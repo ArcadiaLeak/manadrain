@@ -1,5 +1,4 @@
 module glslang.machine_independent.scan_context;
-
 import glslang;
 
 class TScanContext {
@@ -16,7 +15,7 @@ class TScanContext {
   TSourceLoc loc;
   TParserToken parserToken;
 
-  char[] tokenText;
+  string tokenText;
 
   this(TParseContextBase pc) {
     parseContext = pc; afterType = false; afterStruct = false; field = false;
@@ -32,9 +31,9 @@ class TScanContext {
       if (curToken == EndOfInput)
         return 0;
 
-      tokenText = ppToken.name;
+      import std.string;
+      tokenText = ppToken.name.fromStringz.idup;
       loc = ppToken.loc;
-
     } while(true);
   }
 }

@@ -36,14 +36,13 @@ class TInputScanner {
 
     loc = new TSourceLoc[sources.length];
     for (int i = 0; i < sources.length; ++i) {
-      loc[i].init(i - stringBias);
+      loc[i].clear(i - stringBias);
     }
-    if (names != null) {
-      for (int i = 0; i < sources.length; ++i)
+    if (names !is null)
+      foreach (i; 0..sources.length)
         loc[i].name = names[i];
-    }
     loc[currentSource].line = 1;
-    logicalSourceLoc.init(1);
+    logicalSourceLoc.clear(1);
     logicalSourceLoc.name = loc[0].name;
   }
 

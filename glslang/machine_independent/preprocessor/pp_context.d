@@ -1,6 +1,7 @@
 module glslang.machine_independent.preprocessor.pp_context;
 import glslang;
 
+import std.container.dlist;
 import std.container.slist;
 
 class TPpContext {
@@ -10,6 +11,8 @@ class TPpContext {
 
   int previous_token;
   TParseContextBase parseContext;
+  DList!int lastLineTokens;
+  DList!TSourceLoc lastLineTokenLocs;
 
   enum int maxIfNesting = 65;
 
@@ -49,6 +52,9 @@ class TPpContext {
     TPpToken stringifiedToken;
     while (true) {
       int token = scanToken(ppToken);
+
+      import std.stdio;
+      writeln(token);
     }
 
     return -1;
@@ -63,17 +69,77 @@ class TPpContext {
         break;
       popInput;
     }
-
+    if (!inputStack.empty && inputStack.front.isStringInput && !inElseSkip) {
+      if (token == '\n') {
+        lastLineTokens.clear;
+        lastLineTokenLocs.clear;
+      } else {
+        lastLineTokens ~= token;
+        lastLineTokenLocs ~= ppToken.loc;
+      }
+    }
     return token;
   }
 
-  void pushInput(tInput in_) {
-    inputStack.insert = in_;
-    in_.notifyActivated;
+  bool peekPasting() => !inputStack.empty && inputStack.front.peekPasting;
+  bool peekContinuedPasting(int a) => !inputStack.empty && inputStack.front.peekContinuedPasting(a);
+  bool endOfReplacementList() => inputStack.empty || inputStack.front.endOfReplacementList;
+
+  int tokenPaste(int token, ref TPpToken ppToken) {
+    if (token == EFixedAtoms.PpAtomPaste) {
+      parseContext.ppError(ppToken.loc, "unexpected location", "##", "");
+      return scanToken(ppToken);
+    }
+
+    int resultToken = token;
+
+    while (peekPasting) {
+      TPpToken pastedPpToken;
+
+      token = scanToken(pastedPpToken);
+      assert(token == EFixedAtoms.PpAtomPaste);
+
+      if (endOfReplacementList) {
+        parseContext.ppError(ppToken.loc, "unexpected location; end of replacement list", "##", "");
+        break;
+      }
+
+      do {
+        token = scanToken(pastedPpToken);
+
+        if (token == tMarkerInput.marker) {
+          parseContext.ppError(ppToken.loc, "unexpected location; end of argument", "##", "");
+          return resultToken;
+        }
+
+        switch (resultToken) {
+          case EFixedAtoms.PpAtomIdentifier:
+            break;
+          case '=': case '!': case '-': case '~': case '+': case '*':
+          case '/': case '%': case '<': case '>': case '|': case '^':
+          case '&':
+          case EFixedAtoms.PpAtomRight: case EFixedAtoms.PpAtomLeft:
+          case EFixedAtoms.PpAtomAnd: case EFixedAtoms.PpAtomOr:
+          case EFixedAtoms.PpAtomXor:
+            break;
+          default:
+            assert(0);
+        }
+      } while (peekContinuedPasting(resultToken));
+    }
+
+    return resultToken;
+  }
+
+  void pushInput(tInput input) {
+    inputStack.insertFront(input);
+
+    input.notifyActivated;
   }
 
   void popInput() {
     inputStack.front.notifyDeleted;
+  
     inputStack.removeFront;
   }
 

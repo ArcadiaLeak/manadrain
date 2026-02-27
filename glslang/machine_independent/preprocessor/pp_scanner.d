@@ -9,6 +9,11 @@ class tInput {
 
   abstract int scan(ref TPpToken ppToken);
 
+  bool peekPasting() => false;
+  bool peekContinuedPasting(int) => false;
+  bool endOfReplacementList() => false;
+  bool isStringInput() => false;
+
   void notifyActivated() {}
   void notifyDeleted() {}
 }
@@ -17,6 +22,8 @@ class tStringInput : tInput {
   TInputScanner input;
 
   this(TPpContext pp, TInputScanner i) { super(pp); input = i; }
+
+  override bool isStringInput() => true;
 
   int getch() {
     int ch = input.get;
@@ -85,14 +92,14 @@ class tStringInput : tInput {
         ch == 'h' || ch == 'H';
     }
 
-    static immutable string[] Int64_Extensions = [
+    enum string[] Int64_Extensions = [
       E_GL_ARB_gpu_shader_int64,
       E_GL_EXT_shader_explicit_arithmetic_types,
       E_GL_NV_gpu_shader5,
       E_GL_EXT_shader_explicit_arithmetic_types_int64
     ];
 
-    static immutable string[] Int16_Extensions = [
+    enum string[] Int16_Extensions = [
       E_GL_AMD_gpu_shader_int16,
       E_GL_EXT_shader_explicit_arithmetic_types,
       E_GL_EXT_shader_explicit_arithmetic_types_int16
@@ -145,7 +152,7 @@ class tStringInput : tInput {
           );
 
           if (len == 0) continue;
-
+          
           ppToken.name[len] = '\0';
           ungetch;
           return EFixedAtoms.PpAtomIdentifier;
@@ -181,4 +188,12 @@ class tStringInput : tInput {
       ch = getch;
     }
   }
+}
+
+class tMarkerInput : tInput {
+  this(TPpContext pp) {
+    super(pp);
+  }
+
+  enum int marker = -3;
 }
