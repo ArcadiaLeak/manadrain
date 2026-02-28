@@ -179,9 +179,18 @@ class tStringInput : tInput {
 }
 
 class tMarkerInput : tInput {
+  enum int marker = -3;
+
   this(TPpContext pp) {
     super(pp);
   }
+}
 
-  enum int marker = -3;
+class tStringifyLevelInput : tInput {
+  enum int PUSH = -4;
+  enum int POP = -5;
+
+  this(TPpContext pp) {
+    super(pp);
+  }
 }

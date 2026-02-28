@@ -60,6 +60,8 @@ enum Tuple!(EFixedAtoms, string)[] tokens = [
 ];
 
 class TPpContext {
+  MacroSymbol[int] macroDefs;
+
   int[string] atomMap;
   string[int] stringMap;
   int lastAtom;
@@ -243,7 +245,72 @@ class TPpContext {
         }
       } else if (pendingPoundSymbols == 0) {
         mac.body.putToken(token, ppToken);
+      } else if (pendingPoundSymbols == 1) {
+        parseContext.requireProfile(ppToken.loc, ~EProfile(ES_PROFILE: 1), "stringify (#)");
+        parseContext.profileRequires(ppToken.loc, ~EProfile(ES_PROFILE: 1), 130, "", "stringify (#)");
+        bool isArg = false;
+        if (token == EFixedAtoms.PpAtomIdentifier)
+          foreach_reverse (arg; mac.args)
+            if (stringMap[arg] == ppToken.nameStr) {
+              isArg = true;
+              break;
+            }
+        if (!isArg) {
+          parseContext.ppError(ppToken.loc, "'#' is not followed by a macro parameter.", "#", "");
+          return token;
+        }
+        mac.body.putToken(tStringifyLevelInput.PUSH, ppToken);
+        mac.body.putToken(token, ppToken);
+        mac.body.putToken(tStringifyLevelInput.POP, ppToken);
+        pendingPoundSymbols = 0;
+      } else if (pendingPoundSymbols % 2 == 0) {
+        parseContext.requireProfile(ppToken.loc, ~EProfile(ES_PROFILE: 1), "token pasting (##)");
+        parseContext.profileRequires(ppToken.loc, ~EProfile(ES_PROFILE: 1), 130, "", "token pasting (##)");
+        foreach (i; 0..pendingPoundSymbols / 2)
+          mac.body.putToken(EFixedAtoms.PpAtomPaste, savePound);
+        mac.body.putToken(token, ppToken);
+        pendingPoundSymbols = 0;
+      } else {
+        parseContext.ppError(ppToken.loc, "Illegal sequence of paste (##) and stringify (#).", "#", "");
+        return token;
       }
+      token = scanToken(ppToken);
+    }
+    if (pendingPoundSymbols != 0)
+      parseContext.ppError(ppToken.loc, "Macro ended with incomplete '#' paste/stringify operators", "#", "");
+
+    MacroSymbol* existing = defAtom in macroDefs;
+    if (existing !is null) {
+      if (!existing.undef) {
+        if (existing.functionLike != mac.functionLike)
+          parseContext.ppError(
+            defineLoc, "Macro redefined; function-like versus object-like:",
+            "#define", stringMap[defAtom]
+          );
+        else if (existing.args.length != mac.args.length)
+          parseContext.ppError(
+            defineLoc, "Macro redefined; different number of arguments:",
+            "#define", stringMap[defAtom]
+          );
+        else {
+          if (existing.args != mac.args)
+            parseContext.ppError(
+              defineLoc, "Macro redefined; different argument names:",
+              "#define", stringMap[defAtom]
+            );
+          existing.body.reset;
+          mac.body.reset;
+          int newToken;
+          bool firstToken = true;
+          do {
+            int oldToken;
+            TPpToken oldPpToken;
+            TPpToken newPpToken;
+            oldToken = existing.body.getToken(parseContext, oldPpToken);
+          } while (newToken != EndOfInput);
+        }
+      }
+      *existing = mac;
     }
 
     return '\n';
@@ -367,11 +434,33 @@ struct TokenStream {
       i64val = ppToken.i64val;
       name = ppToken.nameStr;
     }
+
+    int get(ref TPpToken ppToken) {
+      ppToken.clear;
+      ppToken.space = space;
+      ppToken.i64val = i64val;
+      ppToken.nameStr = name;
+      return atom;
+    }
+  }
+
+  bool atEnd() => currentPos >= stream.length;
+
+  int getToken(TParseContextBase parseContext, ref TPpToken ppToken) {
+    if (atEnd)
+      return EndOfInput;
+
+    int atom = stream[currentPos++].get(ppToken);
+    ppToken.loc = parseContext.getCurrentLoc;
+
+    return atom;
   }
 
   void putToken(int atom, ref TPpToken ppToken) {
     stream.insert = Token(atom, ppToken);
   }
+
+  void reset() { currentPos = 0; }
 
   TChunked!Token stream;
   size_t currentPos;
@@ -397,5 +486,22 @@ struct TChunked(T) {
     if (chunks.empty || chunks.back.length == ubyte.max)
       chunks.insert = Chunk();
     chunks.back.data[chunks.back.length++] = elem;
+  }
+
+  size_t length() {
+    size_t len;
+    foreach (ref chunk; chunks)
+      len += chunk.length;
+    return len;
+  }
+
+  ref T opIndex(size_t i) { 
+    size_t seen;
+    foreach (ref chunk; chunks) {
+      if (seen + chunk.length > i)
+        return chunk.data[i - seen];
+      seen += chunk.length;
+    }
+    throw new Exception("Chunked list lookup failed!");
   }
 }

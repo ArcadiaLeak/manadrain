@@ -60,6 +60,21 @@ class TParseVersions {
     } else {
       return TExtensionBehavior.EBhMissing;
     }
+  }  
+
+  abstract void warn(
+    in TSourceLoc loc, string szReason,
+    string szToken, string szExtraInfo
+  );
+
+  abstract void error(
+    in TSourceLoc loc, string szReason,
+    string szToken, string szExtraInfo
+  );
+
+  void requireProfile(in TSourceLoc loc, EProfile profileMask, string featureDesc) {
+    if (!(profile & profileMask))
+      error(loc, "not supported with this profile:", featureDesc, profile.getName);
   }
 
   void profileRequires(
@@ -71,18 +86,6 @@ class TParseVersions {
       extension ? [extension] : null, featureDesc
     );
   }
-
-  
-
-  abstract void warn(
-    in TSourceLoc loc, string szReason,
-    string szToken, string szExtraInfo
-  );
-
-  abstract void error(
-    in TSourceLoc loc, string szReason,
-    string szToken, string szExtraInfo
-  );
 
   void profileRequires(
     in TSourceLoc loc, EProfile profileMask, int minVersion, string[] extensions,
