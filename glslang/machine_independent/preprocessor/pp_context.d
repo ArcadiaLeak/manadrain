@@ -193,12 +193,57 @@ class TPpContext {
     if (ppToken.loc.string_ >= 0)
       parseContext.reservedPpErrorCheck(ppToken.loc, ppToken.nameStr, "#define");
 
-    int defAtom = getAddAtom(ppToken.nameStr);
+    const int defAtom = getAddAtom(ppToken.nameStr);
     TSourceLoc defineLoc = ppToken.loc;
 
     token = scanToken(ppToken);
     if (token == '(' && !ppToken.space) {
       mac.functionLike = 1;
+      do {
+        token = scanToken(ppToken);
+        if (mac.args.length == 0 && token == ')')
+          break;
+        if (token != EFixedAtoms.PpAtomIdentifier) {
+          parseContext.ppError(ppToken.loc, "bad argument", "#define", "");
+          return token;
+        }
+        const int argAtom = getAddAtom(ppToken.nameStr);
+
+        bool duplicate = false;
+        foreach (arg; mac.args) {
+          if (arg == argAtom) {
+            parseContext.ppError(ppToken.loc, "duplicate macro parameter", "#define", "");
+            duplicate = true;
+            break;
+          }
+        }
+        if (!duplicate)
+          mac.args ~= argAtom;
+        token = scanToken(ppToken);
+      } while (token == ',');
+
+      if (token != ')') {
+        parseContext.ppError(ppToken.loc, "missing parenthesis", "#define", "");
+        return token;
+      }
+
+      token = scanToken(ppToken);
+    } else if (token != '\n' && token != EndOfInput && !ppToken.space) {
+      parseContext.ppWarn(ppToken.loc, "missing space after macro name", "#define", "");
+      return token;
+    }
+
+    int pendingPoundSymbols = 0;
+    TPpToken savePound;
+    while (token != '\n' && token != EndOfInput) {
+      if (token == '#') {
+        pendingPoundSymbols++;
+        if (pendingPoundSymbols == 0) {
+          savePound = ppToken;
+        }
+      } else if (pendingPoundSymbols == 0) {
+        mac.body.putToken(token, ppToken);
+      }
     }
 
     return '\n';
@@ -315,9 +360,20 @@ struct TokenStream {
     bool space;
     long i64val;
     string name;
+
+    this(int a, ref TPpToken ppToken) {
+      atom = a;
+      space = ppToken.space;
+      i64val = ppToken.i64val;
+      name = ppToken.nameStr;
+    }
   }
 
-  Token[] stream;
+  void putToken(int atom, ref TPpToken ppToken) {
+    stream.insert = Token(atom, ppToken);
+  }
+
+  TChunked!Token stream;
   size_t currentPos;
 }
 
@@ -327,4 +383,19 @@ struct MacroSymbol {
   byte functionLike;
   byte busy;
   byte undef;
+}
+
+struct TChunked(T) {
+  struct Chunk {
+    T[ubyte.max] data;
+    ubyte length;
+  }
+
+  DList!Chunk chunks;
+
+  void insert(T elem) {
+    if (chunks.empty || chunks.back.length == ubyte.max)
+      chunks.insert = Chunk();
+    chunks.back.data[chunks.back.length++] = elem;
+  }
 }
