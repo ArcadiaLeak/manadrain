@@ -86,7 +86,7 @@ enum EFixedAtoms {
 struct TPpToken {
   import std.container.dlist;
 
-  DList!uint name;
+  DList!string name;
   union {
     int val;
     double dval;
@@ -104,10 +104,23 @@ struct TPpToken {
     fullyExpanded = false;
   }
 
-  string nameAsString() {
+  string nameStr() {
     import std.array;
+    import std.range.primitives;
+
+    if (name[].walkLength > 1)
+      nameStr = name[].join;
+
+    return name.front;
+  }
+
+  void nameStr(string str) {
+    name.clear;
+    name.insert = str;
+  }
+
+  void append(dchar ch) {
     import std.conv;
-    import std.string;
-    return name[].array.assumeUTF.to!string;
+    name.insert = ch.to!string;
   }
 }

@@ -131,7 +131,7 @@ class tStringInput : tInput {
         case 'u': case 'v': case 'w': case 'x': case 'y':
         case 'z':
           do {
-            ppToken.name ~= ch;
+            ppToken.append = ch;
             ch = getch;
           } while (
             (ch >= 'a' && ch <= 'z') ||
@@ -145,13 +145,13 @@ class tStringInput : tInput {
           ungetch;
           return EFixedAtoms.PpAtomIdentifier;
         case '0':
-          ppToken.name ~= ch;
+          ppToken.append = ch;
           ch = getch;
           if (ch == 'x' || ch == 'X') {
             bool isUnsigned = false;
             bool isInt64 = false;
             bool isInt16 = false;
-            ppToken.name ~= ch;
+            ppToken.append = ch;
             ch = getch;
             if (
               (ch >= '0' && ch <= '9') ||

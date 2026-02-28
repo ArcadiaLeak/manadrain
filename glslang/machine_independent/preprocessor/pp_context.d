@@ -62,6 +62,7 @@ enum Tuple!(EFixedAtoms, string)[] tokens = [
 class TPpContext {
   int[string] atomMap;
   string[int] stringMap;
+  int lastAtom;
 
   string preamble;
   string[] strings;
@@ -107,11 +108,21 @@ class TPpContext {
       addAtomFixed(ch, [ch]);
     static foreach (token; tokens)
       addAtomFixed(token.expand);
+    lastAtom = EFixedAtoms.PpAtomLast;
   }
 
   void addAtomFixed(int atom, string s) {
     atomMap[s] = atom;
     stringMap[atom] = s;
+  }
+
+  int getAddAtom(string s) {
+    int atom = get(atomMap, s, 0);
+    if (atom == 0) {
+      atom = lastAtom++;
+      addAtomFixed(atom, s);
+    }
+    return atom;
   }
 
   int tokenize(ref TPpToken ppToken) {
@@ -152,12 +163,12 @@ class TPpContext {
     int token = scanToken(ppToken);
     
     if (token == EFixedAtoms.PpAtomIdentifier) {
-      switch (get(atomMap, ppToken.nameAsString, 0)) {
+      switch (get(atomMap, ppToken.nameStr, 0)) {
         case EFixedAtoms.PpAtomDefine:
           token = CPPdefine(ppToken);
           break;
         default:
-          parseContext.ppError(ppToken.loc, "invalid directive:", "#", ppToken.nameAsString);
+          parseContext.ppError(ppToken.loc, "invalid directive:", "#", ppToken.nameStr);
           break;
       }
     } else if (token != '\n' && token != EndOfInput)
@@ -180,7 +191,15 @@ class TPpContext {
       return token;
     }
     if (ppToken.loc.string_ >= 0)
-      parseContext.reservedPpErrorCheck(ppToken.loc, ppToken.nameAsString, "#define");
+      parseContext.reservedPpErrorCheck(ppToken.loc, ppToken.nameStr, "#define");
+
+    int defAtom = getAddAtom(ppToken.nameStr);
+    TSourceLoc defineLoc = ppToken.loc;
+
+    token = scanToken(ppToken);
+    if (token == '(' && !ppToken.space) {
+      mac.functionLike = 1;
+    }
 
     return '\n';
   }
@@ -246,8 +265,8 @@ class TPpContext {
           case EFixedAtoms.PpAtomRight: case EFixedAtoms.PpAtomLeft:
           case EFixedAtoms.PpAtomAnd: case EFixedAtoms.PpAtomOr:
           case EFixedAtoms.PpAtomXor:
-            ppToken.name = DList!uint(stringMap[resultToken]);
-            pastedPpToken.name = DList!uint(stringMap[token]);
+            ppToken.nameStr = stringMap[resultToken];
+            pastedPpToken.nameStr = stringMap[token];
             break;
           default:
             parseContext.ppError(ppToken.loc, "not supported for these tokens", "##", "");
@@ -256,7 +275,7 @@ class TPpContext {
 
         ppToken.name ~= pastedPpToken.name[];
         if (resultToken != EFixedAtoms.PpAtomIdentifier) {
-          uint newToken = get(atomMap, ppToken.nameAsString, 0);
+          uint newToken = get(atomMap, ppToken.nameStr, 0);
           if (newToken > 0)
             resultToken = newToken;
           else

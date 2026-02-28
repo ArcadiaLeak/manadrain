@@ -247,11 +247,11 @@ auto ppClosure(ref string outputString) {
         ) outputBuffer ~= " ";
       }
       if (token == EFixedAtoms.PpAtomIdentifier)
-        lastTokenName = ppToken.nameAsString;
+        lastTokenName = ppToken.nameStr;
       lastToken = token;
       if (token == EFixedAtoms.PpAtomConstString)
         outputBuffer ~= "\"";
-      outputBuffer ~= ppToken.nameAsString;
+      outputBuffer ~= ppToken.nameStr;
       if (token == EFixedAtoms.PpAtomConstString)
         outputBuffer ~= "\"";
     } while (true);

@@ -30,7 +30,7 @@ class TScanContext {
       int curToken = pp.tokenize(ppToken);
       if (curToken == EndOfInput)
         return 0;
-      tokenText = ppToken.nameAsString;
+      tokenText = ppToken.nameStr;
       loc = ppToken.loc;
     } while(true);
   }
