@@ -160,16 +160,16 @@ class tStringInput : tInput {
             ) {
               ival = 0;
               do {
-                //
+                assert(0);
               } while (
                 (ch >= '0' && ch <= '9') ||
                 (ch >= 'A' && ch <= 'F') ||
                 (ch >= 'a' && ch <= 'f')
               );
             } else {
-              //
+              assert(0);
             }
-            //
+            assert(0);
           }
       }
 

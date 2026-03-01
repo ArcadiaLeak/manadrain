@@ -1,10 +1,7 @@
 module glslang.machine_independent.preprocessor.pp_context;
 import glslang;
 
-import std.container.dlist;
-import std.container.slist;
 import std.typecons;
-
 enum Tuple!(EFixedAtoms, string)[] tokens = [
   tuple(EFixedAtoms.PPAtomAddAssign, "+="),
   tuple(EFixedAtoms.PPAtomSubAssign, "-="),
@@ -60,6 +57,9 @@ enum Tuple!(EFixedAtoms, string)[] tokens = [
 ];
 
 class TPpContext {
+  import std.container.dlist;
+  import std.container.slist;
+
   MacroSymbol[int] macroDefs;
 
   int[string] atomMap;
@@ -77,7 +77,7 @@ class TPpContext {
 
   enum int maxIfNesting = 65;
 
-  bool ifdepth;
+  int ifdepth;
   bool[maxIfNesting] elseSeen;
   int elsetracker;
 
@@ -169,12 +169,51 @@ class TPpContext {
         case EFixedAtoms.PpAtomDefine:
           token = CPPdefine(ppToken);
           break;
+        case EFixedAtoms.PpAtomElse:
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#else after #else", "#else", "");
+          elseSeen[elsetracker] = true;
+          if (ifdepth == 0)
+            parseContext.ppError(ppToken.loc, "mismatched statements", "#else", "");
+          token = extraTokenCheck(EFixedAtoms.PpAtomElse, ppToken, scanToken(ppToken));
+          token = CPPelse(0, ppToken);
+          break;
         default:
           parseContext.ppError(ppToken.loc, "invalid directive:", "#", ppToken.nameStr);
           break;
       }
     } else if (token != '\n' && token != EndOfInput)
       parseContext.ppError(ppToken.loc, "invalid directive", "#", "");
+
+    return token;
+  }
+
+  int extraTokenCheck(int contextAtom, ref TPpToken ppToken, int token) {
+    if (token != '\n' && token != EndOfInput) {
+      enum string message = "unexpected tokens following directive";
+
+      string label;
+      if (contextAtom == EFixedAtoms.PpAtomElse)
+        label = "#else";
+      else if (contextAtom == EFixedAtoms.PpAtomElif)
+        label = "#elif";
+      else if (contextAtom == EFixedAtoms.PpAtomEndif)
+        label = "#endif";
+      else if (contextAtom == EFixedAtoms.PpAtomIf)
+        label = "#if";
+      else if (contextAtom == EFixedAtoms.PpAtomLine)
+        label = "#line";
+      else
+        label = "";
+
+      if (parseContext.relaxedErrors)
+        parseContext.ppWarn(ppToken.loc, message, label, "");
+      else
+        parseContext.ppError(ppToken.loc, message, label, "");
+
+      while (token != '\n' && token != EndOfInput)
+        token = scanToken(ppToken);
+    }
 
     return token;
   }
@@ -307,13 +346,132 @@ class TPpContext {
             TPpToken oldPpToken;
             TPpToken newPpToken;
             oldToken = existing.body.getToken(parseContext, oldPpToken);
+            newToken = mac.body.getToken(parseContext, newPpToken);
+            if (firstToken) {
+              newPpToken.space = oldPpToken.space;
+              firstToken = false;
+            }
+            if (oldToken != newToken || oldPpToken != newPpToken) {
+              parseContext.ppError(
+                defineLoc, "Macro redefined; different substitutions:",
+                "#define", stringMap[defAtom]
+              );
+              break;
+            }
           } while (newToken != EndOfInput);
         }
       }
       *existing = mac;
-    }
+    } else
+      addMacroDef(defAtom, mac);
 
     return '\n';
+  }
+
+  void addMacroDef(int atom, MacroSymbol macroDef) {
+    macroDefs[atom] = macroDef;
+  }
+
+  int eval(
+    int token, int precedence, bool shortCircuit,
+    ref int res, ref bool err, ref TPpToken ppToken
+  ) {
+    assert(0);
+  }
+
+  int CPPif(ref TPpToken ppToken) {
+    int token = scanToken(ppToken);
+    if (ifdepth >= maxIfNesting || elsetracker >= maxIfNesting) {
+      parseContext.ppError(ppToken.loc, "maximum nesting depth exceeded", "#if", "");
+      return EndOfInput;
+    } else {
+      elsetracker++;
+      ifdepth++;
+    }
+    int res = 0;
+    bool err = false;
+    token = eval(token, eval_prec.MIN_PRECEDENCE, false, res, err, ppToken);
+    token = extraTokenCheck(EFixedAtoms.PpAtomIf, ppToken, token);
+    if (!res && !err)
+      token = CPPelse(1, ppToken);
+    
+    return token;
+  }
+
+  int CPPelse(int matchelse, ref TPpToken ppToken) {
+    inElseSkip = true;
+    int depth = 0;
+    int token = scanToken(ppToken);
+
+    while (token != EndOfInput) {
+      if (token != '#') {
+        while (token != '\n' && token != EndOfInput)
+          token = scanToken(ppToken);
+        
+        if (token == EndOfInput)
+          return token;
+
+        token = scanToken(ppToken);
+        continue;
+      }
+
+      if ((token = scanToken(ppToken)) != EFixedAtoms.PpAtomIdentifier)
+        continue;
+
+      int nextAtom = atomMap[ppToken.nameStr];
+      if (
+        nextAtom == EFixedAtoms.PpAtomIf ||
+        nextAtom == EFixedAtoms.PpAtomIfdef ||
+        nextAtom == EFixedAtoms.PpAtomIfndef
+      ) {
+        depth++;
+        if (ifdepth >= maxIfNesting || elsetracker >= maxIfNesting) {
+          parseContext.ppError(ppToken.loc, "maximum nesting depth exceeded", "#if/#ifdef/#ifndef", "");
+          return EndOfInput;
+        } else {
+          ifdepth++;
+          elsetracker++;
+        }
+      } else if (nextAtom == EFixedAtoms.PpAtomEndif) {
+        token = extraTokenCheck(nextAtom, ppToken, scanToken(ppToken));
+        elseSeen[elsetracker] = false;
+        --elsetracker;
+        if (depth == 0) {
+          if (ifdepth > 0)
+            --ifdepth;
+          break;
+        }
+        --depth;
+        --ifdepth;
+      } else if (matchelse && depth == 0) {
+        if (nextAtom == EFixedAtoms.PpAtomElse) {
+          elseSeen[elsetracker] = true;
+          token = extraTokenCheck(nextAtom, ppToken, scanToken(ppToken));
+          break;
+        } else if (nextAtom == EFixedAtoms.PpAtomElif) {
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#elif after #else", "#elif", "");
+          if (ifdepth > 0) {
+            --ifdepth;
+            elseSeen[elsetracker] = false;
+            --elsetracker;
+          }
+          inElseSkip = false;
+          return CPPif(ppToken);
+        } else if (nextAtom == EFixedAtoms.PpAtomElse) {
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#else after #else", "#else", "");
+          else
+            elseSeen[elsetracker] = true;
+          token = extraTokenCheck(nextAtom, ppToken, scanToken(ppToken));
+        } else if (nextAtom == EFixedAtoms.PpAtomElif)
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#elif after #else", "#elif", "");
+      }
+    }
+
+    inElseSkip = false;
+    return token;
   }
 
   int scanToken(ref TPpToken ppToken) {
@@ -418,90 +576,5 @@ class TPpContext {
 
     errorOnVersion = versionWillBeError;
     versionSeen = false;
-  }
-}
-
-struct TokenStream {
-  struct Token {
-    int atom;
-    bool space;
-    long i64val;
-    string name;
-
-    this(int a, ref TPpToken ppToken) {
-      atom = a;
-      space = ppToken.space;
-      i64val = ppToken.i64val;
-      name = ppToken.nameStr;
-    }
-
-    int get(ref TPpToken ppToken) {
-      ppToken.clear;
-      ppToken.space = space;
-      ppToken.i64val = i64val;
-      ppToken.nameStr = name;
-      return atom;
-    }
-  }
-
-  bool atEnd() => currentPos >= stream.length;
-
-  int getToken(TParseContextBase parseContext, ref TPpToken ppToken) {
-    if (atEnd)
-      return EndOfInput;
-
-    int atom = stream[currentPos++].get(ppToken);
-    ppToken.loc = parseContext.getCurrentLoc;
-
-    return atom;
-  }
-
-  void putToken(int atom, ref TPpToken ppToken) {
-    stream.insert = Token(atom, ppToken);
-  }
-
-  void reset() { currentPos = 0; }
-
-  TChunked!Token stream;
-  size_t currentPos;
-}
-
-struct MacroSymbol {
-  int[] args;
-  TokenStream body;
-  byte functionLike;
-  byte busy;
-  byte undef;
-}
-
-struct TChunked(T) {
-  struct Chunk {
-    T[ubyte.max] data;
-    ubyte length;
-  }
-
-  DList!Chunk chunks;
-
-  void insert(T elem) {
-    if (chunks.empty || chunks.back.length == ubyte.max)
-      chunks.insert = Chunk();
-    chunks.back.data[chunks.back.length++] = elem;
-  }
-
-  size_t length() {
-    size_t len;
-    foreach (ref chunk; chunks)
-      len += chunk.length;
-    return len;
-  }
-
-  ref T opIndex(size_t i) { 
-    size_t seen;
-    foreach (ref chunk; chunks) {
-      if (seen + chunk.length > i)
-        return chunk.data[i - seen];
-      seen += chunk.length;
-    }
-    throw new Exception("Chunked list lookup failed!");
   }
 }

@@ -6173,7 +6173,7 @@ class TBuiltIns : TBuiltInParseables {
         "\n");
     }
 
-    if (version_ >= 300 /* both ES and non-ES */) {
+    if (version_ >= 300) {
       stageBuiltins.STAGE_FRAGMENT.insert(
         "flat in highp uint gl_ViewID_OVR;" ~
         "\n");

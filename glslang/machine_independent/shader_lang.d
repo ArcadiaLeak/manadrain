@@ -663,11 +663,7 @@ bool SetupBuiltinSymbolTable(
         .MapEProfile(profile).tupleof[precClass]
           .copyTable(commonTable.tupleof[precClass]);
 
-      /*  
-      CommonSymbolTable[versionIndex][spvVersionIndex]
-        .MapEProfile(profile).tupleof[precClass]
-          .readOnly;
-      */
+      assert(0);
     }
   }
 
