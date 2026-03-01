@@ -187,6 +187,17 @@ class tMarkerInput : tInput {
   this(TPpContext pp) {
     super(pp);
   }
+
+  override int getch() { assert(0, "Unreachable!"); return EndOfInput; }
+  override void ungetch() { assert(0, "Unreachable!"); }
+
+  override int scan(ref TPpToken ppToken) {
+    if (done)
+      return EndOfInput;
+    done = true;
+
+    return marker;
+  }
 }
 
 class tStringifyLevelInput : tInput {

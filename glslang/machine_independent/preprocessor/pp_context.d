@@ -499,7 +499,136 @@ class TPpContext {
       return MacroExpandResult.MacroExpandUndef;
     }
 
-    assert(0);
+    tMacroInput in_ = new tMacroInput(this);
+
+    TSourceLoc loc = ppToken.loc;
+    in_.mac = macro_;
+    if (macro_.functionLike) {
+      TPpToken parenToken;
+      int token = scanToken(parenToken);
+      if (newLineOkay) {
+        while (token == '\n')
+          token = scanToken(parenToken);
+      }
+      if (token != '(') {
+        UngetToken(token, parenToken);
+        return MacroExpandResult.MacroExpandNotStarted;
+      }
+      in_.args.length = in_.mac.args.length;
+      foreach (ref arg; in_.args)
+        arg = new TokenStream;
+      in_.expandedArgs.length = in_.mac.args.length;
+      in_.expandedArgs[] = null;
+      size_t arg = 0;
+      bool tokenRecorded = false;
+      do {
+        SList!int nestStack;
+        while (true) {
+          token = scanToken(ppToken);
+          if (token == EndOfInput || token == tMarkerInput.marker) {
+            parseContext.ppError(loc, "End of input in macro", "macro expansion", stringMap[macroAtom]);
+            return MacroExpandResult.MacroExpandError;
+          }
+          if (token == '\n') {
+            if (!newLineOkay) {
+              parseContext.ppError(loc, "End of line in macro substitution:", "macro expansion", stringMap[macroAtom]);
+              return MacroExpandResult.MacroExpandError;
+            }
+            continue;
+          }
+          if (token == '#') {
+            parseContext.ppError(ppToken.loc, "unexpected '#'", "macro expansion", stringMap[macroAtom]);
+            return MacroExpandResult.MacroExpandError;
+          }
+          if (in_.mac.args.length == 0 && token != ')')
+            break;
+          if (nestStack.empty && (token == ',' || token == ')'))
+            break;
+          if (token == '(')
+            nestStack.insertFront = ')';
+          else if (!nestStack.empty && token == nestStack.front)
+            nestStack.removeFront;
+
+          if (get(atomMap, ppToken.nameStr, 0) == EFixedAtoms.PpAtomLineMacro)
+            ppToken.ival = cast(int) parseContext.getCurrentLoc.line;
+
+          in_.args[arg].putToken(token, ppToken);
+          tokenRecorded = true;
+        }
+
+        if (token == ')') {
+          if (in_.mac.args.length == 1 && !tokenRecorded)
+            break;
+          arg++;
+          break;
+        }
+        arg++;
+      } while (arg < in_.mac.args.length);
+
+      if (arg < in_.mac.args.length)
+        parseContext.ppError(loc, "Too few args in Macro", "macro expansion", stringMap[macroAtom]);
+      else if (token != ')') {
+        int depth = 0;
+        while (token != EndOfInput && (depth > 0 || token != ')')) {
+          if (token == ')' || token == '}')
+            depth--;
+          token = scanToken(ppToken);
+          if (token == '(' || token == '{')
+            depth++;
+        }
+
+        if (token == EndOfInput) {
+          parseContext.ppError(loc, "End of input in macro", "macro expansion", stringMap[macroAtom]);
+          return MacroExpandResult.MacroExpandError;
+        }
+        parseContext.ppError(loc, "Too many args in macro", "macro expansion", stringMap[macroAtom]);
+      }
+
+      foreach (i; 0..in_.mac.args.length)
+        in_.expandedArgs[i] = PrescanMacroArg(in_.args[i], ppToken, newLineOkay);
+    }
+
+    pushInput(in_);
+    macro_.busy = 1;
+    macro_.body.reset;
+
+    return MacroExpandResult.MacroExpandStarted;
+  }
+
+  TokenStream* PrescanMacroArg(
+    TokenStream* arg, ref TPpToken ppToken, bool newLineOkay
+  ) {
+    TokenStream* expandedArg = new TokenStream;
+    pushInput(new tMarkerInput(this));
+    pushTokenStreamInput(arg);
+    int token;
+    while (
+      (token = scanToken(ppToken)) != tMarkerInput.marker && token != EndOfInput
+    ) {
+      token = tokenPaste(token, ppToken);
+      if (token == EFixedAtoms.PpAtomIdentifier) {
+        final switch (MacroExpand(ppToken, false, newLineOkay)) {
+          case MacroExpandResult.MacroExpandNotStarted:
+            break;
+          case MacroExpandResult.MacroExpandError:
+            while (
+              (token = scanToken(ppToken)) != tMarkerInput.marker && token != EndOfInput
+            ) {}
+            break;
+          case MacroExpandResult.MacroExpandStarted:
+          case MacroExpandResult.MacroExpandUndef:
+            continue;
+        }
+      }
+      if (token == tMarkerInput.marker || token == EndOfInput)
+        break;
+      expandedArg.putToken(token, ppToken);
+    }
+
+    if (token != tMarkerInput.marker)
+      expandedArg = null;
+
+    return expandedArg;
   }
 
   void UngetToken(int token, ref TPpToken ppToken) {
@@ -685,7 +814,9 @@ class TPpContext {
     return resultToken;
   }
 
-  void pushTokenStreamInput(TokenStream* ts, bool prepasting, bool expanded) {
+  void pushTokenStreamInput(
+    TokenStream* ts, bool prepasting = false, bool expanded = false
+  ) {
     pushInput(new tTokenInput(this, ts, prepasting, expanded));
     ts.reset();
   }
