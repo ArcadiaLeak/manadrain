@@ -243,3 +243,95 @@ class tZeroInput : tInput {
     return EFixedAtoms.PpAtomConstInt;
   }
 }
+
+class tMacroInput : tInput {
+  bool prepaste;
+  bool postpaste;
+
+  MacroSymbol* mac;
+  TokenStream*[] args;
+  TokenStream*[] expandedArgs;
+  
+  this(TPpContext pp) {
+    super(pp);
+    prepaste = false;
+    postpaste = false;
+  }
+
+  override int getch() { assert(0, "Unreachable!"); return EndOfInput; }
+  override void ungetch() { assert(0, "Unreachable!"); }
+
+  override int scan(ref TPpToken ppToken) {
+    int token;
+    do {
+      token = mac.body.getToken(pp.parseContext, ppToken);
+    } while (token == ' ');
+
+    bool pasting = false;
+    if (postpaste) {
+      pasting = true;
+      postpaste = false;
+    }
+
+    if (prepaste) {
+      assert(token == EFixedAtoms.PpAtomPaste);
+      prepaste = false;
+      postpaste = true;
+    }
+
+    if (mac.body.peekTokenizedPasting(false)) {
+      prepaste = true;
+      pasting = true;
+    }
+
+    if (token == EFixedAtoms.PpAtomIdentifier) {
+      long brokeAt = -1;
+      foreach_reverse (i, arg; mac.args)
+        if (pp.stringMap[arg] == ppToken.nameStr) {
+          brokeAt = i;
+          break;
+        }
+      if (brokeAt >= 0) {
+        TokenStream* arg = expandedArgs[brokeAt];
+        bool expanded = !!arg && !pasting;
+        if (arg is null || pasting)
+          arg = args[brokeAt];
+        pp.pushTokenStreamInput(arg, prepaste, expanded);
+        return pp.scanToken(ppToken);
+      }
+    }
+
+    if (token == EndOfInput)
+      mac.busy = 0;
+
+    return token;
+  }
+}
+
+class tTokenInput : tInput {
+  TokenStream* tokens;
+  bool lastTokenPastes;
+  bool preExpanded;
+
+  this(TPpContext pp, TokenStream* t, bool prepasting, bool expanded) {
+    super(pp);
+    tokens = t;
+    lastTokenPastes = prepasting;
+    preExpanded = expanded;
+  }
+
+  override int getch() { assert(0, "Unreachable!"); return EndOfInput; }
+  override void ungetch() { assert(0, "Unreachable!"); }
+
+  override int scan(ref TPpToken ppToken) {
+    int token = tokens.getToken(pp.parseContext, ppToken);
+    ppToken.fullyExpanded = preExpanded;
+    if (tokens.atEnd && token == EFixedAtoms.PpAtomIdentifier) {
+      int macroAtom = get(pp.atomMap, ppToken.nameStr, 0);
+      MacroSymbol* macro_ = macroAtom == 0 ? null : macroAtom in pp.macroDefs;
+      if (macro_ && macro_.functionLike)
+        ppToken.fullyExpanded = false;
+    }
+    return token;
+  }
+}

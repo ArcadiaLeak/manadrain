@@ -496,7 +496,7 @@ class TPpContext {
 
     if ((macro_ is null || macro_.undef) && expandUndef) {
       pushInput(new tZeroInput(this));
-      return MacroExpandResult.MacroExpandNotStarted;
+      return MacroExpandResult.MacroExpandUndef;
     }
 
     assert(0);
@@ -685,15 +685,18 @@ class TPpContext {
     return resultToken;
   }
 
+  void pushTokenStreamInput(TokenStream* ts, bool prepasting, bool expanded) {
+    pushInput(new tTokenInput(this, ts, prepasting, expanded));
+    ts.reset();
+  }
+
   void pushInput(tInput input) {
     inputStack.insertFront(input);
-
     input.notifyActivated;
   }
 
   void popInput() {
     inputStack.front.notifyDeleted;
-  
     inputStack.removeFront;
   }
 

@@ -94,9 +94,21 @@ struct TokenStream {
       ppToken.nameStr = name;
       return atom;
     }
+
+    bool isAtom(int a) const => atom == a;
+    int getAtom() const => atom;
+    bool nonSpaced() const => !space;
   }
 
+  TChunked!Token stream;
+  size_t currentPos;
+
   bool atEnd() => currentPos >= stream.length;
+  void reset() { currentPos = 0; }
+
+  bool peekToken(int atom) => !atEnd && stream[currentPos].isAtom(atom);
+  void putToken(int atom, ref TPpToken ppToken) =>
+    stream.insert = Token(atom, ppToken);
 
   int getToken(TParseContextBase parseContext, ref TPpToken ppToken) {
     if (atEnd)
@@ -108,14 +120,35 @@ struct TokenStream {
     return atom;
   }
 
-  void putToken(int atom, ref TPpToken ppToken) {
-    stream.insert = Token(atom, ppToken);
+  bool peekTokenizedPasting(bool lastTokenPastes) {
+    size_t savePos = currentPos;
+    while (peekToken(' '))
+      ++currentPos;
+    if (peekToken(EFixedAtoms.PpAtomPaste)) {
+      currentPos = savePos;
+      return true;
+    }
+
+    if (!lastTokenPastes) {
+      currentPos = savePos;
+      return false;
+    }
+
+    savePos = currentPos;
+    bool moreTokens = false;
+    do {
+      if (atEnd)
+        break;
+      if (!peekToken(' ')) {
+        moreTokens = true;
+        break;
+      }
+      ++currentPos;
+    } while (true);
+    currentPos = savePos;
+
+    return !moreTokens;
   }
-
-  void reset() { currentPos = 0; }
-
-  TChunked!Token stream;
-  size_t currentPos;
 }
 
 struct MacroSymbol {
