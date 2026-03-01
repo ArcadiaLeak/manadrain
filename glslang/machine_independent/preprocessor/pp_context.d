@@ -376,7 +376,109 @@ class TPpContext {
     int token, int precedence, bool shortCircuit,
     ref int res, ref bool err, ref TPpToken ppToken
   ) {
+    TSourceLoc loc = ppToken.loc;
+    if (token == EFixedAtoms.PpAtomIdentifier) {
+      if (ppToken.nameStr == "defined") {
+        if (isMacroInput) {
+          if (parseContext.relaxedErrors)
+            parseContext.ppWarn(
+              ppToken.loc, "nonportable when expanded from macros for preprocessor expression",
+              "defined", ""
+          );
+          else
+            parseContext.ppError(
+              ppToken.loc, "cannot use in preprocessor expression when expanded from macros",
+              "defined", ""
+            );
+        }
+        bool needclose = 0;
+        token = scanToken(ppToken);
+        if (token == '(') {
+          needclose = true;
+          token = scanToken(ppToken);
+        }
+        if (token != EFixedAtoms.PpAtomIdentifier) {
+          parseContext.ppError(loc, "incorrect directive, expected identifier", "preprocessor evaluation", "");
+          err = true;
+          res = 0;
+          return token;
+        }
+
+        MacroSymbol* macro_ = atomMap[ppToken.nameStr] in macroDefs;
+        res = macro_ !is null ? !macro_.undef : 0;
+        token = scanToken(ppToken);
+        if (needclose) {
+          if (token != ')') {
+            parseContext.ppError(loc, "expected ')'", "preprocessor evaluation", "");
+            err = true;
+            res = 0;
+            return token;
+          }
+          token = scanToken(ppToken);
+        }
+      } else {
+        token = tokenPaste(token, ppToken);
+        token = evalToToken(token, shortCircuit, res, err, ppToken);
+      }
+    }
+
     assert(0);
+  }
+
+  int evalToToken(
+    int token, bool shortCircuit,
+    ref int res, ref bool err, ref TPpToken ppToken
+  ) {
+    while (token == EFixedAtoms.PpAtomIdentifier && ppToken.nameStr != "defined") {
+      
+    }
+
+    return token;
+  }
+
+  enum MacroExpandResult {
+    MacroExpandNotStarted,
+    MacroExpandError,
+    MacroExpandStarted,
+    MacroExpandUndef
+  }
+
+  MacroExpandResult MacroExpand(ref TPpToken ppToken, bool expandUndef, bool newLineOkay) {
+    ppToken.space = false;
+    int macroAtom = atomMap[ppToken.nameStr];
+    if (ppToken.fullyExpanded)
+      return MacroExpandResult.MacroExpandNotStarted;
+
+    import std.conv;
+    switch (macroAtom) {
+      case EFixedAtoms.PpAtomLineMacro:
+        if (ppToken.ival == 0)
+          ppToken.ival = cast(int) parseContext.getCurrentLoc.line;
+        ppToken.nameStr = ppToken.ival.to!string;
+        UngetToken(EFixedAtoms.PpAtomConstInt, ppToken);
+        return MacroExpandResult.MacroExpandStarted;
+
+      case EFixedAtoms.PpAtomFileMacro: {
+        if (parseContext.getCurrentLoc.name)
+          parseContext.ppRequireExtensions(
+            ppToken.loc, [E_GL_GOOGLE_cpp_style_line_directive],
+            "filename-based __FILE__"
+          );
+        ppToken.ival = cast(int) parseContext.getCurrentLoc.string_;
+        ppToken.nameStr = ppToken.loc.getStringNameOrNum;
+        UngetToken(EFixedAtoms.PpAtomConstInt, ppToken);
+        return MacroExpandResult.MacroExpandStarted;
+      }
+
+      default:
+        break;
+    }
+
+    assert(0);
+  }
+
+  void UngetToken(int token, ref TPpToken ppToken) {
+    pushInput(new tUngotTokenInput(this, token, ppToken));
   }
 
   int CPPif(ref TPpToken ppToken) {
@@ -498,6 +600,7 @@ class TPpContext {
   bool peekPasting() => !inputStack.empty && inputStack.front.peekPasting;
   bool peekContinuedPasting(int a) => !inputStack.empty && inputStack.front.peekContinuedPasting(a);
   bool endOfReplacementList() => inputStack.empty || inputStack.front.endOfReplacementList;
+  bool isMacroInput() => inputStack.empty || inputStack.front.isMacroInput;
 
   int tokenPaste(int token, ref TPpToken ppToken) {
     if (token == EFixedAtoms.PpAtomPaste) {

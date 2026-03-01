@@ -17,6 +17,13 @@ struct TSourceLoc {
     clear;
     string_ = stringNum;
   }
+
+  string getStringNameOrNum(bool quoteStringName = true) const {
+    import std.conv;
+    if (name !is null)
+      return quoteStringName ? ("\"" ~ name ~ "\"") : name;
+    return string_.to!string;
+  }
 }
 
 struct TPragmaTable {}

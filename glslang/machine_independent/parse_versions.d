@@ -1,8 +1,5 @@
 module glslang.machine_independent.parse_versions;
-
 import glslang;
-
-import std.conv;
 
 class TParseVersions {
   bool forwardCompatible;
@@ -60,7 +57,55 @@ class TParseVersions {
     } else {
       return TExtensionBehavior.EBhMissing;
     }
-  }  
+  }
+
+  void ppRequireExtensions(
+    in TSourceLoc loc,
+    const string[] extensions, string featureDesc
+  ) {
+    if (checkExtensionsRequested(loc, extensions, featureDesc))
+      return;
+
+    if (extensions.length == 1)
+      ppError(loc, "required extension not requested:", featureDesc, extensions[0]);
+    else {
+      ppError(loc, "required extension not requested:", featureDesc, "Possible extensions include:");
+      foreach (ext; extensions)
+        infoSink.info.message(TPrefixType.EPrefixNone, ext);
+    }
+  }
+
+  bool checkExtensionsRequested(in TSourceLoc loc, const string[] extensions, string featureDesc) {
+    foreach (ext; extensions) {
+      TExtensionBehavior behavior = getExtensionBehavior(ext);
+      if (behavior == TExtensionBehavior.EBhEnable || behavior == TExtensionBehavior.EBhRequire)
+        return true;
+    }
+
+    bool warned = false;
+    foreach (ext; extensions) {
+      TExtensionBehavior behavior = getExtensionBehavior(ext);
+      if (behavior == TExtensionBehavior.EBhDisable && relaxedErrors) {
+        infoSink.info.message(
+          TPrefixType.EPrefixWarning,
+          "The following extension must be enabled to use this feature:",
+          loc, messages.MSG_ABSOLUTE_PATH, messages.MSG_DISPLAY_ERROR_COLUMN
+        );
+        behavior = TExtensionBehavior.EBhWarn;
+      }
+      if (behavior == TExtensionBehavior.EBhWarn) {
+        infoSink.info.message(
+          TPrefixType.EPrefixWarning,
+          "extension " ~ ext ~ " is being used for " ~ featureDesc,
+          loc, messages.MSG_ABSOLUTE_PATH, messages.MSG_DISPLAY_ERROR_COLUMN
+        );
+        warned = true;
+      }
+    }
+    if (warned)
+      return true;
+    return false;
+  }
 
   abstract void warn(
     in TSourceLoc loc, string szReason,
@@ -68,6 +113,16 @@ class TParseVersions {
   );
 
   abstract void error(
+    in TSourceLoc loc, string szReason,
+    string szToken, string szExtraInfo
+  );
+
+  abstract void ppError(
+    in TSourceLoc loc, string szReason,
+    string szToken, string szExtraInfo
+  );
+
+  abstract void ppWarn(
     in TSourceLoc loc, string szReason,
     string szToken, string szExtraInfo
   );
@@ -98,9 +153,8 @@ class TParseVersions {
           case TExtensionBehavior.EBhWarn:
             infoSink.info.message(
               TPrefixType.EPrefixWarning,
-              i"extension $(ext) is being used for $(featureDesc)".text,
-              loc,
-              messages.MSG_DISPLAY_ERROR_COLUMN
+              "extension " ~ ext ~ " is being used for " ~ featureDesc,
+              loc, messages.MSG_ABSOLUTE_PATH, messages.MSG_DISPLAY_ERROR_COLUMN
             );
             goto case;
           case TExtensionBehavior.EBhRequire:

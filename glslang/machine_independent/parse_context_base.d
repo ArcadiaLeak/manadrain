@@ -117,7 +117,7 @@ class TParseContextBase : TParseVersions {
       currentScanner.setEndOfInput;
   }
 
-  void ppError(
+  override void ppError(
     in TSourceLoc loc, string szReason,
     string szToken, string szExtraInfo
   ) {
@@ -130,7 +130,7 @@ class TParseContextBase : TParseVersions {
       currentScanner.setEndOfInput;
   }
 
-  void ppWarn(
+  override void ppWarn(
     in TSourceLoc loc, string szReason,
     string szToken, string szExtraInfo
   ) {

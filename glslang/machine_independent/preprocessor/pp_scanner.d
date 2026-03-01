@@ -7,11 +7,14 @@ class tInput {
 
   this(TPpContext p) { done = false; pp = p; }
 
+  abstract int getch();
+  abstract void ungetch();
   abstract int scan(ref TPpToken ppToken);
 
   bool peekPasting() => false;
   bool peekContinuedPasting(int) => false;
   bool endOfReplacementList() => false;
+  bool isMacroInput() => false;
   bool isStringInput() => false;
 
   void notifyActivated() {}
@@ -25,7 +28,7 @@ class tStringInput : tInput {
 
   override bool isStringInput() => true;
 
-  int getch() {
+  override int getch() {
     int ch = input.get;
 
     if (ch == '\\') {
@@ -56,7 +59,7 @@ class tStringInput : tInput {
     return ch;
   }
 
-  void ungetch() {
+  override void ungetch() {
     input.unget;
 
     do {
@@ -192,5 +195,30 @@ class tStringifyLevelInput : tInput {
 
   this(TPpContext pp) {
     super(pp);
+  }
+}
+
+class tUngotTokenInput : tInput {
+  int token;
+  TPpToken lval;
+  
+  this(TPpContext pp, int t, TPpToken p) {
+    super(pp);
+    token = t;
+    lval = p;
+  }
+
+  override int getch() { assert(0); return EndOfInput; }
+  override void ungetch() { assert(0); }
+
+  override int scan(ref TPpToken ppToken) {
+    if (done)
+      return EndOfInput;
+
+    int ret = token;
+    ppToken = lval;
+    done = true;
+
+    return ret;
   }
 }

@@ -35,7 +35,7 @@ struct TPpToken {
 
   DList!string name;
   union {
-    int val;
+    int ival;
     double dval;
     long i64val;
   }
