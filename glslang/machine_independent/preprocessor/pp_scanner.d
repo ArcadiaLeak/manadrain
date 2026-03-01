@@ -208,8 +208,8 @@ class tUngotTokenInput : tInput {
     lval = p;
   }
 
-  override int getch() { assert(0); return EndOfInput; }
-  override void ungetch() { assert(0); }
+  override int getch() { assert(0, "Unreachable!"); return EndOfInput; }
+  override void ungetch() { assert(0, "Unreachable!"); }
 
   override int scan(ref TPpToken ppToken) {
     if (done)
