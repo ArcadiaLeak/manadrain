@@ -404,7 +404,7 @@ class TPpContext {
           return token;
         }
 
-        MacroSymbol* macro_ = atomMap[ppToken.nameStr] in macroDefs;
+        MacroSymbol* macro_ = atomMap.get(ppToken.nameStr, 0) in macroDefs;
         res = macro_ !is null ? !macro_.undef : 0;
         token = scanToken(ppToken);
         if (needclose) {
@@ -443,9 +443,11 @@ class TPpContext {
     MacroExpandUndef
   }
 
-  MacroExpandResult MacroExpand(ref TPpToken ppToken, bool expandUndef, bool newLineOkay) {
+  MacroExpandResult MacroExpand(
+    ref TPpToken ppToken, bool expandUndef, bool newLineOkay
+  ) {
     ppToken.space = false;
-    int macroAtom = atomMap[ppToken.nameStr];
+    int macroAtom = atomMap.get(ppToken.nameStr, 0);
     if (ppToken.fullyExpanded)
       return MacroExpandResult.MacroExpandNotStarted;
 
@@ -470,8 +472,31 @@ class TPpContext {
         return MacroExpandResult.MacroExpandStarted;
       }
 
+      case EFixedAtoms.PpAtomVersionMacro:
+        ppToken.ival = parseContext.version_;
+        ppToken.nameStr = ppToken.ival.to!string;
+        UngetToken(EFixedAtoms.PpAtomConstInt, ppToken);
+        return MacroExpandResult.MacroExpandStarted;
+
       default:
         break;
+    }
+
+    MacroSymbol* macro_ = macroAtom == 0
+      ? null
+      : macroAtom in macroDefs;
+
+    if (macro_ !is null && macro_.busy) {
+      ppToken.fullyExpanded = true;
+      return MacroExpandResult.MacroExpandNotStarted;
+    }
+
+    if ((macro_ is null || macro_.undef) && !expandUndef)
+      return MacroExpandResult.MacroExpandNotStarted;
+
+    if ((macro_ is null || macro_.undef) && expandUndef) {
+      pushInput(new tZeroInput(this));
+      return MacroExpandResult.MacroExpandNotStarted;
     }
 
     assert(0);
@@ -520,7 +545,7 @@ class TPpContext {
       if ((token = scanToken(ppToken)) != EFixedAtoms.PpAtomIdentifier)
         continue;
 
-      int nextAtom = atomMap[ppToken.nameStr];
+      int nextAtom = atomMap.get(ppToken.nameStr, 0);
       if (
         nextAtom == EFixedAtoms.PpAtomIf ||
         nextAtom == EFixedAtoms.PpAtomIfdef ||

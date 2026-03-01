@@ -222,3 +222,24 @@ class tUngotTokenInput : tInput {
     return ret;
   }
 }
+
+class tZeroInput : tInput {
+  this(TPpContext pp) {
+    super(pp);
+  }
+
+  override int getch() { assert(0, "Unreachable!"); return EndOfInput; }
+  override void ungetch() { assert(0, "Unreachable!"); }
+
+  override int scan(ref TPpToken ppToken) {
+    if (done)
+      return EndOfInput;
+
+    ppToken.nameStr = "0";
+    ppToken.ival = 0;
+    ppToken.space = false;
+    done = true;
+
+    return EFixedAtoms.PpAtomConstInt;
+  }
+}
