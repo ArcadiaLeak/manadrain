@@ -10,6 +10,11 @@ int lua_load(
   lua_State L, lua_Reader reader, string data,
   string chunkname, string mode
 ) {
-  ZIO z = ZIO(L: L, reader: reader, data: data);
+  ZIO z = new ZIO(L, reader, data);
+  ubyte status;
+  if (!chunkname) chunkname = "?";
+  status = luaD_protectedparser(L, z, chunkname, mode);
+
   assert(0);
 }
+

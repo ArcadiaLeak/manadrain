@@ -1,10 +1,14 @@
 module lua.lzio;
 import lua;
 
-struct ZIO {
-  size_t n;
-  size_t p;
+class ZIO {
+  lua_State L;
   lua_Reader reader;
   string data;
-  lua_State L;
+
+  this(lua_State L, lua_Reader reader, string data) {
+    this.L = L;
+    this.reader = reader;
+    this.data = data;
+  }
 }

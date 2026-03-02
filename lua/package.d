@@ -1,6 +1,7 @@
 module lua;
 
 public import lua.lauxlib;
+public import lua.ldo;
 public import lua.lstate;
 public import lua.lzio;
 
