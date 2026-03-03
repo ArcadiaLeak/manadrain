@@ -1,6 +1,6 @@
 import { walk } from "jsr:@std/fs/walk";
 
-let Makefile = "all: build/bison build/glslang build/duk\n";
+let Makefile = "all: build/bison build/glslang build/qjs\n";
 
 {
   const bisonSrcEntries = await Array.fromAsync(walk("bison", { exts: ["d"] }));
@@ -19,10 +19,10 @@ let Makefile = "all: build/bison build/glslang build/duk\n";
 }
 
 {
-  const dukSrcEntries = await Array.fromAsync(walk("duktape", { exts: ["d"] }));
-  const dukSrcPaths = dukSrcEntries.map(e => e.path).join(" ");
+  const qjsSrcEntries = await Array.fromAsync(walk("quickjs", { exts: ["d"] }));
+  const qjsSrcPaths = qjsSrcEntries.map(e => e.path).join(" ");
 
-  Makefile += "\n" + `build/duk: ${dukSrcPaths}\n` +
+  Makefile += "\n" + `build/qjs: ${qjsSrcPaths}\n` +
     "\t" + "dmd -debug -of=$@ $^\n";
 }
 
