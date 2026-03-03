@@ -1,6 +1,6 @@
 import { walk } from "jsr:@std/fs/walk";
 
-let Makefile = "all: build/bison build/glslang build/lua\n";
+let Makefile = "all: build/bison build/glslang build/duk\n";
 
 {
   const bisonSrcEntries = await Array.fromAsync(walk("bison", { exts: ["d"] }));
@@ -19,10 +19,10 @@ let Makefile = "all: build/bison build/glslang build/lua\n";
 }
 
 {
-  const luaSrcEntries = await Array.fromAsync(walk("lua", { exts: ["d"] }));
-  const luaSrcPaths = luaSrcEntries.map(e => e.path).join(" ");
+  const dukSrcEntries = await Array.fromAsync(walk("duktape", { exts: ["d"] }));
+  const dukSrcPaths = dukSrcEntries.map(e => e.path).join(" ");
 
-  Makefile += "\n" + `build/lua: ${luaSrcPaths}\n` +
+  Makefile += "\n" + `build/duk: ${dukSrcPaths}\n` +
     "\t" + "dmd -debug -of=$@ $^\n";
 }
 
