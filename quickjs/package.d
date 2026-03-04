@@ -99,6 +99,62 @@ enum JSWknownAtom {
   @("Symbol.asyncIterator") SYMBOL_ASYNC_ITERATOR
 }
 
+enum JSClassRange {
+  STD,
+}
+
+enum JSClass {
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.OBJECT_) OBJECT = 1,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ARRAY) ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ERROR) ERROR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.NUMBER_) NUMBER,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.STRING_) STRING,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.BOOLEAN_) BOOLEAN,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.SYMBOL_) SYMBOL,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ARGUMENTS_) ARGUMENTS,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ARGUMENTS_) MAPPED_ARGUMENTS,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.DATE) DATE,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.OBJECT_) MODULE_NS,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FUNCTION_) C_FUNCTION,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FUNCTION_) BYTECODE_FUNCTION,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FUNCTION_) BOUND_FUNCTION,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FUNCTION_) C_FUNCTION_DATA,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.GENERATOR_FUNCTION) GENERATOR_FUNCTION,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FOR_IN_ITERATOR) FOR_IN_ITERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.REGEXP) REGEXP,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ARRAY_BUFFER) ARRAY_BUFFER,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.SHARED_ARRAY_BUFFER) SHARED_ARRAY_BUFFER,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.UINT8CLAMPEDARRAY) UINT8C_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.INT8ARRAY) INT8_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.UINT8ARRAY) UINT8_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.INT16ARRAY) INT16_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.UINT16ARRAY) UINT16_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.INT32ARRAY) INT32_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.UINT32ARRAY) UINT32_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.BIGINT64ARRAY) BIG_INT64_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.BIGUINT64ARRAY) BIG_UINT64_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FLOAT16ARRAY) FLOAT16_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FLOAT32ARRAY) FLOAT32_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.FLOAT64ARRAY) FLOAT64_ARRAY,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.DATA_VIEW) DATAVIEW,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.BIGINT_) BIG_INT,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.MAP) MAP,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.SET_) SET,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.WEAKMAP) WEAKMAP,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.WEAKSET) WEAKSET,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ITERATOR) ITERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ITERATOR_CONCAT) ITERATOR_CONCAT,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ITERATOR_HELPER) ITERATOR_HELPER,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ITERATOR_WRAP) ITERATOR_WRAP,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.MAP_ITERATOR) MAP_ITERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.SET_ITERATOR) SET_ITERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.ARRAY_ITERATOR) ARRAY_ITERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.STRING_ITERATOR) STRING_ITERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.REGEXP_STRING_ITERATOR) REGEXP_STRING_ITERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.GENERATOR) GENERATOR,
+  @(JSClassRange.STD) @JSClassShortDef(JSWknownAtom.OBJECT_) GLOBAL_OBJECT
+}
+
 enum JSAtomType : ubyte {
   STRING = 1,
   GLOBAL_SYMBOL,
@@ -107,6 +163,8 @@ enum JSAtomType : ubyte {
 }
 
 import std.container.dlist;
+import std.traits;
+
 class JSRuntime {
   DList!size_t context_list;
   DList!size_t gc_obj_list;
@@ -119,11 +177,10 @@ class JSRuntime {
 
   this() {
     JS_InitAtoms;
+    init_class_range!(JSClassRange.STD);
   }
 
   void JS_InitAtoms() {
-    import std.traits;
-
     int atom_type;
     static foreach (i; EnumMembers!JSWknownAtom) {
       if (i == JSWknownAtom.PRIVATE_BRAND)
@@ -178,6 +235,16 @@ class JSRuntime {
 
     if (atom_type != JSAtomType.SYMBOL)
       atom_hash[jsstr.str] = i;
+  }
+
+  int init_class_range(JSClassRange class_range)() {
+    static foreach (clazz; EnumMembers!JSClass) {
+      static if (hasUDA!(clazz, class_range)) {
+        assert(0);
+      } 
+    }
+
+    assert(0);
   }
 }
 
@@ -239,11 +306,6 @@ struct JSClassShortDef {
   void function(JSRuntime rt, JSValue val, JS_MarkFunc mark_func) gc_mark;
 }
 alias JS_MarkFunc = void function(JSRuntime rt, JSGCObject gco);
-
-enum JSClassShortDef[] js_std_class_def = [
-  JSClassShortDef(JSWknownAtom.OBJECT_),
-  JSClassShortDef(JSWknownAtom.ARRAY, &js_array_finalizer, &js_array_mark)
-];
 
 void js_array_finalizer(JSRuntime rt, JSValue val) {
   JSObject p = val.u.ptr.asObject;
