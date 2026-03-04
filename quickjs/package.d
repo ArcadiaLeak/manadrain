@@ -1,7 +1,5 @@
 module quickjs;
 
-import std.container.dlist;
-
 enum JSGCPhase {
   NONE,
   DECREF,
@@ -9,7 +7,7 @@ enum JSGCPhase {
 }
 
 enum JSWknownAtom : uint {
-  @("null") NULL, @("false") FALSE, @("true") TRUE, @("if") IF,
+  @("null") NULL = 1, @("false") FALSE, @("true") TRUE, @("if") IF,
   @("else") ELSE, @("return") RETURN, @("var") VAR, @("this") THIS,
   @("delete") DELETE, @("void") VOID, @("typeof") TYPEOF, @("new") NEW,
   @("in") IN, @("instanceof") INSTANCEOF, @("do") DO, @("while") WHILE,
@@ -101,6 +99,14 @@ enum JSWknownAtom : uint {
   @("Symbol.asyncIterator") SYMBOL_ASYNC_ITERATOR
 }
 
+enum JSAtomType {
+  STRING = 1,
+  GLOBAL_SYMBOL,
+  SYMBOL,
+  PRIVATE
+}
+
+import std.container.dlist;
 class JSRuntime {
   DList!size_t context_list;
   DList!size_t gc_obj_list;
@@ -109,11 +115,26 @@ class JSRuntime {
   size_t malloc_gc_threshold = 256 * 1024;
   DList!size_t weakref_list;
 
-  int InitAtoms() {
-    assert(0);
+  void InitAtoms() {
+    import std.traits;
+
+    int atom_type;
+    static foreach (i; EnumMembers!JSWknownAtom) {
+      if (i == JSWknownAtom.PRIVATE_BRAND)
+        atom_type = JSAtomType.PRIVATE;
+      else if (i >= JSWknownAtom.SYMBOL_TO_PRIMITIVE)
+        atom_type = JSAtomType.SYMBOL;
+      else
+        atom_type = JSAtomType.STRING;
+      
+      import std.stdio;
+      writeln(getUDAs!(i, string));
+    }
   }
 }
 
 void main(string[] args) {
-  
+  JSRuntime rt = new JSRuntime;
+
+  rt.InitAtoms();
 }
