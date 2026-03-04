@@ -6,7 +6,7 @@ enum JSGCPhase {
   REMOVE_CYCLES
 }
 
-enum JSWknownAtom : uint {
+enum JSWknownAtom {
   @("null") NULL = 1, @("false") FALSE, @("true") TRUE, @("if") IF,
   @("else") ELSE, @("return") RETURN, @("var") VAR, @("this") THIS,
   @("delete") DELETE, @("void") VOID, @("typeof") TYPEOF, @("new") NEW,
@@ -99,7 +99,7 @@ enum JSWknownAtom : uint {
   @("Symbol.asyncIterator") SYMBOL_ASYNC_ITERATOR
 }
 
-enum JSAtomType {
+enum JSAtomType : ubyte {
   STRING = 1,
   GLOBAL_SYMBOL,
   SYMBOL,
@@ -114,8 +114,14 @@ class JSRuntime {
   DList!size_t tmp_obj_list;
   size_t malloc_gc_threshold = 256 * 1024;
   DList!size_t weakref_list;
+  ulong[string] atom_hash;
+  JSString[] atom_array;
 
-  void InitAtoms() {
+  this() {
+    JS_InitAtoms;
+  }
+
+  void JS_InitAtoms() {
     import std.traits;
 
     int atom_type;
@@ -126,15 +132,73 @@ class JSRuntime {
         atom_type = JSAtomType.SYMBOL;
       else
         atom_type = JSAtomType.STRING;
-      
-      import std.stdio;
-      writeln(getUDAs!(i, string));
+      JS_NewAtomInit(getUDAs!(i, string), atom_type);
     }
+  }
+
+  void JS_NewAtomInit(string str, int atom_type) =>
+    JS_NewAtom(new JSString(str, 0), atom_type);
+
+  void JS_NewAtom(JSString jsstr, int atom_type) {
+    if (atom_type < JSAtomType.SYMBOL) {
+      if (jsstr.atom_type == atom_type) {
+        assert(0);
+      }
+      ulong* i = jsstr.str in atom_hash;
+      if (i !is null) {
+        assert(0);
+      }
+    } else {
+      assert(0);
+    }
+
+    import std.range.primitives;
+    if (atom_array.empty) {
+      atom_array ~= new JSString;
+      atom_array.back.atom_type = JSAtomType.SYMBOL;
+    }
+
+    JSString p;
+
+    if (jsstr) {
+      if (jsstr.atom_type == 0) {
+        p = jsstr;
+        p.atom_type = atom_type;
+      } else {
+        assert(0);
+      }
+    } else {
+      assert(0);
+    }
+
+    ulong i = atom_array.length++;
+    atom_array[i] = p;
+
+    p.atom_type = atom_type;
+
+    if (atom_type != JSAtomType.SYMBOL)
+      atom_hash[jsstr.str] = i;
+  }
+}
+
+class JSGCObject {
+  int ref_count = 1;
+}
+
+class JSString : JSGCObject {
+  bool is_wide_char;
+  int atom_type;
+  string str;
+  int atom_free_index;
+
+  this() {}
+
+  this(string s, bool is_wch) {
+    str = s;
+    is_wide_char = is_wch;
   }
 }
 
 void main(string[] args) {
   JSRuntime rt = new JSRuntime;
-
-  rt.InitAtoms();
 }
