@@ -181,8 +181,12 @@ class JSRuntime {
   }
 }
 
-class JSGCObject {
+abstract class JSGCObject {
   int ref_count = 1;
+
+  JSObject asObject() => null;
+  JSString asString() => null;
+  JSStringRope asStringRope() => null;
 }
 
 class JSString : JSGCObject {
@@ -192,11 +196,63 @@ class JSString : JSGCObject {
   int atom_free_index;
 
   this() {}
-
   this(string s, bool is_wch) {
     str = s;
     is_wide_char = is_wch;
   }
+
+  override JSString asString() => null;
+}
+
+union JSValueUnion {
+  int int32;
+  double float64;
+  long short_big_int;
+  JSGCObject ptr;
+}
+
+struct JSValue {
+  JSValueUnion u;
+  long tag;
+}
+
+union JSArrayUnion {
+  JSValue values;
+}
+
+union JSObjectUnion {
+  JSArrayUnion[] array;
+}
+
+class JSObject : JSGCObject {
+  JSObjectUnion u;
+  override JSObject asObject() => this;
+}
+
+class JSStringRope : JSGCObject {
+  override JSStringRope asStringRope() => this;
+}
+
+struct JSClassShortDef {
+  ulong class_name;
+  void function(JSRuntime rt, JSValue val) finalizer;
+  void function(JSRuntime rt, JSValue val, JS_MarkFunc mark_func) gc_mark;
+}
+alias JS_MarkFunc = void function(JSRuntime rt, JSGCObject gco);
+
+enum JSClassShortDef[] js_std_class_def = [
+  JSClassShortDef(JSWknownAtom.OBJECT_),
+  JSClassShortDef(JSWknownAtom.ARRAY, &js_array_finalizer, &js_array_mark)
+];
+
+void js_array_finalizer(JSRuntime rt, JSValue val) {
+  JSObject p = val.u.ptr.asObject;
+  assert(0);
+}
+
+void js_array_mark(JSRuntime rt, JSValue val, JS_MarkFunc mark_func) {
+  JSObject p = val.u.ptr.asObject;
+  assert(0);
 }
 
 void main(string[] args) {
