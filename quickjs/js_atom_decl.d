@@ -1,20 +1,11 @@
-module quickjs.js_atom;
+module quickjs.js_atom_decl;
+import quickjs;
 
 enum {
   JS_ATOM_TYPE_STRING = 1,
   JS_ATOM_TYPE_GLOBAL_SYMBOL,
   JS_ATOM_TYPE_SYMBOL,
   JS_ATOM_TYPE_PRIVATE
-}
-
-immutable class JS_ATOM {
-  string str;
-  int atom_type;
-
-  this(string s, int at) {
-    str = s;
-    atom_type = at;
-  }
 }
 
 static JS_ATOM_null = new JS_ATOM("null", JS_ATOM_TYPE_STRING);
