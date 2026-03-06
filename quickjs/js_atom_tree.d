@@ -3,18 +3,16 @@ import quickjs;
 
 import std.typecons;
 
-class JSAtom {}
-
-struct JSAtomTree {
+struct AtomTree(Atom) {
   enum Color { RED, BLACK };
   static class Node {
-    Tuple!(const uint, JSAtom) data;
+    Tuple!(const uint, Atom) data;
     Color color;
     Node left;
     Node right;
     Node parent;
 
-    this(uint key, JSAtom value) {
+    this(uint key, Atom value) {
       data = tuple(key, value);
       color = Color.RED;
     }
@@ -26,7 +24,7 @@ struct JSAtomTree {
   static struct FwdRange {
     Node node_;
     
-    auto front() => node_.data;
+    Atom front() => node_.data[1];
     bool empty() => node_ is null;
 
     void popFront() {
@@ -49,7 +47,7 @@ struct JSAtomTree {
   static struct RewRange {
     Node node_;
     
-    auto front() => node_.data;
+    Atom front() => node_.data[1];
     bool empty() => node_ is null;
 
     void popFront() {
@@ -73,7 +71,7 @@ struct JSAtomTree {
     Node begin_;
     const Node end_;
     
-    auto front() => begin_.data;
+    Atom front() => begin_.data[1];
     bool empty() => begin_ is end_;
 
     void popFront() {
@@ -124,10 +122,10 @@ struct JSAtomTree {
   bool empty() => size_ == 0;
   size_t size() => size_;
 
-  size_t insert(uint key, JSAtom value) {
+  FwdRange insert(uint key, Atom value) {
     Node new_node = new Node(key, value);
     insert_node(new_node);
-    return size_;
+    return FwdRange(new_node);
   }
 
   FwdRange erase(FwdRange pos) {
@@ -375,4 +373,100 @@ struct JSAtomTree {
     }
     if (x) x.color = Color.BLACK;
   }
+}
+
+unittest {
+  AtomTree!int map;
+
+  assert(map.empty);
+  assert(map.size == 0);
+
+  auto it1 = map.insert(10, 100);
+  assert(map.size == 1);
+  assert(!map.empty);
+  assert(it1.front == 100);
+
+
+  auto it2 = map.insert(5, 50);
+  assert(map.size == 2);
+  assert(it2.front == 50);
+
+  auto f1 = map.equ(10);
+  assert(!f1.empty);
+  assert(f1.front == 100);
+
+  auto f2 = map.equ(5);
+  assert(!f2.empty);
+  assert(f2.front == 50);
+
+  auto f3 = map.equ(42);
+  assert(f3.empty);
+}
+
+unittest {
+  import std.array;
+  AtomTree!string map;
+
+  map.insert(1, "one");
+  map.insert(2, "two");
+  map.insert(1, "uno");
+  map.insert(1, "eins");
+  map.insert(3, "three");
+
+  assert(map.size == 5);
+
+  string[] expected = ["one", "uno", "eins", "two", "three"];
+  assert(map.fwd.array == expected);
+}
+
+unittest {
+  import std.array;
+  AtomTree!int map;
+
+  map.insert(10, 1);
+  map.insert(20, 2);
+  map.insert(10, 3);
+  map.insert(30, 4);
+  map.insert(10, 5);
+  map.insert(20, 6);
+  map.insert(40, 7);
+
+  auto range10 = map.equ(10);
+  int[] expected10 = [1, 3, 5];
+  assert(range10.array == expected10);
+
+  auto range20 = map.equ(20);
+  int[] expected20 = [2, 6];
+  assert(range20.array == expected20);
+
+  auto range30 = map.equ(30);
+  int[] expected30 = [4];
+  assert(range30.array == expected30);
+
+  auto range99 = map.equ(99);
+  assert(range99.begin_ is range99.end_);
+}
+
+unittest {
+  AtomTree!int map;
+  foreach (i; 0..10)
+    map.insert(i % 3, i);
+
+  assert(map.size == 10);
+
+  auto it = map.fwd;
+  assert(it.front == 0);
+  it = map.erase(it);
+  assert(map.size == 9);
+  assert(!it.empty);
+  assert(it.front == 3);
+
+  auto last = map.rew;
+  assert(last.front == 8);
+  auto erased = map.erase(AtomTree!int.FwdRange(last.node_));
+  assert(erased.empty);
+  assert(map.size == 8);
+
+  import std.array;
+  assert(map.fwd.array == [3, 6, 9, 1, 4, 7, 2, 5]);
 }

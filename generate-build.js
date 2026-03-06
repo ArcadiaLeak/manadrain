@@ -1,6 +1,6 @@
 import { walk } from "jsr:@std/fs/walk";
 
-let Makefile = "all: build/bison build/glslang build/qjs\n";
+let Makefile = "all: build/bison build/glslang build/qjs build/qjs-unit\n";
 
 {
   const bisonSrcEntries = await Array.fromAsync(walk("bison", { exts: ["d"] }));
@@ -24,6 +24,14 @@ let Makefile = "all: build/bison build/glslang build/qjs\n";
 
   Makefile += "\n" + `build/qjs: ${qjsSrcPaths}\n` +
     "\t" + "dmd -debug -of=$@ $^\n";
+}
+
+{
+  const qjsSrcEntries = await Array.fromAsync(walk("quickjs", { exts: ["d"] }));
+  const qjsSrcPaths = qjsSrcEntries.map(e => e.path).join(" ");
+
+  Makefile += "\n" + `build/qjs-unit: ${qjsSrcPaths}\n` +
+    "\t" + "dmd -debug -unittest -of=$@ $^\n";
 }
 
 Deno.writeTextFile("Makefile", Makefile);
