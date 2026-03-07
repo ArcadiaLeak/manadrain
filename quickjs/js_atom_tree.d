@@ -1,16 +1,6 @@
 module quickjs.js_atom_tree;
 import quickjs;
 
-import std.typecons;
-
-class JSAtomClazz {
-  uint key;
-  JSAtomTree.Color color;
-  JSAtomClazz left;
-  JSAtomClazz right;
-  JSAtomClazz parent;
-}
-
 struct JSAtomTree {
   enum Color { RED, BLACK };
 
