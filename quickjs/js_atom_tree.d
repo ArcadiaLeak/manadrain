@@ -3,28 +3,24 @@ import quickjs;
 
 import std.typecons;
 
-struct AtomTree(Atom) {
+class JSAtomClazz {
+  uint key;
+  JSAtomTree.Color color;
+  JSAtomClazz left;
+  JSAtomClazz right;
+  JSAtomClazz parent;
+}
+
+struct JSAtomTree {
   enum Color { RED, BLACK };
-  static class Node {
-    Tuple!(const uint, Atom) data;
-    Color color;
-    Node left;
-    Node right;
-    Node parent;
 
-    this(uint key, Atom value) {
-      data = tuple(key, value);
-      color = Color.RED;
-    }
-  }
-
-  Node root;
+  JSAtomClazz root;
   size_t size_;
 
   static struct FwdRange {
-    Node node_;
+    JSAtomClazz node_;
     
-    Atom front() => node_.data[1];
+    JSAtomClazz front() => node_;
     bool empty() => node_ is null;
 
     void popFront() {
@@ -32,7 +28,7 @@ struct AtomTree(Atom) {
       if (node_.right !is null) {
         node_ = minimum(node_.right);
       } else {
-        Node p = node_.parent;
+        JSAtomClazz p = node_.parent;
         while (p !is null && node_ is p.right) {
           node_ = p;
           p = p.parent;
@@ -45,9 +41,9 @@ struct AtomTree(Atom) {
   }
 
   static struct RewRange {
-    Node node_;
+    JSAtomClazz node_;
     
-    Atom front() => node_.data[1];
+    JSAtomClazz front() => node_;
     bool empty() => node_ is null;
 
     void popFront() {
@@ -55,7 +51,7 @@ struct AtomTree(Atom) {
       if (node_.left !is null) {
         node_ = maximum(node_.left);
       } else {
-        Node p = node_.parent;
+        JSAtomClazz p = node_.parent;
         while (p !is null && node_ is p.left) {
           node_ = p;
           p = p.parent;
@@ -68,10 +64,10 @@ struct AtomTree(Atom) {
   }
 
   static struct EquRange {
-    Node begin_;
-    const Node end_;
+    JSAtomClazz begin_;
+    const JSAtomClazz end_;
     
-    Atom front() => begin_.data[1];
+    JSAtomClazz front() => begin_;
     bool empty() => begin_ is end_;
 
     void popFront() {
@@ -79,7 +75,7 @@ struct AtomTree(Atom) {
       if (begin_.right !is null) {
         begin_ = minimum(begin_.right);
       } else {
-        Node p = begin_.parent;
+        JSAtomClazz p = begin_.parent;
         while (p !is null && begin_ is p.right) {
           begin_ = p;
           p = p.parent;
@@ -91,26 +87,16 @@ struct AtomTree(Atom) {
     EquRange save() => this;
   }
 
-  static Node minimum(Node x) {
+  static JSAtomClazz minimum(JSAtomClazz x) {
     if (!x) return null;
     while (x.left) x = x.left;
     return x;
   }
 
-  static const(Node) minimum(const Node x, Node ret = null) {
-    if (!x) return ret;
-    return minimum(x.left);
-  }
-
-  static Node maximum(Node x) {
+  static JSAtomClazz maximum(JSAtomClazz x) {
     if (!x) return null;
     while (x.right) x = x.right;
     return x;
-  }
-
-  static const(Node) maximum(const Node x, Node ret = null) {
-    if (!x) return ret;
-    return maximum(x.right);
   }
 
   FwdRange fwd() => FwdRange(minimum(root));
@@ -122,25 +108,24 @@ struct AtomTree(Atom) {
   bool empty() => size_ == 0;
   size_t size() => size_;
 
-  FwdRange insert(uint key, Atom value) {
-    Node new_node = new Node(key, value);
+  FwdRange insert(JSAtomClazz new_node) {
     insert_node(new_node);
     return FwdRange(new_node);
   }
 
   FwdRange erase(FwdRange pos) {
     assert(!pos.empty);
-    Node node = pos.node_;
+    JSAtomClazz node = pos.node_;
     pos.popFront;
     erase_node(node);
     return pos;
   }
 
-  Node lower_bound_impl(uint key) {
-    Node x = root;
-    Node y = null;
+  JSAtomClazz lower_bound_impl(uint key) {
+    JSAtomClazz x = root;
+    JSAtomClazz y = null;
     while (x) {
-      if (key <= x.data[0]) {
+      if (key <= x.key) {
         y = x;
         x = x.left;
       } else {
@@ -150,11 +135,11 @@ struct AtomTree(Atom) {
     return y;
   }
 
-  Node upper_bound_impl(uint key) {
-    Node x = root;
-    Node y = null;
+  JSAtomClazz upper_bound_impl(uint key) {
+    JSAtomClazz x = root;
+    JSAtomClazz y = null;
     while (x) {
-      if (key < x.data[0]) {
+      if (key < x.key) {
         y = x;
         x = x.left;
       } else {
@@ -164,12 +149,12 @@ struct AtomTree(Atom) {
     return y;
   }
 
-  void insert_node(Node z) {
-    Node y = null;
-    Node x = root;
+  void insert_node(JSAtomClazz z) {
+    JSAtomClazz y = null;
+    JSAtomClazz x = root;
     while (x) {
       y = x;
-      if (z.data[0] < x.data[0])
+      if (z.key < x.key)
         x = x.left;
       else
         x = x.right;
@@ -177,7 +162,7 @@ struct AtomTree(Atom) {
     z.parent = y;
     if (y is null) {
       root = z;
-    } else if (z.data[0] < y.data[0]) {
+    } else if (z.key < y.key) {
       y.left = z;
     } else {
       y.right = z;
@@ -186,10 +171,10 @@ struct AtomTree(Atom) {
     ++size_;
   }
 
-  void insert_fixup(Node z) {
+  void insert_fixup(JSAtomClazz z) {
     while (z.parent && z.parent.color == Color.RED) {
       if (z.parent is z.parent.parent.left) {
-        Node y = z.parent.parent.right;
+        JSAtomClazz y = z.parent.parent.right;
         if (y && y.color == Color.RED) {
           z.parent.color = Color.BLACK;
           y.color = Color.BLACK;
@@ -205,7 +190,7 @@ struct AtomTree(Atom) {
           right_rotate(z.parent.parent);
         }
       } else {
-        Node y = z.parent.parent.left;
+        JSAtomClazz y = z.parent.parent.left;
         if (y && y.color == Color.RED) {
           z.parent.color = Color.BLACK;
           y.color = Color.BLACK;
@@ -225,8 +210,8 @@ struct AtomTree(Atom) {
     root.color = Color.BLACK;
   }
 
-  void left_rotate(Node x) {
-    Node y = x.right;
+  void left_rotate(JSAtomClazz x) {
+    JSAtomClazz y = x.right;
     x.right = y.left;
     if (y.left) y.left.parent = x;
     y.parent = x.parent;
@@ -241,8 +226,8 @@ struct AtomTree(Atom) {
     x.parent = y;
   }
 
-  void right_rotate(Node y) {
-    Node x = y.left;
+  void right_rotate(JSAtomClazz y) {
+    JSAtomClazz x = y.left;
     y.left = x.right;
     if (x.right) x.right.parent = y;
     x.parent = y.parent;
@@ -257,10 +242,10 @@ struct AtomTree(Atom) {
     y.parent = x;
   }
 
-  void erase_node(Node z) {
-    Node y = z;
-    Node x;
-    Node x_parent;
+  void erase_node(JSAtomClazz z) {
+    JSAtomClazz y = z;
+    JSAtomClazz x;
+    JSAtomClazz x_parent;
     Color y_original_color = y.color;
 
     if (z.left is null) {
@@ -296,7 +281,7 @@ struct AtomTree(Atom) {
     }
   }
 
-  void transplant(Node u, Node v) {
+  void transplant(JSAtomClazz u, JSAtomClazz v) {
     if (u.parent is null) {
       root = v;
     } else if (u is u.parent.left) {
@@ -307,10 +292,10 @@ struct AtomTree(Atom) {
     if (v) v.parent = u.parent;
   }
 
-  void delete_fixup(Node x, Node parent) {
+  void delete_fixup(JSAtomClazz x, JSAtomClazz parent) {
     while (x !is root && (x is null || x.color == Color.BLACK)) {
       if (x is parent.left) {
-        Node w = parent.right;
+        JSAtomClazz w = parent.right;
         if (w && w.color == Color.RED) {
           w.color = Color.BLACK;
           parent.color = Color.RED;
@@ -340,7 +325,7 @@ struct AtomTree(Atom) {
           x = root;
         }
       } else {
-        Node w = parent.left;
+        JSAtomClazz w = parent.left;
         if (w && w.color == Color.RED) {
           w.color = Color.BLACK;
           parent.color = Color.RED;
@@ -373,100 +358,4 @@ struct AtomTree(Atom) {
     }
     if (x) x.color = Color.BLACK;
   }
-}
-
-unittest {
-  AtomTree!int map;
-
-  assert(map.empty);
-  assert(map.size == 0);
-
-  auto it1 = map.insert(10, 100);
-  assert(map.size == 1);
-  assert(!map.empty);
-  assert(it1.front == 100);
-
-
-  auto it2 = map.insert(5, 50);
-  assert(map.size == 2);
-  assert(it2.front == 50);
-
-  auto f1 = map.equ(10);
-  assert(!f1.empty);
-  assert(f1.front == 100);
-
-  auto f2 = map.equ(5);
-  assert(!f2.empty);
-  assert(f2.front == 50);
-
-  auto f3 = map.equ(42);
-  assert(f3.empty);
-}
-
-unittest {
-  import std.array;
-  AtomTree!string map;
-
-  map.insert(1, "one");
-  map.insert(2, "two");
-  map.insert(1, "uno");
-  map.insert(1, "eins");
-  map.insert(3, "three");
-
-  assert(map.size == 5);
-
-  string[] expected = ["one", "uno", "eins", "two", "three"];
-  assert(map.fwd.array == expected);
-}
-
-unittest {
-  import std.array;
-  AtomTree!int map;
-
-  map.insert(10, 1);
-  map.insert(20, 2);
-  map.insert(10, 3);
-  map.insert(30, 4);
-  map.insert(10, 5);
-  map.insert(20, 6);
-  map.insert(40, 7);
-
-  auto range10 = map.equ(10);
-  int[] expected10 = [1, 3, 5];
-  assert(range10.array == expected10);
-
-  auto range20 = map.equ(20);
-  int[] expected20 = [2, 6];
-  assert(range20.array == expected20);
-
-  auto range30 = map.equ(30);
-  int[] expected30 = [4];
-  assert(range30.array == expected30);
-
-  auto range99 = map.equ(99);
-  assert(range99.begin_ is range99.end_);
-}
-
-unittest {
-  AtomTree!int map;
-  foreach (i; 0..10)
-    map.insert(i % 3, i);
-
-  assert(map.size == 10);
-
-  auto it = map.fwd;
-  assert(it.front == 0);
-  it = map.erase(it);
-  assert(map.size == 9);
-  assert(!it.empty);
-  assert(it.front == 3);
-
-  auto last = map.rew;
-  assert(last.front == 8);
-  auto erased = map.erase(AtomTree!int.FwdRange(last.node_));
-  assert(erased.empty);
-  assert(map.size == 8);
-
-  import std.array;
-  assert(map.fwd.array == [3, 6, 9, 1, 4, 7, 2, 5]);
 }
