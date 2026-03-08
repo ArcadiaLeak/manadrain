@@ -1,6 +1,12 @@
 module quickjs.js_machine;
 import quickjs;
 
+import std.sumtype;
+
+alias JSValue = SumType!(
+  int, long, double, Object
+);
+
 enum JS_EVAL_TYPE {
   GLOBAL, MODULE, DIRECT, INDIRECT
 }

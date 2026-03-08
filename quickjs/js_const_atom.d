@@ -4,5 +4,6 @@ import quickjs;
 import std.typecons;
 
 enum JS_ATOM = [
-  tuple("JSString", "_ret_", "<ret>")
+  tuple("JSString", "_ret_", "<ret>"),
+  tuple("JSString", "async", "async")
 ];

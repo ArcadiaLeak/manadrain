@@ -7,6 +7,7 @@ public import quickjs.js_function_def;
 public import quickjs.js_machine;
 public import quickjs.js_parse_state;
 public import quickjs.js_runtime;
+public import quickjs.js_token;
 
 void main() {
   JSRuntime rt = new JSRuntime;

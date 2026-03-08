@@ -3,41 +3,6 @@ import quickjs;
 
 import std.sumtype;
 
-alias JSValue = SumType!(
-  int, long, double, Object
-);
-
-struct JSTokStr {
-  JSValue str;
-  int sep;
-}
-
-struct JSTokNum {
-  JSValue num;
-}
-
-struct JSTokIdent {
-  Object atom;
-  bool has_escape;
-  bool is_reserved;
-}
-
-struct JSTokRegexp {
-  JSValue body;
-  JSValue flags;
-}
-
-struct JSTokDch {
-  dchar ch;
-}
-
-struct JSToken {
-  string pos;
-  SumType!(
-    JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp, JSTokDch
-  ) val;
-}
-
 class JSParseState {
   JSContext ctx;
   string buf;
@@ -70,7 +35,7 @@ class JSParseState {
     assert(0);
   }
 
-  int parse_program() {
+  void parse_program() {
     next_token;
     parse_directives;
     
@@ -81,6 +46,25 @@ class JSParseState {
     if (!is_module)
       fd.eval_ret = fd.add_var(ctx.rt.JS_ATOM__ret_);
 
-    assert(0);
+    while (!token.val.has!JSTokEof)
+      parse_source_element;
   }
+
+  void parse_source_element() {
+    if (token.val.has!JSTokFunction)
+      return;
+    else if (
+      token_is_pseudo_keyword(ctx.rt.JS_ATOM_async) &&
+      peek_token(true).has!JSTokFunction
+    )
+      return;
+  }
+
+  JSTokenVal peek_token(bool no_line_terminator) {
+    assert(0);
+  } 
+
+  bool token_is_pseudo_keyword(JSAtom atom) =>
+    token.val.has!JSTokIdent && token.val.get!JSTokIdent.atom is atom &&
+    !token.val.get!JSTokIdent.has_escape;
 }
