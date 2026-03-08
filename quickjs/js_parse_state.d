@@ -39,14 +39,15 @@ struct JSToken {
 }
 
 class JSParseState {
+  JSContext ctx;
   string buf;
   
   JSToken token;
-  JSFunctionDef cur_func;
+  JSFunctionDef fd;
 
   bool is_module;
 
-  int next_token() {
+  void next_token() {
     import std.range.primitives;
 
     string p = buf;
@@ -60,30 +61,25 @@ class JSParseState {
         break;
     }
     buf = p;
-    return 0;
   }
 
-  int parse_directives() {
+  void parse_directives() {
     if (!token.val.has!JSTokStr)
-      return 0;
+      return;
 
     assert(0);
   }
 
   int parse_program() {
-    if (next_token)
-      return -1;
-
-    if (parse_directives)
-      return -1;
+    next_token;
+    parse_directives;
     
-    cur_func.is_global_var = (cur_func.eval_type == JS_EVAL_TYPE.GLOBAL) ||
-      (cur_func.eval_type == JS_EVAL_TYPE.MODULE) ||
-      !cur_func.is_struct;
+    fd.is_global_var = (fd.eval_type == JS_EVAL_TYPE.GLOBAL) ||
+      (fd.eval_type == JS_EVAL_TYPE.MODULE) ||
+      !fd.is_struct;
 
-    if (!is_module) {
-      assert(0);
-    }
+    if (!is_module)
+      fd.eval_ret = fd.add_var(ctx.rt.JS_ATOM__ret_);
 
     assert(0);
   }

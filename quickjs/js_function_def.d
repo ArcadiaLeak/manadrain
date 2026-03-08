@@ -3,7 +3,11 @@ import quickjs;
 
 class JSFunctionDef {
   JSContext ctx;
-  JSMachineOp machine_op;
+  JSMachineOp code;
+
+  JSVarDef vars_begin;
+  JSVarDef vars_end;
+  JSVarDef eval_ret;
 
   JSVarScope scope_level;
   JSVarDef scope_first;
@@ -19,14 +23,30 @@ class JSFunctionDef {
 
     JSEnterScope enter_scope = new JSEnterScope;
     enter_scope.scope_ = new_scope;
-    if (machine_op) {
-      enter_scope.prev = machine_op;
-      enter_scope.next = machine_op.next;
-      machine_op.next = enter_scope;
+    if (code) {
+      enter_scope.prev = code;
+      enter_scope.next = code.next;
+      code.next = enter_scope;
     }
-    machine_op = enter_scope;
+    code = enter_scope;
 
     scope_level = new_scope;
   }
-}
 
+  JSVarDef add_var(JSAtom name) {
+    JSVarDef vd = new JSVarDef;
+    vd.var_name = name;
+
+    if (vars_begin is null)
+      vars_begin = vd;
+    if (vars_end is null)
+      vars_end = vars_begin;
+    else {
+      vd.prev = vars_end;
+      vars_end.next = vd;
+      vars_end = vd;
+    }
+
+    return vd;
+  }
+}

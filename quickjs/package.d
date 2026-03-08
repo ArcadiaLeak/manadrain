@@ -9,5 +9,5 @@ public import quickjs.js_parse_state;
 public import quickjs.js_runtime;
 
 void main() {
-
+  JSRuntime rt = new JSRuntime;
 }
