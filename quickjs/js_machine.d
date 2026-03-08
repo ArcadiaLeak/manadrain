@@ -1,12 +1,6 @@
 module quickjs.js_machine;
 import quickjs;
 
-import std.sumtype;
-
-alias JSValue = SumType!(
-  int, long, double, Object
-);
-
 enum JS_EVAL_TYPE {
   GLOBAL, MODULE, DIRECT, INDIRECT
 }
@@ -27,11 +21,11 @@ class JSVarScope {
   JSVarScope next;
 }
 
-class JSMachineOp {
-  JSMachineOp next;
-  JSMachineOp prev;
+class JSMchInst {
+  JSMchInst next;
+  JSMchInst prev;
 }
 
-class JSEnterScope : JSMachineOp {
+class JSEnterScope : JSMchInst {
   JSVarScope scope_;
 }

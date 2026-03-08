@@ -3,7 +3,7 @@ import quickjs;
 
 class JSFunctionDef {
   JSContext ctx;
-  JSMachineOp code;
+  JSMchInst code;
 
   JSVarDef vars_begin;
   JSVarDef vars_end;

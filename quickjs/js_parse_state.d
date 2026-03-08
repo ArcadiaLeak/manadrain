@@ -77,6 +77,31 @@ class JSParseState {
     int func_type, int func_kind, JSAtom func_name,
     string pos, int export_flag, out JSFunctionDef pfd
   ) {
+    bool is_expr = (
+      func_type != JS_PARSE_FUNC.STATEMENT ||
+      func_type != JS_PARSE_FUNC.VAR
+    );
+
+    if (
+      func_type == JS_PARSE_FUNC.STATEMENT ||
+      func_type == JS_PARSE_FUNC.VAR ||
+      func_type == JS_PARSE_FUNC.EXPR
+    ) {
+      if (
+        func_kind == JS_FUNC_NORMAL &&
+        token_is_pseudo_keyword(ctx.rt.JS_ATOM_async) &&
+        peek_token(true) != JSTokenVal('\n')
+      ) {
+        next_token;
+        func_kind = JS_FUNC_ASYNC;
+      }
+      next_token;
+      if (token.val == JSTokenVal('*')) {
+        next_token;
+        func_kind |= JS_FUNC_GENERATOR;
+      }
+    }
+
     assert(0);
   }
 

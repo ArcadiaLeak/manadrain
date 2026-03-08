@@ -8,6 +8,7 @@ public import quickjs.js_machine;
 public import quickjs.js_parse_state;
 public import quickjs.js_runtime;
 public import quickjs.js_token;
+public import quickjs.js_value;
 public import quickjs.unicode;
 
 void main() {
