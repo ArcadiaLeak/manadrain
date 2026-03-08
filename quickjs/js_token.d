@@ -39,7 +39,6 @@ struct JSToken {
 }
 
 JSTokenVal simple_next_token(ref string pp, bool no_line_terminator) {
-  import std.algorithm.searching;
   import std.range.primitives;
 
   dchar take_then_pop() {
@@ -72,7 +71,7 @@ JSTokenVal simple_next_token(ref string pp, bool no_line_terminator) {
           while (pop_then_take) {
             if ((pp.front == '\r' || pp.front == '\n') && no_line_terminator)
               return JSTokenVal('\n');
-            if (pp.startsWith("*/")) {
+            if (pp.match_identifier("*/")) {
               pp.popFrontExactly("*/".length);
               break;
             }
@@ -87,7 +86,7 @@ JSTokenVal simple_next_token(ref string pp, bool no_line_terminator) {
       case 'i':
         if (pp.front == 'n')
           return JSTokenVal(JS_TOK.IN);
-        if (pp.startsWith("mport")) {
+        if (pp.match_identifier("mport")) {
           pp.popFrontExactly("mport".length);
           return JSTokenVal(JS_TOK.IMPORT);
         }
@@ -104,6 +103,9 @@ JSTokenVal simple_next_token(ref string pp, bool no_line_terminator) {
   }
 }
 
-bool match_identifier(string p, string s) {
-  assert(0);
+int match_identifier(string p, string s) {
+  import std.range.primitives;
+  if (p.length < s.length || p[0..s.length] != s)
+    return 0;
+  return !p.front.lre_js_is_ident_next;
 }
