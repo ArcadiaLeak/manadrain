@@ -104,15 +104,6 @@ JSTokenVal simple_next_token(ref string pp, bool no_line_terminator) {
   }
 }
 
-immutable ubyte[] unicode_prop_ID_Start_table =
-  import("unicode_prop_ID_Start_table.raw");
-immutable ubyte[] unicode_prop_ID_Start_index =
-  import("unicode_prop_ID_Start_index.raw");
-immutable ubyte[] unicode_prop_ID_Continue1_table =
-  import("unicode_prop_ID_Continue1_table.raw");
-immutable ubyte[] unicode_prop_ID_Continue1_index =
-  import("unicode_prop_ID_Continue1_index.raw");
-
 bool match_identifier(string p, string s) {
   assert(0);
 }
