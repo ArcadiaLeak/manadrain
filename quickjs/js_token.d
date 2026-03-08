@@ -23,25 +23,96 @@ struct JSTokRegexp {
   JSValue flags;
 }
 
-struct JSTokDch {
-  dchar ch;
+enum JS_TOK {
+  EOF, FUNCTION, IMPORT, EXPORT,
+  ARROW, IN, OF
 }
 
-struct JSTokEof {}
-
-struct JSTokFunction {}
-
-struct JSTokImport {}
-
-struct JSTokExport {}
-
-alias JSTokenVal =  SumType!(
+alias JSTokenVal = SumType!(
   JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp,
-  JSTokDch, JSTokEof, JSTokFunction, JSTokImport,
-  JSTokExport
+  dchar, JS_TOK
 );
 
 struct JSToken {
   string pos;
   JSTokenVal val;
+}
+
+JSTokenVal simple_next_token(ref string pp, bool no_line_terminator) {
+  import std.algorithm.searching;
+  import std.range.primitives;
+
+  dchar take_then_pop() {
+    scope(exit) pp.popFront;
+    return pp.empty ? 0 : pp.front;
+  }
+
+  dchar pop_then_take() {
+    pp.popFront;
+    return pp.empty ? 0 : pp.front;
+  }
+
+  while (true) {
+    switch (take_then_pop) {
+      case '\r', '\n':
+        if (no_line_terminator)
+          return JSTokenVal('\n');
+        continue;
+      case ' ', '\t', '\v', '\f':
+        continue;
+      case '/':
+        if (pp.front == '/') {
+          if (no_line_terminator)
+            return JSTokenVal('\n');
+          while (!pp.empty && pp.front != '\r' && pp.front != '\n')
+            pp.popFront;
+          continue;
+        }
+        if (pp.front == '*') {
+          while (pop_then_take) {
+            if ((pp.front == '\r' || pp.front == '\n') && no_line_terminator)
+              return JSTokenVal('\n');
+            if (pp.startsWith("*/")) {
+              pp.popFrontExactly("*/".length);
+              break;
+            }
+          }
+          continue;
+        }
+        break;
+      case '=':
+        if (pp.front == '>')
+          return JSTokenVal(JS_TOK.ARROW);
+        break;
+      case 'i':
+        if (pp.front == 'n')
+          return JSTokenVal(JS_TOK.IN);
+        if (pp.startsWith("mport")) {
+          pp.popFrontExactly("mport".length);
+          return JSTokenVal(JS_TOK.IMPORT);
+        }
+        return JSTokenVal(JSTokIdent());
+      case 'o':
+        if (pp.front == 'f')
+          return JSTokenVal(JS_TOK.OF);
+        return JSTokenVal(JSTokIdent());
+      case 'e':
+      default:
+        break;
+    }
+    return JSTokenVal(pp.front);
+  }
+}
+
+immutable ubyte[] unicode_prop_ID_Start_table =
+  import("unicode_prop_ID_Start_table.raw");
+immutable ubyte[] unicode_prop_ID_Start_index =
+  import("unicode_prop_ID_Start_index.raw");
+immutable ubyte[] unicode_prop_ID_Continue1_table =
+  import("unicode_prop_ID_Continue1_table.raw");
+immutable ubyte[] unicode_prop_ID_Continue1_index =
+  import("unicode_prop_ID_Continue1_index.raw");
+
+bool match_identifier(string p, string s) {
+  assert(0);
 }

@@ -23,7 +23,7 @@ let Makefile = "all: build/bison build/glslang build/qjs\n";
   const qjsSrcPaths = qjsSrcEntries.map(e => e.path).join(" ");
 
   Makefile += "\n" + `build/qjs: ${qjsSrcPaths}\n` +
-    "\t" + "dmd -debug -of=$@ $^\n";
+    "\t" + "dmd -debug -J=quickjs -of=$@ $^\n";
 }
 
 Deno.writeTextFile("Makefile", Makefile);

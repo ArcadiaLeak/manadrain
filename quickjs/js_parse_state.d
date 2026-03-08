@@ -21,7 +21,7 @@ class JSParseState {
     dchar c = p.front;
     switch (c) {
       default:
-        token.val = JSTokDch(c);
+        token.val = c;
         p.popFront;
         break;
     }
@@ -46,23 +46,22 @@ class JSParseState {
     if (!is_module)
       fd.eval_ret = fd.add_var(ctx.rt.JS_ATOM__ret_);
 
-    while (!token.val.has!JSTokEof)
+    while (token.val != JSTokenVal(JS_TOK.EOF))
       parse_source_element;
   }
 
   void parse_source_element() {
-    if (token.val.has!JSTokFunction)
+    if (token.val == JSTokenVal(JS_TOK.FUNCTION))
       return;
     else if (
       token_is_pseudo_keyword(ctx.rt.JS_ATOM_async) &&
-      peek_token(true).has!JSTokFunction
+      peek_token(true) == JSTokenVal(JS_TOK.FUNCTION)
     )
       return;
   }
 
-  JSTokenVal peek_token(bool no_line_terminator) {
-    assert(0);
-  } 
+  JSTokenVal peek_token(bool no_line_terminator) =>
+    simple_next_token(buf, no_line_terminator);
 
   bool token_is_pseudo_keyword(JSAtom atom) =>
     token.val.has!JSTokIdent && token.val.get!JSTokIdent.atom is atom &&
