@@ -1,8 +1,8 @@
 module quickjs.js_const_atom;
 import quickjs;
 
-JSString JS_ATOM__ret_;
+import std.typecons;
 
-static this() {
-  JS_ATOM__ret_ = new JSString("<ret>");
-}
+enum JS_ATOM = [
+  tuple("_ret_", "<ret>")
+];

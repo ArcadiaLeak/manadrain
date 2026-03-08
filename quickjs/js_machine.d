@@ -5,14 +5,20 @@ enum JS_EVAL_TYPE {
   GLOBAL, MODULE, DIRECT, INDIRECT
 }
 
-struct JSVarDef {
-  long iatom;
-  long ifuncpool;
+class JSVarDef {
+  JSAtom var_name;
+  Object func_pool;
+
+  JSVarDef prev;
+  JSVarDef next;
 }
 
 class JSVarScope {
   JSVarScope parent;
   JSVarDef first;
+
+  JSVarScope prev;
+  JSVarScope next;
 }
 
 class JSMachineOp {

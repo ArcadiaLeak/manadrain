@@ -2,6 +2,7 @@ module quickjs.js_function_def;
 import quickjs;
 
 class JSFunctionDef {
+  JSContext ctx;
   JSMachineOp machine_op;
 
   JSVarScope scope_level;
