@@ -44,17 +44,16 @@ alias JSTokenVal = SumType!(
 );
 
 struct JSToken {
-  string pos;
+  StrInputBuf pos;
   JSTokenVal val;
 }
 
-int simple_next_token(ref string pp, bool no_line_terminator) {
+int simple_next_token(ref StrInputBuf pp, bool no_line_terminator) {
   import std.range;
-  string p = pp ~ 0;
+  StrInputBuf p = pp;
 
   while (true) {
-    dchar c = p.front;
-    p.popFront;
+    dchar c = p.frontThenPop;
     switch (c) {
       case '\r', '\n':
         if (no_line_terminator)
@@ -71,15 +70,13 @@ int simple_next_token(ref string pp, bool no_line_terminator) {
           continue;
         }
         if (p.front == '*') {
-          p.popFront;
-          while (p.front) {
+          while (p.popThenFront) {
             if ((p.front == '\r' || p.front == '\n') && no_line_terminator)
               return '\n';
             if (p.front == '*' && p.dropOne.front == '/') {
               p = p.drop(2);
               break;
             }
-            p.popFront;
           }
           continue;
         }
@@ -110,7 +107,7 @@ int simple_next_token(ref string pp, bool no_line_terminator) {
         return JS_TOK.IDENT;
       case '\\':
         if (p.front == 'u')
-          if (lre_js_is_ident_first(lre_parse_escape(p, true)))
+          if (p.lre_parse_escape(true).lre_js_is_ident_first)
             return JS_TOK.IDENT;
         break;
       default:
@@ -121,9 +118,11 @@ int simple_next_token(ref string pp, bool no_line_terminator) {
   }
 }
 
-int match_identifier(string p, string s) {
-  import std.range.primitives;
-  if (p.length < s.length || p[0..s.length] != s)
+int match_identifier(StrInputBuf p, dstring s) {
+  import std.range;
+  import std.utf;
+
+  if (p.take(s.length).array == s)
     return 0;
   return !p.front.lre_js_is_ident_next;
 }

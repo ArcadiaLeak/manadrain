@@ -15,7 +15,7 @@ enum JS_FUNC_GENERATOR = 1 << 0;
 enum JS_FUNC_ASYNC = 1 << 1;
 enum JS_FUNC_ASYNC_GENERATOR = JS_FUNC_GENERATOR | JS_FUNC_ASYNC;
 
-struct StringBuffer {
+struct StrOutputBuf {
   import std.container.dlist;
 
   struct Chunk {
@@ -25,7 +25,7 @@ struct StringBuffer {
 
   DList!Chunk chunks;
 
-  void insert(dchar elem) {
+  void put(dchar elem) {
     if (chunks.empty || chunks.back.length == ubyte.max)
       chunks.insert = Chunk();
     chunks.back.data[chunks.back.length++] = elem;
@@ -39,9 +39,39 @@ struct StringBuffer {
   }
 }
 
+struct StrInputBuf {
+  string str;
+
+  enum bool empty = false;
+  StrInputBuf save() => this;
+
+  import std.range;
+
+  dchar front() {
+    if (str.empty)
+      return 0;
+    return str.front;
+  }
+
+  void popFront() {
+    if (!str.empty)
+      str.popFront;
+  }
+
+  dchar popThenFront() {
+    popFront;
+    return front;
+  }
+
+  dchar frontThenPop() {
+    scope (exit) popFront;
+    return front;
+  }
+}
+
 class JSParseState {
-  string buf;
-  
+  StrInputBuf buf;
+
   JSToken token;
   JSFunctionDef fd;
 
@@ -51,11 +81,11 @@ class JSParseState {
   void next_token() {
     import std.range;
 
-    string p = buf;
+    StrInputBuf p = buf;
     got_lf = false;
 
     redo: token.pos = p;
-    dchar c = p.empty ? 0 : p.front;
+    dchar c = p.front;
 
     switch (c) {
       case '\'', '\"':
@@ -78,11 +108,11 @@ class JSParseState {
   }
 
   void parse_string(
-    int sep, bool do_throw, string p,
-    ref JSToken token, ref string pp
+    int sep, bool do_throw, StrInputBuf p,
+    ref JSToken token, ref StrInputBuf pp
   ) {
     import std.range;
-    StringBuffer b;
+    StrOutputBuf b;
 
     while (true) {
       dchar c = p.front;
@@ -139,7 +169,7 @@ class JSParseState {
 
   void parse_function_decl(
     int func_type, int func_kind, JSAtom func_name,
-    string pos, int export_flag, out JSFunctionDef pfd
+    StrInputBuf pos, int export_flag, out JSFunctionDef pfd
   ) {
     bool is_expr = (
       func_type != JS_PARSE_FUNC.STATEMENT ||
@@ -171,7 +201,7 @@ class JSParseState {
 
   void parse_function_decl(
     int func_type, int func_kind,
-    JSAtom func_name, string pos
+    JSAtom func_name, StrInputBuf pos
   ) {
     JSFunctionDef pfd;
     return parse_function_decl(
