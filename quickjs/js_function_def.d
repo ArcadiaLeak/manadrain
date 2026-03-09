@@ -14,6 +14,7 @@ class JSFunctionDef {
   JS_EVAL_TYPE eval_type;
   bool is_struct;
   bool is_global_var;
+  ubyte js_mode;
 
   void push_scope() {
     JSVarScope new_scope = new JSVarScope;

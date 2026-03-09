@@ -10,6 +10,10 @@ enum JS_PARSE_EXPORT {
   NONE, NAMED, DEFAULT
 }
 
+enum JS_MODE_STRICT = 1 << 0;
+enum JS_MODE_ASYNC = 1 << 2;
+enum JS_MODE_BACKTRACE_BARRIER = 1 << 3;
+
 enum JS_FUNC_NORMAL = 0;
 enum JS_FUNC_GENERATOR = 1 << 0;
 enum JS_FUNC_ASYNC = 1 << 1;
@@ -70,7 +74,8 @@ struct StrInputBuf {
 }
 
 class JSParseState {
-  StrInputBuf buf;
+  const string buf_start;
+  StrInputBuf buf_cur;
 
   JSToken token;
   JSFunctionDef fd;
@@ -81,7 +86,7 @@ class JSParseState {
   void next_token() {
     import std.range;
 
-    StrInputBuf p = buf;
+    StrInputBuf p = buf_cur;
     got_lf = false;
 
     redo: token.pos = p;
@@ -104,7 +109,7 @@ class JSParseState {
         break;
     }
 
-    buf = p;
+    buf_cur = p;
   }
 
   void parse_string(
@@ -113,8 +118,11 @@ class JSParseState {
   ) {
     import std.range;
     StrOutputBuf b;
+    string p_escape;
 
     while (true) {
+      if (buf_cur.str.empty)
+        goto invalid_char;
       dchar c = p.front;
       if (c < 0x20) {
         if (sep == '`') {
@@ -122,10 +130,59 @@ class JSParseState {
             if (p.dropOne.front == '\n')
               p.popFront;
             c = '\n';
+          } else if (c == '\n' || c == '\r')
+            goto invalid_char;
+        }
+        p.popFront;
+        if (c == sep)
+          break;
+        if (c == '$' && p.front == '{' && sep == '`') {
+          p.popFront;
+          break;
+        }
+        if (c == '\\') {
+          long diff = buf_start.length - buf_cur.str.length;
+          long prev = diff - 1;
+          p_escape = buf_start[prev..$];
+          c = p.front;
+          switch (c) {
+            case '\0':
+              if (buf_cur.str.empty)
+                goto invalid_char;
+              p.popFront;
+              break;
+            case '\'', '\"', '\\':
+              p.popFront;
+              break;
+            case '\r':
+              if (p.dropOne.front == '\n')
+                p.popFront;
+              goto case;
+            case '\n':
+              p.popFront;
+              continue;
+            case '0': .. case '9':
+              if (!(fd.js_mode & JS_MODE_STRICT) && sep != '`')
+                goto default;
+              if (c == '0' && !(p.dropOne.front >= '0' && p.dropOne.front <= '9')) {
+                p.popFront;
+                c = '\0';
+              } else {
+                if (c >= '8' || sep == '`')
+                  goto invalid_escape;
+                else
+                  assert(0);
+              }
+              break;
+            case CP_LS, CP_PS:
+              continue;
+            default:
+              invalid_escape: assert(0);
           }
         }
       }
     }
+    invalid_char: assert(0);
   }
   
   void parse_directives() {
@@ -211,7 +268,7 @@ class JSParseState {
   }
 
   int peek_token(bool no_line_terminator) =>
-    simple_next_token(buf, no_line_terminator);
+    simple_next_token(buf_cur, no_line_terminator);
 
   bool token_is_pseudo_keyword(string keyword) {
     import std.sumtype;
