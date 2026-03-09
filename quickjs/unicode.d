@@ -152,3 +152,37 @@ int lre_js_is_ident_next(uint c) {
     return lre_is_id_continue(c);
   }
 }
+
+immutable uint[] char_range_s = [
+  10,
+  0x0009, 0x000D + 1,
+  0x0020, 0x0020 + 1,
+  0x00A0, 0x00A0 + 1,
+  0x1680, 0x1680 + 1,
+  0x2000, 0x200A + 1,
+  0x2028, 0x2029 + 1,
+  0x202F, 0x202F + 1,
+  0x205F, 0x205F + 1,
+  0x3000, 0x3000 + 1,
+  0xFEFF, 0xFEFF + 1,
+];
+
+int lre_is_space_byte(uint c) =>
+  lre_ctype_bits[c] & UNICODE_C_SPACE;
+
+bool lre_is_space_non_ascii(uint c) {
+  foreach (lohi; char_range_s[5..$].chunks(2)) {
+    if (c < lohi[0])
+      return false;
+    if (c < lohi[1])
+      return true;
+  }
+  return false;
+}
+
+int lre_is_space(uint c) {
+  if (c < 256)
+    return lre_is_space_byte(c);
+  else
+    return lre_is_space_non_ascii(c);
+}

@@ -48,6 +48,9 @@ struct JSToken {
   JSTokenVal val;
 }
 
+enum CP_LS = 0x2028;
+enum CP_PS = 0x2029;
+
 int simple_next_token(ref StrInputBuf pp, bool no_line_terminator) {
   import std.range;
   StrInputBuf p = pp;
@@ -111,7 +114,13 @@ int simple_next_token(ref StrInputBuf pp, bool no_line_terminator) {
             return JS_TOK.IDENT;
         break;
       default:
-        assert(0);
+        if (c >= 128)
+          if (no_line_terminator && (c == CP_PS || c == CP_LS))
+            return '\n';
+        if (lre_is_space(c))
+          continue;
+        if (lre_js_is_ident_first(c))
+          return JS_TOK.IDENT;
         break;
     }
     return c;
