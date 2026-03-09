@@ -2,7 +2,6 @@ module quickjs.js_function_def;
 import quickjs;
 
 class JSFunctionDef {
-  JSContext ctx;
   JSMchInst code;
 
   JSVarDef vars_begin;
@@ -33,7 +32,7 @@ class JSFunctionDef {
     scope_level = new_scope;
   }
 
-  JSVarDef add_var(JSAtom name) {
+  JSVarDef add_var(string name) {
     JSVarDef vd = new JSVarDef;
     vd.var_name = name;
 

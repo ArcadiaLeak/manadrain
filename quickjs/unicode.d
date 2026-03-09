@@ -114,6 +114,12 @@ int lre_is_id_start(uint c) =>
     unicode_prop_ID_Start_index
   );
 
+int lre_is_id_start_byte(uint c) =>
+  lre_ctype_bits[c] & (
+    UNICODE_C_UPPER | UNICODE_C_LOWER |
+    UNICODE_C_UNDER | UNICODE_C_DOLLAR
+  );
+
 int lre_is_id_continue(uint c) =>
   c.lre_is_id_start ||
   c.lre_is_in_table(
@@ -126,6 +132,16 @@ int lre_is_id_continue_byte(uint c) =>
     UNICODE_C_UPPER | UNICODE_C_LOWER | UNICODE_C_UNDER |
     UNICODE_C_DOLLAR | UNICODE_C_DIGIT
   );
+
+int lre_js_is_ident_first(uint c) {
+  if (c < 128) {
+    return lre_is_id_start_byte(c);
+  } else {
+    if (c >= 0x200C && c <= 0x200D)
+      return true;
+    return lre_is_id_start(c);
+  }
+}
 
 int lre_js_is_ident_next(uint c) {
   if (c < 128) {

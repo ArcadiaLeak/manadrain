@@ -6,7 +6,7 @@ enum JS_EVAL_TYPE {
 }
 
 class JSVarDef {
-  JSAtom var_name;
+  string var_name;
   Object func_pool;
 
   JSVarDef prev;

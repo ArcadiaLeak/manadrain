@@ -13,7 +13,7 @@ struct JSTokNum {
 }
 
 struct JSTokIdent {
-  JSAtom atom;
+  string str;
   bool has_escape;
   bool is_reserved;
 }
@@ -24,13 +24,23 @@ struct JSTokRegexp {
 }
 
 enum JS_TOK {
-  EOF, FUNCTION, IMPORT, EXPORT,
-  ARROW, IN, OF
+  NUMBER = -128, STRING, TEMPLATE, IDENT, REGEXP, MUL_ASSIGN,
+  DIV_ASSIGN, MOD_ASSIGN, PLUS_ASSIGN, MINUS_ASSIGN, SHL_ASSIGN,
+  SAR_ASSIGN, SHR_ASSIGN, AND_ASSIGN, XOR_ASSIGN, OR_ASSIGN,
+  POW_ASSIGN, LAND_ASSIGN, LOR_ASSIGN, DOUBLE_QUESTION_MARK_ASSIGN,
+  DEC, INC, SHL, SAR, SHR, LT, LTE, GT, GTE, EQ, STRICT_EQ, NEQ,
+  STRICT_NEQ, LAND, LOR, POW, ARROW, ELLIPSIS, DOUBLE_QUESTION_MARK,
+  QUESTION_MARK_DOT, ERROR, PRIVATE_NAME, EOF, NULL, FALSE, TRUE,
+  IF, ELSE, RETURN, VAR, THIS, DELETE, VOID, TYPEOF, NEW, IN, INSTANCEOF,
+  DO, WHILE, FOR, BREAK, CONTINUE, SWITCH, CASE, DEFAULT, THROW, TRY,
+  CATCH, FINALLY, FUNCTION, DEBUGGER, WITH, CLASS, CONST, ENUM, EXPORT,
+  EXTENDS, IMPORT, SUPER, IMPLEMENTS, INTERFACE, LET, PACKAGE, PRIVATE,
+  PROTECTED, PUBLIC, STATIC, YIELD, AWAIT, OF
 }
 
 alias JSTokenVal = SumType!(
-  JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp,
-  dchar, JS_TOK
+  JSTokStr, JSTokNum, JSTokIdent,
+  JSTokRegexp, uint
 );
 
 struct JSToken {
@@ -38,68 +48,76 @@ struct JSToken {
   JSTokenVal val;
 }
 
-JSTokenVal simple_next_token(ref string pp, bool no_line_terminator) {
-  import std.range.primitives;
-
-  dchar take_then_pop() {
-    scope(exit) pp.popFront;
-    return pp.empty ? 0 : pp.front;
-  }
-
-  dchar pop_then_take() {
-    pp.popFront;
-    return pp.empty ? 0 : pp.front;
-  }
+int simple_next_token(ref string pp, bool no_line_terminator) {
+  import std.range;
+  string p = pp ~ 0;
 
   while (true) {
-    switch (take_then_pop) {
+    dchar c = p.front;
+    p.popFront;
+    switch (c) {
       case '\r', '\n':
         if (no_line_terminator)
-          return JSTokenVal('\n');
+          return '\n';
         continue;
       case ' ', '\t', '\v', '\f':
         continue;
       case '/':
-        if (pp.front == '/') {
+        if (p.front == '/') {
           if (no_line_terminator)
-            return JSTokenVal('\n');
-          while (!pp.empty && pp.front != '\r' && pp.front != '\n')
-            pp.popFront;
+            return '\n';
+          while (p.front && p.front != '\r' && p.front != '\n')
+            p.popFront;
           continue;
         }
-        if (pp.front == '*') {
-          while (pop_then_take) {
-            if ((pp.front == '\r' || pp.front == '\n') && no_line_terminator)
-              return JSTokenVal('\n');
-            if (pp.match_identifier("*/")) {
-              pp.popFrontExactly("*/".length);
+        if (p.front == '*') {
+          p.popFront;
+          while (p.front) {
+            if ((p.front == '\r' || p.front == '\n') && no_line_terminator)
+              return '\n';
+            if (p.front == '*' && p.dropOne.front == '/') {
+              p = p.drop(2);
               break;
             }
+            p.popFront;
           }
           continue;
         }
         break;
       case '=':
-        if (pp.front == '>')
-          return JSTokenVal(JS_TOK.ARROW);
+        if (p.front == '>')
+          return JS_TOK.ARROW;
         break;
       case 'i':
-        if (pp.front == 'n')
-          return JSTokenVal(JS_TOK.IN);
-        if (pp.match_identifier("mport")) {
-          pp.popFrontExactly("mport".length);
-          return JSTokenVal(JS_TOK.IMPORT);
+        if (p.match_identifier("n"))
+          return JS_TOK.IN;
+        if (p.match_identifier("mport")) {
+          pp = p.drop(5);
+          return JS_TOK.IMPORT;
         }
-        return JSTokenVal(JSTokIdent());
+        return JS_TOK.IDENT;
       case 'o':
-        if (pp.front == 'f')
-          return JSTokenVal(JS_TOK.OF);
-        return JSTokenVal(JSTokIdent());
+        if (p.front == 'f')
+          return JS_TOK.OF;
+        return JS_TOK.IDENT;
       case 'e':
+        if (p.match_identifier("xport"))
+          return JS_TOK.EXPORT;
+        return JS_TOK.IDENT;
+      case 'f':
+        if (p.match_identifier("unction"))
+          return JS_TOK.FUNCTION;
+        return JS_TOK.IDENT;
+      case '\\':
+        if (p.front == 'u')
+          if (lre_js_is_ident_first(lre_parse_escape(p, true)))
+            return JS_TOK.IDENT;
+        break;
       default:
+        assert(0);
         break;
     }
-    return JSTokenVal(pp.front);
+    return c;
   }
 }
 
