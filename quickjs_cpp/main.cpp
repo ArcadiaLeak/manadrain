@@ -7,39 +7,69 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
+#include <functional>
 
 #include "js_atom_enum.hpp"
+#include "js_class_enum.hpp"
 
-enum {
-  JS_ATOM_TYPE_STRING = 1,
-  JS_ATOM_TYPE_GLOBAL_SYMBOL,
-  JS_ATOM_TYPE_SYMBOL,
-  JS_ATOM_TYPE_PRIVATE,
+enum class JS_ATOM_TYPE {
+  STRING = 1,
+  GLOBAL_SYMBOL,
+  SYMBOL,
+  PRIVATE,
 };
 
-struct JS_GC_OBJECT {};
-struct JSAtom : JS_GC_OBJECT {};
-struct JSString : JSAtom {};
+enum class JS_CFUNC {
+  generic,
+  generic_magic,
+  constructor,
+  constructor_magic,
+  constructor_or_func,
+  constructor_or_func_magic,
+  f_f,
+  f_f_f,
+  getter,
+  setter,
+  getter_magic,
+  setter_magic,
+  iterator_next,
+};
+
+struct JSHeapMem {};
+
+struct JSString : JSHeapMem {
+  std::string str;
+};
+
+struct JSContext {};
+
+using JSValue = std::variant<int32_t, int64_t, double, std::shared_ptr<JSHeapMem>>;
+using JSCFunction = std::function<JSValue(
+  std::shared_ptr<JSContext> ctx, JSValue this_val,
+  int argc, std::shared_ptr<JSValue[]> argv
+)>;
 
 struct JSRuntime {
   std::unordered_map<std::string, std::shared_ptr<JSString>> str_hash;
-  std::unordered_set<std::shared_ptr<JS_GC_OBJECT>> gc_obj_hash;
+  std::unordered_set<std::shared_ptr<JSHeapMem>> atom_hash;
 
-  void PopulateWithWellknown() {
+  void insert_wellknown() {
     for (int i = JS_ATOM_null; i < JS_ATOM_END; i++) {
-      int atom_type;
+      JS_ATOM_TYPE atom_type;
       if (i == JS_ATOM_Private_brand)
-        atom_type = JS_ATOM_TYPE_PRIVATE;
+        atom_type = JS_ATOM_TYPE::PRIVATE;
       else if (i >= JS_ATOM_Symbol_toPrimitive)
-        atom_type = JS_ATOM_TYPE_SYMBOL;
+        atom_type = JS_ATOM_TYPE::SYMBOL;
       else
-        atom_type = JS_ATOM_TYPE_STRING;
+        atom_type = JS_ATOM_TYPE::STRING;
       
-      if (atom_type == JS_ATOM_TYPE_STRING) {
+      if (atom_type == JS_ATOM_TYPE::STRING) {
         std::string str{js_atom_init[i - 1]};
         std::shared_ptr<JSString> js_str = std::make_shared<JSString>();
+        js_str->str = str;
         str_hash[str] = js_str;
-        gc_obj_hash.insert(js_str);
+        atom_hash.insert(js_str);
       }
     }
   }
@@ -69,9 +99,9 @@ int main(int argc, char* argv[]) {
   );
 
   JSRuntime rt{};
-  rt.PopulateWithWellknown();
+  rt.insert_wellknown();
 
-  std::println("{} {}", rt.str_hash.size(), rt.gc_obj_hash.size());
+  std::println("{}", rt.str_hash[js_atom_init[JS_ATOM__ret_ - 1]]->str);
 
   return 0;
 }
