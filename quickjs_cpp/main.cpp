@@ -5,6 +5,16 @@
 #include <cstdio>
 #include <ranges>
 #include <vector>
+#include <unordered_map>
+#include <deque>
+
+struct JSAtom {};
+struct JSString : JSAtom {};
+
+struct JSRuntime {
+  std::unordered_map<std::string, std::shared_ptr<JSString>> str_hash;
+  std::deque<JSAtom> atom_deq;
+};
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
@@ -40,7 +50,7 @@ int main(int argc, char* argv[]) {
     con | std::views::take(vec.size() + 5)
   );
 
-  infstr.begin();
+  auto it = infstr.begin();
 
   std::print("{}", infstr);
 
