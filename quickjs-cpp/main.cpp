@@ -34,5 +34,15 @@ int main(int argc, char* argv[]) {
 
   std::print("{}", std::string_view{shared_arr.get(), vec.size()});
 
+  std::ranges::repeat_view rep{'\0'};
+  std::ranges::concat_view con{vec, rep};
+  std::string infstr = std::ranges::to<std::string>(
+    con | std::views::take(vec.size() + 5)
+  );
+
+  infstr.begin();
+
+  std::print("{}", infstr);
+
   return 0;
 }
