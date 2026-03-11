@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <deque>
 
+#include "js_atom_enum.hpp"
+
 struct JSAtom {};
 struct JSString : JSAtom {};
 
