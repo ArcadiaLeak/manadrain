@@ -6,16 +6,43 @@
 #include <ranges>
 #include <vector>
 #include <unordered_map>
-#include <deque>
+#include <unordered_set>
 
 #include "js_atom_enum.hpp"
 
-struct JSAtom {};
+enum {
+  JS_ATOM_TYPE_STRING = 1,
+  JS_ATOM_TYPE_GLOBAL_SYMBOL,
+  JS_ATOM_TYPE_SYMBOL,
+  JS_ATOM_TYPE_PRIVATE,
+};
+
+struct JS_GC_OBJECT {};
+struct JSAtom : JS_GC_OBJECT {};
 struct JSString : JSAtom {};
 
 struct JSRuntime {
   std::unordered_map<std::string, std::shared_ptr<JSString>> str_hash;
-  std::deque<JSAtom> atom_deq;
+  std::unordered_set<std::shared_ptr<JS_GC_OBJECT>> gc_obj_hash;
+
+  void PopulateWithWellknown() {
+    for (int i = JS_ATOM_null; i < JS_ATOM_END; i++) {
+      int atom_type;
+      if (i == JS_ATOM_Private_brand)
+        atom_type = JS_ATOM_TYPE_PRIVATE;
+      else if (i >= JS_ATOM_Symbol_toPrimitive)
+        atom_type = JS_ATOM_TYPE_SYMBOL;
+      else
+        atom_type = JS_ATOM_TYPE_STRING;
+      
+      if (atom_type == JS_ATOM_TYPE_STRING) {
+        std::string str{js_atom_init[i - 1]};
+        std::shared_ptr<JSString> js_str = std::make_shared<JSString>();
+        str_hash[str] = js_str;
+        gc_obj_hash.insert(js_str);
+      }
+    }
+  }
 };
 
 int main(int argc, char* argv[]) {
@@ -37,25 +64,14 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::vector<char> vec = std::ranges::to<std::vector>(
+  std::string source = std::ranges::to<std::string>(
     std::views::istream<char>(file >> std::noskipws)
   );
 
-  std::shared_ptr<char[]> shared_arr = std::make_shared<char[]>(vec.size());
-  std::copy(vec.begin(), vec.end(), shared_arr.get());
+  JSRuntime rt{};
+  rt.PopulateWithWellknown();
 
-  std::print("{}", std::string_view{shared_arr.get(), vec.size()});
-
-  std::ranges::repeat_view rep{'\0'};
-  std::ranges::concat_view con{vec, rep};
-  std::string infstr = std::ranges::to<std::string>(
-    con | std::views::take(vec.size() + 5)
-  );
-  auto it = infstr.begin();
-  std::print("{}", infstr);
-
-  for (auto str : js_atom_init)
-    std::println("{}", str);
+  std::println("{} {}", rt.str_hash.size(), rt.gc_obj_hash.size());
 
   return 0;
 }
