@@ -51,10 +51,11 @@ int main(int argc, char* argv[]) {
   std::string infstr = std::ranges::to<std::string>(
     con | std::views::take(vec.size() + 5)
   );
-
   auto it = infstr.begin();
-
   std::print("{}", infstr);
+
+  for (auto str : js_atom_init)
+    std::println("{}", str);
 
   return 0;
 }

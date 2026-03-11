@@ -1,4 +1,5 @@
 enum {
+  JS_ATOM_NULL,
   JS_ATOM_null,
   JS_ATOM_false,
   JS_ATOM_true,
@@ -236,6 +237,7 @@ enum {
   JS_ATOM_Symbol_species,
   JS_ATOM_Symbol_unscopables,
   JS_ATOM_Symbol_asyncIterator,
+  JS_ATOM_END,
 };
 
 static const char* const js_atom_init[] = {
