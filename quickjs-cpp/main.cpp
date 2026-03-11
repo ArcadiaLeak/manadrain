@@ -1,0 +1,38 @@
+#include <print>
+#include <fstream>
+#include <filesystem>
+#include <string>
+#include <cstdio>
+#include <ranges>
+#include <vector>
+
+int main(int argc, char* argv[]) {
+  if (argc != 2) {
+    std::println(stderr, "Usage: {} <filepath>", argv[0]);
+    return 1;
+  }
+
+  std::string filePath = argv[1];
+
+  if (!std::filesystem::exists(filePath)) {
+    std::println(stderr, "Error: file does not exist: {}", filePath);
+    return 1;
+  }
+
+  std::ifstream file(filePath);
+  if (!file.is_open()) {
+    std::println(stderr, "Error: could not open file: {}", filePath);
+    return 1;
+  }
+
+  std::vector<char> vec = std::ranges::to<std::vector>(
+    std::views::istream<char>(file >> std::noskipws)
+  );
+
+  std::shared_ptr<char[]> shared_arr = std::make_shared<char[]>(vec.size());
+  std::copy(vec.begin(), vec.end(), shared_arr.get());
+
+  std::print("{}", std::string_view{shared_arr.get(), vec.size()});
+
+  return 0;
+}
