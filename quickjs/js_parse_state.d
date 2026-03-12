@@ -212,7 +212,7 @@ class JSParseState {
     if (token.val == JSTokenVal(JS_TOK.FUNCTION))
       parse_function_decl(
         JS_PARSE_FUNC.STATEMENT, JS_FUNC_NORMAL,
-        JSAtom(JSString(null)), token.pos
+        null, token.pos
       );
     else if (
       token_is_pseudo_keyword("async") &&
@@ -220,7 +220,7 @@ class JSParseState {
     )
       parse_function_decl(
         JS_PARSE_FUNC.STATEMENT, JS_FUNC_NORMAL,
-        JSAtom(JSString(null)), token.pos
+        null, token.pos
       );
   }
 
