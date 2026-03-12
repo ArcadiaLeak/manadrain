@@ -37,21 +37,26 @@ enum class JS_CFUNC {
   iterator_next,
 };
 
-struct JSHeapMem {};
+struct JSHeapAny {
+  virtual ~JSHeapAny() = default;
+  JSHeapAny(const JSHeapAny&) = default;
+  JSHeapAny& operator=(const JSHeapAny&) = default;
+  JSHeapAny(JSHeapAny&&) noexcept = default;
+  JSHeapAny& operator=(JSHeapAny&&) noexcept = default;
 
-struct JSString : JSHeapMem {
-  std::string str;
+  JSHeapAny() = default;
+};
+
+struct JSString : JSHeapAny {
+  std::shared_ptr<char[]> str;
+  size_t len;
 };
 
 struct JSContext {
   std::shared_ptr<struct JSRuntime> rt;
 };
 
-struct JSParseState {
-
-};
-
-using JSValue = std::variant<int32_t, int64_t, double, std::shared_ptr<JSHeapMem>>;
+using JSValue = std::variant<int32_t, int64_t, double, std::shared_ptr<JSHeapAny>>;
 using JSCFunction = std::function<JSValue(
   std::shared_ptr<JSContext> ctx, JSValue this_val,
   int argc, std::shared_ptr<JSValue[]> argv
@@ -67,7 +72,7 @@ struct JSTokNum {
 };
 
 struct JSTokIdent {
-  std::string str;
+  std::shared_ptr<char[]> str;
   bool has_escape;
   bool is_reserved;
 };
@@ -84,6 +89,50 @@ using JSTokenVal = std::variant<
 struct JSToken {
   size_t offset;
   JSTokenVal val;
+};
+
+enum class JS_EVAL_TYPE {
+  GLOBAL, MODULE, DIRECT, INDIRECT
+};
+
+struct JSVarDef {
+  std::shared_ptr<char[]> var_name;
+  std::shared_ptr<JSHeapAny> func_pool;
+
+  std::shared_ptr<JSVarDef> prev;
+  std::shared_ptr<JSVarDef> next;
+};
+
+struct JSVarScope {
+  std::shared_ptr<JSVarScope> parent;
+  std::shared_ptr<JSVarDef> first;
+
+  std::shared_ptr<JSVarScope> prev;
+  std::shared_ptr<JSVarScope> next;
+};
+
+struct JSFunctionDef {
+  std::shared_ptr<JSVarDef> vars_begin;
+  std::shared_ptr<JSVarDef> vars_end;
+  std::shared_ptr<JSVarDef> eval_ret;
+
+  std::shared_ptr<JSVarScope> scope_level;
+  std::shared_ptr<JSVarDef> scope_first;
+
+  JS_EVAL_TYPE eval_type;
+  bool is_struct;
+  bool is_global_var;
+  uint8_t js_mode;
+};
+
+struct JSParseState {
+  std::shared_ptr<JSContext> ctx;
+  JSToken token;
+
+  std::shared_ptr<char[]> buf;
+  size_t buf_prev;
+  size_t buf_curr;
+  size_t buf_size;
 };
 
 enum JS_TOK {
@@ -112,7 +161,7 @@ enum JS_TOK {
 
 struct JSRuntime {
   std::unordered_map<std::string, std::shared_ptr<JSString>> str_hash;
-  std::unordered_set<std::shared_ptr<JSHeapMem>> atom_hash;
+  std::unordered_set<std::shared_ptr<JSHeapAny>> atom_hash;
 
   void insert_wellknown() {
     for (int i = JS_ATOM_null; i < JS_ATOM_END; i++) {
@@ -127,7 +176,10 @@ struct JSRuntime {
       if (atom_type == JS_ATOM_TYPE::STRING) {
         std::string str{js_atom_init[i - 1]};
         std::shared_ptr<JSString> js_str = std::make_shared<JSString>();
-        js_str->str = str;
+        std::shared_ptr<char[]> shared_str = std::make_shared<char[]>(str.size());
+        std::copy(str.begin(), str.end(), shared_str.get());
+        js_str->str = shared_str;
+        js_str->len = str.size();
         str_hash[str] = js_str;
         atom_hash.insert(js_str);
       }
