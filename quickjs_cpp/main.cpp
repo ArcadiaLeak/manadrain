@@ -10,9 +10,11 @@
 #include <variant>
 #include <functional>
 #include <span>
+#include <stdexcept>
 
 #include "js_atom_enum.hpp"
 #include "js_class_enum.hpp"
+#include "js_token_enum.hpp"
 
 enum class JS_ATOM_TYPE {
   STRING = 1,
@@ -52,15 +54,7 @@ struct JSString : JSHeapAny {
   size_t len;
 };
 
-struct JSContext {
-  std::shared_ptr<struct JSRuntime> rt;
-};
-
 using JSValue = std::variant<int32_t, int64_t, double, std::shared_ptr<JSHeapAny>>;
-using JSCFunction = std::function<JSValue(
-  std::shared_ptr<JSContext> ctx, JSValue this_val,
-  int argc, std::shared_ptr<JSValue[]> argv
-)>;
 
 struct JSTokStr {
   JSValue str;
@@ -125,40 +119,6 @@ struct JSFunctionDef {
   uint8_t js_mode;
 };
 
-struct JSParseState {
-  std::shared_ptr<JSContext> ctx;
-  JSToken token;
-
-  std::shared_ptr<char[]> buf;
-  size_t buf_prev;
-  size_t buf_curr;
-  size_t buf_size;
-};
-
-enum JS_TOK {
-  JS_TOK_NUMBER = -128, JS_TOK_STRING, JS_TOK_TEMPLATE, JS_TOK_IDENT,
-  JS_TOK_REGEXP, JS_TOK_MUL_ASSIGN, JS_TOK_DIV_ASSIGN, JS_TOK_MOD_ASSIGN,
-  JS_TOK_PLUS_ASSIGN, JS_TOK_MINUS_ASSIGN, JS_TOK_SHL_ASSIGN,
-  JS_TOK_SAR_ASSIGN, JS_TOK_SHR_ASSIGN, JS_TOK_AND_ASSIGN,
-  JS_TOK_XOR_ASSIGN, JS_TOK_OR_ASSIGN, JS_TOK_POW_ASSIGN,
-  JS_TOK_LAND_ASSIGN, JS_TOK_LOR_ASSIGN, JS_TOK_DOUBLE_QUESTION_MARK_ASSIGN,
-  JS_TOK_DEC, JS_TOK_INC, JS_TOK_SHL, JS_TOK_SAR, JS_TOK_SHR, JS_TOK_LT,
-  JS_TOK_LTE, JS_TOK_GT, JS_TOK_GTE, JS_TOK_EQ, JS_TOK_STRICT_EQ, JS_TOK_NEQ,
-  JS_TOK_STRICT_NEQ, JS_TOK_LAND, JS_TOK_LOR, JS_TOK_POW, JS_TOK_ARROW,
-  JS_TOK_ELLIPSIS, JS_TOK_DOUBLE_QUESTION_MARK, JS_TOK_QUESTION_MARK_DOT,
-  JS_TOK_ERROR, JS_TOK_PRIVATE_NAME, JS_TOK_EOF, JS_TOK_NULL, JS_TOK_FALSE,
-  JS_TOK_TRUE, JS_TOK_IF, JS_TOK_ELSE, JS_TOK_RETURN, JS_TOK_VAR, JS_TOK_THIS,
-  JS_TOK_DELETE, JS_TOK_VOID, JS_TOK_TYPEOF, JS_TOK_NEW, JS_TOK_IN,
-  JS_TOK_INSTANCEOF, JS_TOK_DO, JS_TOK_WHILE, JS_TOK_FOR, JS_TOK_BREAK,
-  JS_TOK_CONTINUE, JS_TOK_SWITCH, JS_TOK_CASE, JS_TOK_DEFAULT, JS_TOK_THROW,
-  JS_TOK_TRY, JS_TOK_CATCH, JS_TOK_FINALLY, JS_TOK_FUNCTION, JS_TOK_DEBUGGER,
-  JS_TOK_WITH, JS_TOK_CLASS, JS_TOK_CONST, JS_TOK_ENUM, JS_TOK_EXPORT,
-  JS_TOK_EXTENDS, JS_TOK_IMPORT, JS_TOK_SUPER, JS_TOK_IMPLEMENTS,
-  JS_TOK_INTERFACE, JS_TOK_LET, JS_TOK_PACKAGE, JS_TOK_PRIVATE,
-  JS_TOK_PROTECTED, JS_TOK_PUBLIC, JS_TOK_STATIC, JS_TOK_YIELD,
-  JS_TOK_AWAIT, JS_TOK_OF
-};
-
 struct JSRuntime {
   std::unordered_map<std::string, std::shared_ptr<JSString>> str_hash;
   std::unordered_set<std::shared_ptr<JSHeapAny>> atom_hash;
@@ -185,6 +145,66 @@ struct JSRuntime {
       }
     }
   }
+};
+
+struct JSParseState {
+  std::shared_ptr<struct JSContext> ctx;
+  std::shared_ptr<char[]> filename;
+  JSToken token;
+
+  std::shared_ptr<char[]> buf;
+  size_t buf_prev;
+  size_t buf_curr;
+  size_t buf_size;
+};
+
+struct JSContext {
+  std::shared_ptr<JSRuntime> rt;
+};
+
+JSValue JS_EvalInternal(
+  std::shared_ptr<JSContext> ctx,
+  JSValue this_obj,
+  std::shared_ptr<char[]> input,
+  size_t input_len,
+  std::shared_ptr<char[]> filename,
+  int flags,
+  int scope_idx
+) {
+  std::shared_ptr<JSParseState> s = std::make_shared<JSParseState>(
+    JSParseState{
+      .ctx = ctx,
+      .filename = filename,
+      .buf = input,
+      .buf_size = input_len
+    }
+  );
+
+  throw std::runtime_error("unimplemented!");
+}
+
+using JSCFunction = std::function<JSValue(
+  std::shared_ptr<JSContext> ctx,
+  JSValue this_val,
+  int argc,
+  std::shared_ptr<JSValue[]> argv
+)>;
+
+struct JSMchInst {
+  virtual ~JSMchInst() = default;
+  JSMchInst(const JSMchInst&) = default;
+  JSMchInst& operator=(const JSMchInst&) = default;
+  JSMchInst(JSMchInst&&) noexcept = default;
+  JSMchInst& operator=(JSMchInst&&) noexcept = default;
+
+  JSMchInst() = default;
+
+  std::shared_ptr<JSMchInst> next;
+  std::shared_ptr<JSMchInst> prev;
+};
+
+struct JSEnterScope : JSMchInst {
+  std::shared_ptr<JSVarScope> scope_;
 };
 
 int main(int argc, char* argv[]) {
