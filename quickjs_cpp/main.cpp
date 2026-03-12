@@ -11,6 +11,8 @@
 #include <span>
 #include <stdexcept>
 #include <deque>
+#include <limits>
+#include <cassert>
 
 #include "js_atom_enum.hpp"
 #include "js_class_enum.hpp"
@@ -39,16 +41,20 @@ enum class JS_CFUNC {
   iterator_next,
 };
 
-constexpr int JS_EVAL_TYPE_GLOBAL = 0;
-constexpr int JS_EVAL_TYPE_MODULE = 1;
-constexpr int JS_EVAL_TYPE_DIRECT = 2;
-constexpr int JS_EVAL_TYPE_INDIRECT = 3;
-constexpr int JS_EVAL_TYPE_MASK = 3;
+enum {
+  OP_enter_scope
+};
 
-constexpr int JS_EVAL_FLAG_STRICT = 1 << 3;
+constexpr uint8_t JS_EVAL_TYPE_GLOBAL = 0;
+constexpr uint8_t JS_EVAL_TYPE_MODULE = 1;
+constexpr uint8_t JS_EVAL_TYPE_DIRECT = 2;
+constexpr uint8_t JS_EVAL_TYPE_INDIRECT = 3;
+constexpr uint8_t JS_EVAL_TYPE_MASK = 3;
 
-constexpr int JS_MODE_STRICT = 1 << 0;
-constexpr int JS_MODE_ASYNC = 1 << 2;
+constexpr uint8_t JS_EVAL_FLAG_STRICT = 1 << 3;
+
+constexpr uint8_t JS_MODE_STRICT = 1 << 0;
+constexpr uint8_t JS_MODE_ASYNC = 1 << 2;
 
 struct JSHeapAny {
   virtual ~JSHeapAny() = default;
@@ -134,8 +140,10 @@ struct JSFunctionDef {
   size_t scope_level;
   size_t scope_first;
   std::vector<JSVarScope> scopes;
+  size_t body_scope;
 
-  std::deque<uint8_t> byte_code;
+  std::deque<uint64_t> byte_code;
+  size_t last_opcode_pos;
 };
 
 struct JSRuntime {
@@ -168,7 +176,7 @@ struct JSRuntime {
 
 struct JSParseState {
   std::shared_ptr<struct JSContext> ctx;
-  std::shared_ptr<char[]> filename;
+  std::string filename;
   JSToken token;
 
   std::shared_ptr<char[]> buf;
@@ -188,20 +196,41 @@ struct JSParseState {
       .parent = fd.scope_level,
       .first = fd.scope_first
     };
+    uint64_t scope_idx = fd.scopes.size();
     fd.scopes.emplace_back(scope);
-    size_t scope_idx = fd.scopes.size();
     fd.scope_level = scope_idx;
-    emit_op(0);
-    emit_u16(scope_idx);
+    emit_op(OP_enter_scope);
+    emit_u32(scope_idx);
     return scope_idx;
   }
 
-  void emit_op(uint8_t val) {
-    throw std::runtime_error{""};
+  void emit_op(uint64_t val) {
+    cur_func->last_opcode_pos = cur_func->byte_code.size();
+    cur_func->byte_code.push_back(val);
   }
 
-  void emit_u16(uint16_t val) {
-    throw std::runtime_error{""};
+  void emit_u32(uint64_t val) {
+    cur_func->byte_code.push_back(val);
+  }
+
+  void parse_program() {
+    JSFunctionDef& fd = *cur_func;
+
+    next_token();
+
+  }
+
+  void next_token() {
+    std::ranges::concat_view con{
+      std::span<char>{buf.get(), buf_size},
+      std::ranges::repeat_view{'\0'}
+    };
+
+    auto b = con.begin();
+    b++;
+    b--;
+
+    std::println("{}", *b);
   }
 };
 
@@ -218,7 +247,7 @@ JSFunctionDef js_new_function_def(
   std::shared_ptr<JSFunctionDef> parent,
   bool is_eval,
   bool is_func_expr,
-  std::shared_ptr<char[]> filename,
+  std::string filename,
   size_t source_pos
 ) {
   return JSFunctionDef{
@@ -234,11 +263,11 @@ JSValue JS_EvalInternal(
   JSValue this_obj,
   std::shared_ptr<char[]> input,
   size_t input_len,
-  std::shared_ptr<char[]> filename,
+  std::string filename,
   int flags,
   int scope_idx
 ) {
-  int js_mode = 0;
+  uint8_t js_mode = 0;
 
   JSParseState state{
     .ctx = ctx,
@@ -271,8 +300,11 @@ JSValue JS_EvalInternal(
   func_def.func_name = ctx->rt->atom_vec[JS_ATOM__eval_];
   state.is_module = false;
   state.push_scope();
+  func_def.body_scope = func_def.scope_level;
 
-  throw std::runtime_error("unimplemented!");
+  state.parse_program();
+
+  assert(0);
 }
 
 int main(int argc, char* argv[]) {
@@ -294,15 +326,19 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::string source = std::ranges::to<std::string>(
+  std::string source_str = std::ranges::to<std::string>(
     std::views::istream<char>(file >> std::noskipws)
   );
+  std::shared_ptr<char[]> source_buf = std::make_shared<char[]>(source_str.size());
+  std::copy(source_str.begin(), source_str.end(), source_buf.get());
 
   std::shared_ptr<JSRuntime> rt = std::make_shared<JSRuntime>();
   rt->insert_wellknown();
 
   std::shared_ptr<JSContext> ctx = std::make_shared<JSContext>();
   ctx->rt = rt;
+
+  JS_EvalInternal(ctx, nullptr, source_buf, source_str.size(), "", 0, -1);
 
   return 0;
 }
