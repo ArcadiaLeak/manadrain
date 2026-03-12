@@ -2,7 +2,6 @@
 #include <fstream>
 #include <filesystem>
 #include <string>
-#include <cstdio>
 #include <ranges>
 #include <vector>
 #include <unordered_map>
@@ -11,6 +10,7 @@
 #include <functional>
 #include <span>
 #include <stdexcept>
+#include <deque>
 
 #include "js_atom_enum.hpp"
 #include "js_class_enum.hpp"
@@ -107,32 +107,35 @@ enum class JSEvalType {
 };
 
 struct JSVarDef {
-  std::shared_ptr<char[]> var_name;
-  std::shared_ptr<JSHeapAny> func_pool;
+  std::shared_ptr<JSAtom> var_name;
 };
 
 struct JSVarScope {
-  std::shared_ptr<JSVarScope> parent;
-  std::shared_ptr<JSVarDef> first;
+  size_t parent;
+  size_t first;
 };
 
 struct JSFunctionDef {
   std::shared_ptr<JSContext> ctx;
   std::shared_ptr<JSFunctionDef> parent;
 
-  std::shared_ptr<JSVarDef> vars_begin;
-  std::shared_ptr<JSVarDef> vars_end;
-  std::shared_ptr<JSVarDef> eval_ret;
-
-  std::shared_ptr<JSVarScope> scope_level;
-  std::shared_ptr<JSVarDef> scope_first;
-
   bool is_eval;
-  JSEvalType eval_type;
   bool is_global_var;
   bool is_func_expr;
+
+  JSEvalType eval_type;
   uint8_t js_mode;
+
   std::shared_ptr<JSAtom> func_name;
+
+  std::vector<JSVarDef> vars;
+  size_t eval_ret_idx;
+
+  size_t scope_level;
+  size_t scope_first;
+  std::vector<JSVarScope> scopes;
+
+  std::deque<uint8_t> byte_code;
 };
 
 struct JSRuntime {
@@ -231,23 +234,6 @@ JSValue JS_EvalInternal(
 
   throw std::runtime_error("unimplemented!");
 }
-
-struct JSMchInst {
-  virtual ~JSMchInst() = default;
-  JSMchInst(const JSMchInst&) = default;
-  JSMchInst& operator=(const JSMchInst&) = default;
-  JSMchInst(JSMchInst&&) noexcept = default;
-  JSMchInst& operator=(JSMchInst&&) noexcept = default;
-
-  JSMchInst() = default;
-
-  std::shared_ptr<JSMchInst> next;
-  std::shared_ptr<JSMchInst> prev;
-};
-
-struct JSEnterScope : JSMchInst {
-  std::shared_ptr<JSVarScope> scope_;
-};
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
