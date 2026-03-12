@@ -1,6 +1,8 @@
 module quickjs;
 
+public import quickjs.js_atom_enum;
 public import quickjs.js_atom;
+public import quickjs.js_class_enum;
 public import quickjs.js_function_def;
 public import quickjs.js_machine;
 public import quickjs.js_parse_state;
