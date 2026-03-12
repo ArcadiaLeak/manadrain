@@ -16,7 +16,7 @@
 #include "js_class_enum.hpp"
 #include "js_token_enum.hpp"
 
-enum class JS_ATOM_TYPE {
+enum class JSAtomType {
   STRING = 1,
   GLOBAL_SYMBOL,
   SYMBOL,
@@ -39,6 +39,17 @@ enum class JS_CFUNC {
   iterator_next,
 };
 
+constexpr int JS_EVAL_TYPE_GLOBAL = 0;
+constexpr int JS_EVAL_TYPE_MODULE = 1;
+constexpr int JS_EVAL_TYPE_DIRECT = 2;
+constexpr int JS_EVAL_TYPE_INDIRECT = 3;
+constexpr int JS_EVAL_TYPE_MASK = 3;
+
+constexpr int JS_EVAL_FLAG_STRICT = 1 << 3;
+
+constexpr int JS_MODE_STRICT = 1 << 0;
+constexpr int JS_MODE_ASYNC = 1 << 2;
+
 struct JSHeapAny {
   virtual ~JSHeapAny() = default;
   JSHeapAny(const JSHeapAny&) = default;
@@ -49,7 +60,7 @@ struct JSHeapAny {
   JSHeapAny() = default;
 };
 
-struct JSString : JSHeapAny {
+struct JSAtom : JSHeapAny {
   std::shared_ptr<char[]> str;
   size_t len;
 };
@@ -79,33 +90,36 @@ struct JSTokRegexp {
 using JSTokenVal = std::variant<
   JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp, uint32_t
 >;
+using JSCFunction = std::function<JSValue(
+  std::shared_ptr<struct JSContext> ctx,
+  JSValue this_val,
+  int argc,
+  std::shared_ptr<JSValue[]> argv
+)>;
 
 struct JSToken {
   size_t offset;
   JSTokenVal val;
 };
 
-enum class JS_EVAL_TYPE {
+enum class JSEvalType {
   GLOBAL, MODULE, DIRECT, INDIRECT
 };
 
 struct JSVarDef {
   std::shared_ptr<char[]> var_name;
   std::shared_ptr<JSHeapAny> func_pool;
-
-  std::shared_ptr<JSVarDef> prev;
-  std::shared_ptr<JSVarDef> next;
 };
 
 struct JSVarScope {
   std::shared_ptr<JSVarScope> parent;
   std::shared_ptr<JSVarDef> first;
-
-  std::shared_ptr<JSVarScope> prev;
-  std::shared_ptr<JSVarScope> next;
 };
 
 struct JSFunctionDef {
+  std::shared_ptr<JSContext> ctx;
+  std::shared_ptr<JSFunctionDef> parent;
+
   std::shared_ptr<JSVarDef> vars_begin;
   std::shared_ptr<JSVarDef> vars_end;
   std::shared_ptr<JSVarDef> eval_ret;
@@ -113,29 +127,31 @@ struct JSFunctionDef {
   std::shared_ptr<JSVarScope> scope_level;
   std::shared_ptr<JSVarDef> scope_first;
 
-  JS_EVAL_TYPE eval_type;
-  bool is_struct;
+  bool is_eval;
+  JSEvalType eval_type;
   bool is_global_var;
+  bool is_func_expr;
   uint8_t js_mode;
+  std::shared_ptr<JSAtom> func_name;
 };
 
 struct JSRuntime {
-  std::unordered_map<std::string, std::shared_ptr<JSString>> str_hash;
+  std::unordered_map<std::string, std::shared_ptr<JSAtom>> str_hash;
   std::unordered_set<std::shared_ptr<JSHeapAny>> atom_hash;
 
   void insert_wellknown() {
-    for (int i = JS_ATOM_null; i < JS_ATOM_END; i++) {
-      JS_ATOM_TYPE atom_type;
+    for (int i = 0; i < JS_ATOM_END; i++) {
+      JSAtomType atom_type;
       if (i == JS_ATOM_Private_brand)
-        atom_type = JS_ATOM_TYPE::PRIVATE;
+        atom_type = JSAtomType::PRIVATE;
       else if (i >= JS_ATOM_Symbol_toPrimitive)
-        atom_type = JS_ATOM_TYPE::SYMBOL;
+        atom_type = JSAtomType::SYMBOL;
       else
-        atom_type = JS_ATOM_TYPE::STRING;
+        atom_type = JSAtomType::STRING;
       
-      if (atom_type == JS_ATOM_TYPE::STRING) {
-        std::string str{js_atom_init[i - 1]};
-        std::shared_ptr<JSString> js_str = std::make_shared<JSString>();
+      if (atom_type == JSAtomType::STRING) {
+        std::string str{js_atom_init[i]};
+        std::shared_ptr<JSAtom> js_str = std::make_shared<JSAtom>();
         std::shared_ptr<char[]> shared_str = std::make_shared<char[]>(str.size());
         std::copy(str.begin(), str.end(), shared_str.get());
         js_str->str = shared_str;
@@ -158,9 +174,29 @@ struct JSParseState {
   size_t buf_size;
 };
 
+struct JSStackFrame {};
+struct JSFunctionBytecode {};
+struct JSVarRef {};
+
 struct JSContext {
   std::shared_ptr<JSRuntime> rt;
 };
+
+JSFunctionDef js_new_function_def(
+  std::shared_ptr<JSContext> ctx,
+  std::shared_ptr<JSFunctionDef> parent,
+  bool is_eval,
+  bool is_func_expr,
+  std::shared_ptr<char[]> filename,
+  std::shared_ptr<char[]> source_ptr
+) {
+  return JSFunctionDef{
+    .ctx = ctx,
+    .parent = parent,
+    .is_eval = is_eval,
+    .is_func_expr = is_func_expr
+  };
+}
 
 JSValue JS_EvalInternal(
   std::shared_ptr<JSContext> ctx,
@@ -171,24 +207,30 @@ JSValue JS_EvalInternal(
   int flags,
   int scope_idx
 ) {
-  std::shared_ptr<JSParseState> s = std::make_shared<JSParseState>(
-    JSParseState{
-      .ctx = ctx,
-      .filename = filename,
-      .buf = input,
-      .buf_size = input_len
-    }
-  );
+  std::shared_ptr<JSParseState> state =
+    std::make_shared<JSParseState>(
+      JSParseState{
+        .ctx = ctx,
+        .filename = filename,
+        .buf = input,
+        .buf_size = input_len
+      }
+    );
+  std::shared_ptr<JSStackFrame> stack_frame{};
+  std::shared_ptr<JSFunctionBytecode> bytecode{};
+  std::shared_ptr<std::shared_ptr<JSVarRef>[]> var_ref_array{};
+  int js_mode = 0;
+
+  int eval_type = flags & JS_EVAL_TYPE_MASK;
+  if (eval_type == JS_EVAL_TYPE_DIRECT) {
+    throw std::runtime_error("unimplemented!");
+  } else {
+    if (flags & JS_EVAL_FLAG_STRICT)
+      js_mode |= JS_MODE_STRICT;
+  }
 
   throw std::runtime_error("unimplemented!");
 }
-
-using JSCFunction = std::function<JSValue(
-  std::shared_ptr<JSContext> ctx,
-  JSValue this_val,
-  int argc,
-  std::shared_ptr<JSValue[]> argv
-)>;
 
 struct JSMchInst {
   virtual ~JSMchInst() = default;

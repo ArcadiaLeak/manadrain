@@ -1,5 +1,4 @@
 enum {
-  JS_ATOM_NULL,
   JS_ATOM_null,
   JS_ATOM_false,
   JS_ATOM_true,

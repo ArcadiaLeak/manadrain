@@ -243,7 +243,6 @@ const JS_ATOM = [
 ];
 
 let js_atom_enum = "enum {\n";
-js_atom_enum += "  JS_ATOM_NULL,\n";
 for (const { name } of JS_ATOM) {
   js_atom_enum += `  JS_ATOM_${name},\n`;
 }
