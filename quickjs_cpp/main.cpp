@@ -60,7 +60,7 @@ struct JSHeapAny {
   JSHeapAny() = default;
 };
 
-struct JSAtom : JSHeapAny {
+struct JSAtom {
   std::shared_ptr<char[]> str;
   size_t len;
 };
@@ -102,10 +102,6 @@ struct JSToken {
   JSTokenVal val;
 };
 
-enum class JSEvalType {
-  GLOBAL, MODULE, DIRECT, INDIRECT
-};
-
 struct JSVarDef {
   std::shared_ptr<JSAtom> var_name;
 };
@@ -123,7 +119,11 @@ struct JSFunctionDef {
   bool is_global_var;
   bool is_func_expr;
 
-  JSEvalType eval_type;
+  int eval_type;
+  bool new_target_allowed;
+  bool super_call_allowed;
+  bool super_allowed;
+  bool arguments_allowed;
   uint8_t js_mode;
 
   std::shared_ptr<JSAtom> func_name;
@@ -139,8 +139,8 @@ struct JSFunctionDef {
 };
 
 struct JSRuntime {
-  std::unordered_map<std::string, std::shared_ptr<JSAtom>> str_hash;
-  std::unordered_set<std::shared_ptr<JSHeapAny>> atom_hash;
+  std::unordered_map<std::string, size_t> atom_hash;
+  std::vector<std::shared_ptr<JSAtom>> atom_vec;
 
   void insert_wellknown() {
     for (int i = 0; i < JS_ATOM_END; i++) {
@@ -159,8 +159,8 @@ struct JSRuntime {
         std::copy(str.begin(), str.end(), shared_str.get());
         js_str->str = shared_str;
         js_str->len = str.size();
-        str_hash[str] = js_str;
-        atom_hash.insert(js_str);
+        atom_vec.push_back(js_str);
+        atom_hash[str] = i;
       }
     }
   }
@@ -175,6 +175,34 @@ struct JSParseState {
   size_t buf_prev;
   size_t buf_curr;
   size_t buf_size;
+
+  std::shared_ptr<JSFunctionDef> cur_func;
+  bool is_module;
+
+  size_t push_scope() {
+    if (!cur_func)
+      return 0;
+
+    JSFunctionDef& fd = *cur_func;
+    JSVarScope scope{
+      .parent = fd.scope_level,
+      .first = fd.scope_first
+    };
+    fd.scopes.emplace_back(scope);
+    size_t scope_idx = fd.scopes.size();
+    fd.scope_level = scope_idx;
+    emit_op(0);
+    emit_u16(scope_idx);
+    return scope_idx;
+  }
+
+  void emit_op(uint8_t val) {
+    throw std::runtime_error{""};
+  }
+
+  void emit_u16(uint16_t val) {
+    throw std::runtime_error{""};
+  }
 };
 
 struct JSStackFrame {};
@@ -191,7 +219,7 @@ JSFunctionDef js_new_function_def(
   bool is_eval,
   bool is_func_expr,
   std::shared_ptr<char[]> filename,
-  std::shared_ptr<char[]> source_ptr
+  size_t source_pos
 ) {
   return JSFunctionDef{
     .ctx = ctx,
@@ -210,19 +238,14 @@ JSValue JS_EvalInternal(
   int flags,
   int scope_idx
 ) {
-  std::shared_ptr<JSParseState> state =
-    std::make_shared<JSParseState>(
-      JSParseState{
-        .ctx = ctx,
-        .filename = filename,
-        .buf = input,
-        .buf_size = input_len
-      }
-    );
-  std::shared_ptr<JSStackFrame> stack_frame{};
-  std::shared_ptr<JSFunctionBytecode> bytecode{};
-  std::shared_ptr<std::shared_ptr<JSVarRef>[]> var_ref_array{};
   int js_mode = 0;
+
+  JSParseState state{
+    .ctx = ctx,
+    .filename = filename,
+    .buf = input,
+    .buf_size = input_len
+  };
 
   int eval_type = flags & JS_EVAL_TYPE_MASK;
   if (eval_type == JS_EVAL_TYPE_DIRECT) {
@@ -231,6 +254,23 @@ JSValue JS_EvalInternal(
     if (flags & JS_EVAL_FLAG_STRICT)
       js_mode |= JS_MODE_STRICT;
   }
+  state.cur_func = std::make_shared<JSFunctionDef>(
+    js_new_function_def(ctx, nullptr, true, false, filename, 0)
+  );
+  JSFunctionDef& func_def = *state.cur_func;
+  func_def.eval_type = eval_type;
+  if (eval_type == JS_EVAL_TYPE_DIRECT) {
+    throw std::runtime_error("unimplemented!");
+  } else {
+    func_def.new_target_allowed = false;
+    func_def.super_call_allowed = false;
+    func_def.super_allowed = false;
+    func_def.arguments_allowed = true;
+  }
+  func_def.js_mode = js_mode;
+  func_def.func_name = ctx->rt->atom_vec[JS_ATOM__eval_];
+  state.is_module = false;
+  state.push_scope();
 
   throw std::runtime_error("unimplemented!");
 }
