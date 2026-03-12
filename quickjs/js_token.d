@@ -2,6 +2,7 @@ module quickjs.js_token;
 import quickjs;
 
 import std.sumtype;
+import std.uni;
 
 struct JSTokStr {
   JSValue str;
@@ -117,7 +118,7 @@ int simple_next_token(ref StrInputBuf pp, bool no_line_terminator) {
         if (c >= 128)
           if (no_line_terminator && (c == CP_PS || c == CP_LS))
             return '\n';
-        if (lre_is_space(c))
+        if (isWhite(c))
           continue;
         if (lre_js_is_ident_first(c))
           return JS_TOK.IDENT;
