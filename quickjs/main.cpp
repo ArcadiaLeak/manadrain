@@ -13,6 +13,7 @@
 #include <deque>
 #include <limits>
 #include <cassert>
+#include <optional>
 
 #include "js_atom_enum.hpp"
 #include "js_class_enum.hpp"
@@ -186,6 +187,57 @@ auto inf_range_from(
   };
 }
 
+int simple_next_token(
+  size_t& begin_idx,
+  std::shared_ptr<char[]> buf,
+  size_t buf_size,
+  bool no_line_feed
+) {
+  auto infbuf = inf_range_from(buf, buf_size, '\0');
+  size_t idx = begin_idx;
+  uint32_t ch = infbuf[idx];
+
+  while (true) {
+    ch = infbuf[idx++];
+    switch (ch) {
+      case '\r': case '\n':
+      if (no_line_feed)
+        return '\n';
+      continue;
+      
+      case ' ': case '\t': case '\v': case '\f':
+      continue;
+
+      case '/':
+      if (infbuf[idx] == '/') {
+        if (no_line_feed)
+          return '\n';
+        auto cch = infbuf[idx];
+        while (cch && cch != '\r' && cch != '\n')
+          idx++;
+        continue;
+      }
+      if (infbuf[idx] == '*') {
+        while (infbuf[++idx]) {
+          auto cch = infbuf[idx];
+          if ((cch == '\r' || cch == '\n') && no_line_feed)
+            return '\n';
+          if (cch == '*' && infbuf[idx + 1] == '/')
+            { idx += 2; break; }
+        }
+        continue;
+      }
+      break;
+
+      case '=': if (infbuf[idx] == '>')
+        return JS_TOK_ARROW;
+      break;
+
+      
+    }
+  }
+}
+
 struct JSParseState {
   std::shared_ptr<struct JSContext> ctx;
   std::string filename;
@@ -193,8 +245,8 @@ struct JSParseState {
   bool got_line_feed;
 
   std::shared_ptr<char[]> buf;
-  ptrdiff_t last_idx;
-  ptrdiff_t curr_idx;
+  size_t last_idx;
+  size_t curr_idx;
   size_t buf_size;
 
   std::shared_ptr<JSFunctionDef> cur_func;
@@ -228,11 +280,24 @@ struct JSParseState {
 
   void parse_program() {
     next_token();
+
+    while (token.val != JS_TOK_EOF)
+      parse_source_element();
+  }
+
+  void parse_source_element() {
+
+  }
+
+  int peek_token(bool no_line_feed) {
+    return simple_next_token(
+      curr_idx, buf, buf_size, no_line_feed
+    );
   }
 
   void parse_string(
-    int sep, bool do_throw, ptrdiff_t idx,
-    JSToken& token, ptrdiff_t& idxref
+    int sep, bool do_throw, size_t idx,
+    JSToken& token, size_t& idxref
   ) {
     auto infbuf = inf_range_from(buf, buf_size, '\0');
     auto ch = infbuf[idx];
@@ -249,7 +314,7 @@ struct JSParseState {
         { idx++; break; }
       
       if (ch == '\\') {
-        ptrdiff_t idx_escape = idx - 1;
+        size_t idx_escape = idx - 1;
         ch = infbuf[idx];
 
         switch (ch) {
@@ -353,7 +418,7 @@ JSValue JS_EvalInternal(
   size_t input_len,
   std::string filename,
   int flags,
-  int scope_idx
+  std::optional<size_t> scope_idx
 ) {
   uint8_t js_mode = 0;
 
@@ -426,7 +491,7 @@ int main(int argc, char* argv[]) {
   std::shared_ptr<JSContext> ctx = std::make_shared<JSContext>();
   ctx->rt = rt;
 
-  JS_EvalInternal(ctx, nullptr, source_buf, source_str.size(), "", 0, -1);
+  JS_EvalInternal(ctx, nullptr, source_buf, source_str.size(), "", 0, {});
 
   return 0;
 }
