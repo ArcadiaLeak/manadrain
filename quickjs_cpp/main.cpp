@@ -93,8 +93,8 @@ struct JSTokRegexp {
   JSValue flags;
 };
 
-using JSTokenVal = std::variant<
-  JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp, uint32_t
+using JSTokenUnion = std::variant<
+  JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp
 >;
 using JSCFunction = std::function<JSValue(
   std::shared_ptr<struct JSContext> ctx,
@@ -104,8 +104,9 @@ using JSCFunction = std::function<JSValue(
 )>;
 
 struct JSToken {
+  int val;
   size_t offset;
-  JSTokenVal val;
+  JSTokenUnion u;
 };
 
 struct JSVarDef {
@@ -174,14 +175,26 @@ struct JSRuntime {
   }
 };
 
+auto inf_range_from(
+  std::shared_ptr<char[]> buffer,
+  size_t buffer_len,
+  char pad
+) {
+  return std::ranges::concat_view{
+    std::span<char>{buffer.get(), buffer_len},
+    std::ranges::repeat_view{pad}
+  };
+}
+
 struct JSParseState {
   std::shared_ptr<struct JSContext> ctx;
   std::string filename;
   JSToken token;
+  bool got_line_feed;
 
   std::shared_ptr<char[]> buf;
-  size_t buf_prev;
-  size_t buf_curr;
+  ptrdiff_t last_idx;
+  ptrdiff_t curr_idx;
   size_t buf_size;
 
   std::shared_ptr<JSFunctionDef> cur_func;
@@ -214,23 +227,98 @@ struct JSParseState {
   }
 
   void parse_program() {
-    JSFunctionDef& fd = *cur_func;
-
     next_token();
+  }
 
+  void parse_string(
+    int sep, bool do_throw, ptrdiff_t idx,
+    JSToken& token, ptrdiff_t& idxref
+  ) {
+    auto infbuf = inf_range_from(buf, buf_size, '\0');
+    auto ch = infbuf[idx];
+    auto strbuf = std::string{""};
+
+    while (true) {
+      if (idx >= buf_size)
+        goto invalid_char;
+
+      ch = infbuf[idx]; idx++;
+      if (ch == sep) break;
+
+      if (ch == '$' && infbuf[idx] == '{' && sep == '`')
+        { idx++; break; }
+      
+      if (ch == '\\') {
+        ptrdiff_t idx_escape = idx - 1;
+        ch = infbuf[idx];
+
+        switch (ch) {
+          case '\0': if (idx >= buf_size)
+            goto invalid_char;
+          idx++; break;
+
+          case '\'': case '\"': case '\\':
+          idx++; break;
+
+          case '\r':
+          if (infbuf[idx + 1] == '\n')
+            idx++;
+          [[fallthrough]];
+
+          case '\n': idx++;
+          continue;
+
+          default: break;
+        }
+      }
+
+      strbuf.push_back(ch);
+    }
+
+    invalid_char: if (do_throw)
+      throw std::runtime_error{"unexpected end of string"};
   }
 
   void next_token() {
-    std::ranges::concat_view con{
-      std::span<char>{buf.get(), buf_size},
-      std::ranges::repeat_view{'\0'}
-    };
+    auto infbuf = inf_range_from(buf, buf_size, '\0');
+    auto idx = curr_idx;
+    auto ch = infbuf[idx];
 
-    auto b = con.begin();
-    b++;
-    b--;
+    last_idx = curr_idx;
+    got_line_feed = false;
 
-    std::println("{}", *b);
+    redo: token.offset = curr_idx;
+    ch = infbuf[idx];
+
+    switch (ch) {
+      case 0:
+      if (idx >= buf_size)
+        token.val = JS_TOK_EOF;
+      else
+        goto def_token;
+      break;
+
+      case '\r':
+      if (infbuf[idx + 1] == '\n')
+        idx++;
+      [[fallthrough]];
+
+      case '\n': idx++;
+      line_feed: got_line_feed = true;
+      goto redo;
+
+      case '\f': case '\v': case ' ': case '\t': idx++;
+      goto redo;
+
+      case '\'': case '\"':
+      parse_string(ch, true, idx + 1, token, idx);
+      break;
+
+      default: def_token: token.val = ch;
+      idx++; break;
+    }
+
+    curr_idx = idx;
   }
 };
 

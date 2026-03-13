@@ -1,4 +1,4 @@
-enum JS_TOK {
+enum {
   JS_TOK_NUMBER = -128,
   JS_TOK_STRING,
   JS_TOK_TEMPLATE,
