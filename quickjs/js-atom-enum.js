@@ -1,4 +1,6 @@
-function DEF(name, str) { return { name, str }; }
+function DEF(name, str) {
+  return { name, str };
+}
 
 const JS_ATOM = [
   DEF("null", "null"),
@@ -240,23 +242,17 @@ const JS_ATOM = [
   DEF("Symbol_asyncIterator", "Symbol.asyncIterator")
 ];
 
-const header = "module quickjs.js_atom_enum;\n";
-
 let js_atom_enum = "enum {\n";
-js_atom_enum += "  JS_ATOM_NULL,\n";
 for (const { name } of JS_ATOM) {
   js_atom_enum += `  JS_ATOM_${name},\n`;
 }
 js_atom_enum += "  JS_ATOM_END,\n";
 js_atom_enum += "};\n";
 
-let js_atom_str = "enum string[] js_atom_init = [\n";
+let js_atom_str = "static const char* const js_atom_init[] = {\n";
 for (const { str } of JS_ATOM) {
   js_atom_str += `  "${str}",\n`;
 }
-js_atom_str += "];\n";
+js_atom_str += "};\n";
 
-Deno.writeTextFile(
-  "js_atom_enum.d",
-  [header, js_atom_enum, js_atom_str].join("\n")
-);
+Deno.writeTextFile("js_atom_enum.hpp", js_atom_enum + "\n" + js_atom_str);

@@ -19,11 +19,11 @@ let Makefile = "all: build/bison build/glslang build/qjs\n";
 }
 
 {
-  const qjsSrcEntries = await Array.fromAsync(walk("quickjs", { exts: ["d"] }));
+  const qjsSrcEntries = await Array.fromAsync(walk("quickjs", { exts: ["cpp"] }));
   const qjsSrcPaths = qjsSrcEntries.map(e => e.path).join(" ");
 
   Makefile += "\n" + `build/qjs: ${qjsSrcPaths}\n` +
-    "\t" + "dmd -debug -J=quickjs -of=$@ $^\n";
+    "\t" + "g++ -std=c++26 -Wconversion -Wimplicit-fallthrough -O0 -g -o $@ $^\n";
 }
 
 Deno.writeTextFile("Makefile", Makefile);

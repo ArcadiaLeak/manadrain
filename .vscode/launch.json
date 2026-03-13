@@ -8,7 +8,7 @@
             "name": "(gdb) Launch",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/quickjs_cpp",
+            "program": "${workspaceFolder}/build/qjs",
             "args": ["${workspaceFolder}/glslgram/additive_expression.json"],
             "stopAtEntry": true,
             "cwd": "${fileDirname}",
