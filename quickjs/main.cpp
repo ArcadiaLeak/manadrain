@@ -14,6 +14,7 @@
 #include <limits>
 #include <cassert>
 #include <optional>
+#include <cctype>
 
 #include "js_atom_enum.hpp"
 #include "js_class_enum.hpp"
@@ -64,25 +65,6 @@ constexpr uint8_t DECL_MASK_ALL = DECL_MASK_FUNC |
   DECL_MASK_FUNC_WITH_LABEL | DECL_MASK_OTHER;
 
 constexpr uint8_t UTF8_CHAR_LEN_MAX = 6;
-
-// int match_identifier(
-//   std::shared_ptr<char[]> buf,
-//   size_t idx, size_t len, std::string str
-// ) {
-//   using namespace std::ranges;
-//   auto infbuf = inf_range_from(buf, len, '\0');
-  
-//   auto ite = std::next(infbuf.begin(), idx);
-//   auto sen = std::next(infbuf.begin(), idx + str.size());
-//   if (to<std::string>(subrange(ite, sen)) != str)
-//     return 0;
-
-//   char ch = *sen;
-//   // if (ch >= 128)
-//   //   ch = unicode_from_utf8(p, UTF8_CHAR_LEN_MAX, &p);
-//   // return !lre_js_is_ident_next(ch);
-//   assert(0);
-// }
 
 struct JSHeapAny {
   virtual ~JSHeapAny() = default;
@@ -210,6 +192,162 @@ using JSSourceBuf = std::ranges::concat_view<
   std::ranges::repeat_view<char>
 >;
 
+bool lre_is_id_continue_byte(char c) {
+  return std::isalnum(c) || c == '$' || c == '_';
+}
+
+bool match_identifier(
+  JSSourceBuf& buf, size_t idx,
+  std::string rhs
+) {
+  std::string lhs = std::ranges::to<std::string>(
+    std::ranges::subrange(
+      std::next(buf.begin(), idx),
+      std::next(buf.begin(), idx + rhs.size())
+    )
+  );
+  
+  if (lhs == rhs) return !lre_is_id_continue_byte(
+    *std::next(buf.begin(), idx + rhs.size())
+  );
+
+  return false;
+}
+
+int from_hex(int c) {
+  if (c >= '0' && c <= '9')
+    return c - '0';
+  else if (c >= 'A' && c <= 'F')
+    return c - 'A' + 10;
+  else if (c >= 'a' && c <= 'f')
+    return c - 'a' + 10;
+  else
+    return -1;
+}
+
+bool is_hi_surrogate(uint32_t c) {
+  return (c >> 10) == (0xD800 >> 10); // 0xD800-0xDBFF
+}
+
+bool is_lo_surrogate(uint32_t c) {
+  return (c >> 10) == (0xDC00 >> 10); // 0xDC00-0xDFFF
+}
+
+uint32_t from_surrogate(uint32_t hi, uint32_t lo) {
+  return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
+}
+
+int lre_parse_escape(
+  JSSourceBuf& buf, size_t& begin_idx,
+  int allow_utf16
+) {
+  auto p = std::next(buf.begin(), begin_idx);
+  uint32_t c = *p++;
+
+  switch(c) {
+    case 'b': c = '\b';
+    break;
+
+    case 'f': c = '\f';
+    break;
+
+    case 'n': c = '\n';
+    break;
+
+    case 'r': c = '\r';
+    break;
+
+    case 't': c = '\t';
+    break;
+
+    case 'v': c = '\v';
+    break;
+
+    case 'x': {
+      int h0 = from_hex(*p++);
+      if (h0 < 0)
+        return -1;
+      int h1 = from_hex(*p++);
+      if (h1 < 0)
+        return -1;
+      c = (h0 << 4) | h1;
+    }
+    break;
+
+    case 'u': {
+      int h, i;
+
+      if (*p == '{' && allow_utf16) {
+        p++; c = 0;
+        while (true) {
+          h = from_hex(*p++);
+          if (h < 0)
+            return -1;
+          c = (c << 4) | h;
+          if (c > 0x10FFFF)
+            return -1;
+          if (*p == '}')
+            break;
+        }
+        p++;
+      } else {
+        c = 0;
+        for(i = 0; i < 4; i++) {
+          h = from_hex(*p++);
+          if (h < 0) {
+            return -1;
+          }
+          c = (c << 4) | h;
+        }
+        if (
+          is_hi_surrogate(c) && allow_utf16 == 2 &&
+          p[0] == '\\' && p[1] == 'u'
+        ) {
+          uint32_t c1 = 0;
+          for(i = 0; i < 4; i++) {
+            h = from_hex(p[2 + i]);
+            if (h < 0)
+              break;
+            c1 = (c1 << 4) | h;
+          }
+          if (i == 4 && is_lo_surrogate(c1)) {
+            p += 6;
+            c = from_surrogate(c, c1);
+          }
+        }
+      }
+    }
+    break;
+
+    case '0': case '1': case '2': case '3':
+    case '4': case '5': case '6': case '7':
+    c -= '0';
+    if (allow_utf16 == 2) {
+      if (c != 0 || std::isdigit(*p))
+        return -1;
+    } else {
+      uint32_t v = *p - '0';
+      if (v > 7)
+        break;
+      c = (c << 3) | v;
+      p++;
+      if (c >= 32)
+        break;
+      v = *p - '0';
+      if (v > 7)
+        break;
+      c = (c << 3) | v;
+      p++;
+    }
+    break;
+
+    default: return -2;
+  }
+
+  begin_idx = std::distance(buf.begin(), p);
+  return c;
+}
+
 int simple_next_token(
   JSSourceBuf& buf,
   size_t& begin_idx,
@@ -254,6 +392,25 @@ int simple_next_token(
         return JS_TOK_ARROW;
       break;
 
+      case 'i': if (match_identifier(buf, idx, "n"))
+        return JS_TOK_IN;
+      if (match_identifier(buf, idx, "mport")) {
+        begin_idx = idx + 5;
+        return JS_TOK_IMPORT;
+      }
+      return JS_TOK_IDENT;
+
+      case 'o': if (match_identifier(buf, idx, "f"))
+        return JS_TOK_OF;
+      return JS_TOK_IDENT;
+
+      case 'e': if (match_identifier(buf, idx, "xport"))
+        return JS_TOK_EXPORT;
+      return JS_TOK_IDENT;
+
+      case 'f': if (match_identifier(buf, idx, "unction"))
+        return JS_TOK_FUNCTION;
+      return JS_TOK_IDENT;
       
     }
   }
