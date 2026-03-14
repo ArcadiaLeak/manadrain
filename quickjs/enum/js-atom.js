@@ -242,12 +242,12 @@ const JS_ATOM = [
   DEF("Symbol_asyncIterator", "Symbol.asyncIterator")
 ];
 
-let js_atom_enum = "enum {\n";
+let js_atom = "enum {\n";
 for (const { name } of JS_ATOM) {
-  js_atom_enum += `  JS_ATOM_${name},\n`;
+  js_atom += `  JS_ATOM_${name},\n`;
 }
-js_atom_enum += "  JS_ATOM_END,\n";
-js_atom_enum += "};\n";
+js_atom += "  JS_ATOM_END,\n";
+js_atom += "};\n";
 
 let js_atom_str = "static const char* const js_atom_init[] = {\n";
 for (const { str } of JS_ATOM) {
@@ -255,4 +255,4 @@ for (const { str } of JS_ATOM) {
 }
 js_atom_str += "};\n";
 
-Deno.writeTextFile("js_atom_enum.hpp", js_atom_enum + "\n" + js_atom_str);
+Deno.writeTextFile("js_atom.hpp", js_atom + "\n" + js_atom_str);

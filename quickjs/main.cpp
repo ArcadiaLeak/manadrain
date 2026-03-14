@@ -5,20 +5,19 @@
 #include <ranges>
 #include <vector>
 #include <unordered_map>
-#include <unordered_set>
 #include <variant>
 #include <functional>
-#include <span>
 #include <stdexcept>
 #include <deque>
 #include <limits>
 #include <cassert>
 #include <optional>
 #include <cctype>
+#include <array>
 
-#include "js_atom_enum.hpp"
-#include "js_class_enum.hpp"
-#include "js_token_enum.hpp"
+#include "enum/js_atom.hpp"
+#include "enum/js_class.hpp"
+#include "enum/js_token.hpp"
 
 enum class JSAtomType {
   STRING = 1,
@@ -69,14 +68,14 @@ constexpr uint8_t UTF8_CHAR_LEN_MAX = 6;
 constexpr int CP_LS = 0x2028;
 constexpr int CP_PS = 0x2029;
 
-struct JSHeapAny {
-  virtual ~JSHeapAny() = default;
-  JSHeapAny(const JSHeapAny&) = default;
-  JSHeapAny& operator=(const JSHeapAny&) = default;
-  JSHeapAny(JSHeapAny&&) noexcept = default;
-  JSHeapAny& operator=(JSHeapAny&&) noexcept = default;
+struct JSHeapVal {
+  virtual ~JSHeapVal() = default;
+  JSHeapVal(const JSHeapVal&) = default;
+  JSHeapVal& operator=(const JSHeapVal&) = default;
+  JSHeapVal(JSHeapVal&&) noexcept = default;
+  JSHeapVal& operator=(JSHeapVal&&) noexcept = default;
 
-  JSHeapAny() = default;
+  JSHeapVal() = default;
 };
 
 struct JSAtom {
@@ -84,7 +83,9 @@ struct JSAtom {
   size_t len;
 };
 
-using JSValue = std::variant<int32_t, int64_t, double, std::shared_ptr<JSHeapAny>>;
+using JSValue = std::variant<
+  int32_t, int64_t, double, std::shared_ptr<JSHeapVal>
+>;
 
 struct JSTokStr {
   JSValue str;
@@ -109,12 +110,6 @@ struct JSTokRegexp {
 using JSTokenUnion = std::variant<
   JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp
 >;
-using JSCFunction = std::function<JSValue(
-  std::shared_ptr<struct JSContext> ctx,
-  JSValue this_val,
-  int argc,
-  std::shared_ptr<JSValue[]> argv
-)>;
 
 struct JSToken {
   int val;
@@ -132,7 +127,7 @@ struct JSVarScope {
 };
 
 struct JSFunctionDef {
-  std::shared_ptr<JSContext> ctx;
+  std::shared_ptr<struct JSContext> ctx;
   std::shared_ptr<JSFunctionDef> parent;
 
   bool is_eval;
@@ -165,30 +160,64 @@ struct JSFunctionDef {
 struct JSRuntime {
   std::unordered_map<std::string, size_t> atom_hash;
   std::vector<std::shared_ptr<JSAtom>> atom_vec;
+};
 
-  void insert_wellknown() {
-    for (int i = 0; i < JS_ATOM_END; i++) {
-      JSAtomType atom_type;
-      if (i == JS_ATOM_Private_brand)
-        atom_type = JSAtomType::PRIVATE;
-      else if (i >= JS_ATOM_Symbol_toPrimitive)
-        atom_type = JSAtomType::SYMBOL;
-      else
-        atom_type = JSAtomType::STRING;
-      
-      if (atom_type == JSAtomType::STRING) {
-        std::string str{js_atom_init[i]};
-        std::shared_ptr<JSAtom> js_str = std::make_shared<JSAtom>();
-        std::shared_ptr<char[]> shared_str = std::make_shared<char[]>(str.size());
-        std::copy(str.begin(), str.end(), shared_str.get());
-        js_str->str = shared_str;
-        js_str->len = str.size();
-        atom_vec.push_back(js_str);
-        atom_hash[str] = i;
-      }
+void JS_InitAtoms(JSRuntime& rt) {
+  for (int i = 0; i < JS_ATOM_END; i++) {
+    JSAtomType atom_type;
+    if (i == JS_ATOM_Private_brand)
+      atom_type = JSAtomType::PRIVATE;
+    else if (i >= JS_ATOM_Symbol_toPrimitive)
+      atom_type = JSAtomType::SYMBOL;
+    else
+      atom_type = JSAtomType::STRING;
+    
+    if (atom_type == JSAtomType::STRING) {
+      std::string str{js_atom_init[i]};
+      std::shared_ptr<JSAtom> js_str = std::make_shared<JSAtom>();
+      std::shared_ptr<char[]> shared_str = std::make_shared<char[]>(str.size());
+      std::copy(str.begin(), str.end(), shared_str.get());
+      js_str->str = shared_str;
+      js_str->len = str.size();
+      rt.atom_vec.push_back(js_str);
+      rt.atom_hash[str] = i;
     }
   }
+}
+
+JSRuntime JS_NewRuntime() {
+  JSRuntime rt{};
+  JS_InitAtoms(rt);
+  return rt;
+}
+
+using JSClassFinalizer = void(std::shared_ptr<JSRuntime> rt, JSValue val);
+using JS_MarkFunc = void(std::shared_ptr<JSRuntime> rt, JSHeapVal heap_val);
+using JSClassGCMark = void(
+  std::shared_ptr<JSRuntime> rt, JSValue val,
+  std::function<JS_MarkFunc> mark_func
+);
+
+struct JSClassShortDef {
+  int class_name;
+  std::function<JSClassFinalizer> finalizer;
+  std::function<JSClassGCMark> gc_mark;
 };
+
+auto js_std_class_def() {
+  return std::to_array<JSClassShortDef>({
+    { JS_ATOM_Object, nullptr, nullptr }
+  });
+}
+
+template<size_t N>
+void init_class_range(
+  std::shared_ptr<JSRuntime> rt,
+  std::array<JSClassShortDef, N> tab,
+  int start
+) {
+
+}
 
 using JSSourceBuf = std::ranges::concat_view<
   std::ranges::owning_view<std::string>,
@@ -502,7 +531,7 @@ int simple_next_token(
   }
 }
 
-std::shared_ptr<JSRuntime> getRT(struct JSContext& ctx);
+std::shared_ptr<JSRuntime> GetRT(struct JSContext& ctx);
 
 struct JSParseState {
   std::shared_ptr<struct JSContext> ctx;
@@ -544,26 +573,31 @@ struct JSParseState {
     cur_func->byte_code.push_back(val);
   }
 
-  void parse_program() {
-    next_token();
+  int parse_program() {
+    if (next_token())
+      return -1;
 
-    while (token.val != JS_TOK_EOF)
-      parse_source_element();
+    while (token.val != JS_TOK_EOF) {
+      if (parse_source_element())
+        return -1;
+    }
+
+    return 0;
   }
 
-  void parse_source_element() {
+  int parse_source_element() {
     if (token.val == JS_TOK_FUNCTION || token_is_async_func())
-      throw std::runtime_error("unimplemented!");
+      return -1;
     else if (cur_func->module_def && token.val == JS_TOK_EXPORT)
-      throw std::runtime_error("unimplemented!");
+      return -1;
     else if (cur_func->module_def && token_is_static_import())
-      throw std::runtime_error("unimplemented!");
+      return -1;
     else
-      parse_statement_or_decl(DECL_MASK_ALL);
+      return parse_statement_or_decl(DECL_MASK_ALL);
   }
 
-  void parse_statement_or_decl(int decl_mask) {
-
+  int parse_statement_or_decl(int decl_mask) {
+    return -1;
   }
 
   bool token_is_static_import() {
@@ -575,7 +609,7 @@ struct JSParseState {
 
   bool token_is_async_func() {
     return (
-      token_is_pseudo_keyword(getRT(*ctx)->atom_vec[JS_ATOM_async]) &&
+      token_is_pseudo_keyword(GetRT(*ctx)->atom_vec[JS_ATOM_async]) &&
       peek_token(true) == JS_TOK_FUNCTION
     );
   }
@@ -592,7 +626,7 @@ struct JSParseState {
     );
   }
 
-  void parse_string(
+  int parse_string(
     int sep, bool do_throw, size_t idx,
     JSToken& token, size_t& idxref
   ) {
@@ -636,11 +670,14 @@ struct JSParseState {
       strbuf.push_back(ch);
     }
 
-    invalid_char: if (do_throw)
-      throw std::runtime_error{"unexpected end of string"};
+    invalid_char: assert(0);
   }
 
-  void next_token() {
+  int parse_error(size_t offset, std::string message) {
+    assert(0);
+  }
+
+  int next_token() {
     auto idx = curr_idx;
     auto ch = buf[idx];
 
@@ -671,7 +708,8 @@ struct JSParseState {
       goto redo;
 
       case '\'': case '\"':
-      parse_string(ch, true, idx + 1, token, idx);
+      if (parse_string(ch, true, idx + 1, token, idx))
+        goto fail;
       break;
 
       default: def_token: token.val = ch;
@@ -679,6 +717,10 @@ struct JSParseState {
     }
 
     curr_idx = idx;
+    return 0;
+
+    fail: token.val = JS_TOK_ERROR;
+    return -1;
   }
 };
 
@@ -690,7 +732,12 @@ struct JSContext {
   std::shared_ptr<JSRuntime> rt;
 };
 
-std::shared_ptr<JSRuntime> getRT(JSContext& ctx) {
+JSContext JS_NewContextRaw(std::shared_ptr<JSRuntime> rt) {
+  JSContext ctx{ .rt = rt };
+  return ctx;
+}
+
+std::shared_ptr<JSRuntime> GetRT(JSContext& ctx) {
   return ctx.rt;
 }
 
@@ -751,7 +798,7 @@ JSValue JS_EvalInternal(
     func_def.arguments_allowed = true;
   }
   func_def.js_mode = js_mode;
-  func_def.func_name = getRT(*ctx)->atom_vec[JS_ATOM__eval_];
+  func_def.func_name = GetRT(*ctx)->atom_vec[JS_ATOM__eval_];
   state.is_module = false;
   state.push_scope();
   func_def.body_scope = func_def.scope_level;
@@ -787,11 +834,10 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::shared_ptr<JSRuntime> rt = std::make_shared<JSRuntime>();
-  rt->insert_wellknown();
+  auto rt = std::make_shared<JSRuntime>(JS_NewRuntime());
+  init_class_range(rt, js_std_class_def(), JS_CLASS_OBJECT);
 
-  std::shared_ptr<JSContext> ctx = std::make_shared<JSContext>();
-  ctx->rt = rt;
+  auto ctx = std::make_shared<JSContext>(JS_NewContextRaw(rt));
 
   JS_EvalInternal(ctx, nullptr, source_str(filepath), "", 0, {});
 
