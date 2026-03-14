@@ -57,6 +57,33 @@ constexpr uint8_t JS_EVAL_FLAG_STRICT = 1 << 3;
 constexpr uint8_t JS_MODE_STRICT = 1 << 0;
 constexpr uint8_t JS_MODE_ASYNC = 1 << 2;
 
+constexpr uint8_t DECL_MASK_FUNC = 1 << 0;
+constexpr uint8_t DECL_MASK_FUNC_WITH_LABEL = 1 << 1;
+constexpr uint8_t DECL_MASK_OTHER = 1 << 2;
+constexpr uint8_t DECL_MASK_ALL = DECL_MASK_FUNC |
+  DECL_MASK_FUNC_WITH_LABEL | DECL_MASK_OTHER;
+
+constexpr uint8_t UTF8_CHAR_LEN_MAX = 6;
+
+// int match_identifier(
+//   std::shared_ptr<char[]> buf,
+//   size_t idx, size_t len, std::string str
+// ) {
+//   using namespace std::ranges;
+//   auto infbuf = inf_range_from(buf, len, '\0');
+  
+//   auto ite = std::next(infbuf.begin(), idx);
+//   auto sen = std::next(infbuf.begin(), idx + str.size());
+//   if (to<std::string>(subrange(ite, sen)) != str)
+//     return 0;
+
+//   char ch = *sen;
+//   // if (ch >= 128)
+//   //   ch = unicode_from_utf8(p, UTF8_CHAR_LEN_MAX, &p);
+//   // return !lre_js_is_ident_next(ch);
+//   assert(0);
+// }
+
 struct JSHeapAny {
   virtual ~JSHeapAny() = default;
   JSHeapAny(const JSHeapAny&) = default;
@@ -84,7 +111,7 @@ struct JSTokNum {
 };
 
 struct JSTokIdent {
-  std::shared_ptr<char[]> str;
+  std::shared_ptr<JSAtom> atom;
   bool has_escape;
   bool is_reserved;
 };
@@ -146,6 +173,8 @@ struct JSFunctionDef {
 
   std::deque<uint64_t> byte_code;
   size_t last_opcode_pos;
+
+  std::shared_ptr<struct JSModuleDef> module_def;
 };
 
 struct JSRuntime {
@@ -176,29 +205,21 @@ struct JSRuntime {
   }
 };
 
-auto inf_range_from(
-  std::shared_ptr<char[]> buffer,
-  size_t buffer_len,
-  char pad
-) {
-  return std::ranges::concat_view{
-    std::span<char>{buffer.get(), buffer_len},
-    std::ranges::repeat_view{pad}
-  };
-}
+using JSSourceBuf = std::ranges::concat_view<
+  std::ranges::owning_view<std::string>,
+  std::ranges::repeat_view<char>
+>;
 
 int simple_next_token(
+  JSSourceBuf& buf,
   size_t& begin_idx,
-  std::shared_ptr<char[]> buf,
-  size_t buf_size,
   bool no_line_feed
 ) {
-  auto infbuf = inf_range_from(buf, buf_size, '\0');
   size_t idx = begin_idx;
-  uint32_t ch = infbuf[idx];
+  uint32_t ch = buf[idx];
 
   while (true) {
-    ch = infbuf[idx++];
+    ch = buf[idx++];
     switch (ch) {
       case '\r': case '\n':
       if (no_line_feed)
@@ -209,27 +230,27 @@ int simple_next_token(
       continue;
 
       case '/':
-      if (infbuf[idx] == '/') {
+      if (buf[idx] == '/') {
         if (no_line_feed)
           return '\n';
-        auto cch = infbuf[idx];
+        auto cch = buf[idx];
         while (cch && cch != '\r' && cch != '\n')
           idx++;
         continue;
       }
-      if (infbuf[idx] == '*') {
-        while (infbuf[++idx]) {
-          auto cch = infbuf[idx];
+      if (buf[idx] == '*') {
+        while (buf[++idx]) {
+          auto cch = buf[idx];
           if ((cch == '\r' || cch == '\n') && no_line_feed)
             return '\n';
-          if (cch == '*' && infbuf[idx + 1] == '/')
+          if (cch == '*' && buf[idx + 1] == '/')
             { idx += 2; break; }
         }
         continue;
       }
       break;
 
-      case '=': if (infbuf[idx] == '>')
+      case '=': if (buf[idx] == '>')
         return JS_TOK_ARROW;
       break;
 
@@ -238,13 +259,15 @@ int simple_next_token(
   }
 }
 
+std::shared_ptr<JSRuntime> getRT(struct JSContext& ctx);
+
 struct JSParseState {
   std::shared_ptr<struct JSContext> ctx;
   std::string filename;
   JSToken token;
   bool got_line_feed;
 
-  std::shared_ptr<char[]> buf;
+  JSSourceBuf buf;
   size_t last_idx;
   size_t curr_idx;
   size_t buf_size;
@@ -286,12 +309,43 @@ struct JSParseState {
   }
 
   void parse_source_element() {
+    if (token.val == JS_TOK_FUNCTION || token_is_async_func())
+      throw std::runtime_error("unimplemented!");
+    else if (cur_func->module_def && token.val == JS_TOK_EXPORT)
+      throw std::runtime_error("unimplemented!");
+    else if (cur_func->module_def && token_is_static_import())
+      throw std::runtime_error("unimplemented!");
+    else
+      parse_statement_or_decl(DECL_MASK_ALL);
+  }
 
+  void parse_statement_or_decl(int decl_mask) {
+
+  }
+
+  bool token_is_static_import() {
+    if (token.val != JS_TOK_IMPORT)
+      return false;
+    int tok = peek_token(false);
+    return tok != '(' && tok != '.';
+  }
+
+  bool token_is_async_func() {
+    return (
+      token_is_pseudo_keyword(getRT(*ctx)->atom_vec[JS_ATOM_async]) &&
+      peek_token(true) == JS_TOK_FUNCTION
+    );
+  }
+
+  bool token_is_pseudo_keyword(std::shared_ptr<JSAtom> atom) {
+    return token.val == JS_TOK_IDENT &&
+      std::get<JSTokIdent>(token.u).atom == atom &&
+      std::get<JSTokIdent>(token.u).has_escape;
   }
 
   int peek_token(bool no_line_feed) {
     return simple_next_token(
-      curr_idx, buf, buf_size, no_line_feed
+      buf, curr_idx, no_line_feed
     );
   }
 
@@ -299,23 +353,22 @@ struct JSParseState {
     int sep, bool do_throw, size_t idx,
     JSToken& token, size_t& idxref
   ) {
-    auto infbuf = inf_range_from(buf, buf_size, '\0');
-    auto ch = infbuf[idx];
+    auto ch = buf[idx];
     auto strbuf = std::string{""};
 
     while (true) {
       if (idx >= buf_size)
         goto invalid_char;
 
-      ch = infbuf[idx]; idx++;
+      ch = buf[idx]; idx++;
       if (ch == sep) break;
 
-      if (ch == '$' && infbuf[idx] == '{' && sep == '`')
+      if (ch == '$' && buf[idx] == '{' && sep == '`')
         { idx++; break; }
       
       if (ch == '\\') {
         size_t idx_escape = idx - 1;
-        ch = infbuf[idx];
+        ch = buf[idx];
 
         switch (ch) {
           case '\0': if (idx >= buf_size)
@@ -326,7 +379,7 @@ struct JSParseState {
           idx++; break;
 
           case '\r':
-          if (infbuf[idx + 1] == '\n')
+          if (buf[idx + 1] == '\n')
             idx++;
           [[fallthrough]];
 
@@ -345,15 +398,14 @@ struct JSParseState {
   }
 
   void next_token() {
-    auto infbuf = inf_range_from(buf, buf_size, '\0');
     auto idx = curr_idx;
-    auto ch = infbuf[idx];
+    auto ch = buf[idx];
 
     last_idx = curr_idx;
     got_line_feed = false;
 
     redo: token.offset = curr_idx;
-    ch = infbuf[idx];
+    ch = buf[idx];
 
     switch (ch) {
       case 0:
@@ -364,7 +416,7 @@ struct JSParseState {
       break;
 
       case '\r':
-      if (infbuf[idx + 1] == '\n')
+      if (buf[idx + 1] == '\n')
         idx++;
       [[fallthrough]];
 
@@ -395,6 +447,10 @@ struct JSContext {
   std::shared_ptr<JSRuntime> rt;
 };
 
+std::shared_ptr<JSRuntime> getRT(JSContext& ctx) {
+  return ctx.rt;
+}
+
 JSFunctionDef js_new_function_def(
   std::shared_ptr<JSContext> ctx,
   std::shared_ptr<JSFunctionDef> parent,
@@ -414,8 +470,7 @@ JSFunctionDef js_new_function_def(
 JSValue JS_EvalInternal(
   std::shared_ptr<JSContext> ctx,
   JSValue this_obj,
-  std::shared_ptr<char[]> input,
-  size_t input_len,
+  std::string input,
   std::string filename,
   int flags,
   std::optional<size_t> scope_idx
@@ -425,8 +480,11 @@ JSValue JS_EvalInternal(
   JSParseState state{
     .ctx = ctx,
     .filename = filename,
-    .buf = input,
-    .buf_size = input_len
+    .buf = std::ranges::concat_view{
+      std::ranges::owning_view{std::string{input}},
+      std::ranges::repeat_view{'\0'}
+    },
+    .buf_size = input.size()
   };
 
   int eval_type = flags & JS_EVAL_TYPE_MASK;
@@ -450,7 +508,7 @@ JSValue JS_EvalInternal(
     func_def.arguments_allowed = true;
   }
   func_def.js_mode = js_mode;
-  func_def.func_name = ctx->rt->atom_vec[JS_ATOM__eval_];
+  func_def.func_name = getRT(*ctx)->atom_vec[JS_ATOM__eval_];
   state.is_module = false;
   state.push_scope();
   func_def.body_scope = func_def.scope_level;
@@ -460,30 +518,31 @@ JSValue JS_EvalInternal(
   assert(0);
 }
 
+std::string source_str(std::string filepath) {
+  std::ifstream file{filepath};
+  if (!file.is_open()) throw std::runtime_error{
+    std::format("could not open file: {}", filepath)
+  };
+
+  return std::ranges::to<std::string>(
+    std::ranges::subrange(
+      std::istreambuf_iterator<char>{file},
+      std::istreambuf_iterator<char>{}
+    )
+  );
+}
+
 int main(int argc, char* argv[]) {
   if (argc != 2) {
     std::println(stderr, "Usage: {} <filepath>", argv[0]);
     return 1;
   }
 
-  std::string filePath = argv[1];
-
-  if (!std::filesystem::exists(filePath)) {
-    std::println(stderr, "Error: file does not exist: {}", filePath);
+  std::string filepath = argv[1];
+  if (!std::filesystem::exists(filepath)) {
+    std::println(stderr, "Error: file does not exist: {}", filepath);
     return 1;
   }
-
-  std::ifstream file(filePath);
-  if (!file.is_open()) {
-    std::println(stderr, "Error: could not open file: {}", filePath);
-    return 1;
-  }
-
-  std::string source_str = std::ranges::to<std::string>(
-    std::views::istream<char>(file >> std::noskipws)
-  );
-  std::shared_ptr<char[]> source_buf = std::make_shared<char[]>(source_str.size());
-  std::copy(source_str.begin(), source_str.end(), source_buf.get());
 
   std::shared_ptr<JSRuntime> rt = std::make_shared<JSRuntime>();
   rt->insert_wellknown();
@@ -491,7 +550,7 @@ int main(int argc, char* argv[]) {
   std::shared_ptr<JSContext> ctx = std::make_shared<JSContext>();
   ctx->rt = rt;
 
-  JS_EvalInternal(ctx, nullptr, source_buf, source_str.size(), "", 0, {});
+  JS_EvalInternal(ctx, nullptr, source_str(filepath), "", 0, {});
 
   return 0;
 }
