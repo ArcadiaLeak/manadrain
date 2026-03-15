@@ -69,6 +69,8 @@ constexpr int CP_LS = 0x2028;
 constexpr int CP_PS = 0x2029;
 
 struct JSHeapVal {
+  int ref_count = 1;
+
   virtual ~JSHeapVal() = default;
   JSHeapVal(const JSHeapVal&) = default;
   JSHeapVal& operator=(const JSHeapVal&) = default;
@@ -78,12 +80,19 @@ struct JSHeapVal {
   JSHeapVal() = default;
 };
 
-struct JSAtom {
+struct JSAtom : JSHeapVal {
   std::string str;
+  JSAtom(std::string str): str{str} {}
+};
+
+struct JSContext : JSHeapVal {};
+
+struct JSHeapHandle {
+  size_t offset;
 };
 
 using JSValue = std::variant<
-  int32_t, int64_t, double, std::shared_ptr<JSHeapVal>
+  int32_t, int64_t, double, JSHeapHandle
 >;
 
 struct JSTokStr {
@@ -125,8 +134,10 @@ struct JSVarScope {
   size_t first;
 };
 
+struct JSModuleDef;
+
 struct JSFunctionDef {
-  std::shared_ptr<struct JSContext> ctx;
+  size_t ctx_handle;
   std::shared_ptr<JSFunctionDef> parent;
 
   bool is_eval;
@@ -140,7 +151,7 @@ struct JSFunctionDef {
   bool arguments_allowed;
   uint8_t js_mode;
 
-  std::shared_ptr<JSAtom> func_name;
+  size_t func_name;
 
   std::vector<JSVarDef> vars;
   size_t eval_ret_idx;
@@ -153,46 +164,46 @@ struct JSFunctionDef {
   std::deque<uint64_t> byte_code;
   size_t last_opcode_pos;
 
-  std::shared_ptr<struct JSModuleDef> module_def;
+  std::shared_ptr<JSModuleDef> module_def;
+};
+
+struct JSClass {
+  size_t class_id;
+  size_t class_name;
 };
 
 struct JSRuntime {
   std::unordered_map<std::string, size_t> atom_hash;
-  std::vector<std::shared_ptr<JSAtom>> atom_vec;
-};
+  std::vector<std::shared_ptr<JSAtom>> atom_array;
+  std::vector<JSClass> class_array;
+  std::deque<std::unique_ptr<JSHeapVal>> gc_obj_list;
 
-void JS_InitAtoms(JSRuntime& rt) {
-  for (auto [i, str_view] : std::views::enumerate(js_atom_init)) {
-    JSAtomType atom_type;
-    if (i == JS_ATOM_Private_brand)
-      atom_type = JSAtomType::PRIVATE;
-    else if (i >= JS_ATOM_Symbol_toPrimitive)
-      atom_type = JSAtomType::SYMBOL;
-    else
-      atom_type = JSAtomType::STRING;
-    
-    if (atom_type == JSAtomType::STRING) {
-      std::string str{str_view};
-      rt.atom_vec.emplace_back(std::make_shared<JSAtom>(str));
-      rt.atom_hash[str] = i;
+  template<size_t N>
+  void init_class_range(
+    std::array<int, N> tab, int start
+  ) {
+    for (size_t i = 0; i < N; i++) {
+      class_array.emplace_back(
+        JSClass{
+          .class_id = i + start,
+          .class_name = JS_DupAtom(*this, tab[i])
+        }
+      );
     }
   }
-}
 
-JSRuntime JS_NewRuntime() {
-  JSRuntime rt{};
-  JS_InitAtoms(rt);
-  return rt;
-}
+  size_t new_context();
+  void init_atom_range();
 
-template<size_t N>
-void init_class_range(
-  std::shared_ptr<JSRuntime> rt,
-  std::array<int, N> tab,
-  int start
-) {
-
-}
+  JSValue eval_internal(
+    size_t ctx_handle,
+    std::optional<JSValue> this_obj,
+    std::string input,
+    std::string filename,
+    int flags,
+    std::optional<size_t> scope_idx
+  );
+};
 
 using JSSourceBuf = std::ranges::concat_view<
   std::ranges::owning_view<std::string>,
@@ -506,10 +517,8 @@ int simple_next_token(
   }
 }
 
-std::shared_ptr<JSRuntime> GetRT(struct JSContext& ctx);
-
 struct JSParseState {
-  std::shared_ptr<struct JSContext> ctx;
+  size_t ctx_handle;
   std::string filename;
   JSToken token;
   bool got_line_feed;
@@ -519,7 +528,7 @@ struct JSParseState {
   size_t curr_idx;
   size_t buf_size;
 
-  std::shared_ptr<JSFunctionDef> cur_func;
+  std::unique_ptr<JSFunctionDef> cur_func;
   bool is_module;
 
   size_t push_scope() {
@@ -548,20 +557,20 @@ struct JSParseState {
     cur_func->byte_code.push_back(val);
   }
 
-  int parse_program() {
+  int parse_program(JSRuntime& rt) {
     if (next_token())
       return -1;
 
     while (token.val != JS_TOK_EOF) {
-      if (parse_source_element())
+      if (parse_source_element(rt))
         return -1;
     }
 
     return 0;
   }
 
-  int parse_source_element() {
-    if (token.val == JS_TOK_FUNCTION || token_is_async_func())
+  int parse_source_element(JSRuntime& rt) {
+    if (token.val == JS_TOK_FUNCTION || token_is_async_func(rt))
       return -1;
     else if (cur_func->module_def && token.val == JS_TOK_EXPORT)
       return -1;
@@ -582,9 +591,9 @@ struct JSParseState {
     return tok != '(' && tok != '.';
   }
 
-  bool token_is_async_func() {
+  bool token_is_async_func(JSRuntime& rt) {
     return (
-      token_is_pseudo_keyword(GetRT(*ctx)->atom_vec[JS_ATOM_async]) &&
+      token_is_pseudo_keyword(rt.atom_array[JS_ATOM_async]) &&
       peek_token(true) == JS_TOK_FUNCTION
     );
   }
@@ -699,42 +708,45 @@ struct JSParseState {
   }
 };
 
-struct JSStackFrame {};
-struct JSFunctionBytecode {};
-struct JSVarRef {};
-
-struct JSContext {
-  std::shared_ptr<JSRuntime> rt;
-};
-
-JSContext JS_NewContextRaw(std::shared_ptr<JSRuntime> rt) {
-  JSContext ctx{ .rt = rt };
-  return ctx;
+void JSRuntime::init_atom_range() {
+  using namespace std::views;
+  for (auto [i, str_view] : enumerate(js_atom_init)) {
+    JSAtomType atom_type;
+    if (i == JS_ATOM_Private_brand)
+      atom_type = JSAtomType::PRIVATE;
+    else if (i >= JS_ATOM_Symbol_toPrimitive)
+      atom_type = JSAtomType::SYMBOL;
+    else
+      atom_type = JSAtomType::STRING;
+    
+    if (atom_type == JSAtomType::STRING) {
+      std::string str{str_view};
+      atom_array.emplace_back(std::make_shared<JSAtom>(str));
+      atom_hash[str] = i;
+    }
+  }
 }
 
-std::shared_ptr<JSRuntime> GetRT(JSContext& ctx) {
-  return ctx.rt;
+size_t JSRuntime::new_context() {
+  gc_obj_list.emplace_back(
+    std::make_unique<JSContext>()
+  );
+  return gc_obj_list.size() - 1;
 }
 
-JSFunctionDef js_new_function_def(
-  std::shared_ptr<JSContext> ctx,
-  std::shared_ptr<JSFunctionDef> parent,
-  bool is_eval,
-  bool is_func_expr,
-  std::string filename,
-  size_t source_pos
-) {
-  return JSFunctionDef{
-    .ctx = ctx,
-    .parent = parent,
-    .is_eval = is_eval,
-    .is_func_expr = is_func_expr
-  };
+constexpr bool JS_AtomIsConst(size_t idx) {
+  return idx > JS_ATOM_END;
 }
 
-JSValue JS_EvalInternal(
-  std::shared_ptr<JSContext> ctx,
-  JSValue this_obj,
+size_t JS_DupAtom(JSRuntime& rt, size_t idx) {
+  if (!JS_AtomIsConst(idx))
+    rt.atom_array[idx]->ref_count++;
+  return idx;
+}
+
+JSValue JSRuntime::eval_internal(
+  size_t ctx_handle,
+  std::optional<JSValue> this_obj,
   std::string input,
   std::string filename,
   int flags,
@@ -743,7 +755,7 @@ JSValue JS_EvalInternal(
   uint8_t js_mode = 0;
 
   JSParseState state{
-    .ctx = ctx,
+    .ctx_handle = ctx_handle,
     .filename = filename,
     .buf = std::ranges::concat_view{
       std::ranges::owning_view{std::string{input}},
@@ -759,8 +771,13 @@ JSValue JS_EvalInternal(
     if (flags & JS_EVAL_FLAG_STRICT)
       js_mode |= JS_MODE_STRICT;
   }
-  state.cur_func = std::make_shared<JSFunctionDef>(
-    js_new_function_def(ctx, nullptr, true, false, filename, 0)
+  state.cur_func = std::make_unique<JSFunctionDef>(
+    JSFunctionDef{
+      .ctx_handle = ctx_handle,
+      .parent = nullptr,
+      .is_eval = true,
+      .is_func_expr = false
+    }
   );
   JSFunctionDef& func_def = *state.cur_func;
   func_def.eval_type = eval_type;
@@ -773,13 +790,12 @@ JSValue JS_EvalInternal(
     func_def.arguments_allowed = true;
   }
   func_def.js_mode = js_mode;
-  func_def.func_name = GetRT(*ctx)->atom_vec[JS_ATOM__eval_];
+  func_def.func_name = JS_DupAtom(*this, JS_ATOM__eval_);
   state.is_module = false;
   state.push_scope();
   func_def.body_scope = func_def.scope_level;
 
-  state.parse_program();
-
+  state.parse_program(*this);
   assert(0);
 }
 
@@ -809,12 +825,14 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  auto rt = std::make_shared<JSRuntime>(JS_NewRuntime());
-  init_class_range(rt, js_std_class_def, JS_CLASS_OBJECT);
+  std::shared_ptr<JSRuntime> rt = std::make_shared<JSRuntime>();
+  rt->init_atom_range();
+  rt->init_class_range(js_std_class_def, JS_CLASS_OBJECT);
 
-  auto ctx = std::make_shared<JSContext>(JS_NewContextRaw(rt));
-
-  JS_EvalInternal(ctx, nullptr, source_str(filepath), "", 0, {});
+  size_t ctx_handle = rt->new_context();
+  rt->eval_internal(
+    ctx_handle, {}, source_str(filepath), "", 0, {}
+  );
 
   return 0;
 }
