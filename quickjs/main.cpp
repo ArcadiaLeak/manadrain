@@ -14,6 +14,7 @@
 #include <cctype>
 #include <array>
 #include <stack>
+#include <span>
 
 #include "enum/js_atom.hpp"
 #include "enum/js_class.hpp"
@@ -65,11 +66,11 @@ constexpr uint8_t DECL_MASK_ALL = DECL_MASK_FUNC |
 
 constexpr uint8_t UTF8_CHAR_LEN_MAX = 6;
 
-constexpr int CP_LS = 0x2028;
-constexpr int CP_PS = 0x2029;
+constexpr int32_t CP_LS = 0x2028;
+constexpr int32_t CP_PS = 0x2029;
 
 struct JSHeapVal {
-  int ref_count = 1;
+  int32_t ref_count = 1;
 
   virtual ~JSHeapVal() = default;
   JSHeapVal(const JSHeapVal&) = default;
@@ -101,7 +102,7 @@ using JSValue = std::variant<
 
 struct JSTokStr {
   JSValue str;
-  int sep;
+  int32_t sep;
 };
 
 struct JSTokNum {
@@ -119,15 +120,9 @@ struct JSTokRegexp {
   JSValue flags;
 };
 
-using JSTokenUnion = std::variant<
+using JSToken = std::variant<
   JSTokStr, JSTokNum, JSTokIdent, JSTokRegexp
 >;
-
-struct JSToken {
-  int val;
-  size_t offset;
-  JSTokenUnion u;
-};
 
 struct JSVarDef {
   size_t var_name;
@@ -184,31 +179,18 @@ struct JSRuntime {
   std::vector<JSClass> class_array;
   std::deque<std::unique_ptr<JSHeapVal>> gc_obj_list;
 
-  template<size_t N>
-  void init_class_range(
-    std::array<int, N> tab, int start
-  ) {
-    for (size_t i = 0; i < N; i++) {
-      class_array.emplace_back(
-        JSClass{
-          .class_id = i + start,
-          .class_name = JS_DupAtom(*this, tab[i])
-        }
-      );
-    }
-  }
-
   size_t new_atom(std::string str, JSAtomType atom_type);
   size_t new_context();
-
+  
   void init_atom_range();
+  void init_class_range(std::span<const int32_t> tab, int32_t start);
 
   JSValue eval_internal(
     size_t ctx_handle,
     std::optional<JSValue> this_obj,
     std::string input,
     std::string filename,
-    int flags,
+    int32_t flags,
     std::optional<size_t> scope_idx
   );
 };
@@ -218,11 +200,11 @@ using JSSourceBuf = std::ranges::concat_view<
   std::ranges::repeat_view<char>
 >;
 
-bool lre_is_id_start_byte(int c) {
+bool lre_is_id_start_byte(int32_t c) {
   return std::isalpha(c) || c == '$' || c == '_';
 }
 
-bool lre_is_id_continue_byte(int c) {
+bool lre_is_id_continue_byte(int32_t c) {
   return std::isalnum(c) || c == '$' || c == '_';
 }
 
@@ -244,7 +226,7 @@ bool match_identifier(
   return false;
 }
 
-int from_hex(int c) {
+int32_t from_hex(int32_t c) {
   if (c >= '0' && c <= '9')
     return c - '0';
   else if (c >= 'A' && c <= 'F')
@@ -267,7 +249,7 @@ uint32_t from_surrogate(uint32_t hi, uint32_t lo) {
   return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
 }
 
-int lre_parse_escape(
+int32_t lre_parse_escape(
   JSSourceBuf& buf, size_t& begin_idx,
   int allow_utf16
 ) {
@@ -294,10 +276,10 @@ int lre_parse_escape(
     break;
 
     case 'x': {
-      int h0 = from_hex(*p++);
+      int32_t h0 = from_hex(*p++);
       if (h0 < 0)
         return -1;
-      int h1 = from_hex(*p++);
+      int32_t h1 = from_hex(*p++);
       if (h1 < 0)
         return -1;
       c = (h0 << 4) | h1;
@@ -305,7 +287,7 @@ int lre_parse_escape(
     break;
 
     case 'u': {
-      int h, i;
+      int32_t h, i;
 
       if (*p == '{' && allow_utf16) {
         p++; c = 0;
@@ -378,20 +360,20 @@ int lre_parse_escape(
   return c;
 }
 
-constexpr unsigned int utf8_min_code[5] = {
+constexpr uint32_t utf8_min_code[5] = {
   0x80, 0x800, 0x10000, 0x00200000, 0x04000000,
 };
 
-constexpr unsigned char utf8_first_code_mask[5] = {
+constexpr uint8_t utf8_first_code_mask[5] = {
   0x1f, 0xf, 0x7, 0x3, 0x1,
 };
 
-int unicode_from_utf8(
+int32_t unicode_from_utf8(
   JSSourceBuf& buf, size_t begin_idx,
-  int max_len, size_t& end_idx
+  int32_t max_len, size_t& end_idx
 ) {
   auto p = std::next(buf.begin(), begin_idx);
-  int l, c = *p++;
+  int32_t l, c = *p++;
   if (c < 0x80) {
     end_idx = std::distance(buf.begin(), p);
     return c;
@@ -428,8 +410,8 @@ int unicode_from_utf8(
   if (l > (max_len - 1))
     return -1;
   c &= utf8_first_code_mask[l - 1];
-  for (int i = 0; i < l; i++) {
-    int b = *p++;
+  for (int32_t i = 0; i < l; i++) {
+    int32_t b = *p++;
     if (b < 0x80 || b >= 0xc0)
       return -1;
     c = (c << 6) | (b & 0x3f);
@@ -440,7 +422,7 @@ int unicode_from_utf8(
   return c;
 }
 
-int simple_next_token(
+int32_t simple_next_token(
   JSSourceBuf& buf,
   size_t& begin_idx,
   bool no_line_feed
@@ -528,9 +510,12 @@ int simple_next_token(
 struct JSParseState {
   size_t ctx_handle;
   std::string filename;
-  JSToken token;
   bool got_line_feed;
 
+  int32_t token_char;
+  size_t token_idx;
+  JSToken token;
+  
   JSSourceBuf buf;
   size_t last_idx;
   size_t curr_idx;
@@ -569,7 +554,7 @@ struct JSParseState {
     if (next_token())
       return -1;
 
-    while (token.val != JS_TOK_EOF) {
+    while (token_char != JS_TOK_EOF) {
       if (parse_source_element(rt))
         return -1;
     }
@@ -578,9 +563,9 @@ struct JSParseState {
   }
 
   int parse_source_element(JSRuntime& rt) {
-    if (token.val == JS_TOK_FUNCTION || token_is_async_func(rt))
+    if (token_char == JS_TOK_FUNCTION || token_is_async_func(rt))
       return -1;
-    else if (cur_func->module_def && token.val == JS_TOK_EXPORT)
+    else if (cur_func->module_def && token_char == JS_TOK_EXPORT)
       return -1;
     else if (cur_func->module_def && token_is_static_import())
       return -1;
@@ -593,9 +578,9 @@ struct JSParseState {
   }
 
   bool token_is_static_import() {
-    if (token.val != JS_TOK_IMPORT)
+    if (token_char != JS_TOK_IMPORT)
       return false;
-    int tok = peek_token(false);
+    int32_t tok = peek_token(false);
     return tok != '(' && tok != '.';
   }
 
@@ -607,19 +592,19 @@ struct JSParseState {
   }
 
   bool token_is_pseudo_keyword(size_t atom) {
-    return token.val == JS_TOK_IDENT &&
-      std::get<JSTokIdent>(token.u).atom == atom &&
-      std::get<JSTokIdent>(token.u).has_escape;
+    return token_char == JS_TOK_IDENT &&
+      std::get<JSTokIdent>(token).atom == atom &&
+      std::get<JSTokIdent>(token).has_escape;
   }
 
-  int peek_token(bool no_line_feed) {
+  int32_t peek_token(bool no_line_feed) {
     return simple_next_token(
       buf, curr_idx, no_line_feed
     );
   }
 
   int parse_string(
-    int sep, bool do_throw, size_t idx,
+    int32_t sep, bool do_throw, size_t idx,
     JSToken& token, size_t& idxref
   ) {
     auto ch = buf[idx];
@@ -676,13 +661,13 @@ struct JSParseState {
     last_idx = curr_idx;
     got_line_feed = false;
 
-    redo: token.offset = curr_idx;
+    redo: token_idx = curr_idx;
     ch = buf[idx];
 
     switch (ch) {
       case 0:
       if (idx >= buf_size)
-        token.val = JS_TOK_EOF;
+        token_char = JS_TOK_EOF;
       else
         goto def_token;
       break;
@@ -704,21 +689,20 @@ struct JSParseState {
         goto fail;
       break;
 
-      default: def_token: token.val = ch;
+      default: def_token: token_char = ch;
       idx++; break;
     }
 
     curr_idx = idx;
     return 0;
 
-    fail: token.val = JS_TOK_ERROR;
+    fail: token_char = JS_TOK_ERROR;
     return -1;
   }
 };
 
 void JSRuntime::init_atom_range() {
-  using namespace std::views;
-  for (auto [i, str_view] : enumerate(js_atom_init)) {
+  for (size_t i = 0; i < js_atom_init.size(); i++) {
     JSAtomType atom_type;
     if (i == JS_ATOM_Private_brand)
       atom_type = JSAtomType::PRIVATE;
@@ -726,7 +710,7 @@ void JSRuntime::init_atom_range() {
       atom_type = JSAtomType::SYMBOL;
     else
       atom_type = JSAtomType::STRING;
-    new_atom(std::string{str_view}, atom_type);
+    new_atom(std::string{js_atom_init[i]}, atom_type);
   }
 }
 
@@ -761,13 +745,6 @@ size_t JSRuntime::new_atom(std::string str, JSAtomType atom_type) {
   return idx;
 }
 
-size_t JSRuntime::new_context() {
-  gc_obj_list.emplace_back(
-    std::make_unique<JSContext>()
-  );
-  return gc_obj_list.size() - 1;
-}
-
 constexpr bool JS_AtomIsConst(size_t idx) {
   return idx > JS_ATOM_END;
 }
@@ -776,6 +753,18 @@ size_t JS_DupAtom(JSRuntime& rt, size_t idx) {
   if (!JS_AtomIsConst(idx))
     rt.atom_array[idx]->ref_count++;
   return idx;
+}
+
+void JSRuntime::init_class_range(std::span<const int32_t> tab, int32_t start) {
+  for (size_t i = 0; i < tab.size(); i++)
+    class_array.emplace_back(i + start, JS_DupAtom(*this, tab[i]));
+}
+
+size_t JSRuntime::new_context() {
+  gc_obj_list.emplace_back(
+    std::make_unique<JSContext>()
+  );
+  return gc_obj_list.size() - 1;
 }
 
 JSValue JSRuntime::eval_internal(
