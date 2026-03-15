@@ -79,8 +79,7 @@ struct JSHeapVal {
 };
 
 struct JSAtom {
-  std::shared_ptr<char[]> str;
-  size_t len;
+  std::string str;
 };
 
 using JSValue = std::variant<
@@ -163,7 +162,7 @@ struct JSRuntime {
 };
 
 void JS_InitAtoms(JSRuntime& rt) {
-  for (int i = 0; i < JS_ATOM_END; i++) {
+  for (auto [i, str_view] : std::views::enumerate(js_atom_init)) {
     JSAtomType atom_type;
     if (i == JS_ATOM_Private_brand)
       atom_type = JSAtomType::PRIVATE;
@@ -173,13 +172,8 @@ void JS_InitAtoms(JSRuntime& rt) {
       atom_type = JSAtomType::STRING;
     
     if (atom_type == JSAtomType::STRING) {
-      std::string str{js_atom_init[i]};
-      std::shared_ptr<JSAtom> js_str = std::make_shared<JSAtom>();
-      std::shared_ptr<char[]> shared_str = std::make_shared<char[]>(str.size());
-      std::copy(str.begin(), str.end(), shared_str.get());
-      js_str->str = shared_str;
-      js_str->len = str.size();
-      rt.atom_vec.push_back(js_str);
+      std::string str{str_view};
+      rt.atom_vec.emplace_back(std::make_shared<JSAtom>(str));
       rt.atom_hash[str] = i;
     }
   }
@@ -191,29 +185,10 @@ JSRuntime JS_NewRuntime() {
   return rt;
 }
 
-using JSClassFinalizer = void(std::shared_ptr<JSRuntime> rt, JSValue val);
-using JS_MarkFunc = void(std::shared_ptr<JSRuntime> rt, JSHeapVal heap_val);
-using JSClassGCMark = void(
-  std::shared_ptr<JSRuntime> rt, JSValue val,
-  std::function<JS_MarkFunc> mark_func
-);
-
-struct JSClassShortDef {
-  int class_name;
-  std::function<JSClassFinalizer> finalizer;
-  std::function<JSClassGCMark> gc_mark;
-};
-
-auto js_std_class_def() {
-  return std::to_array<JSClassShortDef>({
-    { JS_ATOM_Object, nullptr, nullptr }
-  });
-}
-
 template<size_t N>
 void init_class_range(
   std::shared_ptr<JSRuntime> rt,
-  std::array<JSClassShortDef, N> tab,
+  std::array<int, N> tab,
   int start
 ) {
 
@@ -835,7 +810,7 @@ int main(int argc, char* argv[]) {
   }
 
   auto rt = std::make_shared<JSRuntime>(JS_NewRuntime());
-  init_class_range(rt, js_std_class_def(), JS_CLASS_OBJECT);
+  init_class_range(rt, js_std_class_def, JS_CLASS_OBJECT);
 
   auto ctx = std::make_shared<JSContext>(JS_NewContextRaw(rt));
 
