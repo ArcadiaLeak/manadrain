@@ -6,7 +6,6 @@
 #include <vector>
 #include <unordered_map>
 #include <variant>
-#include <functional>
 #include <stdexcept>
 #include <deque>
 #include <limits>
@@ -14,13 +13,14 @@
 #include <optional>
 #include <cctype>
 #include <array>
+#include <stack>
 
 #include "enum/js_atom.hpp"
 #include "enum/js_class.hpp"
 #include "enum/js_token.hpp"
 
 enum class JSAtomType {
-  STRING = 1,
+  STRING,
   GLOBAL_SYMBOL,
   SYMBOL,
   PRIVATE,
@@ -80,9 +80,13 @@ struct JSHeapVal {
   JSHeapVal() = default;
 };
 
-struct JSAtom : JSHeapVal {
+struct JSAtomStruct : JSHeapVal {
   std::string str;
-  JSAtom(std::string str): str{str} {}
+  JSAtomType atom_type;
+
+  JSAtomStruct(
+    std::string str, JSAtomType atom_type
+  ): str{str}, atom_type{atom_type} {}
 };
 
 struct JSContext : JSHeapVal {};
@@ -105,7 +109,7 @@ struct JSTokNum {
 };
 
 struct JSTokIdent {
-  std::shared_ptr<JSAtom> atom;
+  size_t atom;
   bool has_escape;
   bool is_reserved;
 };
@@ -126,7 +130,7 @@ struct JSToken {
 };
 
 struct JSVarDef {
-  std::shared_ptr<JSAtom> var_name;
+  size_t var_name;
 };
 
 struct JSVarScope {
@@ -138,7 +142,7 @@ struct JSModuleDef;
 
 struct JSFunctionDef {
   size_t ctx_handle;
-  std::shared_ptr<JSFunctionDef> parent;
+  std::optional<size_t> parent;
 
   bool is_eval;
   bool is_global_var;
@@ -174,7 +178,9 @@ struct JSClass {
 
 struct JSRuntime {
   std::unordered_map<std::string, size_t> atom_hash;
-  std::vector<std::shared_ptr<JSAtom>> atom_array;
+  std::vector<std::unique_ptr<JSAtomStruct>> atom_array;
+  std::stack<size_t> atom_free_idx;
+
   std::vector<JSClass> class_array;
   std::deque<std::unique_ptr<JSHeapVal>> gc_obj_list;
 
@@ -192,7 +198,9 @@ struct JSRuntime {
     }
   }
 
+  size_t new_atom(std::string str, JSAtomType atom_type);
   size_t new_context();
+
   void init_atom_range();
 
   JSValue eval_internal(
@@ -593,12 +601,12 @@ struct JSParseState {
 
   bool token_is_async_func(JSRuntime& rt) {
     return (
-      token_is_pseudo_keyword(rt.atom_array[JS_ATOM_async]) &&
+      token_is_pseudo_keyword(JS_ATOM_async) &&
       peek_token(true) == JS_TOK_FUNCTION
     );
   }
 
-  bool token_is_pseudo_keyword(std::shared_ptr<JSAtom> atom) {
+  bool token_is_pseudo_keyword(size_t atom) {
     return token.val == JS_TOK_IDENT &&
       std::get<JSTokIdent>(token.u).atom == atom &&
       std::get<JSTokIdent>(token.u).has_escape;
@@ -718,13 +726,39 @@ void JSRuntime::init_atom_range() {
       atom_type = JSAtomType::SYMBOL;
     else
       atom_type = JSAtomType::STRING;
-    
-    if (atom_type == JSAtomType::STRING) {
-      std::string str{str_view};
-      atom_array.emplace_back(std::make_shared<JSAtom>(str));
-      atom_hash[str] = i;
+    new_atom(std::string{str_view}, atom_type);
+  }
+}
+
+size_t JSRuntime::new_atom(std::string str, JSAtomType atom_type) {
+  size_t idx{};
+
+  if (atom_type == JSAtomType::STRING) {
+    auto idx_iter = atom_hash.find(str);
+    if (idx_iter != atom_hash.end()) {
+      idx = idx_iter->second;
+      atom_array[idx]->ref_count++;
+      return idx;
     }
   }
+
+  if (atom_free_idx.empty()) {
+    idx = atom_array.size();
+    atom_array.emplace_back(
+      std::make_unique<JSAtomStruct>(str, atom_type)
+    );
+  } else {
+    idx = atom_free_idx.top();
+    atom_free_idx.pop();
+
+    auto pos = std::next(atom_array.begin(), idx);
+    *pos = std::make_unique<JSAtomStruct>(str, atom_type);
+  }
+
+  if (atom_type == JSAtomType::STRING)
+    atom_hash[str] = idx;
+
+  return idx;
 }
 
 size_t JSRuntime::new_context() {
@@ -774,7 +808,7 @@ JSValue JSRuntime::eval_internal(
   state.cur_func = std::make_unique<JSFunctionDef>(
     JSFunctionDef{
       .ctx_handle = ctx_handle,
-      .parent = nullptr,
+      .parent = {},
       .is_eval = true,
       .is_func_expr = false
     }
