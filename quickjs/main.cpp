@@ -92,6 +92,7 @@ namespace JS {
   struct atom : heap_val {
     std::string str;
     ATOM_TYPE atom_type;
+    std::optional<size_t> idx;
 
     atom(
       std::string str, ATOM_TYPE atom_type
@@ -100,12 +101,15 @@ namespace JS {
 }
 
 namespace JS {
-  struct context : heap_val {};
+  struct context : heap_val {
+    std::weak_ptr<struct runtime> rt;
+    context(std::weak_ptr<runtime> rt): rt{rt} {}
+  };
 }
 
 namespace JS {
   using dynamic = std::variant<
-    int32_t, int64_t, double, heap_val*
+    int32_t, int64_t, double, std::weak_ptr<heap_val>
   >;
 }
 
@@ -120,7 +124,7 @@ namespace JS {
   };
 
   struct tok_ident {
-    size_t atom;
+    std::weak_ptr<atom> str;
     bool has_escape;
     bool is_reserved;
   };
@@ -135,76 +139,66 @@ namespace JS {
   >;
 }
 
-struct JSVarDef {
-  size_t var_name;
-};
+namespace JS {
+  struct var_def {
+    std::weak_ptr<atom> var_name;
+  };
 
-struct JSVarScope {
-  size_t parent;
-  size_t first;
-};
+  struct var_scope {
+    size_t parent;
+    size_t first;
+  };
 
-struct JSModuleDef;
+  struct function_def {
+    std::weak_ptr<context> ctx;
+    std::optional<size_t> parent;
 
-struct JSFunctionDef {
-  size_t ctx_handle;
-  std::optional<size_t> parent;
+    bool is_eval;
+    bool is_global_var;
+    bool is_func_expr;
 
-  bool is_eval;
-  bool is_global_var;
-  bool is_func_expr;
+    int eval_type;
+    bool new_target_allowed;
+    bool super_call_allowed;
+    bool super_allowed;
+    bool arguments_allowed;
+    uint8_t js_mode;
 
-  int eval_type;
-  bool new_target_allowed;
-  bool super_call_allowed;
-  bool super_allowed;
-  bool arguments_allowed;
-  uint8_t js_mode;
+    std::weak_ptr<atom> func_name;
 
-  size_t func_name;
+    std::vector<var_def> vars;
+    size_t eval_ret_idx;
 
-  std::vector<JSVarDef> vars;
-  size_t eval_ret_idx;
+    size_t scope_level;
+    size_t scope_first;
+    std::vector<var_scope> scopes;
+    size_t body_scope;
 
-  size_t scope_level;
-  size_t scope_first;
-  std::vector<JSVarScope> scopes;
-  size_t body_scope;
+    std::deque<uint64_t> byte_code;
+    size_t last_opcode_pos;
 
-  std::deque<uint64_t> byte_code;
-  size_t last_opcode_pos;
-
-  JSModuleDef* module_def;
-};
-
-struct JSClass {
-  size_t class_id;
-  size_t class_name;
-};
+    std::weak_ptr<struct module_def> module_def;
+  }; 
+}
 
 namespace JS {
+  struct clazz {
+    size_t class_id;
+    std::weak_ptr<atom> class_name;
+  };
+
   struct runtime {
-    std::unordered_map<std::string, size_t> atom_hash;
-    std::vector<atom*> atom_array;
+    std::unordered_map<std::string, std::weak_ptr<atom>> atom_hash;
+    std::vector<std::shared_ptr<atom>> atom_array;
     std::stack<size_t> atom_free_idx;
 
-    std::vector<JSClass> class_array;
-    std::deque<heap_val*> gc_obj_list;
+    std::vector<clazz> class_array;
+    std::deque<std::weak_ptr<heap_val>> gc_obj_list;
 
-    size_t new_atom(std::string str, ATOM_TYPE atom_type);
-    size_t new_context();
+    std::weak_ptr<atom> new_atom(std::string str, ATOM_TYPE atom_type);
     
     void init_atom_range();
     void init_class_range(std::span<const int32_t> tab, int32_t start);
-
-    dynamic eval_internal(
-      size_t ctx_handle,
-      std::optional<dynamic> this_obj,
-      std::string input,
-      std::string filename,
-      int flags,
-      std::optional<size_t> scope_idx
-    );
   };
 }
 
@@ -535,7 +529,7 @@ namespace JS {
 
 namespace JS {
   struct parse_state {
-    size_t ctx_handle;
+    std::weak_ptr<context> ctx;
     std::string filename;
     bool got_line_feed;
 
@@ -548,15 +542,15 @@ namespace JS {
     size_t curr_idx;
     size_t buf_size;
 
-    JSFunctionDef* cur_func;
+    std::shared_ptr<function_def> cur_func;
     bool is_module;
 
     size_t push_scope() {
       if (!cur_func)
         return 0;
 
-      JSFunctionDef& fd = *cur_func;
-      JSVarScope scope{
+      function_def& fd = *cur_func;
+      var_scope scope{
         .parent = fd.scope_level,
         .first = fd.scope_first
       };
@@ -577,24 +571,24 @@ namespace JS {
       cur_func->byte_code.push_back(val);
     }
 
-    int parse_program(runtime& rt) {
+    int parse_program() {
       if (next_token())
         return -1;
 
       while (token_char != TOK_EOF) {
-        if (parse_source_element(rt))
+        if (parse_source_element())
           return -1;
       }
 
       return 0;
     }
 
-    int parse_source_element(runtime& rt) {
-      if (token_char == TOK_FUNCTION || token_is_async_func(rt))
+    int parse_source_element() {
+      if (token_char == TOK_FUNCTION || token_is_async_func())
         return -1;
-      else if (cur_func->module_def && token_char == TOK_EXPORT)
+      else if (cur_func->module_def.lock() && token_char == TOK_EXPORT)
         return -1;
-      else if (cur_func->module_def && token_is_static_import())
+      else if (cur_func->module_def.lock() && token_is_static_import())
         return -1;
       else
         return parse_statement_or_decl(DECL_MASK_ALL);
@@ -611,7 +605,7 @@ namespace JS {
       return tok != '(' && tok != '.';
     }
 
-    bool token_is_async_func(runtime& rt) {
+    bool token_is_async_func() {
       return (
         token_is_pseudo_keyword(ATOM_async) &&
         peek_token(true) == TOK_FUNCTION
@@ -620,7 +614,8 @@ namespace JS {
 
     bool token_is_pseudo_keyword(size_t atom) {
       return token_char == TOK_IDENT &&
-        std::get<tok_ident>(token).atom == atom &&
+        std::get<tok_ident>(token).str.lock() ==
+          ctx.lock()->rt.lock()->atom_array[atom] &&
         std::get<tok_ident>(token).has_escape;
     }
 
@@ -743,63 +738,54 @@ namespace JS {
     }
   }
 
-  size_t runtime::new_atom(std::string str, ATOM_TYPE atom_type) {
-    size_t idx{};
-
+  std::weak_ptr<atom> runtime::new_atom(std::string str, ATOM_TYPE atom_type) {
     if (atom_type == ATOM_TYPE::STRING) {
-      auto idx_iter = atom_hash.find(str);
-      if (idx_iter != atom_hash.end()) {
-        idx = idx_iter->second;
-        atom_array[idx]->ref_count++;
-        return idx;
+      auto atom_iter = atom_hash.find(str);
+      if (
+        atom_iter != atom_hash.end() &&
+        atom_iter->second.lock()
+      ) {
+        return atom_iter->second;
       }
     }
 
-    if (atom_free_idx.empty()) {
-      idx = atom_array.size();
-      atom_array.emplace_back(new atom{str, atom_type});
-    } else {
-      idx = atom_free_idx.top();
-      atom_free_idx.pop();
+    std::shared_ptr<atom> ret = std::make_shared<atom>(str, atom_type);
 
-      auto pos = std::next(atom_array.begin(), idx);
-      *pos = new atom{str, atom_type};
+    if (atom_free_idx.empty()) {
+      ret->idx = atom_array.size();
+      atom_array.push_back(ret);
+    } else {
+      ret->idx = atom_free_idx.top();
+      atom_free_idx.pop();
+      atom_array[*ret->idx] = ret;
     }
 
     if (atom_type == ATOM_TYPE::STRING)
-      atom_hash[str] = idx;
+      atom_hash[str] = ret;
 
-    return idx;
-  }
-}
-
-namespace JS {
-  constexpr bool atom_is_const(size_t idx) {
-    return idx > ATOM_END;
-  }
-
-  size_t dup_atom(runtime& rt, size_t idx) {
-    if (!atom_is_const(idx))
-      rt.atom_array[idx]->ref_count++;
-    return idx;
+    return ret;
   }
 }
 
 namespace JS {
   void runtime::init_class_range(std::span<const int32_t> tab, int32_t start) {
-    for (size_t i = 0; i < tab.size(); i++)
-      class_array.emplace_back(i + start, dup_atom(*this, tab[i]));
-  }
-
-  size_t runtime::new_context() {
-    gc_obj_list.emplace_back(new context{});
-    return gc_obj_list.size() - 1;
+    for (size_t i = 0; i < tab.size(); i++) {
+      class_array.emplace_back(i + start, atom_array[tab[i]]);
+    }
   }
 }
 
 namespace JS {
-  dynamic runtime::eval_internal(
-    size_t ctx_handle,
+  std::weak_ptr<context> new_context(std::shared_ptr<runtime> rt) {
+    std::shared_ptr ctx = std::make_shared<context>(rt);
+    rt->gc_obj_list.push_back(ctx);
+    return ctx;
+  }
+}
+
+namespace JS {
+  dynamic eval_internal(
+    std::weak_ptr<context> ctx,
     std::optional<dynamic> this_obj,
     std::string input,
     std::string filename,
@@ -809,7 +795,7 @@ namespace JS {
     uint8_t js_mode = 0;
 
     parse_state state{
-      .ctx_handle = ctx_handle,
+      .ctx = ctx,
       .filename = filename,
       .buf = std::ranges::concat_view{
         std::ranges::owning_view{std::string{input}},
@@ -825,13 +811,15 @@ namespace JS {
       if (flags & EVAL_FLAG_STRICT)
         js_mode |= MODE_STRICT;
     }
-    state.cur_func = new JSFunctionDef{
-      .ctx_handle = ctx_handle,
-      .parent = {},
-      .is_eval = true,
-      .is_func_expr = false
-    };
-    JSFunctionDef& func_def = *state.cur_func;
+    state.cur_func = std::make_shared<function_def>(
+      function_def{
+        .ctx = ctx,
+        .parent = {},
+        .is_eval = true,
+        .is_func_expr = false
+      }
+    );
+    function_def& func_def = *state.cur_func;
     func_def.eval_type = eval_type;
     if (eval_type == EVAL_TYPE_DIRECT) {
       throw std::runtime_error("unimplemented!");
@@ -842,12 +830,12 @@ namespace JS {
       func_def.arguments_allowed = true;
     }
     func_def.js_mode = js_mode;
-    func_def.func_name = dup_atom(*this, ATOM__eval_);
+    func_def.func_name = ctx.lock()->rt.lock()->atom_array[ATOM__eval_];
     state.is_module = false;
     state.push_scope();
     func_def.body_scope = func_def.scope_level;
+    state.parse_program();
 
-    state.parse_program(*this);
     assert(0);
   }
 }
@@ -880,13 +868,13 @@ int main(int argc, char* argv[]) {
 
   {
     using namespace JS;
-    runtime* rt = new runtime{};
+    std::shared_ptr<runtime> rt = std::make_shared<runtime>();
     rt->init_atom_range();
     rt->init_class_range(std_class_def, CLASS_OBJECT);
 
-    size_t ctx_handle = rt->new_context();
-    rt->eval_internal(
-      ctx_handle, {}, source_str(filepath), "", 0, {}
+    std::weak_ptr<context> ctx = new_context(rt);
+    eval_internal(
+      ctx, {}, source_str(filepath), "", 0, {}
     );
   }
   
