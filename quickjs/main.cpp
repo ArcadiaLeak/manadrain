@@ -103,7 +103,10 @@ namespace JS {
 namespace JS {
   struct context : heap_val {
     std::weak_ptr<struct runtime> rt;
+
     context(std::weak_ptr<runtime> rt): rt{rt} {}
+
+    std::weak_ptr<atom> dup_atom(size_t idx);
   };
 }
 
@@ -196,6 +199,7 @@ namespace JS {
     std::deque<std::weak_ptr<heap_val>> gc_obj_list;
 
     std::weak_ptr<atom> new_atom(std::string str, ATOM_TYPE atom_type);
+    std::weak_ptr<atom> dup_atom(size_t idx);
     
     void init_atom_range();
     void init_class_range(std::span<const int32_t> tab, int32_t start);
@@ -768,15 +772,32 @@ namespace JS {
 }
 
 namespace JS {
+  constexpr bool atom_is_const(size_t idx) {
+    return idx > ATOM_END;
+  }
+
+  std::weak_ptr<atom> runtime::dup_atom(size_t idx) {
+    std::shared_ptr<atom> ret = atom_array[idx];
+    if (!atom_is_const(idx))
+      ret->ref_count++;
+    return ret;
+  }
+
+  std::weak_ptr<atom> context::dup_atom(size_t idx) {
+    return rt.lock()->dup_atom(idx);
+  }
+}
+
+namespace JS {
   void runtime::init_class_range(std::span<const int32_t> tab, int32_t start) {
     for (size_t i = 0; i < tab.size(); i++) {
-      class_array.emplace_back(i + start, atom_array[tab[i]]);
+      class_array.emplace_back(i + start, dup_atom(tab[i]));
     }
   }
 }
 
 namespace JS {
-  std::weak_ptr<context> new_context(std::shared_ptr<runtime> rt) {
+  std::weak_ptr<context> NewContext(std::shared_ptr<runtime> rt) {
     std::shared_ptr ctx = std::make_shared<context>(rt);
     rt->gc_obj_list.push_back(ctx);
     return ctx;
@@ -784,7 +805,7 @@ namespace JS {
 }
 
 namespace JS {
-  dynamic eval_internal(
+  dynamic EvalInternal(
     std::weak_ptr<context> ctx,
     std::optional<dynamic> this_obj,
     std::string input,
@@ -830,7 +851,7 @@ namespace JS {
       func_def.arguments_allowed = true;
     }
     func_def.js_mode = js_mode;
-    func_def.func_name = ctx.lock()->rt.lock()->atom_array[ATOM__eval_];
+    func_def.func_name = ctx.lock()->dup_atom(ATOM__eval_);
     state.is_module = false;
     state.push_scope();
     func_def.body_scope = func_def.scope_level;
@@ -872,8 +893,8 @@ int main(int argc, char* argv[]) {
     rt->init_atom_range();
     rt->init_class_range(std_class_def, CLASS_OBJECT);
 
-    std::weak_ptr<context> ctx = new_context(rt);
-    eval_internal(
+    std::weak_ptr<context> ctx = NewContext(rt);
+    EvalInternal(
       ctx, {}, source_str(filepath), "", 0, {}
     );
   }
