@@ -112,6 +112,7 @@ namespace JS {
     TAG_UNINITIALIZED,
     TAG_FALSE,
     TAG_TRUE,
+    TAG_EXCEPTION
   };
 
   using dynamic = std::variant<
@@ -119,6 +120,13 @@ namespace JS {
     std::weak_ptr<atom>,
     std::weak_ptr<object>
   >;
+
+  std::weak_ptr<object> get_proto_obj(dynamic proto_val) {
+    if (std::holds_alternative<std::weak_ptr<object>>(proto_val))
+      return std::get<std::weak_ptr<object>>(proto_val);
+
+    return std::weak_ptr<object>{};
+  }
 }
 
 namespace JS {
@@ -136,6 +144,8 @@ namespace JS {
     std::weak_ptr<context> ctx, dynamic proto_val,
     size_t class_id, int n_alloc_props
   ) {
+    std::weak_ptr<object> proto = get_proto_obj(proto_val);
+
     assert(0);
   }
 }
@@ -223,6 +233,8 @@ namespace JS {
 
     std::list<std::weak_ptr<context>> context_list;
     std::list<std::shared_ptr<heap_val>> gc_obj_list;
+
+    std::unordered_map<std::string, std::weak_ptr<struct shape>> shape_hash;
 
     std::weak_ptr<atom> new_atom(std::string str, ATOM_TYPE atom_type);
     std::weak_ptr<atom> dup_atom(size_t idx);
