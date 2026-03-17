@@ -15,6 +15,7 @@
 #include <array>
 #include <stack>
 #include <span>
+#include <list>
 
 #include "enum/js_atom.hpp"
 #include "enum/js_class.hpp"
@@ -89,6 +90,10 @@ namespace JS {
 }
 
 namespace JS {
+  struct object : heap_val {};
+}
+
+namespace JS {
   struct atom : heap_val {
     std::string str;
     ATOM_TYPE atom_type;
@@ -101,19 +106,38 @@ namespace JS {
 }
 
 namespace JS {
+  enum class unit {
+    TAG_NULL,
+    TAG_UNDEFINED,
+    TAG_UNINITIALIZED,
+    TAG_FALSE,
+    TAG_TRUE,
+  };
+
+  using dynamic = std::variant<
+    unit,
+    std::weak_ptr<atom>,
+    std::weak_ptr<object>
+  >;
+}
+
+namespace JS {
   struct context : heap_val {
     std::weak_ptr<struct runtime> rt;
 
-    context(std::weak_ptr<runtime> rt): rt{rt} {}
+    std::vector<dynamic> class_proto;
 
     std::weak_ptr<atom> dup_atom(size_t idx);
   };
 }
 
 namespace JS {
-  using dynamic = std::variant<
-    int32_t, int64_t, double, std::weak_ptr<heap_val>
-  >;
+  dynamic NewObjectProtoClassAlloc(
+    std::weak_ptr<context> ctx, dynamic proto_val,
+    size_t class_id, int n_alloc_props
+  ) {
+    assert(0);
+  }
 }
 
 namespace JS {
@@ -138,7 +162,7 @@ namespace JS {
   };
 
   using tok_variant = std::variant<
-    tok_string, tok_number, tok_ident, tok_regexp
+    int32_t, tok_string, tok_number, tok_ident, tok_regexp
   >;
 }
 
@@ -196,7 +220,9 @@ namespace JS {
     std::stack<size_t> atom_free_idx;
 
     std::vector<clazz> class_array;
-    std::deque<std::weak_ptr<heap_val>> gc_obj_list;
+
+    std::list<std::weak_ptr<context>> context_list;
+    std::list<std::shared_ptr<heap_val>> gc_obj_list;
 
     std::weak_ptr<atom> new_atom(std::string str, ATOM_TYPE atom_type);
     std::weak_ptr<atom> dup_atom(size_t idx);
@@ -537,7 +563,6 @@ namespace JS {
     std::string filename;
     bool got_line_feed;
 
-    int32_t token_char;
     size_t token_idx;
     tok_variant token;
     
@@ -550,7 +575,7 @@ namespace JS {
     bool is_module;
 
     size_t push_scope() {
-      if (!cur_func)
+      if (not cur_func)
         return 0;
 
       function_def& fd = *cur_func;
@@ -579,7 +604,7 @@ namespace JS {
       if (next_token())
         return -1;
 
-      while (token_char != TOK_EOF) {
+      while (token.index() != 0 || std::get<0>(token) != TOK_EOF) {
         if (parse_source_element())
           return -1;
       }
@@ -588,9 +613,9 @@ namespace JS {
     }
 
     int parse_source_element() {
-      if (token_char == TOK_FUNCTION || token_is_async_func())
+      if (token.index() == 0 && std::get<0>(token) == TOK_FUNCTION || token_is_async_func())
         return -1;
-      else if (cur_func->module_def.lock() && token_char == TOK_EXPORT)
+      else if (cur_func->module_def.lock() && token.index() == 0 && std::get<0>(token) == TOK_EXPORT)
         return -1;
       else if (cur_func->module_def.lock() && token_is_static_import())
         return -1;
@@ -603,7 +628,7 @@ namespace JS {
     }
 
     bool token_is_static_import() {
-      if (token_char != TOK_IMPORT)
+      if (token.index() != 0 || std::get<0>(token) != TOK_IMPORT)
         return false;
       int32_t tok = peek_token(false);
       return tok != '(' && tok != '.';
@@ -617,9 +642,8 @@ namespace JS {
     }
 
     bool token_is_pseudo_keyword(size_t atom) {
-      return token_char == TOK_IDENT &&
-        std::get<tok_ident>(token).str.lock() ==
-          ctx.lock()->rt.lock()->atom_array[atom] &&
+      return std::holds_alternative<tok_ident>(token) &&
+        std::get<tok_ident>(token).str.lock() == ctx.lock()->rt.lock()->atom_array[atom] &&
         std::get<tok_ident>(token).has_escape;
     }
 
@@ -693,7 +717,7 @@ namespace JS {
       switch (ch) {
         case 0:
         if (idx >= buf_size)
-          token_char = TOK_EOF;
+          token = TOK_EOF;
         else
           goto def_token;
         break;
@@ -715,14 +739,14 @@ namespace JS {
           goto fail;
         break;
 
-        default: def_token: token_char = ch;
+        default: def_token: token = ch;
         idx++; break;
       }
 
       curr_idx = idx;
       return 0;
 
-      fail: token_char = TOK_ERROR;
+      fail: token = TOK_ERROR;
       return -1;
     }
   };
@@ -778,7 +802,7 @@ namespace JS {
 
   std::weak_ptr<atom> runtime::dup_atom(size_t idx) {
     std::shared_ptr<atom> ret = atom_array[idx];
-    if (!atom_is_const(idx))
+    if (not atom_is_const(idx))
       ret->ref_count++;
     return ret;
   }
@@ -798,8 +822,11 @@ namespace JS {
 
 namespace JS {
   std::weak_ptr<context> NewContext(std::shared_ptr<runtime> rt) {
-    std::shared_ptr ctx = std::make_shared<context>(rt);
+    std::shared_ptr ctx = std::make_shared<context>();
     rt->gc_obj_list.push_back(ctx);
+    ctx->class_proto.resize(rt->class_array.size());
+    ctx->rt = rt;
+    rt->context_list.push_back(ctx);
     return ctx;
   }
 }
@@ -863,7 +890,7 @@ namespace JS {
 
 std::string source_str(std::string filepath) {
   std::ifstream file{filepath};
-  if (!file.is_open()) throw std::runtime_error{
+  if (not file.is_open()) throw std::runtime_error{
     std::format("could not open file: {}", filepath)
   };
 
@@ -882,7 +909,7 @@ int main(int argc, char* argv[]) {
   }
 
   std::string filepath = argv[1];
-  if (!std::filesystem::exists(filepath)) {
+  if (not std::filesystem::exists(filepath)) {
     std::println(stderr, "Error: file does not exist: {}", filepath);
     return 1;
   }
