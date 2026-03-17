@@ -76,30 +76,30 @@ namespace unicode {
 }
 
 namespace JS {
-  struct heap_val {
+  struct HeapVal {
     int32_t ref_count = 1;
 
-    virtual ~heap_val() = default;
-    heap_val(const heap_val&) = default;
-    heap_val& operator=(const heap_val&) = default;
-    heap_val(heap_val&&) noexcept = default;
-    heap_val& operator=(heap_val&&) noexcept = default;
+    virtual ~HeapVal() = default;
+    HeapVal(const HeapVal&) = default;
+    HeapVal& operator=(const HeapVal&) = default;
+    HeapVal(HeapVal&&) noexcept = default;
+    HeapVal& operator=(HeapVal&&) noexcept = default;
 
-    heap_val() = default;
+    HeapVal() = default;
   };
 }
 
 namespace JS {
-  struct object : heap_val {};
+  struct Object : HeapVal {};
 }
 
 namespace JS {
-  struct atom : heap_val {
+  struct Atom : HeapVal {
     std::string str;
     ATOM_TYPE atom_type;
     std::optional<size_t> idx;
 
-    atom(
+    Atom(
       std::string str, ATOM_TYPE atom_type
     ): str{str}, atom_type{atom_type} {}
   };
@@ -117,77 +117,77 @@ namespace JS {
 
   using dynamic = std::variant<
     unit,
-    std::weak_ptr<atom>,
-    std::weak_ptr<object>
+    std::weak_ptr<Atom>,
+    std::weak_ptr<Object>
   >;
-
-  std::weak_ptr<object> get_proto_obj(dynamic proto_val) {
-    if (std::holds_alternative<std::weak_ptr<object>>(proto_val))
-      return std::get<std::weak_ptr<object>>(proto_val);
-
-    return std::weak_ptr<object>{};
-  }
 }
 
 namespace JS {
-  struct context : heap_val {
-    std::weak_ptr<struct runtime> rt;
+  struct Context : HeapVal {
+    std::weak_ptr<struct Runtime> rt;
 
     std::vector<dynamic> class_proto;
 
-    std::weak_ptr<atom> dup_atom(size_t idx);
+    std::weak_ptr<Atom> dup_atom(size_t idx);
   };
 }
 
 namespace JS {
+  std::weak_ptr<Object> get_proto_obj(dynamic proto_val) {
+    if (std::holds_alternative<std::weak_ptr<Object>>(proto_val))
+      return std::get<std::weak_ptr<Object>>(proto_val);
+
+    return std::weak_ptr<Object>{};
+  }
+
   dynamic NewObjectProtoClassAlloc(
-    std::weak_ptr<context> ctx, dynamic proto_val,
+    std::weak_ptr<Context> ctx, dynamic proto_val,
     size_t class_id, int n_alloc_props
   ) {
-    std::weak_ptr<object> proto = get_proto_obj(proto_val);
+    std::weak_ptr proto = get_proto_obj(proto_val);
 
     assert(0);
   }
 }
 
 namespace JS {
-  struct tok_string {
+  struct TokString {
     dynamic str;
     int32_t sep;
   };
 
-  struct tok_number {
+  struct TokNumber {
     dynamic num;
   };
 
-  struct tok_ident {
-    std::weak_ptr<atom> str;
+  struct TokIdent {
+    std::weak_ptr<Atom> str;
     bool has_escape;
     bool is_reserved;
   };
 
-  struct tok_regexp {
+  struct TokRegexp {
     dynamic body;
     dynamic flags;
   };
 
-  using tok_variant = std::variant<
-    int32_t, tok_string, tok_number, tok_ident, tok_regexp
+  using TokVariant = std::variant<
+    int32_t, TokString, TokNumber, TokIdent, TokRegexp
   >;
 }
 
 namespace JS {
-  struct var_def {
-    std::weak_ptr<atom> var_name;
+  struct VarDef {
+    std::weak_ptr<Atom> var_name;
   };
 
-  struct var_scope {
+  struct VarScope {
     size_t parent;
     size_t first;
   };
 
-  struct function_def {
-    std::weak_ptr<context> ctx;
+  struct FunctionDef {
+    std::weak_ptr<Context> ctx;
     std::optional<size_t> parent;
 
     bool is_eval;
@@ -201,14 +201,14 @@ namespace JS {
     bool arguments_allowed;
     uint8_t js_mode;
 
-    std::weak_ptr<atom> func_name;
+    std::weak_ptr<Atom> func_name;
 
-    std::vector<var_def> vars;
+    std::vector<VarDef> vars;
     size_t eval_ret_idx;
 
     size_t scope_level;
     size_t scope_first;
-    std::vector<var_scope> scopes;
+    std::vector<VarScope> scopes;
     size_t body_scope;
 
     std::deque<uint64_t> byte_code;
@@ -219,25 +219,25 @@ namespace JS {
 }
 
 namespace JS {
-  struct clazz {
+  struct Clazz {
     size_t class_id;
-    std::weak_ptr<atom> class_name;
+    std::weak_ptr<Atom> class_name;
   };
 
-  struct runtime {
-    std::unordered_map<std::string, std::weak_ptr<atom>> atom_hash;
-    std::vector<std::shared_ptr<atom>> atom_array;
+  struct Runtime {
+    std::unordered_map<std::string, std::weak_ptr<Atom>> atom_hash;
+    std::vector<std::shared_ptr<Atom>> atom_array;
     std::stack<size_t> atom_free_idx;
 
-    std::vector<clazz> class_array;
+    std::vector<Clazz> class_array;
 
-    std::list<std::weak_ptr<context>> context_list;
-    std::list<std::shared_ptr<heap_val>> gc_obj_list;
+    std::list<std::weak_ptr<Context>> context_list;
+    std::list<std::shared_ptr<HeapVal>> gc_obj_list;
 
     std::unordered_map<std::string, std::weak_ptr<struct shape>> shape_hash;
 
-    std::weak_ptr<atom> new_atom(std::string str, ATOM_TYPE atom_type);
-    std::weak_ptr<atom> dup_atom(size_t idx);
+    std::weak_ptr<Atom> new_atom(std::string str, ATOM_TYPE atom_type);
+    std::weak_ptr<Atom> dup_atom(size_t idx);
     
     void init_atom_range();
     void init_class_range(std::span<const int32_t> tab, int32_t start);
@@ -245,7 +245,7 @@ namespace JS {
 }
 
 namespace common {
-  using padded_buf = std::ranges::concat_view<
+  using PaddedBuf = std::ranges::concat_view<
     std::ranges::owning_view<std::string>,
     std::ranges::repeat_view<char>
   >;
@@ -288,7 +288,7 @@ namespace lre {
   }
 
   int32_t parse_escape(
-    common::padded_buf& buf, size_t& begin_idx,
+    common::PaddedBuf& buf, size_t& begin_idx,
     int allow_utf16
   ) {
     auto p = std::next(buf.begin(), begin_idx);
@@ -409,7 +409,7 @@ namespace unicode {
   };
 
   int32_t from_utf8(
-    common::padded_buf& buf, size_t begin_idx,
+    common::PaddedBuf& buf, size_t begin_idx,
     int32_t max_len, size_t& end_idx
   ) {
     auto p = std::next(buf.begin(), begin_idx);
@@ -465,7 +465,7 @@ namespace unicode {
 
 namespace JS {
   bool match_identifier(
-    common::padded_buf& buf, size_t idx,
+    common::PaddedBuf& buf, size_t idx,
     std::string rhs
   ) {
     std::string lhs = std::ranges::to<std::string>(
@@ -483,7 +483,7 @@ namespace JS {
   }
   
   int32_t simple_next_token(
-    common::padded_buf& buf,
+    common::PaddedBuf& buf,
     size_t& begin_idx,
     bool no_line_feed
   ) {
@@ -570,28 +570,28 @@ namespace JS {
 }
 
 namespace JS {
-  struct parse_state {
-    std::weak_ptr<context> ctx;
+  struct ParseState {
+    std::weak_ptr<Context> ctx;
     std::string filename;
     bool got_line_feed;
 
     size_t token_idx;
-    tok_variant token;
+    TokVariant token;
     
-    common::padded_buf buf;
+    common::PaddedBuf buf;
     size_t last_idx;
     size_t curr_idx;
     size_t buf_size;
 
-    std::shared_ptr<function_def> cur_func;
+    std::shared_ptr<FunctionDef> cur_func;
     bool is_module;
 
     size_t push_scope() {
       if (not cur_func)
         return 0;
 
-      function_def& fd = *cur_func;
-      var_scope scope{
+      FunctionDef& fd = *cur_func;
+      VarScope scope{
         .parent = fd.scope_level,
         .first = fd.scope_first
       };
@@ -654,9 +654,9 @@ namespace JS {
     }
 
     bool token_is_pseudo_keyword(size_t atom) {
-      return std::holds_alternative<tok_ident>(token) &&
-        std::get<tok_ident>(token).str.lock() == ctx.lock()->rt.lock()->atom_array[atom] &&
-        std::get<tok_ident>(token).has_escape;
+      return std::holds_alternative<TokIdent>(token) &&
+        std::get<TokIdent>(token).str.lock() == ctx.lock()->rt.lock()->atom_array[atom] &&
+        std::get<TokIdent>(token).has_escape;
     }
 
     int32_t peek_token(bool no_line_feed) {
@@ -667,7 +667,7 @@ namespace JS {
 
     int parse_string(
       int32_t sep, bool do_throw, size_t idx,
-      tok_variant& token, size_t& idxref
+      TokVariant& token, size_t& idxref
     ) {
       auto ch = buf[idx];
       auto strbuf = std::string{""};
@@ -765,7 +765,7 @@ namespace JS {
 }
 
 namespace JS {
-  void runtime::init_atom_range() {
+  void Runtime::init_atom_range() {
     for (size_t i = 0; i < atom_init.size(); i++) {
       ATOM_TYPE atom_type;
       if (i == ATOM_Private_brand)
@@ -778,7 +778,7 @@ namespace JS {
     }
   }
 
-  std::weak_ptr<atom> runtime::new_atom(std::string str, ATOM_TYPE atom_type) {
+  std::weak_ptr<Atom> Runtime::new_atom(std::string str, ATOM_TYPE atom_type) {
     if (atom_type == ATOM_TYPE::STRING) {
       auto atom_iter = atom_hash.find(str);
       if (
@@ -789,7 +789,7 @@ namespace JS {
       }
     }
 
-    std::shared_ptr<atom> ret = std::make_shared<atom>(str, atom_type);
+    std::shared_ptr ret = std::make_shared<Atom>(str, atom_type);
 
     if (atom_free_idx.empty()) {
       ret->idx = atom_array.size();
@@ -812,20 +812,20 @@ namespace JS {
     return idx > ATOM_END;
   }
 
-  std::weak_ptr<atom> runtime::dup_atom(size_t idx) {
-    std::shared_ptr<atom> ret = atom_array[idx];
+  std::weak_ptr<Atom> Runtime::dup_atom(size_t idx) {
+    std::shared_ptr<Atom> ret = atom_array[idx];
     if (not atom_is_const(idx))
       ret->ref_count++;
     return ret;
   }
 
-  std::weak_ptr<atom> context::dup_atom(size_t idx) {
+  std::weak_ptr<Atom> Context::dup_atom(size_t idx) {
     return rt.lock()->dup_atom(idx);
   }
 }
 
 namespace JS {
-  void runtime::init_class_range(std::span<const int32_t> tab, int32_t start) {
+  void Runtime::init_class_range(std::span<const int32_t> tab, int32_t start) {
     for (size_t i = 0; i < tab.size(); i++) {
       class_array.emplace_back(i + start, dup_atom(tab[i]));
     }
@@ -833,8 +833,8 @@ namespace JS {
 }
 
 namespace JS {
-  std::weak_ptr<context> NewContext(std::shared_ptr<runtime> rt) {
-    std::shared_ptr ctx = std::make_shared<context>();
+  std::weak_ptr<Context> NewContext(std::shared_ptr<Runtime> rt) {
+    std::shared_ptr ctx = std::make_shared<Context>();
     rt->gc_obj_list.push_back(ctx);
     ctx->class_proto.resize(rt->class_array.size());
     ctx->rt = rt;
@@ -845,7 +845,7 @@ namespace JS {
 
 namespace JS {
   dynamic EvalInternal(
-    std::weak_ptr<context> ctx,
+    std::weak_ptr<Context> ctx,
     std::optional<dynamic> this_obj,
     std::string input,
     std::string filename,
@@ -854,7 +854,7 @@ namespace JS {
   ) {
     uint8_t js_mode = 0;
 
-    parse_state state{
+    ParseState state{
       .ctx = ctx,
       .filename = filename,
       .buf = std::ranges::concat_view{
@@ -871,15 +871,15 @@ namespace JS {
       if (flags & EVAL_FLAG_STRICT)
         js_mode |= MODE_STRICT;
     }
-    state.cur_func = std::make_shared<function_def>(
-      function_def{
+    state.cur_func = std::make_shared<FunctionDef>(
+      FunctionDef{
         .ctx = ctx,
         .parent = {},
         .is_eval = true,
         .is_func_expr = false
       }
     );
-    function_def& func_def = *state.cur_func;
+    FunctionDef& func_def = *state.cur_func;
     func_def.eval_type = eval_type;
     if (eval_type == EVAL_TYPE_DIRECT) {
       throw std::runtime_error("unimplemented!");
@@ -928,11 +928,11 @@ int main(int argc, char* argv[]) {
 
   {
     using namespace JS;
-    std::shared_ptr<runtime> rt = std::make_shared<runtime>();
+    std::shared_ptr rt = std::make_shared<Runtime>();
     rt->init_atom_range();
     rt->init_class_range(std_class_def, CLASS_OBJECT);
 
-    std::weak_ptr<context> ctx = NewContext(rt);
+    std::weak_ptr ctx = NewContext(rt);
     EvalInternal(
       ctx, {}, source_str(filepath), "", 0, {}
     );
