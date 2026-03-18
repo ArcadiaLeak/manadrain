@@ -1,4 +1,4 @@
-export module js_token;
+export module quickjs.predef.token;
 
 export namespace JS {
   enum {

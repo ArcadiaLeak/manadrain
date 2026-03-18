@@ -1,7 +1,6 @@
-export module js_class;
+export module quickjs.predef.clazz;
+import quickjs.predef.atom;
 import std;
-
-import js_atom;
 
 export namespace JS {
   enum {

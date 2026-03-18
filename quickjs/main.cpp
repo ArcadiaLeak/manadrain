@@ -1,8 +1,8 @@
 import std;
 
-import js_atom;
-import js_class;
-import js_token;
+import quickjs.predef.atom;
+import quickjs.predef.clazz;
+import quickjs.predef.token;
 
 namespace JS {
   enum class ATOM_TYPE {

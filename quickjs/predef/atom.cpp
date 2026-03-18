@@ -1,4 +1,4 @@
-export module js_atom;
+export module quickjs.predef.atom;
 import std;
 
 export namespace JS {
