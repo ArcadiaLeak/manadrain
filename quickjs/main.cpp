@@ -8,9 +8,7 @@
 #include <variant>
 #include <stdexcept>
 #include <deque>
-#include <limits>
 #include <cassert>
-#include <optional>
 #include <cctype>
 #include <array>
 #include <stack>
@@ -18,6 +16,7 @@
 #include <list>
 #include <map>
 #include <algorithm>
+#include <bitset>
 
 #include "enum/js_atom.hpp"
 #include "enum/js_class.hpp"
@@ -53,21 +52,21 @@ enum {
 };
 
 namespace JS {
-  constexpr uint8_t EVAL_TYPE_GLOBAL = 0;
-  constexpr uint8_t EVAL_TYPE_MODULE = 1;
-  constexpr uint8_t EVAL_TYPE_DIRECT = 2;
-  constexpr uint8_t EVAL_TYPE_INDIRECT = 3;
-  constexpr uint8_t EVAL_TYPE_MASK = 3;
+  constexpr std::bitset<8> EVAL_TYPE_GLOBAL = 0;
+  constexpr std::bitset<8> EVAL_TYPE_MODULE = 1;
+  constexpr std::bitset<8> EVAL_TYPE_DIRECT = 2;
+  constexpr std::bitset<8> EVAL_TYPE_INDIRECT = 3;
+  constexpr std::bitset<8> EVAL_TYPE_MASK = 3;
 
-  constexpr uint8_t EVAL_FLAG_STRICT = 1 << 3;
+  constexpr std::bitset<8> EVAL_FLAG_STRICT = 1 << 3;
 
-  constexpr uint8_t MODE_STRICT = 1 << 0;
-  constexpr uint8_t MODE_ASYNC = 1 << 2;
+  constexpr std::bitset<8> MODE_STRICT = 1 << 0;
+  constexpr std::bitset<8> MODE_ASYNC = 1 << 2;
 
-  constexpr uint8_t DECL_MASK_FUNC = 1 << 0;
-  constexpr uint8_t DECL_MASK_FUNC_WITH_LABEL = 1 << 1;
-  constexpr uint8_t DECL_MASK_OTHER = 1 << 2;
-  constexpr uint8_t DECL_MASK_ALL = DECL_MASK_FUNC |
+  constexpr std::bitset<8> DECL_MASK_FUNC = 1 << 0;
+  constexpr std::bitset<8> DECL_MASK_FUNC_WITH_LABEL = 1 << 1;
+  constexpr std::bitset<8> DECL_MASK_OTHER = 1 << 2;
+  constexpr std::bitset<8> DECL_MASK_ALL = DECL_MASK_FUNC |
     DECL_MASK_FUNC_WITH_LABEL | DECL_MASK_OTHER;
 
   constexpr size_t PROP_INITIAL_SIZE = 2;
@@ -80,16 +79,21 @@ namespace unicode {
 }
 
 namespace JS {
-  struct HeapVal {
+  struct Context;
+  struct Object;
+  
+  struct HeapVal : std::enable_shared_from_this<HeapVal> {
     int32_t ref_count = 1;
 
-    virtual ~HeapVal() = default;
+    HeapVal() = default;
     HeapVal(const HeapVal&) = default;
     HeapVal& operator=(const HeapVal&) = default;
     HeapVal(HeapVal&&) noexcept = default;
     HeapVal& operator=(HeapVal&&) noexcept = default;
-
-    HeapVal() = default;
+    virtual ~HeapVal() = default;
+    
+    virtual std::shared_ptr<Object> asObject() { return nullptr; }
+    virtual std::shared_ptr<Context> asContext() { return nullptr; }
   };
 }
 
@@ -97,7 +101,7 @@ namespace JS {
   struct Atom : HeapVal {
     std::string str;
     ATOM_TYPE atom_type;
-    std::optional<size_t> idx;
+    int64_t idx = -1;
 
     Atom(
       std::string str, ATOM_TYPE atom_type
@@ -115,11 +119,7 @@ namespace JS {
     TAG_EXCEPTION
   };
 
-  using Value = std::variant<
-    Unit,
-    std::weak_ptr<Atom>,
-    std::weak_ptr<struct Object>
-  >;
+  using Value = std::variant<Unit, std::weak_ptr<HeapVal>>;
 }
 
 namespace JS {
@@ -159,19 +159,19 @@ namespace JS {
   };
 
   struct FunctionDef {
-    std::weak_ptr<struct Context> ctx;
-    std::optional<size_t> parent;
+    std::weak_ptr<Context> ctx;
+    int64_t parent = -1;
 
     bool is_eval;
     bool is_global_var;
     bool is_func_expr;
 
-    int eval_type;
+    std::bitset<8> eval_type;
     bool new_target_allowed;
     bool super_call_allowed;
     bool super_allowed;
     bool arguments_allowed;
-    uint8_t js_mode;
+    std::bitset<8> js_mode;
 
     std::weak_ptr<Atom> func_name;
 
@@ -196,11 +196,10 @@ namespace JS {
     size_t prop_size;
   };
 
-  std::weak_ptr<Object> get_proto_obj(Value proto_val) {
-    if (std::holds_alternative<std::weak_ptr<Object>>(proto_val))
-      return std::get<std::weak_ptr<Object>>(proto_val);
-
-    return std::weak_ptr<Object>{};
+  std::shared_ptr<Object> get_proto_obj(Value proto_val) {
+    if (proto_val.index() == 1)
+      return std::get<1>(proto_val).lock()->asObject();
+    return nullptr;
   }
 }
 
@@ -208,17 +207,22 @@ namespace JS {
   struct Property {};
 
   struct Object : HeapVal {
-    size_t class_id;
+    int32_t class_id;
     std::weak_ptr<Shape> shape;
     std::vector<Property> prop;
+    std::bitset<8> flags;
 
-    Object(
-      std::shared_ptr<Shape> sh, size_t class_id
-    ) : shape{sh}, class_id{class_id}, prop{sh->prop_size} {}
+    Object(std::shared_ptr<Shape> sh, int32_t class_id)
+      : shape{sh}, class_id{class_id}, prop{sh->prop_size} {}
+
+    std::shared_ptr<Object> asObject() override {
+      return std::static_pointer_cast<Object>(shared_from_this());
+    }
   };
 
-  struct Clazz {
-    std::weak_ptr<Atom> class_name;
+  struct Array : Object {
+    Array(std::shared_ptr<Shape> sh, int32_t class_id)
+      : Object{sh, class_id} {}
   };
 
   struct Runtime {
@@ -226,7 +230,7 @@ namespace JS {
     std::vector<std::shared_ptr<Atom>> atom_array;
     std::stack<size_t> atom_free_idx;
 
-    std::vector<Clazz> class_array;
+    std::vector<std::weak_ptr<Atom>> class_array;
 
     std::list<std::weak_ptr<Context>> context_list;
     std::list<std::shared_ptr<HeapVal>> gc_obj_list;
@@ -253,7 +257,13 @@ namespace JS {
     Context(std::shared_ptr<Runtime> rt)
       : rt{rt}, class_proto{rt->class_array.size()} {}
 
+    int AddIntrinsicBasicObjects();
+    
     std::shared_ptr<Atom> DupAtom(size_t idx);
+
+    std::shared_ptr<Context> asContext() override {
+      return std::static_pointer_cast<Context>(shared_from_this());
+    }
   };
 }
 
@@ -273,50 +283,42 @@ namespace JS {
         ctx.lock()->class_proto.resize(class_array.size());
       }
     }
-    class_array.at(class_id) = Clazz{class_name};
+    class_array.at(class_id) = class_name;
   }
 }
 
 namespace JS {
-  struct Visitor_DupValue {
-    template<typename T>
-    Value operator()(std::weak_ptr<T> heap_val) {
-      heap_val.lock()->ref_count++;
-      return heap_val;
-    }
-
-    Value operator()(Unit unit) {
-      return unit;
-    }
-  };
-
-  Value DupValue(Value val) {
-    return val.visit(Visitor_DupValue{});
+  std::shared_ptr<HeapVal> DupValue(std::shared_ptr<HeapVal> heap_val) {
+    heap_val->ref_count++;
+    return heap_val;
   }
 }
 
 namespace JS {
   Value NewObjectFromShape(
-    std::weak_ptr<Context> ctx, std::shared_ptr<Shape> sh,
-    size_t class_id
+    std::shared_ptr<Context> ctx,
+    std::shared_ptr<Shape> sh,
+    int32_t class_id
   ) {
+    std::shared_ptr<Object> obj = nullptr;
     switch (class_id) {
-      default:
-      return std::make_shared<Object>(sh, class_id);
+      default: obj = std::make_shared<Object>(sh, class_id);
+      break;
     }
+    ctx->rt.lock()->add_gc_object(obj);
+    return obj;
   }
 }
 
 namespace JS {
   std::shared_ptr<Shape> new_shape_nohash(
     std::shared_ptr<Context> ctx,
-    std::weak_ptr<Object> proto,
+    std::shared_ptr<Object> proto,
     size_t prop_size
   ) {
     std::shared_ptr sh = std::make_shared<Shape>();
     ctx->rt.lock()->add_gc_object(sh);
-    if (not proto.expired())
-      DupValue(proto);
+    if (proto) DupValue(proto);
     sh->proto = proto;
     sh->prop_size = PROP_INITIAL_SIZE;
     return sh;
@@ -324,14 +326,13 @@ namespace JS {
 
   Value NewObjectProtoClassAlloc(
     std::shared_ptr<Context> ctx, Value proto_val,
-    size_t class_id, size_t n_alloc_props
+    int32_t class_id, size_t n_alloc_props
   ) {
-    std::weak_ptr proto = get_proto_obj(proto_val);
+    std::shared_ptr proto = get_proto_obj(proto_val);
     std::shared_ptr sh = new_shape_nohash(ctx, proto, n_alloc_props);
     if (not sh)
       return Unit::TAG_EXCEPTION;
-
-    assert(0);
+    return NewObjectFromShape(ctx, sh, class_id);
   }
 }
 
@@ -735,7 +736,7 @@ namespace JS {
         return parse_statement_or_decl(DECL_MASK_ALL);
     }
 
-    int parse_statement_or_decl(int decl_mask) {
+    int parse_statement_or_decl(std::bitset<8> decl_mask) {
       return -1;
     }
 
@@ -897,7 +898,7 @@ namespace JS {
     } else {
       ret->idx = atom_free_idx.top();
       atom_free_idx.pop();
-      atom_array[*ret->idx] = ret;
+      atom_array[ret->idx] = ret;
     }
 
     if (atom_type == ATOM_TYPE::STRING)
@@ -925,8 +926,21 @@ namespace JS {
 }
 
 namespace JS {
+  int Context::AddIntrinsicBasicObjects() {
+    class_proto[CLASS_OBJECT] = NewObjectProtoClassAlloc(
+      asContext(), Unit::TAG_NULL, CLASS_OBJECT, 0
+    );
+
+    return -1;
+  }
+}
+
+namespace JS {
   void Runtime::init_class_range(std::span<const int32_t> table, int32_t start) {
-    for (int32_t class_name : table) NewClass(start++, DupAtom(class_name));
+    for (int i = 0; i < table.size(); i++) {
+      int32_t class_id = i + start;
+      NewClass(class_id, DupAtom(table[i]));
+    }
   }
 }
 
@@ -942,13 +956,13 @@ namespace JS {
 namespace JS {
   Value EvalInternal(
     std::shared_ptr<Context> ctx,
-    std::optional<Value> this_obj,
+    Value this_obj,
     std::string input,
     std::string filename,
-    int flags,
-    std::optional<size_t> scope_idx
+    std::bitset<8> flags,
+    int64_t scope_idx = -1
   ) {
-    uint8_t js_mode = 0;
+    std::bitset<8> js_mode = 0;
 
     ParseState state{
       .ctx = ctx,
@@ -960,17 +974,16 @@ namespace JS {
       .buf_size = input.size()
     };
 
-    int eval_type = flags & EVAL_TYPE_MASK;
+    std::bitset eval_type = flags & EVAL_TYPE_MASK;
     if (eval_type == EVAL_TYPE_DIRECT) {
       throw std::runtime_error("unimplemented!");
     } else {
-      if (flags & EVAL_FLAG_STRICT)
-        js_mode |= MODE_STRICT;
+      std::bitset eval_flag = flags & EVAL_FLAG_STRICT;
+      if (eval_flag.any()) js_mode |= MODE_STRICT;
     }
     state.cur_func = std::make_shared<FunctionDef>(
       FunctionDef{
         .ctx = ctx,
-        .parent = {},
         .is_eval = true,
         .is_func_expr = false
       }
@@ -1030,7 +1043,7 @@ int main(int argc, char* argv[]) {
 
     std::shared_ptr ctx = NewContext(rt);
     EvalInternal(
-      ctx, {}, source_str(filepath), "", 0, {}
+      ctx, Unit::TAG_NULL, source_str(filepath), "", 0
     );
   }
   
