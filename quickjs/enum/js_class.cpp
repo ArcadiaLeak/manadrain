@@ -1,4 +1,9 @@
-namespace JS {
+export module js_class;
+import std;
+
+import js_atom;
+
+export namespace JS {
   enum {
     CLASS_OBJECT,
     CLASS_ARRAY,

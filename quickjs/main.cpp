@@ -1,26 +1,8 @@
-#include <print>
-#include <fstream>
-#include <filesystem>
-#include <string>
-#include <ranges>
-#include <vector>
-#include <unordered_map>
-#include <variant>
-#include <stdexcept>
-#include <deque>
-#include <cassert>
-#include <cctype>
-#include <array>
-#include <stack>
-#include <span>
-#include <list>
-#include <map>
-#include <algorithm>
-#include <bitset>
+import std;
 
-#include "enum/js_atom.hpp"
-#include "enum/js_class.hpp"
-#include "enum/js_token.hpp"
+import js_atom;
+import js_class;
+import js_token;
 
 namespace JS {
   enum class ATOM_TYPE {
@@ -69,13 +51,13 @@ namespace JS {
   constexpr std::bitset<8> DECL_MASK_ALL = DECL_MASK_FUNC |
     DECL_MASK_FUNC_WITH_LABEL | DECL_MASK_OTHER;
 
-  constexpr size_t PROP_INITIAL_SIZE = 2;
+  constexpr std::size_t PROP_INITIAL_SIZE = 2;
 }
 
 namespace unicode {
-  constexpr uint8_t UTF8_CHAR_LEN_MAX = 6;
-  constexpr int32_t CP_LS = 0x2028;
-  constexpr int32_t CP_PS = 0x2029;
+  constexpr std::uint8_t UTF8_CHAR_LEN_MAX = 6;
+  constexpr std::int32_t CP_LS = 0x2028;
+  constexpr std::int32_t CP_PS = 0x2029;
 }
 
 namespace JS {
@@ -83,7 +65,7 @@ namespace JS {
   struct Object;
   
   struct HeapVal : std::enable_shared_from_this<HeapVal> {
-    int32_t ref_count = 1;
+    std::int32_t ref_count = 1;
 
     HeapVal() = default;
     HeapVal(const HeapVal&) = default;
@@ -101,7 +83,7 @@ namespace JS {
   struct Atom : HeapVal {
     std::string str;
     ATOM_TYPE atom_type;
-    int64_t idx = -1;
+    std::int64_t idx = -1;
 
     Atom(
       std::string str, ATOM_TYPE atom_type
@@ -125,7 +107,7 @@ namespace JS {
 namespace JS {
   struct TokString {
     Value str;
-    int32_t sep;
+    std::int32_t sep;
   };
 
   struct TokNumber {
@@ -144,7 +126,7 @@ namespace JS {
   };
 
   using TokVariant = std::variant<
-    int32_t, TokString, TokNumber, TokIdent, TokRegexp
+    std::int32_t, TokString, TokNumber, TokIdent, TokRegexp
   >;
 }
 
@@ -154,13 +136,13 @@ namespace JS {
   };
 
   struct VarScope {
-    size_t parent;
-    size_t first;
+    std::size_t parent;
+    std::size_t first;
   };
 
   struct FunctionDef {
     std::weak_ptr<Context> ctx;
-    int64_t parent = -1;
+    std::int64_t parent = -1;
 
     bool is_eval;
     bool is_global_var;
@@ -176,15 +158,15 @@ namespace JS {
     std::weak_ptr<Atom> func_name;
 
     std::vector<VarDef> vars;
-    size_t eval_ret_idx;
+    std::size_t eval_ret_idx;
 
-    size_t scope_level;
-    size_t scope_first;
+    std::size_t scope_level;
+    std::size_t scope_first;
     std::vector<VarScope> scopes;
-    size_t body_scope;
+    std::size_t body_scope;
 
-    std::deque<uint64_t> byte_code;
-    size_t last_opcode_pos;
+    std::deque<std::uint64_t> byte_code;
+    std::size_t last_opcode_pos;
 
     std::weak_ptr<struct ModuleDef> module_def;
   }; 
@@ -193,7 +175,7 @@ namespace JS {
 namespace JS {
   struct Shape : HeapVal {
     std::weak_ptr<Object> proto;
-    size_t prop_size;
+    std::size_t prop_size;
   };
 
   std::shared_ptr<Object> get_proto_obj(Value proto_val) {
@@ -207,12 +189,12 @@ namespace JS {
   struct Property {};
 
   struct Object : HeapVal {
-    int32_t class_id;
+    std::int32_t class_id;
     std::weak_ptr<Shape> shape;
     std::vector<Property> prop;
     std::bitset<8> flags;
 
-    Object(std::shared_ptr<Shape> sh, int32_t class_id)
+    Object(std::shared_ptr<Shape> sh, std::int32_t class_id)
       : shape{sh}, class_id{class_id}, prop{sh->prop_size} {}
 
     std::shared_ptr<Object> asObject() override {
@@ -221,14 +203,14 @@ namespace JS {
   };
 
   struct Array : Object {
-    Array(std::shared_ptr<Shape> sh, int32_t class_id)
+    Array(std::shared_ptr<Shape> sh, std::int32_t class_id)
       : Object{sh, class_id} {}
   };
 
   struct Runtime {
     std::unordered_map<std::string, std::weak_ptr<Atom>> atom_hash;
     std::vector<std::shared_ptr<Atom>> atom_array;
-    std::stack<size_t> atom_free_idx;
+    std::stack<std::size_t> atom_free_idx;
 
     std::vector<std::weak_ptr<Atom>> class_array;
 
@@ -238,12 +220,12 @@ namespace JS {
     std::map<std::weak_ptr<Object>, std::weak_ptr<Shape>> shape_hash;
 
     std::shared_ptr<Atom> NewAtom(std::string str, ATOM_TYPE atom_type);
-    std::shared_ptr<Atom> DupAtom(size_t idx);
+    std::shared_ptr<Atom> DupAtom(std::size_t idx);
 
-    void NewClass(int32_t class_id, std::shared_ptr<Atom> class_name);
+    void NewClass(std::int32_t class_id, std::shared_ptr<Atom> class_name);
     
     void init_atom_range();
-    void init_class_range(std::span<const int32_t> tab, int32_t start);
+    void init_class_range(std::span<const std::int32_t> tab, std::int32_t start);
 
     void add_gc_object(std::shared_ptr<HeapVal> heap_val) {
       gc_obj_list.push_back(heap_val);
@@ -259,7 +241,7 @@ namespace JS {
 
     int AddIntrinsicBasicObjects();
     
-    std::shared_ptr<Atom> DupAtom(size_t idx);
+    std::shared_ptr<Atom> DupAtom(std::size_t idx);
 
     std::shared_ptr<Context> asContext() override {
       return std::static_pointer_cast<Context>(shared_from_this());
@@ -269,13 +251,13 @@ namespace JS {
 
 namespace JS {
   void Runtime::NewClass(
-    int32_t class_id, std::shared_ptr<Atom> class_name
+    std::int32_t class_id, std::shared_ptr<Atom> class_name
   ) {
     if (class_id >= class_array.size()) {
       class_array.resize(
-        std::max<size_t>(
+        std::max<std::size_t>(
           CLASS_INIT_COUNT,
-          std::max<size_t>(class_id + 1, class_array.size() * 3 / 2)
+          std::max<std::size_t>(class_id + 1, class_array.size() * 3 / 2)
         )
       );
     
@@ -298,7 +280,7 @@ namespace JS {
   Value NewObjectFromShape(
     std::shared_ptr<Context> ctx,
     std::shared_ptr<Shape> sh,
-    int32_t class_id
+    std::int32_t class_id
   ) {
     std::shared_ptr<Object> obj = nullptr;
     switch (class_id) {
@@ -314,19 +296,19 @@ namespace JS {
   std::shared_ptr<Shape> new_shape_nohash(
     std::shared_ptr<Context> ctx,
     std::shared_ptr<Object> proto,
-    size_t prop_size
+    std::size_t prop_size
   ) {
     std::shared_ptr sh = std::make_shared<Shape>();
     ctx->rt.lock()->add_gc_object(sh);
     if (proto) DupValue(proto);
     sh->proto = proto;
-    sh->prop_size = PROP_INITIAL_SIZE;
+    sh->prop_size = prop_size;
     return sh;
   }
 
   Value NewObjectProtoClassAlloc(
     std::shared_ptr<Context> ctx, Value proto_val,
-    int32_t class_id, size_t n_alloc_props
+    std::int32_t class_id, std::size_t n_alloc_props
   ) {
     std::shared_ptr proto = get_proto_obj(proto_val);
     std::shared_ptr sh = new_shape_nohash(ctx, proto, n_alloc_props);
@@ -344,7 +326,7 @@ namespace common {
 }
 
 namespace unicode {
-  int32_t from_hex(int32_t c) {
+  std::int32_t from_hex(std::int32_t c) {
     if (c >= '0' && c <= '9')
       return c - '0';
     else if (c >= 'A' && c <= 'F')
@@ -355,15 +337,15 @@ namespace unicode {
       return -1;
   }
 
-  bool is_hi_surrogate(uint32_t c) {
+  bool is_hi_surrogate(std::uint32_t c) {
     return (c >> 10) == (0xD800 >> 10); // 0xD800-0xDBFF
   }
 
-  bool is_lo_surrogate(uint32_t c) {
+  bool is_lo_surrogate(std::uint32_t c) {
     return (c >> 10) == (0xDC00 >> 10); // 0xDC00-0xDFFF
   }
 
-  uint32_t from_surrogate(uint32_t hi, uint32_t lo) {
+  std::uint32_t from_surrogate(std::uint32_t hi, std::uint32_t lo) {
     return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
   }
 }
@@ -371,20 +353,20 @@ namespace unicode {
 namespace lre {
   using namespace unicode;
 
-  bool is_id_start_byte(int32_t c) {
+  bool is_id_start_byte(std::int32_t c) {
     return std::isalpha(c) || c == '$' || c == '_';
   }
 
-  bool is_id_continue_byte(int32_t c) {
+  bool is_id_continue_byte(std::int32_t c) {
     return std::isalnum(c) || c == '$' || c == '_';
   }
 
-  int32_t parse_escape(
-    common::PaddedBuf& buf, size_t& begin_idx,
+  std::int32_t parse_escape(
+    common::PaddedBuf& buf, std::size_t& begin_idx,
     int allow_utf16
   ) {
     auto p = std::next(buf.begin(), begin_idx);
-    uint32_t c = *p++;
+    std::uint32_t c = *p++;
 
     switch(c) {
       case 'b': c = '\b';
@@ -406,10 +388,10 @@ namespace lre {
       break;
 
       case 'x': {
-        int32_t h0 = from_hex(*p++);
+        std::int32_t h0 = from_hex(*p++);
         if (h0 < 0)
           return -1;
-        int32_t h1 = from_hex(*p++);
+        std::int32_t h1 = from_hex(*p++);
         if (h1 < 0)
           return -1;
         c = (h0 << 4) | h1;
@@ -417,7 +399,7 @@ namespace lre {
       break;
 
       case 'u': {
-        int32_t h, i;
+        std::int32_t h, i;
 
         if (*p == '{' && allow_utf16) {
           p++; c = 0;
@@ -445,7 +427,7 @@ namespace lre {
             is_hi_surrogate(c) && allow_utf16 == 2 &&
             p[0] == '\\' && p[1] == 'u'
           ) {
-            uint32_t c1 = 0;
+            std::uint32_t c1 = 0;
             for(i = 0; i < 4; i++) {
               h = from_hex(p[2 + i]);
               if (h < 0)
@@ -468,7 +450,7 @@ namespace lre {
         if (c != 0 || std::isdigit(*p))
           return -1;
       } else {
-        uint32_t v = *p - '0';
+        std::uint32_t v = *p - '0';
         if (v > 7)
           break;
         c = (c << 3) | v;
@@ -492,20 +474,20 @@ namespace lre {
 }
 
 namespace unicode {
-  constexpr uint32_t utf8_min_code[5] = {
+  constexpr std::uint32_t utf8_min_code[5] = {
     0x80, 0x800, 0x10000, 0x00200000, 0x04000000,
   };
 
-  constexpr uint8_t utf8_first_code_mask[5] = {
+  constexpr std::uint8_t utf8_first_code_mask[5] = {
     0x1f, 0xf, 0x7, 0x3, 0x1,
   };
 
-  int32_t from_utf8(
-    common::PaddedBuf& buf, size_t begin_idx,
-    int32_t max_len, size_t& end_idx
+  std::int32_t from_utf8(
+    common::PaddedBuf& buf, std::size_t begin_idx,
+    std::int32_t max_len, std::size_t& end_idx
   ) {
     auto p = std::next(buf.begin(), begin_idx);
-    int32_t l, c = *p++;
+    std::int32_t l, c = *p++;
     if (c < 0x80) {
       end_idx = std::distance(buf.begin(), p);
       return c;
@@ -542,8 +524,8 @@ namespace unicode {
     if (l > (max_len - 1))
       return -1;
     c &= utf8_first_code_mask[l - 1];
-    for (int32_t i = 0; i < l; i++) {
-      int32_t b = *p++;
+    for (std::int32_t i = 0; i < l; i++) {
+      std::int32_t b = *p++;
       if (b < 0x80 || b >= 0xc0)
         return -1;
       c = (c << 6) | (b & 0x3f);
@@ -557,7 +539,7 @@ namespace unicode {
 
 namespace JS {
   bool match_identifier(
-    common::PaddedBuf& buf, size_t idx,
+    common::PaddedBuf& buf, std::size_t idx,
     std::string rhs
   ) {
     std::string lhs = std::ranges::to<std::string>(
@@ -574,13 +556,13 @@ namespace JS {
     return false;
   }
   
-  int32_t simple_next_token(
+  std::int32_t simple_next_token(
     common::PaddedBuf& buf,
-    size_t& begin_idx,
+    std::size_t& begin_idx,
     bool no_line_feed
   ) {
-    size_t idx = begin_idx;
-    uint32_t ch = buf[idx];
+    std::size_t idx = begin_idx;
+    std::uint32_t ch = buf[idx];
 
     while (true) {
       ch = buf[idx++];
@@ -667,18 +649,18 @@ namespace JS {
     std::string filename;
     bool got_line_feed;
 
-    size_t token_idx;
+    std::size_t token_idx;
     TokVariant token;
     
     common::PaddedBuf buf;
-    size_t last_idx;
-    size_t curr_idx;
-    size_t buf_size;
+    std::size_t last_idx;
+    std::size_t curr_idx;
+    std::size_t buf_size;
 
     std::shared_ptr<FunctionDef> cur_func;
     bool is_module;
 
-    size_t push_scope() {
+    std::size_t push_scope() {
       if (not cur_func)
         return 0;
 
@@ -687,7 +669,7 @@ namespace JS {
         .parent = fd.scope_level,
         .first = fd.scope_first
       };
-      uint64_t scope_idx = fd.scopes.size();
+      std::uint64_t scope_idx = fd.scopes.size();
       fd.scopes.emplace_back(scope);
       fd.scope_level = scope_idx;
       emit_op(OP_enter_scope);
@@ -695,12 +677,12 @@ namespace JS {
       return scope_idx;
     }
 
-    void emit_op(uint64_t val) {
+    void emit_op(std::uint64_t val) {
       cur_func->last_opcode_pos = cur_func->byte_code.size();
       cur_func->byte_code.push_back(val);
     }
 
-    void emit_u32(uint64_t val) {
+    void emit_u32(std::uint64_t val) {
       cur_func->byte_code.push_back(val);
     }
 
@@ -743,7 +725,7 @@ namespace JS {
     bool token_is_static_import() {
       if (token.index() != 0 || std::get<0>(token) != TOK_IMPORT)
         return false;
-      int32_t tok = peek_token(false);
+      std::int32_t tok = peek_token(false);
       return tok != '(' && tok != '.';
     }
 
@@ -754,21 +736,21 @@ namespace JS {
       );
     }
 
-    bool token_is_pseudo_keyword(size_t atom) {
+    bool token_is_pseudo_keyword(std::size_t atom) {
       return std::holds_alternative<TokIdent>(token) &&
         std::get<TokIdent>(token).str.lock() == ctx->rt.lock()->atom_array[atom] &&
         std::get<TokIdent>(token).has_escape;
     }
 
-    int32_t peek_token(bool no_line_feed) {
+    std::int32_t peek_token(bool no_line_feed) {
       return simple_next_token(
         buf, curr_idx, no_line_feed
       );
     }
 
     int parse_string(
-      int32_t sep, bool do_throw, size_t idx,
-      TokVariant& token, size_t& idxref
+      std::int32_t sep, bool do_throw, std::size_t idx,
+      TokVariant& token, std::size_t& idxref
     ) {
       auto ch = buf[idx];
       auto strbuf = std::string{""};
@@ -784,7 +766,7 @@ namespace JS {
           { idx++; break; }
         
         if (ch == '\\') {
-          size_t idx_escape = idx - 1;
+          std::size_t idx_escape = idx - 1;
           ch = buf[idx];
 
           switch (ch) {
@@ -810,11 +792,11 @@ namespace JS {
         strbuf.push_back(ch);
       }
 
-      invalid_char: assert(0);
+      invalid_char: throw;
     }
 
-    int parse_error(size_t offset, std::string message) {
-      assert(0);
+    int parse_error(std::size_t offset, std::string message) {
+      throw;
     }
 
     int next_token() {
@@ -867,7 +849,7 @@ namespace JS {
 
 namespace JS {
   void Runtime::init_atom_range() {
-    for (size_t i = 0; i < atom_init.size(); i++) {
+    for (std::size_t i = 0; i < atom_init.size(); i++) {
       ATOM_TYPE atom_type;
       if (i == ATOM_Private_brand)
         atom_type = ATOM_TYPE::PRIVATE;
@@ -909,26 +891,42 @@ namespace JS {
 }
 
 namespace JS {
-  constexpr bool atom_is_const(size_t idx) {
+  constexpr bool atom_is_const(std::size_t idx) {
     return idx > ATOM_END;
   }
 
-  std::shared_ptr<Atom> Runtime::DupAtom(size_t idx) {
+  std::shared_ptr<Atom> Runtime::DupAtom(std::size_t idx) {
     std::shared_ptr<Atom> ret = atom_array[idx];
     if (not atom_is_const(idx))
       ret->ref_count++;
     return ret;
   }
 
-  std::shared_ptr<Atom> Context::DupAtom(size_t idx) {
+  std::shared_ptr<Atom> Context::DupAtom(std::size_t idx) {
     return rt.lock()->DupAtom(idx);
   }
 }
 
 namespace JS {
+  constexpr std::array Object_proto_funcs = std::to_array<std::string_view>({
+    "toString",
+    "toLocaleString",
+    "valueOf",
+    "hasOwnProperty",
+    "isPrototypeOf",
+    "propertyIsEnumerable",
+    "__proto__",
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+  });
+}
+
+namespace JS {
   int Context::AddIntrinsicBasicObjects() {
     class_proto[CLASS_OBJECT] = NewObjectProtoClassAlloc(
-      asContext(), Unit::TAG_NULL, CLASS_OBJECT, 0
+      asContext(), Unit::TAG_NULL, CLASS_OBJECT, Object_proto_funcs.size()
     );
 
     return -1;
@@ -936,9 +934,9 @@ namespace JS {
 }
 
 namespace JS {
-  void Runtime::init_class_range(std::span<const int32_t> table, int32_t start) {
+  void Runtime::init_class_range(std::span<const std::int32_t> table, std::int32_t start) {
     for (int i = 0; i < table.size(); i++) {
-      int32_t class_id = i + start;
+      std::int32_t class_id = i + start;
       NewClass(class_id, DupAtom(table[i]));
     }
   }
@@ -960,7 +958,7 @@ namespace JS {
     std::string input,
     std::string filename,
     std::bitset<8> flags,
-    int64_t scope_idx = -1
+    std::int64_t scope_idx = -1
   ) {
     std::bitset<8> js_mode = 0;
 
@@ -1005,7 +1003,7 @@ namespace JS {
     func_def.body_scope = func_def.scope_level;
     state.parse_program();
 
-    assert(0);
+    throw;
   }
 }
 
@@ -1025,13 +1023,13 @@ std::string source_str(std::string filepath) {
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
-    std::println(stderr, "Usage: {} <filepath>", argv[0]);
+    std::println(std::cerr, "Usage: {} <filepath>", argv[0]);
     return 1;
   }
 
   std::string filepath = argv[1];
   if (not std::filesystem::exists(filepath)) {
-    std::println(stderr, "Error: file does not exist: {}", filepath);
+    std::println(std::cerr, "Error: file does not exist: {}", filepath);
     return 1;
   }
 

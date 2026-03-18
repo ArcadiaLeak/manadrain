@@ -1,4 +1,7 @@
-namespace JS {
+export module js_atom;
+import std;
+
+export namespace JS {
   enum {
     ATOM_null,
     ATOM_false,

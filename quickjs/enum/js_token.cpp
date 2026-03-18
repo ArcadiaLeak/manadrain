@@ -1,4 +1,6 @@
-namespace JS {
+export module js_token;
+
+export namespace JS {
   enum {
     TOK_NUMBER = -128,
     TOK_STRING,
