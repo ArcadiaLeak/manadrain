@@ -17,6 +17,7 @@
 #include <span>
 #include <list>
 #include <map>
+#include <algorithm>
 
 #include "enum/js_atom.hpp"
 #include "enum/js_class.hpp"
@@ -68,6 +69,8 @@ namespace JS {
   constexpr uint8_t DECL_MASK_OTHER = 1 << 2;
   constexpr uint8_t DECL_MASK_ALL = DECL_MASK_FUNC |
     DECL_MASK_FUNC_WITH_LABEL | DECL_MASK_OTHER;
+
+  constexpr size_t PROP_INITIAL_SIZE = 2;
 }
 
 namespace unicode {
@@ -88,10 +91,6 @@ namespace JS {
 
     HeapVal() = default;
   };
-}
-
-namespace JS {
-  struct Object : HeapVal {};
 }
 
 namespace JS {
@@ -119,18 +118,8 @@ namespace JS {
   using Value = std::variant<
     Unit,
     std::weak_ptr<Atom>,
-    std::weak_ptr<Object>
+    std::weak_ptr<struct Object>
   >;
-}
-
-namespace JS {
-  struct Context : HeapVal {
-    std::weak_ptr<struct Runtime> rt;
-
-    std::vector<Value> class_proto;
-
-    std::weak_ptr<Atom> DupAtom(size_t idx);
-  };
 }
 
 namespace JS {
@@ -170,7 +159,7 @@ namespace JS {
   };
 
   struct FunctionDef {
-    std::weak_ptr<Context> ctx;
+    std::weak_ptr<struct Context> ctx;
     std::optional<size_t> parent;
 
     bool is_eval;
@@ -197,14 +186,14 @@ namespace JS {
     std::deque<uint64_t> byte_code;
     size_t last_opcode_pos;
 
-    std::weak_ptr<struct module_def> module_def;
+    std::weak_ptr<struct ModuleDef> module_def;
   }; 
 }
 
 namespace JS {
   struct Shape : HeapVal {
     std::weak_ptr<Object> proto;
-    int prop_size;
+    size_t prop_size;
   };
 
   std::weak_ptr<Object> get_proto_obj(Value proto_val) {
@@ -216,8 +205,19 @@ namespace JS {
 }
 
 namespace JS {
-  struct Clazz {
+  struct Property {};
+
+  struct Object : HeapVal {
     size_t class_id;
+    std::weak_ptr<Shape> shape;
+    std::vector<Property> prop;
+
+    Object(
+      std::shared_ptr<Shape> sh, size_t class_id
+    ) : shape{sh}, class_id{class_id}, prop{sh->prop_size} {}
+  };
+
+  struct Clazz {
     std::weak_ptr<Atom> class_name;
   };
 
@@ -233,17 +233,48 @@ namespace JS {
 
     std::map<std::weak_ptr<Object>, std::weak_ptr<Shape>> shape_hash;
 
-    std::weak_ptr<Atom> NewAtom(std::string str, ATOM_TYPE atom_type);
-    std::weak_ptr<Atom> DupAtom(size_t idx);
+    std::shared_ptr<Atom> NewAtom(std::string str, ATOM_TYPE atom_type);
+    std::shared_ptr<Atom> DupAtom(size_t idx);
+
+    void NewClass(int32_t class_id, std::shared_ptr<Atom> class_name);
     
     void init_atom_range();
     void init_class_range(std::span<const int32_t> tab, int32_t start);
-
 
     void add_gc_object(std::shared_ptr<HeapVal> heap_val) {
       gc_obj_list.push_back(heap_val);
     }
   };
+
+  struct Context : HeapVal {
+    std::weak_ptr<Runtime> rt;
+    std::vector<Value> class_proto;
+
+    Context(std::shared_ptr<Runtime> rt)
+      : rt{rt}, class_proto{rt->class_array.size()} {}
+
+    std::shared_ptr<Atom> DupAtom(size_t idx);
+  };
+}
+
+namespace JS {
+  void Runtime::NewClass(
+    int32_t class_id, std::shared_ptr<Atom> class_name
+  ) {
+    if (class_id >= class_array.size()) {
+      class_array.resize(
+        std::max<size_t>(
+          CLASS_INIT_COUNT,
+          std::max<size_t>(class_id + 1, class_array.size() * 3 / 2)
+        )
+      );
+    
+      for (std::weak_ptr ctx : context_list) {
+        ctx.lock()->class_proto.resize(class_array.size());
+      }
+    }
+    class_array.at(class_id) = Clazz{class_name};
+  }
 }
 
 namespace JS {
@@ -269,7 +300,10 @@ namespace JS {
     std::weak_ptr<Context> ctx, std::shared_ptr<Shape> sh,
     size_t class_id
   ) {
-    assert(0);
+    switch (class_id) {
+      default:
+      return std::make_shared<Object>(sh, class_id);
+    }
   }
 }
 
@@ -277,20 +311,20 @@ namespace JS {
   std::shared_ptr<Shape> new_shape_nohash(
     std::shared_ptr<Context> ctx,
     std::weak_ptr<Object> proto,
-    int prop_size
+    size_t prop_size
   ) {
     std::shared_ptr sh = std::make_shared<Shape>();
     ctx->rt.lock()->add_gc_object(sh);
     if (not proto.expired())
       DupValue(proto);
     sh->proto = proto;
-    sh->prop_size = prop_size;
+    sh->prop_size = PROP_INITIAL_SIZE;
     return sh;
   }
 
   Value NewObjectProtoClassAlloc(
     std::shared_ptr<Context> ctx, Value proto_val,
-    size_t class_id, int n_alloc_props
+    size_t class_id, size_t n_alloc_props
   ) {
     std::weak_ptr proto = get_proto_obj(proto_val);
     std::shared_ptr sh = new_shape_nohash(ctx, proto, n_alloc_props);
@@ -844,14 +878,14 @@ namespace JS {
     }
   }
 
-  std::weak_ptr<Atom> Runtime::NewAtom(std::string str, ATOM_TYPE atom_type) {
+  std::shared_ptr<Atom> Runtime::NewAtom(std::string str, ATOM_TYPE atom_type) {
     if (atom_type == ATOM_TYPE::STRING) {
       auto atom_iter = atom_hash.find(str);
       if (
         atom_iter != atom_hash.end() &&
-        atom_iter->second.lock()
+        not atom_iter->second.expired()
       ) {
-        return atom_iter->second;
+        return atom_iter->second.lock();
       }
     }
 
@@ -878,32 +912,28 @@ namespace JS {
     return idx > ATOM_END;
   }
 
-  std::weak_ptr<Atom> Runtime::DupAtom(size_t idx) {
+  std::shared_ptr<Atom> Runtime::DupAtom(size_t idx) {
     std::shared_ptr<Atom> ret = atom_array[idx];
     if (not atom_is_const(idx))
       ret->ref_count++;
     return ret;
   }
 
-  std::weak_ptr<Atom> Context::DupAtom(size_t idx) {
+  std::shared_ptr<Atom> Context::DupAtom(size_t idx) {
     return rt.lock()->DupAtom(idx);
   }
 }
 
 namespace JS {
-  void Runtime::init_class_range(std::span<const int32_t> tab, int32_t start) {
-    for (size_t i = 0; i < tab.size(); i++) {
-      class_array.emplace_back(i + start, DupAtom(tab[i]));
-    }
+  void Runtime::init_class_range(std::span<const int32_t> table, int32_t start) {
+    for (int32_t class_name : table) NewClass(start++, DupAtom(class_name));
   }
 }
 
 namespace JS {
   std::shared_ptr<Context> NewContext(std::shared_ptr<Runtime> rt) {
-    std::shared_ptr ctx = std::make_shared<Context>();
+    std::shared_ptr ctx = std::make_shared<Context>(rt);
     rt->add_gc_object(ctx);
-    ctx->class_proto.resize(rt->class_array.size());
-    ctx->rt = rt;
     rt->context_list.push_back(ctx);
     return ctx;
   }
