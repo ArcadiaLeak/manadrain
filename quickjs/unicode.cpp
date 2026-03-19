@@ -1,5 +1,6 @@
 module quickjs:unicode;
-import :common;
+
+import :utility;
 
 namespace JS {
   namespace unicode {
@@ -47,7 +48,7 @@ namespace JS {
     };
 
     std::int32_t from_utf8(
-      common::PaddedBuf& buf, std::size_t begin_idx,
+      utility::PaddedBuf& buf, std::size_t begin_idx,
       std::int32_t max_len, std::size_t& end_idx
     ) {
       auto p = std::next(buf.begin(), begin_idx);
@@ -115,7 +116,7 @@ namespace JS {
     }
 
     std::int32_t parse_escape(
-      common::PaddedBuf& buf, std::size_t& begin_idx,
+      utility::PaddedBuf& buf, std::size_t& begin_idx,
       int allow_utf16
     ) {
       auto p = std::next(buf.begin(), begin_idx);

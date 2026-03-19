@@ -3,17 +3,21 @@ export module quickjs;
 import :predef.atom;
 import :predef.clazz;
 import :predef.token;
-import :common;
+import :parsing;
+export import :prelude;
 import :unicode;
+import :utility;
+
+export namespace std {
+  template<>
+  struct hash<JS::String> {
+    std::size_t operator()(const JS::String& str) const noexcept {
+      return std::hash<std::string_view>{}(str.view());
+    }
+  };
+}
 
 export namespace JS {
-  enum class ATOM_TYPE {
-    STRING,
-    GLOBAL_SYMBOL,
-    SYMBOL,
-    PRIVATE,
-  };
-
   enum class CFUNC {
     generic,
     generic_magic,
@@ -29,140 +33,6 @@ export namespace JS {
     setter_magic,
     iterator_next,
   };
-}
-
-enum {
-  OP_enter_scope
-};
-
-export namespace JS {
-  constexpr std::bitset<8> EVAL_TYPE_GLOBAL = 0;
-  constexpr std::bitset<8> EVAL_TYPE_MODULE = 1;
-  constexpr std::bitset<8> EVAL_TYPE_DIRECT = 2;
-  constexpr std::bitset<8> EVAL_TYPE_INDIRECT = 3;
-  constexpr std::bitset<8> EVAL_TYPE_MASK = 3;
-
-  constexpr std::bitset<8> EVAL_FLAG_STRICT = 1 << 3;
-
-  constexpr std::bitset<8> MODE_STRICT = 1 << 0;
-  constexpr std::bitset<8> MODE_ASYNC = 1 << 2;
-
-  constexpr std::bitset<8> DECL_MASK_FUNC = 1 << 0;
-  constexpr std::bitset<8> DECL_MASK_FUNC_WITH_LABEL = 1 << 1;
-  constexpr std::bitset<8> DECL_MASK_OTHER = 1 << 2;
-  constexpr std::bitset<8> DECL_MASK_ALL = DECL_MASK_FUNC |
-    DECL_MASK_FUNC_WITH_LABEL | DECL_MASK_OTHER;
-
-  constexpr std::size_t PROP_INITIAL_SIZE = 2;
-}
-
-export namespace JS {
-  struct HeapVal : std::enable_shared_from_this<HeapVal> {
-    std::int32_t ref_count = 1;
-
-    HeapVal() = default;
-    HeapVal(const HeapVal&) = default;
-    HeapVal& operator=(const HeapVal&) = default;
-    HeapVal(HeapVal&&) noexcept = default;
-    HeapVal& operator=(HeapVal&&) noexcept = default;
-    virtual ~HeapVal() = default;
-    
-    virtual std::shared_ptr<struct Object> asObject() { return nullptr; }
-    virtual std::shared_ptr<struct Context> asContext() { return nullptr; }
-  };
-}
-
-export namespace JS {
-  struct Atom : HeapVal {
-    std::string str;
-    ATOM_TYPE atom_type;
-    std::int64_t idx = -1;
-
-    Atom(
-      std::string str, ATOM_TYPE atom_type
-    ): str{str}, atom_type{atom_type} {}
-  };
-}
-
-export namespace JS {
-  enum class Unit {
-    TAG_NULL,
-    TAG_UNDEFINED,
-    TAG_UNINITIALIZED,
-    TAG_FALSE,
-    TAG_TRUE,
-    TAG_EXCEPTION
-  };
-
-  using Value = std::variant<Unit, std::weak_ptr<HeapVal>>;
-}
-
-export namespace JS {
-  struct TokString {
-    Value str;
-    std::int32_t sep;
-  };
-
-  struct TokNumber {
-    Value num;
-  };
-
-  struct TokIdent {
-    std::weak_ptr<Atom> str;
-    bool has_escape;
-    bool is_reserved;
-  };
-
-  struct TokRegexp {
-    Value body;
-    Value flags;
-  };
-
-  using TokVariant = std::variant<
-    std::int32_t, TokString, TokNumber, TokIdent, TokRegexp
-  >;
-}
-
-export namespace JS {
-  struct VarDef {
-    std::weak_ptr<Atom> var_name;
-  };
-
-  struct VarScope {
-    std::size_t parent;
-    std::size_t first;
-  };
-
-  struct FunctionDef {
-    std::weak_ptr<Context> ctx;
-    std::int64_t parent = -1;
-
-    bool is_eval;
-    bool is_global_var;
-    bool is_func_expr;
-
-    std::bitset<8> eval_type;
-    bool new_target_allowed;
-    bool super_call_allowed;
-    bool super_allowed;
-    bool arguments_allowed;
-    std::bitset<8> js_mode;
-
-    std::weak_ptr<Atom> func_name;
-
-    std::vector<VarDef> vars;
-    std::size_t eval_ret_idx;
-
-    std::size_t scope_level;
-    std::size_t scope_first;
-    std::vector<VarScope> scopes;
-    std::size_t body_scope;
-
-    std::deque<std::uint64_t> byte_code;
-    std::size_t last_opcode_pos;
-
-    std::weak_ptr<struct ModuleDef> module_def;
-  }; 
 }
 
 export namespace JS {
@@ -201,7 +71,7 @@ export namespace JS {
   };
 
   struct Runtime {
-    std::unordered_map<std::string, std::weak_ptr<Atom>> atom_hash;
+    std::unordered_map<String, std::weak_ptr<Atom>> atom_hash;
     std::vector<std::shared_ptr<Atom>> atom_array;
     std::stack<std::size_t> atom_free_idx;
 
@@ -212,7 +82,7 @@ export namespace JS {
 
     std::map<std::weak_ptr<Object>, std::weak_ptr<Shape>> shape_hash;
 
-    std::shared_ptr<Atom> NewAtom(std::string str, ATOM_TYPE atom_type);
+    std::shared_ptr<Atom> NewAtom(String str, ATOM_TYPE atom_type);
     std::shared_ptr<Atom> DupAtom(std::size_t idx);
 
     void NewClass(std::int32_t class_id, std::shared_ptr<Atom> class_name);
@@ -311,314 +181,189 @@ export namespace JS {
   }
 }
 
-export namespace JS {
-  bool match_identifier(
-    common::PaddedBuf& buf, std::size_t idx,
-    std::string rhs
-  ) {
-    std::string lhs = std::ranges::to<std::string>(
-      std::ranges::subrange(
-        std::next(buf.begin(), idx),
-        std::next(buf.begin(), idx + rhs.size())
-      )
-    );
-    
-    if (lhs == rhs) return !lre::is_id_continue_byte(
-      *std::next(buf.begin(), idx + rhs.size())
-    );
-
-    return false;
+namespace JS {
+  bool ParseState::token_is_pseudo_keyword(std::size_t atom) {
+    return std::holds_alternative<TokIdent>(token) &&
+      std::get<TokIdent>(token).str.lock() == ctx->rt.lock()->atom_array[atom] &&
+      std::get<TokIdent>(token).has_escape;
   }
-  
-  std::int32_t simple_next_token(
-    common::PaddedBuf& buf,
-    std::size_t& begin_idx,
-    bool no_line_feed
+
+  std::size_t ParseState::push_scope() {
+    if (not cur_func)
+      return 0;
+
+    FunctionDef& fd = *cur_func;
+    VarScope scope{
+      .parent = fd.scope_level,
+      .first = fd.scope_first
+    };
+    std::uint64_t scope_idx = fd.scopes.size();
+    fd.scopes.emplace_back(scope);
+    fd.scope_level = scope_idx;
+    emit_op(OP::enter_scope);
+    emit_u32(scope_idx);
+    return scope_idx;
+  }
+
+  void ParseState::emit_op(OP val) {
+    cur_func->last_opcode_pos = cur_func->byte_code.size();
+    cur_func->byte_code.push_back(std::to_underlying(val));
+  }
+
+  void ParseState::emit_u32(std::uint64_t val) {
+    cur_func->byte_code.push_back(val);
+  }
+
+  int ParseState::parse_program() {
+    if (next_token())
+      return -1;
+    while (token.index() != 0 || std::get<0>(token) != TOK_EOF) {
+      if (parse_source_element())
+        return -1;
+    }
+    return 0;
+  }
+
+  int ParseState::parse_source_element() {
+    if (
+      token.index() == 0 && std::get<0>(token) == TOK_FUNCTION ||
+      token_is_async_func()
+    )
+      return -1;
+    else if (
+      not cur_func->module_def.expired() &&
+      token.index() == 0 && std::get<0>(token) == TOK_EXPORT
+    )
+      return -1;
+    else if (
+      not cur_func->module_def.expired() &&
+      token_is_static_import()
+    )
+      return -1;
+    else
+      return parse_statement_or_decl(DECL_MASK_ALL);
+  }
+
+  int ParseState::parse_statement_or_decl(std::bitset<8> decl_mask) {
+    return -1;
+  }
+
+  bool ParseState::token_is_static_import() {
+    if (token.index() != 0 || std::get<0>(token) != TOK_IMPORT)
+      return false;
+    std::int32_t tok = peek_token(false);
+    return tok != '(' && tok != '.';
+  }
+
+  bool ParseState::token_is_async_func() {
+    return (
+      token_is_pseudo_keyword(ATOM_async) &&
+      peek_token(true) == TOK_FUNCTION
+    );
+  }
+
+  std::int32_t ParseState::peek_token(bool no_line_feed) {
+    return simple_next_token(
+      buf, curr_idx, no_line_feed
+    );
+  }
+
+  int ParseState::parse_string(
+    std::int32_t sep, bool do_throw, std::size_t idx,
+    TokVariant& token, std::size_t& idxref
   ) {
-    std::size_t idx = begin_idx;
-    std::uint32_t ch = buf[idx];
+    auto ch = buf[idx];
+    auto strbuf = std::string{""};
 
     while (true) {
-      ch = buf[idx++];
-      switch (ch) {
-        case '\r': case '\n':
-        if (no_line_feed)
-          return '\n';
-        continue;
-        
-        case ' ': case '\t': case '\v': case '\f':
-        continue;
+      if (idx >= buf_size)
+        goto invalid_char;
 
-        case '/':
-        if (buf[idx] == '/') {
-          if (no_line_feed)
-            return '\n';
-          auto cch = buf[idx];
-          while (cch && cch != '\r' && cch != '\n')
+      ch = buf[idx]; idx++;
+      if (ch == sep) break;
+
+      if (ch == '$' && buf[idx] == '{' && sep == '`')
+        { idx++; break; }
+      
+      if (ch == '\\') {
+        std::size_t idx_escape = idx - 1;
+        ch = buf[idx];
+
+        switch (ch) {
+          case '\0': if (idx >= buf_size)
+            goto invalid_char;
+          idx++; break;
+
+          case '\'': case '\"': case '\\':
+          idx++; break;
+
+          case '\r':
+          if (buf[idx + 1] == '\n')
             idx++;
+          [[fallthrough]];
+
+          case '\n': idx++;
           continue;
+
+          default: break;
         }
-        if (buf[idx] == '*') {
-          while (buf[++idx]) {
-            auto cch = buf[idx];
-            if ((cch == '\r' || cch == '\n') && no_line_feed)
-              return '\n';
-            if (cch == '*' && buf[idx + 1] == '/')
-              { idx += 2; break; }
-          }
-          continue;
-        }
-        break;
-
-        case '=': if (buf[idx] == '>')
-          return TOK_ARROW;
-        break;
-
-        case 'i': if (match_identifier(buf, idx, "n"))
-          return TOK_IN;
-        if (match_identifier(buf, idx, "mport")) {
-          begin_idx = idx + 5;
-          return TOK_IMPORT;
-        }
-        return TOK_IDENT;
-
-        case 'o': if (match_identifier(buf, idx, "f"))
-          return TOK_OF;
-        return TOK_IDENT;
-
-        case 'e': if (match_identifier(buf, idx, "xport"))
-          return TOK_EXPORT;
-        return TOK_IDENT;
-
-        case 'f': if (match_identifier(buf, idx, "unction"))
-          return TOK_FUNCTION;
-        return TOK_IDENT;
-        
-        case '\\': if (buf[idx] == 'u') {
-          if (lre::is_id_start_byte(lre::parse_escape(buf, idx, true)))
-            return TOK_IDENT;
-        }
-        break;
-
-        default: if (ch >= 128) {
-          using namespace unicode;
-          ch = from_utf8(buf, idx - 1, UTF8_CHAR_LEN_MAX, idx);
-          if (no_line_feed && (ch == CP_PS || ch == CP_LS))
-            return '\n';
-        }
-        if (std::isspace(ch))
-          continue;
-        if (lre::is_id_start_byte(ch))
-          return TOK_IDENT;
-        break;
       }
-      return ch;
+
+      strbuf.push_back(ch);
     }
+
+    invalid_char: throw;
   }
-}
 
-export namespace JS {
-  struct ParseState {
-    std::shared_ptr<Context> ctx;
-    std::string filename;
-    bool got_line_feed;
+  int ParseState::parse_error(std::size_t offset, std::string message) {
+    throw;
+  }
 
-    std::size_t token_idx;
-    TokVariant token;
-    
-    common::PaddedBuf buf;
-    std::size_t last_idx;
-    std::size_t curr_idx;
-    std::size_t buf_size;
+  int ParseState::next_token() {
+    auto idx = curr_idx;
+    auto ch = buf[idx];
 
-    std::shared_ptr<FunctionDef> cur_func;
-    bool is_module;
+    last_idx = curr_idx;
+    got_line_feed = false;
 
-    std::size_t push_scope() {
-      if (not cur_func)
-        return 0;
+    redo: token_idx = curr_idx;
+    ch = buf[idx];
 
-      FunctionDef& fd = *cur_func;
-      VarScope scope{
-        .parent = fd.scope_level,
-        .first = fd.scope_first
-      };
-      std::uint64_t scope_idx = fd.scopes.size();
-      fd.scopes.emplace_back(scope);
-      fd.scope_level = scope_idx;
-      emit_op(OP_enter_scope);
-      emit_u32(scope_idx);
-      return scope_idx;
-    }
-
-    void emit_op(std::uint64_t val) {
-      cur_func->last_opcode_pos = cur_func->byte_code.size();
-      cur_func->byte_code.push_back(val);
-    }
-
-    void emit_u32(std::uint64_t val) {
-      cur_func->byte_code.push_back(val);
-    }
-
-    int parse_program() {
-      if (next_token())
-        return -1;
-
-      while (token.index() != 0 || std::get<0>(token) != TOK_EOF) {
-        if (parse_source_element())
-          return -1;
-      }
-
-      return 0;
-    }
-
-    int parse_source_element() {
-      if (
-        token.index() == 0 && std::get<0>(token) == TOK_FUNCTION ||
-        token_is_async_func()
-      )
-        return -1;
-      else if (
-        not cur_func->module_def.expired() &&
-        token.index() == 0 && std::get<0>(token) == TOK_EXPORT
-      )
-        return -1;
-      else if (
-        not cur_func->module_def.expired() &&
-        token_is_static_import()
-      )
-        return -1;
+    switch (ch) {
+      case 0:
+      if (idx >= buf_size)
+        token = TOK_EOF;
       else
-        return parse_statement_or_decl(DECL_MASK_ALL);
+        goto def_token;
+      break;
+
+      case '\r':
+      if (buf[idx + 1] == '\n')
+        idx++;
+      [[fallthrough]];
+
+      case '\n': idx++;
+      line_feed: got_line_feed = true;
+      goto redo;
+
+      case '\f': case '\v': case ' ': case '\t': idx++;
+      goto redo;
+
+      case '\'': case '\"':
+      if (parse_string(ch, true, idx + 1, token, idx))
+        goto fail;
+      break;
+
+      default: def_token: token = ch;
+      idx++; break;
     }
 
-    int parse_statement_or_decl(std::bitset<8> decl_mask) {
-      return -1;
-    }
+    curr_idx = idx;
+    return 0;
 
-    bool token_is_static_import() {
-      if (token.index() != 0 || std::get<0>(token) != TOK_IMPORT)
-        return false;
-      std::int32_t tok = peek_token(false);
-      return tok != '(' && tok != '.';
-    }
-
-    bool token_is_async_func() {
-      return (
-        token_is_pseudo_keyword(ATOM_async) &&
-        peek_token(true) == TOK_FUNCTION
-      );
-    }
-
-    bool token_is_pseudo_keyword(std::size_t atom) {
-      return std::holds_alternative<TokIdent>(token) &&
-        std::get<TokIdent>(token).str.lock() == ctx->rt.lock()->atom_array[atom] &&
-        std::get<TokIdent>(token).has_escape;
-    }
-
-    std::int32_t peek_token(bool no_line_feed) {
-      return simple_next_token(
-        buf, curr_idx, no_line_feed
-      );
-    }
-
-    int parse_string(
-      std::int32_t sep, bool do_throw, std::size_t idx,
-      TokVariant& token, std::size_t& idxref
-    ) {
-      auto ch = buf[idx];
-      auto strbuf = std::string{""};
-
-      while (true) {
-        if (idx >= buf_size)
-          goto invalid_char;
-
-        ch = buf[idx]; idx++;
-        if (ch == sep) break;
-
-        if (ch == '$' && buf[idx] == '{' && sep == '`')
-          { idx++; break; }
-        
-        if (ch == '\\') {
-          std::size_t idx_escape = idx - 1;
-          ch = buf[idx];
-
-          switch (ch) {
-            case '\0': if (idx >= buf_size)
-              goto invalid_char;
-            idx++; break;
-
-            case '\'': case '\"': case '\\':
-            idx++; break;
-
-            case '\r':
-            if (buf[idx + 1] == '\n')
-              idx++;
-            [[fallthrough]];
-
-            case '\n': idx++;
-            continue;
-
-            default: break;
-          }
-        }
-
-        strbuf.push_back(ch);
-      }
-
-      invalid_char: throw;
-    }
-
-    int parse_error(std::size_t offset, std::string message) {
-      throw;
-    }
-
-    int next_token() {
-      auto idx = curr_idx;
-      auto ch = buf[idx];
-
-      last_idx = curr_idx;
-      got_line_feed = false;
-
-      redo: token_idx = curr_idx;
-      ch = buf[idx];
-
-      switch (ch) {
-        case 0:
-        if (idx >= buf_size)
-          token = TOK_EOF;
-        else
-          goto def_token;
-        break;
-
-        case '\r':
-        if (buf[idx + 1] == '\n')
-          idx++;
-        [[fallthrough]];
-
-        case '\n': idx++;
-        line_feed: got_line_feed = true;
-        goto redo;
-
-        case '\f': case '\v': case ' ': case '\t': idx++;
-        goto redo;
-
-        case '\'': case '\"':
-        if (parse_string(ch, true, idx + 1, token, idx))
-          goto fail;
-        break;
-
-        default: def_token: token = ch;
-        idx++; break;
-      }
-
-      curr_idx = idx;
-      return 0;
-
-      fail: token = TOK_ERROR;
-      return -1;
-    }
-  };
+    fail: token = TOK_ERROR;
+    return -1;
+  }
 }
 
 export namespace JS {
@@ -631,11 +376,11 @@ export namespace JS {
         atom_type = ATOM_TYPE::SYMBOL;
       else
         atom_type = ATOM_TYPE::STRING;
-      NewAtom(std::string{atom_init[i]}, atom_type);
+      NewAtom(atom_init[i], atom_type);
     }
   }
 
-  std::shared_ptr<Atom> Runtime::NewAtom(std::string str, ATOM_TYPE atom_type) {
+  std::shared_ptr<Atom> Runtime::NewAtom(String str, ATOM_TYPE atom_type) {
     if (atom_type == ATOM_TYPE::STRING) {
       auto atom_iter = atom_hash.find(str);
       if (
@@ -666,7 +411,7 @@ export namespace JS {
 
 export namespace JS {
   constexpr bool atom_is_const(std::size_t idx) {
-    return idx > ATOM_END;
+    return idx < ATOM_END;
   }
 
   std::shared_ptr<Atom> Runtime::DupAtom(std::size_t idx) {
@@ -729,8 +474,8 @@ export namespace JS {
   Value EvalInternal(
     std::shared_ptr<Context> ctx,
     Value this_obj,
-    std::string input,
-    std::string filename,
+    const std::string& input,
+    const std::string& filename,
     std::bitset<8> flags,
     std::int64_t scope_idx = -1
   ) {
