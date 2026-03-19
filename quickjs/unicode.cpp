@@ -1,5 +1,4 @@
 module quickjs:unicode;
-
 import :utility;
 
 namespace JS {

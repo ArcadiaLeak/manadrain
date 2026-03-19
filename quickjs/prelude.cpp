@@ -81,7 +81,6 @@ namespace JS {
   struct AtomStruct {
     String str;
     ATOM_TYPE atom_type;
-    std::size_t idx = -1;
 
     AtomStruct(const AtomStruct&) = default;
     AtomStruct& operator=(const AtomStruct&) = default;

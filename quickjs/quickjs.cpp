@@ -73,6 +73,11 @@ export namespace JS {
   struct Runtime {
     std::unordered_map<String, std::weak_ptr<Atom>> atom_hash;
     std::vector<std::shared_ptr<Atom>> atom_array;
+
+    std::map<
+      std::weak_ptr<Atom>, std::size_t,
+      std::owner_less<std::weak_ptr<Atom>>
+    > atom_indices;
     std::stack<std::size_t> atom_free_idx;
 
     std::vector<std::weak_ptr<Atom>> class_array;
@@ -80,7 +85,10 @@ export namespace JS {
     std::list<std::weak_ptr<Context>> context_list;
     std::list<std::shared_ptr<HeapVal>> gc_obj_list;
 
-    std::map<std::weak_ptr<Object>, std::weak_ptr<Shape>> shape_hash;
+    std::map<
+      std::weak_ptr<Object>, std::weak_ptr<Shape>,
+      std::owner_less<std::weak_ptr<Object>>
+    > shape_hash;
 
     std::shared_ptr<Atom> NewAtom(String str, ATOM_TYPE atom_type);
     std::shared_ptr<Atom> DupAtom(std::size_t idx);
@@ -394,12 +402,13 @@ export namespace JS {
     std::shared_ptr ret = std::make_shared<Atom>(str, atom_type);
 
     if (atom_free_idx.empty()) {
-      ret->idx = atom_array.size();
+      atom_indices[ret] = atom_array.size();
       atom_array.push_back(ret);
     } else {
-      ret->idx = atom_free_idx.top();
+      std::size_t free_idx = atom_free_idx.top();
       atom_free_idx.pop();
-      atom_array[ret->idx] = ret;
+      atom_indices[ret] = free_idx;
+      atom_array[free_idx] = ret;
     }
 
     if (atom_type == ATOM_TYPE::STRING)
