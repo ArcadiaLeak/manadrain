@@ -1,8 +1,5 @@
 export module quickjs;
 
-import :predef.atom;
-import :predef.clazz;
-import :predef.token;
 import :parsing;
 export import :prelude;
 import :unicode;
@@ -71,32 +68,18 @@ export namespace JS {
   };
 
   struct Runtime {
-    std::unordered_map<String, std::weak_ptr<Atom>> atom_hash;
-    std::vector<std::shared_ptr<Atom>> atom_array;
-
-    std::map<
-      std::weak_ptr<Atom>, std::size_t,
-      std::owner_less<std::weak_ptr<Atom>>
-    > atom_indices;
+    std::unordered_map<String, std::size_t> atom_hash;
+    std::vector<Atom> atom_array;
     std::stack<std::size_t> atom_free_idx;
 
-    std::vector<std::weak_ptr<Atom>> class_array;
+    std::vector<String> class_array;
 
     std::list<std::weak_ptr<Context>> context_list;
     std::list<std::shared_ptr<HeapVal>> gc_obj_list;
 
-    std::map<
-      std::weak_ptr<Object>, std::weak_ptr<Shape>,
-      std::owner_less<std::weak_ptr<Object>>
-    > shape_hash;
+    std::size_t NewAtom(String str, ATOM_TYPE atom_type);
 
-    std::shared_ptr<Atom> NewAtom(String str, ATOM_TYPE atom_type);
-    std::shared_ptr<Atom> DupAtom(std::size_t idx);
-
-    void NewClass(std::int32_t class_id, std::shared_ptr<Atom> class_name);
-    
-    void init_atom_range();
-    void init_class_range(std::span<const std::int32_t> tab, std::int32_t start);
+    void NewClass(std::int32_t class_id, String class_name);
 
     void add_gc_object(std::shared_ptr<HeapVal> heap_val) {
       gc_obj_list.push_back(heap_val);
@@ -111,8 +94,6 @@ export namespace JS {
       : rt{rt}, class_proto{rt->class_array.size()} {}
 
     int AddIntrinsicBasicObjects();
-    
-    std::shared_ptr<Atom> DupAtom(std::size_t idx);
 
     std::shared_ptr<Context> asContext() override {
       return std::static_pointer_cast<Context>(shared_from_this());
@@ -121,15 +102,10 @@ export namespace JS {
 }
 
 export namespace JS {
-  void Runtime::NewClass(
-    std::int32_t class_id, std::shared_ptr<Atom> class_name
-  ) {
+  void Runtime::NewClass(std::int32_t class_id, String class_name) {
     if (class_id >= class_array.size()) {
       class_array.resize(
-        std::max<std::size_t>(
-          CLASS_INIT_COUNT,
-          std::max<std::size_t>(class_id + 1, class_array.size() * 3 / 2)
-        )
+        std::max<std::size_t>(class_id + 1, class_array.size() * 3 / 2)
       );
     
       for (std::weak_ptr ctx : context_list) {
@@ -190,10 +166,13 @@ export namespace JS {
 }
 
 namespace JS {
-  bool ParseState::token_is_pseudo_keyword(std::size_t atom) {
-    return std::holds_alternative<TokIdent>(token) &&
-      std::get<TokIdent>(token).str.lock() == ctx->rt.lock()->atom_array[atom] &&
-      std::get<TokIdent>(token).has_escape;
+  bool ParseState::token_is_pseudo_keyword(std::string_view word) {
+    if (not std::holds_alternative<TokenIde>(token))
+      return false;
+
+    std::shared_ptr rt = ctx->rt.lock();
+    std::size_t atom_idx = rt->NewAtom(word, ATOM_TYPE::STRING);
+    return std::get<TokenIde>(token).str == rt->atom_array[atom_idx].str;
   }
 
   std::size_t ParseState::push_scope() {
@@ -225,7 +204,7 @@ namespace JS {
   int ParseState::parse_program() {
     if (next_token())
       return -1;
-    while (token.index() != 0 || std::get<0>(token) != TOK_EOF) {
+    while (token != TokenVar(TokenTri{'e', 'o', 'f'})) {
       if (parse_source_element())
         return -1;
     }
@@ -234,13 +213,13 @@ namespace JS {
 
   int ParseState::parse_source_element() {
     if (
-      token.index() == 0 && std::get<0>(token) == TOK_FUNCTION ||
+      token == TokenVar(TokenTri{'f', 'u', 'n'}) ||
       token_is_async_func()
     )
       return -1;
     else if (
       not cur_func->module_def.expired() &&
-      token.index() == 0 && std::get<0>(token) == TOK_EXPORT
+      token == TokenVar(TokenTri{'e', 'x', 'p'})
     )
       return -1;
     else if (
@@ -257,20 +236,23 @@ namespace JS {
   }
 
   bool ParseState::token_is_static_import() {
-    if (token.index() != 0 || std::get<0>(token) != TOK_IMPORT)
+    if (token != TokenVar(TokenTri{'i', 'm', 'p'}))
       return false;
-    std::int32_t tok = peek_token(false);
-    return tok != '(' && tok != '.';
+    TokenTri peeked = peek_token(false);
+    return (
+      peeked != TokenTri{0, 0, '('} &&
+      peeked != TokenTri{0, 0, '.'}
+    );
   }
 
   bool ParseState::token_is_async_func() {
     return (
-      token_is_pseudo_keyword(ATOM_async) &&
-      peek_token(true) == TOK_FUNCTION
+      token_is_pseudo_keyword("async") &&
+      peek_token(true) == TokenTri{'f', 'u', 'n'}
     );
   }
 
-  std::int32_t ParseState::peek_token(bool no_line_feed) {
+  TokenTri ParseState::peek_token(bool no_line_feed) {
     return simple_next_token(
       buf, curr_idx, no_line_feed
     );
@@ -278,7 +260,7 @@ namespace JS {
 
   int ParseState::parse_string(
     std::int32_t sep, bool do_throw, std::size_t idx,
-    TokVariant& token, std::size_t& idxref
+    TokenVar& token, std::size_t& idxref
   ) {
     auto ch = buf[idx];
     auto strbuf = std::string{""};
@@ -328,8 +310,8 @@ namespace JS {
   }
 
   int ParseState::next_token() {
-    auto idx = curr_idx;
-    auto ch = buf[idx];
+    std::size_t idx = curr_idx;
+    char32_t ch = buf[idx];
 
     last_idx = curr_idx;
     got_line_feed = false;
@@ -340,7 +322,7 @@ namespace JS {
     switch (ch) {
       case 0:
       if (idx >= buf_size)
-        token = TOK_EOF;
+        token = TokenTri{'e', 'o', 'f'};
       else
         goto def_token;
       break;
@@ -362,76 +344,43 @@ namespace JS {
         goto fail;
       break;
 
-      default: def_token: token = ch;
+      default: def_token: token = TokenTri{0, 0, ch};
       idx++; break;
     }
 
     curr_idx = idx;
     return 0;
 
-    fail: token = TOK_ERROR;
+    fail: token = TokenTri{'e', 'r', 'r'};
     return -1;
   }
 }
 
 export namespace JS {
-  void Runtime::init_atom_range() {
-    for (std::size_t i = 0; i < atom_init.size(); i++) {
-      ATOM_TYPE atom_type;
-      if (i == ATOM_Private_brand)
-        atom_type = ATOM_TYPE::PRIVATE;
-      else if (i >= ATOM_Symbol_toPrimitive)
-        atom_type = ATOM_TYPE::SYMBOL;
-      else
-        atom_type = ATOM_TYPE::STRING;
-      NewAtom(atom_init[i], atom_type);
-    }
-  }
-
-  std::shared_ptr<Atom> Runtime::NewAtom(String str, ATOM_TYPE atom_type) {
+  std::size_t Runtime::NewAtom(String str, ATOM_TYPE atom_type) {
     if (atom_type == ATOM_TYPE::STRING) {
-      auto atom_iter = atom_hash.find(str);
-      if (
-        atom_iter != atom_hash.end() &&
-        not atom_iter->second.expired()
-      ) {
-        return atom_iter->second.lock();
+      auto hash_entry = atom_hash.find(str);
+      if (hash_entry != atom_hash.end()) {
+        return hash_entry->second;
       }
     }
 
-    std::shared_ptr ret = std::make_shared<Atom>(str, atom_type);
+    Atom ret = Atom{str, atom_type};
+    std::size_t taken_idx{};
 
     if (atom_free_idx.empty()) {
-      atom_indices[ret] = atom_array.size();
+      taken_idx = atom_array.size();
       atom_array.push_back(ret);
     } else {
-      std::size_t free_idx = atom_free_idx.top();
+      taken_idx = atom_free_idx.top();
+      atom_array[taken_idx] = ret;
       atom_free_idx.pop();
-      atom_indices[ret] = free_idx;
-      atom_array[free_idx] = ret;
     }
 
     if (atom_type == ATOM_TYPE::STRING)
-      atom_hash[str] = ret;
+      atom_hash[str] = taken_idx;
 
-    return ret;
-  }
-}
-
-export namespace JS {
-  constexpr bool atom_is_const(std::size_t idx) {
-    return idx < ATOM_END;
-  }
-
-  std::shared_ptr<Atom> Runtime::DupAtom(std::size_t idx) {
-    std::shared_ptr<Atom> ret = atom_array[idx];
-    if (not atom_is_const(idx))
-      ret->ref_count++;
-    return ret;
-  }
-
-  std::shared_ptr<Atom> Context::DupAtom(std::size_t idx) {
-    return rt.lock()->DupAtom(idx);
+    return taken_idx;
   }
 }
 
@@ -453,20 +402,11 @@ export namespace JS {
 
 export namespace JS {
   int Context::AddIntrinsicBasicObjects() {
-    class_proto[CLASS_OBJECT] = NewObjectProtoClassAlloc(
-      asContext(), Unit::TAG_NULL, CLASS_OBJECT, Object_proto_funcs.size()
-    );
+    // class_proto[CLASS_OBJECT] = NewObjectProtoClassAlloc(
+    //   asContext(), Unit::TAG_NULL, CLASS_OBJECT, Object_proto_funcs.size()
+    // );
 
     return -1;
-  }
-}
-
-export namespace JS {
-  void Runtime::init_class_range(std::span<const std::int32_t> table, std::int32_t start) {
-    for (int i = 0; i < table.size(); i++) {
-      std::int32_t class_id = i + start;
-      NewClass(class_id, DupAtom(table[i]));
-    }
   }
 }
 
@@ -483,21 +423,22 @@ export namespace JS {
   Value EvalInternal(
     std::shared_ptr<Context> ctx,
     Value this_obj,
-    const std::string& input,
-    const std::string& filename,
+    std::string input,
+    std::string filename,
     std::bitset<8> flags,
     std::int64_t scope_idx = -1
   ) {
     std::bitset<8> js_mode = 0;
+    std::size_t buf_size = input.size();
 
     ParseState state{
       .ctx = ctx,
       .filename = filename,
       .buf = std::ranges::concat_view{
-        std::ranges::owning_view{std::string{input}},
+        std::ranges::owning_view{std::move(input)},
         std::ranges::repeat_view{'\0'}
       },
-      .buf_size = input.size()
+      .buf_size = buf_size
     };
 
     std::bitset eval_type = flags & EVAL_TYPE_MASK;
@@ -525,7 +466,7 @@ export namespace JS {
       func_def.arguments_allowed = true;
     }
     func_def.js_mode = js_mode;
-    func_def.func_name = ctx->DupAtom(ATOM__eval_);
+    func_def.func_name = ctx->rt.lock()->NewAtom(String{"<eval>"}, ATOM_TYPE::STRING);
     state.is_module = false;
     state.push_scope();
     func_def.body_scope = func_def.scope_level;

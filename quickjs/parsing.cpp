@@ -1,17 +1,13 @@
 
 module quickjs:parsing;
 
-import :predef.atom;
-import :predef.token;
 import :prelude;
 import :utility;
 import :unicode;
 
-import std;
-
 namespace JS {
   struct VarDef {
-    std::weak_ptr<Atom> var_name;
+    Atom var_name;
   };
 
   struct VarScope {
@@ -34,7 +30,7 @@ namespace JS {
     bool arguments_allowed;
     std::bitset<8> js_mode;
 
-    std::weak_ptr<Atom> func_name;
+    std::size_t func_name;
 
     std::vector<VarDef> vars;
     std::size_t eval_ret_idx;
@@ -70,7 +66,7 @@ namespace JS {
     return false;
   }
   
-  std::int32_t simple_next_token(
+  TokenTri simple_next_token(
     utility::PaddedBuf& buf,
     std::size_t& begin_idx,
     bool no_line_feed
@@ -83,7 +79,7 @@ namespace JS {
       switch (ch) {
         case '\r': case '\n':
         if (no_line_feed)
-          return '\n';
+          return {0, 0, '\n'};
         continue;
         
         case ' ': case '\t': case '\v': case '\f':
@@ -92,7 +88,7 @@ namespace JS {
         case '/':
         if (buf[idx] == '/') {
           if (no_line_feed)
-            return '\n';
+            return {0, 0, '\n'};
           auto cch = buf[idx];
           while (cch && cch != '\r' && cch != '\n')
             idx++;
@@ -102,7 +98,7 @@ namespace JS {
           while (buf[++idx]) {
             auto cch = buf[idx];
             if ((cch == '\r' || cch == '\n') && no_line_feed)
-              return '\n';
+              return {0, 0, '\n'};
             if (cch == '*' && buf[idx + 1] == '/')
               { idx += 2; break; }
           }
@@ -111,32 +107,32 @@ namespace JS {
         break;
 
         case '=': if (buf[idx] == '>')
-          return TOK_ARROW;
+          return {0, '=', '>'};
         break;
 
         case 'i': if (match_identifier(buf, idx, "n"))
-          return TOK_IN;
+          return {0, 'i', 'n'};
         if (match_identifier(buf, idx, "mport")) {
           begin_idx = idx + 5;
-          return TOK_IMPORT;
+          return {'i', 'm', 'p'};
         }
-        return TOK_IDENT;
+        return {'i', 'd', 'e'};
 
         case 'o': if (match_identifier(buf, idx, "f"))
-          return TOK_OF;
-        return TOK_IDENT;
+          return {0, 'o', 'f'};
+        return {'i', 'd', 'e'};
 
         case 'e': if (match_identifier(buf, idx, "xport"))
-          return TOK_EXPORT;
-        return TOK_IDENT;
+          return {'e', 'x', 'p'};
+        return {'i', 'd', 'e'};
 
         case 'f': if (match_identifier(buf, idx, "unction"))
-          return TOK_FUNCTION;
-        return TOK_IDENT;
+          return {'f', 'u', 'n'};
+        return {'i', 'd', 'e'};
         
         case '\\': if (buf[idx] == 'u') {
           if (lre::is_id_start_byte(lre::parse_escape(buf, idx, true)))
-            return TOK_IDENT;
+            return {'i', 'd', 'e'};
         }
         break;
 
@@ -144,15 +140,15 @@ namespace JS {
           using namespace unicode;
           ch = from_utf8(buf, idx - 1, UTF8_CHAR_LEN_MAX, idx);
           if (no_line_feed && (ch == CP_PS || ch == CP_LS))
-            return '\n';
+            return {0, 0, '\n'};
         }
         if (std::isspace(ch))
           continue;
         if (lre::is_id_start_byte(ch))
-          return TOK_IDENT;
+          return {'i', 'd', 'e'};
         break;
       }
-      return ch;
+      return {0, 0, ch};
     }
   }
 }
@@ -164,7 +160,7 @@ namespace JS {
     bool got_line_feed;
 
     std::size_t token_idx;
-    TokVariant token;
+    TokenVar token;
     
     utility::PaddedBuf buf;
     std::size_t last_idx;
@@ -183,16 +179,16 @@ namespace JS {
     int parse_statement_or_decl(std::bitset<8> decl_mask);
     int parse_string(
       std::int32_t sep, bool do_throw, std::size_t idx,
-      TokVariant& token, std::size_t& idxref
+      TokenVar& token, std::size_t& idxref
     );
     int parse_program();
     int parse_error(std::size_t offset, std::string message);
 
     bool token_is_static_import();
     bool token_is_async_func();
-    bool token_is_pseudo_keyword(std::size_t atom);
+    bool token_is_pseudo_keyword(std::string_view atom);
 
-    std::int32_t peek_token(bool no_line_feed);
+    TokenTri peek_token(bool no_line_feed);
     int next_token();
   };
 }

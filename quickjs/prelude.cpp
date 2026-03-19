@@ -1,7 +1,6 @@
 
 export module quickjs:prelude;
 import :utility;
-import std;
 
 namespace JS {
   enum class OP {
@@ -39,11 +38,9 @@ namespace JS {
 
 export namespace JS {
   struct String {
-    const std::shared_ptr<const char[]> data;
-    const std::size_t size;
-    
     String(std::string_view str_view)
       : data{utility::shared_str(str_view)}, size{str_view.size()} {}
+    String() = default;
 
     std::string_view view() const {
       return std::string_view{data.get(), size};
@@ -52,6 +49,10 @@ export namespace JS {
     bool operator==(const String& other) const {
       return view() == other.view();
     }
+
+    private:
+    std::shared_ptr<const char[]> data;
+    std::size_t size;
   };
 }
 
@@ -78,23 +79,9 @@ namespace JS {
 }
 
 namespace JS {
-  struct AtomStruct {
+  struct Atom {
     String str;
     ATOM_TYPE atom_type;
-
-    AtomStruct(const AtomStruct&) = default;
-    AtomStruct& operator=(const AtomStruct&) = default;
-    AtomStruct(AtomStruct&&) noexcept = default;
-    AtomStruct& operator=(AtomStruct&&) noexcept = default;
-    virtual ~AtomStruct() = default;
-
-    AtomStruct(String str, ATOM_TYPE atom_type)
-      : str{str}, atom_type{atom_type} {}
-  };
-
-  struct Atom : AtomStruct, HeapVal {
-    Atom(String str, ATOM_TYPE atom_type)
-      : AtomStruct{str, atom_type} {}
   };
 }
 
@@ -109,30 +96,40 @@ export namespace JS {
   };
 
   using Value = std::variant<Unit, std::weak_ptr<HeapVal>>;
+  bool operator==(
+    const std::weak_ptr<HeapVal>& lhs,
+    const std::weak_ptr<HeapVal>& rhs
+  ) { return lhs.lock() == rhs.lock(); }
 }
 
 namespace JS {
-  struct TokString {
+  struct TokenStr {
     Value str;
     std::int32_t sep;
+    bool operator==(const TokenStr& other) const = default; 
   };
 
-  struct TokNumber {
+  struct TokenNum {
     Value num;
+    bool operator==(const TokenNum& other) const = default; 
   };
 
-  struct TokIdent {
-    std::weak_ptr<Atom> str;
+  struct TokenIde {
+    String str;
     bool has_escape;
     bool is_reserved;
+    bool operator==(const TokenIde& other) const = default; 
   };
 
-  struct TokRegexp {
+  struct TokenRxp {
     Value body;
     Value flags;
+    bool operator==(const TokenRxp& other) const = default; 
   };
 
-  using TokVariant = std::variant<
-    std::int32_t, TokString, TokNumber, TokIdent, TokRegexp
+  using TokenTri = std::array<std::uint32_t, 3>;
+
+  using TokenVar = std::variant<
+    TokenTri, TokenStr, TokenNum, TokenIde, TokenRxp
   >;
 }

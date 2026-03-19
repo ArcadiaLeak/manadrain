@@ -30,8 +30,6 @@ int main(int argc, char* argv[]) {
   {
     using namespace JS;
     std::shared_ptr rt = std::make_shared<Runtime>();
-    rt->init_atom_range();
-    // rt->init_class_range(std_class_def, CLASS_OBJECT);
 
     std::shared_ptr ctx = NewContext(rt);
     EvalInternal(
