@@ -1,8 +1,6 @@
-export module quickjs.predef.clazz;
-import quickjs.predef.atom;
-import std;
+module quickjs:predef.clazz;
 
-export namespace JS {
+namespace JS {
   enum {
     CLASS_OBJECT,
     CLASS_ARRAY,
@@ -67,56 +65,4 @@ export namespace JS {
     CLASS_FINALIZATION_REGISTRY,
     CLASS_INIT_COUNT,
   };
-
-  constexpr std::array std_class_def = std::to_array<int>({
-    ATOM_Object,
-    ATOM_Array,
-    ATOM_Error,
-    ATOM_Number,
-    ATOM_String,
-    ATOM_Boolean,
-    ATOM_Symbol,
-    ATOM_Arguments,
-    ATOM_Arguments,
-    ATOM_Date,
-    ATOM_Object,
-    ATOM_Function,
-    ATOM_Function,
-    ATOM_Function,
-    ATOM_Function,
-    ATOM_GeneratorFunction,
-    ATOM_ForInIterator,
-    ATOM_RegExp,
-    ATOM_ArrayBuffer,
-    ATOM_SharedArrayBuffer,
-    ATOM_Uint8ClampedArray,
-    ATOM_Int8Array,
-    ATOM_Uint8Array,
-    ATOM_Int16Array,
-    ATOM_Uint16Array,
-    ATOM_Int32Array,
-    ATOM_Uint32Array,
-    ATOM_BigInt64Array,
-    ATOM_BigUint64Array,
-    ATOM_Float16Array,
-    ATOM_Float32Array,
-    ATOM_Float64Array,
-    ATOM_DataView,
-    ATOM_BigInt,
-    ATOM_Map,
-    ATOM_Set,
-    ATOM_WeakMap,
-    ATOM_WeakSet,
-    ATOM_Iterator,
-    ATOM_IteratorConcat,
-    ATOM_IteratorHelper,
-    ATOM_IteratorWrap,
-    ATOM_Map_Iterator,
-    ATOM_Set_Iterator,
-    ATOM_Array_Iterator,
-    ATOM_String_Iterator,
-    ATOM_RegExp_String_Iterator,
-    ATOM_Generator,
-    ATOM_Object,
-  });
 }

@@ -1,8 +1,7 @@
-export module quickjs.unicode;
-import quickjs.common;
-import std;
+module quickjs:unicode;
+import :common;
 
-export namespace JS {
+namespace JS {
   namespace unicode {
     constexpr std::uint8_t UTF8_CHAR_LEN_MAX = 6;
     constexpr std::int32_t CP_LS = 0x2028;
@@ -10,7 +9,7 @@ export namespace JS {
   }
 }
 
-export namespace JS {
+namespace JS {
   namespace unicode {
     std::int32_t from_hex(std::int32_t c) {
       if (c >= '0' && c <= '9')
@@ -37,7 +36,7 @@ export namespace JS {
   }
 }
 
-export namespace JS {
+namespace JS {
   namespace unicode {
     constexpr std::uint32_t utf8_min_code[5] = {
       0x80, 0x800, 0x10000, 0x00200000, 0x04000000,
@@ -103,7 +102,7 @@ export namespace JS {
   }
 }
 
-export namespace JS {
+namespace JS {
   namespace lre {
     using namespace unicode;
 

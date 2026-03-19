@@ -1,7 +1,7 @@
-export module quickjs.predef.atom;
+module quickjs:predef.atom;
 import std;
 
-export namespace JS {
+namespace JS {
   enum {
     ATOM_null,
     ATOM_false,

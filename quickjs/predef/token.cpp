@@ -1,6 +1,6 @@
-export module quickjs.predef.token;
+module quickjs:predef.token;
 
-export namespace JS {
+namespace JS {
   enum {
     TOK_NUMBER = -128,
     TOK_STRING,

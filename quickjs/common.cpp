@@ -1,7 +1,7 @@
-export module quickjs.common;
+module quickjs:common;
 import std;
 
-export namespace JS {
+namespace JS {
   namespace common {
     using PaddedBuf = std::ranges::concat_view<
       std::ranges::owning_view<std::string>,
