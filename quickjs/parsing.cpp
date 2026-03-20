@@ -59,14 +59,14 @@ namespace JS {
       )
     );
     
-    if (lhs == rhs) return !lre::is_id_continue_byte(
+    if (lhs == rhs) return !unicode::is_id_continue_byte(
       *std::next(buf.begin(), idx + rhs.size())
     );
 
     return false;
   }
   
-  Trigraph simple_lexeme_next(
+  Trigraph lexeme_next_simple(
     utility::PaddedBuf& buf,
     std::size_t& begin_idx,
     bool no_line_feed
@@ -131,20 +131,20 @@ namespace JS {
         return {'i', 'd', 'e'};
         
         case '\\': if (buf[idx] == 'u') {
-          if (lre::is_id_start_byte(lre::parse_escape(buf, idx, true)))
+          if (unicode::is_id_start_byte(unicode::parse_escape(buf, idx)))
             return {'i', 'd', 'e'};
         }
         break;
 
         default: if (ch >= 128) {
           using namespace unicode;
-          ch = from_utf8(buf, idx - 1, UTF8_CHAR_LEN_MAX, idx);
+          ch = from_utf8(buf, idx - 1, idx);
           if (no_line_feed && (ch == CP_PS || ch == CP_LS))
             return {0, 0, '\n'};
         }
         if (std::isspace(ch))
           continue;
-        if (lre::is_id_start_byte(ch))
+        if (unicode::is_id_start_byte(ch))
           return {'i', 'd', 'e'};
         break;
       }

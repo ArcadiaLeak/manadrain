@@ -241,7 +241,7 @@ namespace JS {
   }
 
   Trigraph ParseState::lexeme_peek(bool no_line_feed) {
-    return simple_lexeme_next(
+    return lexeme_next_simple(
       buf, lastly_at, no_line_feed
     );
   }
