@@ -72,14 +72,15 @@ export namespace JS {
     std::vector<Atom> atom_array;
     std::stack<std::size_t> atom_free_idx;
 
-    std::vector<String> class_array;
+    std::map<Trigraph, String> class_rb;
+    std::uint32_t max_class_id;
 
     std::list<std::weak_ptr<Context>> context_list;
     std::list<std::shared_ptr<HeapVal>> gc_obj_list;
 
     std::size_t NewAtom(String str, ATOM_TYPE atom_type);
 
-    void NewClass(std::int32_t class_id, String class_name);
+    void NewClass(Trigraph class_id, String class_name);
 
     void add_gc_object(std::shared_ptr<HeapVal> heap_val) {
       gc_obj_list.push_back(heap_val);
@@ -88,10 +89,9 @@ export namespace JS {
 
   struct Context : HeapVal {
     std::weak_ptr<Runtime> rt;
-    std::vector<Value> class_proto;
+    std::map<Trigraph, Value> class_proto;
 
-    Context(std::shared_ptr<Runtime> rt)
-      : rt{rt}, class_proto{rt->class_array.size()} {}
+    Context(std::shared_ptr<Runtime> rt) : rt{rt} {}
 
     int AddIntrinsicBasicObjects();
 
@@ -102,17 +102,8 @@ export namespace JS {
 }
 
 export namespace JS {
-  void Runtime::NewClass(std::int32_t class_id, String class_name) {
-    if (class_id >= class_array.size()) {
-      class_array.resize(
-        std::max<std::size_t>(class_id + 1, class_array.size() * 3 / 2)
-      );
-    
-      for (std::weak_ptr ctx : context_list) {
-        ctx.lock()->class_proto.resize(class_array.size());
-      }
-    }
-    class_array.at(class_id) = class_name;
+  void Runtime::NewClass(Trigraph class_id, String class_name) {
+    class_rb[class_id] = class_name;
   }
 }
 
@@ -166,13 +157,13 @@ export namespace JS {
 }
 
 namespace JS {
-  bool ParseState::token_is_pseudo_keyword(std::string_view word) {
-    if (not std::holds_alternative<TokenIde>(token))
+  bool ParseState::lexeme_is_pseudo_keyword(std::string_view word) {
+    if (not std::holds_alternative<LexemeIde>(lexeme))
       return false;
 
     std::shared_ptr rt = ctx->rt.lock();
     std::size_t atom_idx = rt->NewAtom(word, ATOM_TYPE::STRING);
-    return std::get<TokenIde>(token).str == rt->atom_array[atom_idx].str;
+    return std::get<LexemeIde>(lexeme).str == rt->atom_array[atom_idx].str;
   }
 
   std::size_t ParseState::push_scope() {
@@ -201,30 +192,27 @@ namespace JS {
     cur_func->byte_code.push_back(val);
   }
 
-  int ParseState::parse_program() {
-    if (next_token())
-      return -1;
-    while (token != TokenVar(TokenTri{'e', 'o', 'f'})) {
-      if (parse_source_element())
-        return -1;
-    }
-    return 0;
+  void ParseState::parse_program() {
+    lexeme_next();
+
+    while (lexeme != LexemeVar{Trigraph{'e', 'o', 'f'}})
+      parse_source_element();
   }
 
   int ParseState::parse_source_element() {
     if (
-      token == TokenVar(TokenTri{'f', 'u', 'n'}) ||
-      token_is_async_func()
+      lexeme == LexemeVar{Trigraph{'f', 'u', 'n'}} ||
+      lexeme_is_async_func()
     )
       return -1;
     else if (
       not cur_func->module_def.expired() &&
-      token == TokenVar(TokenTri{'e', 'x', 'p'})
+      lexeme == LexemeVar{Trigraph{'e', 'x', 'p'}}
     )
       return -1;
     else if (
       not cur_func->module_def.expired() &&
-      token_is_static_import()
+      lexeme_is_static_import()
     )
       return -1;
     else
@@ -235,44 +223,43 @@ namespace JS {
     return -1;
   }
 
-  bool ParseState::token_is_static_import() {
-    if (token != TokenVar(TokenTri{'i', 'm', 'p'}))
+  bool ParseState::lexeme_is_static_import() {
+    if (lexeme != LexemeVar{Trigraph{'i', 'm', 'p'}})
       return false;
-    TokenTri peeked = peek_token(false);
+    Trigraph peeked = lexeme_peek(false);
     return (
-      peeked != TokenTri{0, 0, '('} &&
-      peeked != TokenTri{0, 0, '.'}
+      peeked != Trigraph{0, 0, '('} &&
+      peeked != Trigraph{0, 0, '.'}
     );
   }
 
-  bool ParseState::token_is_async_func() {
+  bool ParseState::lexeme_is_async_func() {
     return (
-      token_is_pseudo_keyword("async") &&
-      peek_token(true) == TokenTri{'f', 'u', 'n'}
+      lexeme_is_pseudo_keyword("async") &&
+      lexeme_peek(true) == Trigraph{'f', 'u', 'n'}
     );
   }
 
-  TokenTri ParseState::peek_token(bool no_line_feed) {
-    return simple_next_token(
-      buf, curr_idx, no_line_feed
+  Trigraph ParseState::lexeme_peek(bool no_line_feed) {
+    return simple_lexeme_next(
+      buf, lastly_at, no_line_feed
     );
   }
 
-  int ParseState::parse_string(
-    std::int32_t sep, bool do_throw, std::size_t idx,
-    TokenVar& token, std::size_t& idxref
+  LexemeVar ParseState::parse_string(
+    std::int32_t delim, std::size_t& idx
   ) {
-    auto ch = buf[idx];
-    auto strbuf = std::string{""};
+    std::int32_t ch = buf[idx];
+    std::string parsed{};
 
     while (true) {
-      if (idx >= buf_size)
+      if (idx >= input_sz)
         goto invalid_char;
 
       ch = buf[idx]; idx++;
-      if (ch == sep) break;
+      if (ch == delim) break;
 
-      if (ch == '$' && buf[idx] == '{' && sep == '`')
+      if (ch == '$' && buf[idx] == '{' && delim == '`')
         { idx++; break; }
       
       if (ch == '\\') {
@@ -280,7 +267,7 @@ namespace JS {
         ch = buf[idx];
 
         switch (ch) {
-          case '\0': if (idx >= buf_size)
+          case '\0': if (idx >= input_sz)
             goto invalid_char;
           idx++; break;
 
@@ -298,61 +285,52 @@ namespace JS {
           default: break;
         }
       }
-
-      strbuf.push_back(ch);
     }
 
     invalid_char: throw;
   }
 
-  int ParseState::parse_error(std::size_t offset, std::string message) {
-    throw;
-  }
+  void ParseState::lexeme_next() {
+    std::size_t idx = lastly_at;
+    std::uint32_t ch = buf[idx];
 
-  int ParseState::next_token() {
-    std::size_t idx = curr_idx;
-    char32_t ch = buf[idx];
-
-    last_idx = curr_idx;
+    before_at = lastly_at;
     got_line_feed = false;
 
-    redo: token_idx = curr_idx;
-    ch = buf[idx];
+    LexemeVar discovered = [&]() -> LexemeVar {
+      redo: lexeme_at = lastly_at;
+      ch = buf[idx];
 
-    switch (ch) {
-      case 0:
-      if (idx >= buf_size)
-        token = TokenTri{'e', 'o', 'f'};
-      else
-        goto def_token;
-      break;
+      switch (ch) {
+        case 0:
+        if (idx >= input_sz)
+          return Trigraph{'e', 'o', 'f'};
+        else
+          goto def_lexeme;
+        break;
 
-      case '\r':
-      if (buf[idx + 1] == '\n')
-        idx++;
-      [[fallthrough]];
+        case '\r':
+        if (buf[idx + 1] == '\n')
+          idx++;
+        [[fallthrough]];
 
-      case '\n': idx++;
-      line_feed: got_line_feed = true;
-      goto redo;
+        case '\n': idx++;
+        line_feed: got_line_feed = true;
+        goto redo;
 
-      case '\f': case '\v': case ' ': case '\t': idx++;
-      goto redo;
+        case '\f': case '\v': case ' ': case '\t': idx++;
+        goto redo;
 
-      case '\'': case '\"':
-      if (parse_string(ch, true, idx + 1, token, idx))
-        goto fail;
-      break;
+        case '\'': case '\"':
+        return parse_string(ch, ++idx);
 
-      default: def_token: token = TokenTri{0, 0, ch};
-      idx++; break;
-    }
+        default: def_lexeme: return Trigraph{0, 0, ch};
+        idx++; break;
+      }
+    }();
 
-    curr_idx = idx;
-    return 0;
-
-    fail: token = TokenTri{'e', 'r', 'r'};
-    return -1;
+    lexeme = discovered;
+    lastly_at = idx;
   }
 }
 
@@ -429,7 +407,7 @@ export namespace JS {
     std::int64_t scope_idx = -1
   ) {
     std::bitset<8> js_mode = 0;
-    std::size_t buf_size = input.size();
+    std::size_t input_sz = input.size();
 
     ParseState state{
       .ctx = ctx,
@@ -438,7 +416,7 @@ export namespace JS {
         std::ranges::owning_view{std::move(input)},
         std::ranges::repeat_view{'\0'}
       },
-      .buf_size = buf_size
+      .input_sz = input_sz
     };
 
     std::bitset eval_type = flags & EVAL_TYPE_MASK;
@@ -470,8 +448,8 @@ export namespace JS {
     state.is_module = false;
     state.push_scope();
     func_def.body_scope = func_def.scope_level;
+    
     state.parse_program();
-
-    throw;
+    throw std::exception{};
   }
 }

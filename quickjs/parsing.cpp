@@ -66,7 +66,7 @@ namespace JS {
     return false;
   }
   
-  TokenTri simple_next_token(
+  Trigraph simple_lexeme_next(
     utility::PaddedBuf& buf,
     std::size_t& begin_idx,
     bool no_line_feed
@@ -159,13 +159,13 @@ namespace JS {
     std::string filename;
     bool got_line_feed;
 
-    std::size_t token_idx;
-    TokenVar token;
+    std::size_t lexeme_at;
+    LexemeVar lexeme;
     
     utility::PaddedBuf buf;
-    std::size_t last_idx;
-    std::size_t curr_idx;
-    std::size_t buf_size;
+    std::size_t before_at;
+    std::size_t lastly_at;
+    std::size_t input_sz;
 
     std::shared_ptr<FunctionDef> cur_func;
     bool is_module;
@@ -177,18 +177,14 @@ namespace JS {
 
     int parse_source_element();
     int parse_statement_or_decl(std::bitset<8> decl_mask);
-    int parse_string(
-      std::int32_t sep, bool do_throw, std::size_t idx,
-      TokenVar& token, std::size_t& idxref
-    );
-    int parse_program();
-    int parse_error(std::size_t offset, std::string message);
+    LexemeVar parse_string(std::int32_t sep, std::size_t& idx);
+    void parse_program();
 
-    bool token_is_static_import();
-    bool token_is_async_func();
-    bool token_is_pseudo_keyword(std::string_view atom);
+    bool lexeme_is_static_import();
+    bool lexeme_is_async_func();
+    bool lexeme_is_pseudo_keyword(std::string_view atom);
 
-    TokenTri peek_token(bool no_line_feed);
-    int next_token();
+    Trigraph lexeme_peek(bool no_line_feed);
+    void lexeme_next();
   };
 }

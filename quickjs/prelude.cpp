@@ -86,6 +86,8 @@ namespace JS {
 }
 
 export namespace JS {
+  using Trigraph = std::array<std::uint32_t, 3>;
+
   enum class Unit {
     TAG_NULL,
     TAG_UNDEFINED,
@@ -103,33 +105,31 @@ export namespace JS {
 }
 
 namespace JS {
-  struct TokenStr {
+  struct LexemeStr {
     Value str;
     std::int32_t sep;
-    bool operator==(const TokenStr& other) const = default; 
+    bool operator==(const LexemeStr& other) const = default; 
   };
 
-  struct TokenNum {
+  struct LexemeNum {
     Value num;
-    bool operator==(const TokenNum& other) const = default; 
+    bool operator==(const LexemeNum& other) const = default; 
   };
 
-  struct TokenIde {
+  struct LexemeIde {
     String str;
     bool has_escape;
     bool is_reserved;
-    bool operator==(const TokenIde& other) const = default; 
+    bool operator==(const LexemeIde& other) const = default; 
   };
 
-  struct TokenRxp {
+  struct LexemeRxp {
     Value body;
     Value flags;
-    bool operator==(const TokenRxp& other) const = default; 
+    bool operator==(const LexemeRxp& other) const = default; 
   };
 
-  using TokenTri = std::array<std::uint32_t, 3>;
-
-  using TokenVar = std::variant<
-    TokenTri, TokenStr, TokenNum, TokenIde, TokenRxp
+  using LexemeVar = std::variant<
+    Trigraph, LexemeStr, LexemeNum, LexemeIde, LexemeRxp
   >;
 }
