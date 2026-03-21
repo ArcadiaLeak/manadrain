@@ -18,15 +18,14 @@ int main(int argc, char* argv[]) {
     std::format("could not open file: {}", filepath)
   };
 
-  Manadrain::Parser parser = Manadrain::Parser{
-    .source_str = std::ranges::to<std::string>(
-      std::ranges::subrange(
-        std::istreambuf_iterator<char>{file},
-        std::istreambuf_iterator<char>{}
-      )
+  std::string source_str = std::ranges::to<std::string>(
+    std::ranges::subrange(
+      std::istreambuf_iterator<char>{file},
+      std::istreambuf_iterator<char>{}
     )
-  };
-  parser.Parse();
+  );
+
+  Manadrain::parse_program(source_str);
   
   return 0;
 }
