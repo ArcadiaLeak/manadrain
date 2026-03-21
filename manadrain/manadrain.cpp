@@ -28,7 +28,7 @@ export namespace Manadrain {
 
   UcharPair parse_escape(std::string_view switch_view) {
     return next_char(switch_view).and_then(
-      [&](auto switch_pair) -> UcharPair {
+      [](auto switch_pair) -> UcharPair {
         auto [ch, case_view] = switch_pair;
 
         switch (ch) {
@@ -39,12 +39,12 @@ export namespace Manadrain {
           case 't': return std::make_pair('\t', case_view);
           case 'v': return std::make_pair('\v', case_view);
           case 'x': return next_char(case_view)
-            .and_then([&](auto char_pair) { return parse_digit16(char_pair); })
-            .and_then([&](auto hex0_pair) -> UcharPair {
+            .and_then([](auto char_pair) { return parse_digit16(char_pair); })
+            .and_then([](auto hex0_pair) -> UcharPair {
               auto [hex0, hex0_view] = hex0_pair;
               return next_char(hex0_view)
-                .and_then([&](auto char_pair) { return parse_digit16(char_pair); })
-                .and_then([&](auto hex1_pair) -> UcharPair {
+                .and_then([](auto char_pair) { return parse_digit16(char_pair); })
+                .and_then([hex0](auto hex1_pair) -> UcharPair {
                   auto [hex1, hex1_view] = hex1_pair;
                   return std::make_pair((hex0 << 4) | hex1, hex1_view);
                 });
