@@ -1,19 +1,5 @@
-import manadrain;
 import std;
-
-std::string source_str(std::string filepath) {
-  std::ifstream file{filepath};
-  if (not file.is_open()) throw std::runtime_error{
-    std::format("could not open file: {}", filepath)
-  };
-
-  return std::ranges::to<std::string>(
-    std::ranges::subrange(
-      std::istreambuf_iterator<char>{file},
-      std::istreambuf_iterator<char>{}
-    )
-  );
-}
+import manadrain;
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
@@ -27,16 +13,20 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  {
-    using namespace JS;
-    std::shared_ptr rt = std::make_shared<Runtime>();
+  std::ifstream file{filepath};
+  if (not file.is_open()) throw std::runtime_error{
+    std::format("could not open file: {}", filepath)
+  };
 
-    std::shared_ptr ctx = NewContext(rt);
-    EvalInternal(
-      ctx, Unit::TAG_NULL, source_str(filepath), "", 0
-    );
-  }
+  Manadrain::Parser parser = Manadrain::Parser{
+    .source_str = std::ranges::to<std::string>(
+      std::ranges::subrange(
+        std::istreambuf_iterator<char>{file},
+        std::istreambuf_iterator<char>{}
+      )
+    )
+  };
+  parser.Parse();
   
   return 0;
 }
-
