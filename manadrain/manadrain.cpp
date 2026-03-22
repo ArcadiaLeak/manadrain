@@ -5,6 +5,18 @@ namespace Manadrain {
   struct Token {};
 
   using UcharPair = std::pair<std::uint32_t, std::string_view>;
+
+  bool is_hi_surrogate(std::uint32_t c) {
+    return (c >> 10) == (0xD800 >> 10); // 0xD800-0xDBFF
+  }
+
+  bool is_lo_surrogate(std::uint32_t c) {
+    return (c >> 10) == (0xDC00 >> 10); // 0xDC00-0xDFFF
+  }
+
+  std::uint32_t from_surrogate(std::uint32_t hi, std::uint32_t lo) {
+    return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
+  }
 }
 
 export namespace Manadrain {
@@ -46,7 +58,7 @@ export namespace Manadrain {
           auto [hex0, hex0_view] = hex0_pair;
           return next_char(hex0_view)
             .and_then(hex_digit)
-            .and_then([hex0](UcharPair hex1_pair) -> std::optional<UcharPair> {
+            .transform([hex0](UcharPair hex1_pair) {
               auto [hex1, hex1_view] = hex1_pair;
               return UcharPair{(hex0 << 4) | hex1, hex1_view};
             });
@@ -56,6 +68,7 @@ export namespace Manadrain {
           if (brace_pair.first == '{' && utf16_mode != UTF16_MODE::DISABLED) {
             std::uint32_t utf16_char = 0;
             std::string_view utf16_view = brace_pair.second;
+
             while (true) {
               std::optional<UcharPair> end_pair_opt = next_char(utf16_view);
               if (not end_pair_opt)
@@ -71,19 +84,43 @@ export namespace Manadrain {
                 return std::nullopt;
               utf16_view = hex_pair_opt->second;
             }
-          }
+          } else {
+            std::uint32_t uni_char = 0;
+            std::string_view uni_view = brace_pair.second;
 
-          UcharPair uni_pair{brace_pair};
-          std::uint32_t uni_char = 0;
-          for (int i = 0; i < 4; i++) {
-            std::optional<UcharPair> hex_pair_opt = hex_digit(uni_pair);
-            if (not hex_pair_opt)
-              return std::nullopt;
-            uni_char = (uni_char << 4) | hex_pair_opt->first;
-            uni_pair = *hex_pair_opt;
-          }
+            for (int i = 0; i < 4; i++) {
+              std::optional<UcharPair> hex_pair_opt =
+                next_char(uni_view).and_then(hex_digit);
+              if (not hex_pair_opt)
+                return std::nullopt;
+              uni_char = (uni_char << 4) | hex_pair_opt->first;
+              uni_view = hex_pair_opt->second;
+            }
 
-          return std::nullopt;
+            if (
+              is_hi_surrogate(uni_char) && utf16_mode == UTF16_MODE::REGEXP &&
+              std::string_view{uni_view | std::views::take(2)} == "\\u"
+            ) {
+              std::uint32_t losu_char = 0;
+              std::string_view losu_view = uni_view | std::views::drop(2);
+              for (int i = 0; i < 4; i++) {
+                std::optional<UcharPair> hex_pair_opt =
+                  next_char(losu_view).and_then(hex_digit);
+                if (not hex_pair_opt)
+                  goto return_uni_char;
+                losu_char = (losu_char << 4) | hex_pair_opt->first;
+                losu_view = hex_pair_opt->second;
+              }
+              if (is_lo_surrogate(losu_char))
+                return UcharPair{
+                  from_surrogate(uni_char, losu_char),
+                  losu_view
+                };
+            }
+
+            return_uni_char:
+            return UcharPair{uni_char, uni_view};
+          }
         });
       default: return std::nullopt;
     }
