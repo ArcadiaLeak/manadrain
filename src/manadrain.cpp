@@ -13,10 +13,12 @@ namespace Manadrain {
 
   enum class BAD_ESCAPE {
     MALFORMED,
-    FELL_THROUGH
+    MISMATCH
   };
 
-  using UcharPair = std::pair<std::uint32_t, std::string_view>;
+  template<typename T>
+  using ParsePair = std::pair<T, std::string_view>;
+  using UcharPair = ParsePair<std::uint32_t>;
 
   std::optional<UcharPair> next_char(std::string_view source_view) {
     if (source_view.empty()) return std::nullopt;
@@ -41,9 +43,12 @@ namespace Manadrain {
   };
 
   std::expected<UcharPair, BAD_ESCAPE> parse_escape(
-    UcharPair switch_pair, UTF16_MODE utf16_mode
+    std::string_view source_view, UTF16_MODE utf16_mode
   ) {
-    auto [switch_char, switch_view] = switch_pair;
+    std::optional<UcharPair> switch_pair = next_char(source_view);
+    if (not switch_pair) return std::unexpected{BAD_ESCAPE::MISMATCH};
+
+    auto [switch_char, switch_view] = *switch_pair;
     switch (switch_char) {
       case 'b': return UcharPair{'\b', switch_view};
       case 'f': return UcharPair{'\f', switch_view};
@@ -164,19 +169,8 @@ namespace Manadrain {
         return octal_pair;
       }
 
-      default: return std::unexpected{BAD_ESCAPE::FELL_THROUGH};
+      default: return std::unexpected{BAD_ESCAPE::MISMATCH};
     }
-  }
-
-  std::optional<UcharPair> next_token(std::string_view source_view) {
-    std::optional<UcharPair> source_pair = next_char(source_view);
-    if (not source_pair)
-      return std::nullopt;
-    std::expected<UcharPair, BAD_ESCAPE> parsed =
-      parse_escape(*source_pair, UTF16_MODE::NORMAL);
-    if (not parsed)
-      return std::nullopt;
-    return *parsed;
   }
 
   /* Index: 0 -> 2-byte sequence, 1 -> 3-byte, ..., 4 -> 6-byte. */
@@ -242,6 +236,57 @@ namespace Manadrain {
     if (not ahead_pair_opt)
       return 1;
     return !u_hasBinaryProperty(ahead_pair_opt->first, UCHAR_XID_CONTINUE);
+  }
+
+  using Tri = std::tuple<std::uint8_t, std::uint8_t, std::uint32_t>;
+  using TriPair = ParsePair<Tri>;
+  enum class LINE_FEED { RETURN, IGNORE };
+
+  template<LINE_FEED LF>
+  std::optional<TriPair> peek_token(std::string_view source_view) {
+    while (true) {
+      std::optional uchar_pair = next_char(source_view);
+
+      if (uchar_pair && std::isspace(uchar_pair->first)) {
+        source_view = uchar_pair->second;
+        if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
+          return TriPair{{0, 0, '\n'}, source_view};
+        continue;
+      }
+
+      if (std::string_view{source_view | std::views::take(2)} == "//") {
+        source_view = std::string_view{source_view | std::views::drop_while(
+          [](char ch) { return ch != '\r' || ch != '\n'; }
+        )};
+        if constexpr (LF == LINE_FEED::RETURN)
+          return TriPair{{0, 0, '\n'}, source_view};
+        continue;
+      }
+
+      if (std::string_view{source_view | std::views::take(2)} == "/*") {
+        bool done = false; 
+        skip_delim: source_view = std::string_view{source_view | std::views::drop(2)};
+        if (done) continue;
+
+        skip_text: uchar_pair = next_char(source_view);
+        if (uchar_pair) {
+          source_view = uchar_pair->second;
+          if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
+            return TriPair{{0, 0, '\n'}, source_view};
+          if (std::string_view{source_view | std::views::take(2)} == "*/")
+            done = true;
+          if (done) goto skip_delim; else goto skip_text;
+        }
+      }
+
+      return std::nullopt;
+    }
+  }
+
+  std::optional<TriPair> next_token(std::string_view source_view) {
+    std::optional<TriPair> parsed = peek_token<LINE_FEED::RETURN>(source_view);
+    if (not parsed) return std::nullopt;
+    return *parsed;
   }
 }
 
