@@ -95,40 +95,40 @@ namespace Manadrain {
             utf16_view = hex_pair_opt->second;
           }
         } else {
-          std::uint32_t uni_char = 0;
           std::string_view uni_view = brace_pair->second;
-
+          
+          std::uint32_t high_surr = 0;
           for (int i = 0; i < 4; i++) {
             std::optional<UcharPair> hex_pair_opt =
               next_char(uni_view).and_then(hex_digit);
             if (not hex_pair_opt)
               return std::unexpected{BAD_ESCAPE::MALFORMED};
-            uni_char = (uni_char << 4) | hex_pair_opt->first;
+            high_surr = (high_surr << 4) | hex_pair_opt->first;
             uni_view = hex_pair_opt->second;
           }
 
           if (
-            is_hi_surrogate(uni_char) && utf16_mode == UTF16_MODE::REGEXP &&
-            std::string_view{uni_view | std::views::take(2)} == "\\u"
+            is_hi_surrogate(high_surr) && utf16_mode == UTF16_MODE::REGEXP &&
+            uni_view.starts_with("\\u")
           ) {
-            std::uint32_t losu_char = 0;
-            std::string_view losu_view = uni_view | std::views::drop(2);
+            std::uint32_t low_surr = 0;
+            uni_view.remove_prefix(2);
             for (int i = 0; i < 4; i++) {
               std::optional<UcharPair> hex_pair_opt =
-                next_char(losu_view).and_then(hex_digit);
+                next_char(uni_view).and_then(hex_digit);
               if (not hex_pair_opt)
-                goto return_uni_char;
-              losu_char = (losu_char << 4) | hex_pair_opt->first;
-              losu_view = hex_pair_opt->second;
+                goto return_high_surr;
+              low_surr = (low_surr << 4) | hex_pair_opt->first;
+              uni_view = hex_pair_opt->second;
             }
-            if (is_lo_surrogate(losu_char)) {
-              std::uint32_t complete_char = from_surrogate(uni_char, losu_char);
-              return UcharPair{complete_char, losu_view};
+            if (is_lo_surrogate(low_surr)) {
+              std::uint32_t uni_char = from_surrogate(high_surr, low_surr);
+              return UcharPair{uni_char, uni_view};
             }
           }
 
-          return_uni_char:
-          return UcharPair{uni_char, uni_view};
+          return_high_surr:
+          return UcharPair{high_surr, uni_view};
         }
       }
 
@@ -229,10 +229,10 @@ namespace Manadrain {
   }
 
   bool match_identifier(std::string_view lhs_view, std::string_view rhs_view) {
-    if (std::string_view{lhs_view | std::views::take(rhs_view.size())} != rhs_view)
+    if (not lhs_view.starts_with(rhs_view))
       return 0;
-    std::string_view lhs_tail = lhs_view | std::views::drop(rhs_view.size());
-    std::optional<UcharPair> ahead_pair_opt = unicode_from_utf8(lhs_tail);
+    lhs_view.remove_prefix(rhs_view.size());
+    std::optional<UcharPair> ahead_pair_opt = unicode_from_utf8(lhs_view);
     if (not ahead_pair_opt)
       return 1;
     return !u_hasBinaryProperty(ahead_pair_opt->first, UCHAR_XID_CONTINUE);
@@ -254,29 +254,31 @@ namespace Manadrain {
         continue;
       }
 
-      if (std::string_view{source_view | std::views::take(2)} == "//") {
-        source_view = std::string_view{source_view | std::views::drop_while(
-          [](char ch) { return ch != '\r' || ch != '\n'; }
-        )};
+      if (source_view.starts_with("//")) {
+        source_view.remove_prefix(2);
         if constexpr (LF == LINE_FEED::RETURN)
           return TriPair{{0, 0, '\n'}, source_view};
+        std::string_view::iterator comment_end =
+          std::ranges::find_if(source_view, [](char ch) { return ch != '\r' || ch != '\n'; });
+        source_view = std::string_view{comment_end, source_view.end()};
         continue;
       }
 
-      if (std::string_view{source_view | std::views::take(2)} == "/*") {
+      if (source_view.starts_with("/*")) {
         bool done = false; 
-        skip_delim: source_view = std::string_view{source_view | std::views::drop(2)};
+        skip_delim: source_view.remove_prefix(2);
         if (done) continue;
 
         skip_text: uchar_pair = next_char(source_view);
-        if (uchar_pair) {
-          source_view = uchar_pair->second;
-          if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
-            return TriPair{{0, 0, '\n'}, source_view};
-          if (std::string_view{source_view | std::views::take(2)} == "*/")
-            done = true;
-          if (done) goto skip_delim; else goto skip_text;
-        }
+        if (not uchar_pair)
+          return std::nullopt;
+
+        source_view = uchar_pair->second;
+        if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
+          return TriPair{{0, 0, '\n'}, source_view};
+        if (source_view.starts_with("*/"))
+          done = true;
+        if (done) goto skip_delim; else goto skip_text;
       }
 
       return std::nullopt;
