@@ -5,7 +5,6 @@ namespace Manadrain {
   struct Token {};
 
   using UcharPair = std::pair<std::uint32_t, std::string_view>;
-  using UcharTriple = std::tuple<bool, std::uint32_t, std::string_view>;
 }
 
 export namespace Manadrain {
@@ -55,39 +54,34 @@ export namespace Manadrain {
       case 'u': return next_char(switch_pair.second)
         .and_then([utf16_mode](UcharPair brace_pair) -> std::optional<UcharPair> {
           if (brace_pair.first == '{' && utf16_mode != UTF16_MODE::DISABLED) {
-            UcharTriple utf16_triple{false, 0, brace_pair.second};
+            std::uint32_t utf16_char = 0;
+            std::string_view utf16_view = brace_pair.second;
+            while (true) {
+              std::optional<UcharPair> end_pair_opt = next_char(utf16_view);
+              if (not end_pair_opt)
+                return std::nullopt;
+              if (end_pair_opt->first == '}')
+                return UcharPair{utf16_char, end_pair_opt->second};
 
-            ahead: if (std::get<0>(utf16_triple))
-              return UcharPair{std::get<1>(utf16_triple), std::get<2>(utf16_triple)};
-
-            std::optional<UcharTriple> utf16_triple_opt = std::make_optional<UcharPair>(
-              std::get<1>(utf16_triple), std::get<2>(utf16_triple)
-            ).and_then([](UcharPair utf16_pair) -> std::optional<UcharTriple> {
-              auto [utf16_prev, utf16_view] = utf16_pair;
-              return next_char(utf16_view).and_then([utf16_prev](UcharPair next_pair) -> std::optional<UcharTriple> {
-                if (next_pair.first == '}')
-                  return UcharTriple{true, utf16_prev, next_pair.second};
-
-                return hex_digit(next_pair).and_then([utf16_prev](UcharPair hex_pair) -> std::optional<UcharTriple> {
-                  std::uint32_t utf16_char = (utf16_prev << 4) | hex_pair.first;
-
-                  if (utf16_char > 0x10FFFF)
-                    return std::nullopt;
-
-                  return UcharTriple{false, utf16_char, hex_pair.second};
-                });
-              });
-            });
-
-            if (utf16_triple_opt) {
-              utf16_triple = *utf16_triple_opt;
-              goto ahead;
+              std::optional<UcharPair> hex_pair_opt = hex_digit(*end_pair_opt);
+              if (not hex_pair_opt)
+                return std::nullopt;
+              utf16_char = (utf16_char << 4) | hex_pair_opt->first;
+              if (utf16_char > 0x10FFFF)
+                return std::nullopt;
+              utf16_view = hex_pair_opt->second;
             }
-
-            return std::nullopt;
           }
 
-          // TODO
+          UcharPair uni_pair{brace_pair};
+          std::uint32_t uni_char = 0;
+          for (int i = 0; i < 4; i++) {
+            std::optional<UcharPair> hex_pair_opt = hex_digit(uni_pair);
+            if (not hex_pair_opt)
+              return std::nullopt;
+            uni_char = (uni_char << 4) | hex_pair_opt->first;
+            uni_pair = *hex_pair_opt;
+          }
 
           return std::nullopt;
         });
