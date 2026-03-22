@@ -16,9 +16,7 @@ namespace Manadrain {
     MISMATCH
   };
 
-  template<typename T>
-  using ParsePair = std::pair<T, std::string_view>;
-  using UcharPair = ParsePair<std::uint32_t>;
+  using UcharPair = std::pair<std::uint32_t, std::string_view>;
 
   std::optional<UcharPair> next_char(std::string_view source_view) {
     if (source_view.empty()) return std::nullopt;
@@ -45,7 +43,7 @@ namespace Manadrain {
   std::expected<UcharPair, BAD_ESCAPE> parse_escape(
     std::string_view source_view, UTF16_MODE utf16_mode
   ) {
-    std::optional<UcharPair> switch_pair = next_char(source_view);
+    std::optional switch_pair = next_char(source_view);
     if (not switch_pair) return std::unexpected{BAD_ESCAPE::MISMATCH};
 
     auto [switch_char, switch_view] = *switch_pair;
@@ -58,13 +56,11 @@ namespace Manadrain {
       case 'v': return UcharPair{'\v', switch_view};
 
       case 'x': {
-        std::optional<UcharPair> hex0_pair =
-          next_char(switch_view).and_then(hex_digit);
+        std::optional hex0_pair = next_char(switch_view).and_then(hex_digit);
         if (not hex0_pair)
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         auto [hex0, hex0_view] = *hex0_pair;
-        std::optional<UcharPair> hex1_pair =
-          next_char(hex0_view).and_then(hex_digit);
+        std::optional hex1_pair = next_char(hex0_view).and_then(hex_digit);
         if (not hex1_pair)
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         auto [hex1, hex1_view] = *hex1_pair;
@@ -72,7 +68,7 @@ namespace Manadrain {
       }
 
       case 'u': {
-        std::optional<UcharPair> brace_pair = next_char(switch_view);
+        std::optional brace_pair = next_char(switch_view);
         if (not brace_pair)
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         if (brace_pair->first == '{' && utf16_mode != UTF16_MODE::DISABLED) {
@@ -80,13 +76,13 @@ namespace Manadrain {
           std::string_view utf16_view = brace_pair->second;
 
           while (true) {
-            std::optional<UcharPair> end_pair_opt = next_char(utf16_view);
+            std::optional end_pair_opt = next_char(utf16_view);
             if (not end_pair_opt)
               return std::unexpected{BAD_ESCAPE::MALFORMED};
             if (end_pair_opt->first == '}')
               return UcharPair{utf16_char, end_pair_opt->second};
 
-            std::optional<UcharPair> hex_pair_opt = hex_digit(*end_pair_opt);
+            std::optional hex_pair_opt = hex_digit(*end_pair_opt);
             if (not hex_pair_opt)
               return std::unexpected{BAD_ESCAPE::MALFORMED};
             utf16_char = (utf16_char << 4) | hex_pair_opt->first;
@@ -99,8 +95,7 @@ namespace Manadrain {
           
           std::uint32_t high_surr = 0;
           for (int i = 0; i < 4; i++) {
-            std::optional<UcharPair> hex_pair_opt =
-              next_char(uni_view).and_then(hex_digit);
+            std::optional hex_pair_opt = next_char(uni_view).and_then(hex_digit);
             if (not hex_pair_opt)
               return std::unexpected{BAD_ESCAPE::MALFORMED};
             high_surr = (high_surr << 4) | hex_pair_opt->first;
@@ -114,8 +109,7 @@ namespace Manadrain {
             std::uint32_t low_surr = 0;
             uni_view.remove_prefix(2);
             for (int i = 0; i < 4; i++) {
-              std::optional<UcharPair> hex_pair_opt =
-                next_char(uni_view).and_then(hex_digit);
+              std::optional hex_pair_opt = next_char(uni_view).and_then(hex_digit);
               if (not hex_pair_opt)
                 goto return_high_surr;
               low_surr = (low_surr << 4) | hex_pair_opt->first;
@@ -134,7 +128,7 @@ namespace Manadrain {
 
       case '0':
       if (utf16_mode == UTF16_MODE::REGEXP) {
-        std::optional<UcharPair> ahead_pair = next_char(switch_view);
+        std::optional ahead_pair = next_char(switch_view);
         if (ahead_pair && std::isdigit(ahead_pair->first))
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         return UcharPair{0, switch_view};
@@ -144,7 +138,7 @@ namespace Manadrain {
       case '1': case '2': case '3': case '4':
       case '5': case '6': case '7': {
         UcharPair octal_pair{switch_char - '0', switch_view};
-        std::optional<UcharPair> ahead_pair_opt{};
+        std::optional<UcharPair> ahead_pair_opt;
 
         ahead_pair_opt = next_char(octal_pair.second)
           .transform([](UcharPair ahead_pair) {
@@ -196,7 +190,7 @@ namespace Manadrain {
   }
 
   std::optional<UcharPair> unicode_from_utf8(std::string_view start_view) {
-    std::optional<UcharPair> first_pair = next_char(start_view);
+    std::optional first_pair = next_char(start_view);
     if (not first_pair)
       return std::nullopt;
 
@@ -214,7 +208,7 @@ namespace Manadrain {
     };
 
     for (int i = 0; i < cont_bytes; i++) {
-      std::optional<UcharPair> cont_pair_opt = next_char(code_pair.second);
+      std::optional cont_pair_opt = next_char(code_pair.second);
       /* Continuation bytes must be 10xxxxxx (0x80..0xBF) */
       if (not cont_pair_opt || cont_pair_opt->first < 0x80 || cont_pair_opt->first >= 0xC0)
         return std::nullopt;
@@ -232,32 +226,41 @@ namespace Manadrain {
     if (not lhs_view.starts_with(rhs_view))
       return 0;
     lhs_view.remove_prefix(rhs_view.size());
-    std::optional<UcharPair> ahead_pair_opt = unicode_from_utf8(lhs_view);
+    std::optional ahead_pair_opt = unicode_from_utf8(lhs_view);
     if (not ahead_pair_opt)
       return 1;
     return !u_hasBinaryProperty(ahead_pair_opt->first, UCHAR_XID_CONTINUE);
   }
 
-  using Tri = std::tuple<std::uint8_t, std::uint8_t, std::uint32_t>;
-  using TriPair = ParsePair<Tri>;
+  using Trigraph = std::tuple<std::uint8_t, std::uint8_t, std::uint32_t>;
+  constexpr Trigraph trigraph(std::string_view str_view) {
+    std::string str{str_view}; str.resize(3);
+    return {str[0], str[1], str[2]};
+  }
+
+  using Tripair = std::pair<Trigraph, std::string_view>;
+  constexpr Tripair tripair(std::string_view tri_view, std::string_view tail_view) {
+    return {trigraph(tri_view), tail_view};
+  }
+
   enum class LINE_FEED { RETURN, IGNORE };
 
   template<LINE_FEED LF>
-  std::optional<TriPair> peek_token(std::string_view source_view) {
+  std::optional<Tripair> peek_token(std::string_view source_view) {
     while (true) {
       std::optional uchar_pair = next_char(source_view);
 
       if (uchar_pair && std::isspace(uchar_pair->first)) {
         source_view = uchar_pair->second;
         if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
-          return TriPair{{0, 0, '\n'}, source_view};
+          return tripair("\0\0\n", source_view);
         continue;
       }
 
       if (source_view.starts_with("//")) {
         source_view.remove_prefix(2);
         if constexpr (LF == LINE_FEED::RETURN)
-          return TriPair{{0, 0, '\n'}, source_view};
+          return tripair("\0\0\n", source_view);
         std::string_view::iterator comment_end =
           std::ranges::find_if(source_view, [](char ch) { return ch != '\r' || ch != '\n'; });
         source_view = std::string_view{comment_end, source_view.end()};
@@ -275,18 +278,32 @@ namespace Manadrain {
 
         source_view = uchar_pair->second;
         if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
-          return TriPair{{0, 0, '\n'}, source_view};
+          return tripair("\0\0\n", source_view);
         if (source_view.starts_with("*/"))
           done = true;
         if (done) goto skip_delim; else goto skip_text;
+      }
+
+      if (source_view.starts_with("=>"))
+        return tripair("\0=>", source_view | std::views::drop(2));
+
+      static const std::array keyword_arr = std::to_array<std::string_view>
+        ({"in", "import", "of", "export", "function"});
+      for (std::string_view keyword : keyword_arr) {
+        if (match_identifier(source_view, keyword)) {
+          return tripair(
+            keyword,
+            source_view | std::views::drop(keyword.size())
+          );
+        }
       }
 
       return std::nullopt;
     }
   }
 
-  std::optional<TriPair> next_token(std::string_view source_view) {
-    std::optional<TriPair> parsed = peek_token<LINE_FEED::RETURN>(source_view);
+  std::optional<Tripair> next_token(std::string_view source_view) {
+    std::optional parsed = peek_token<LINE_FEED::RETURN>(source_view);
     if (not parsed) return std::nullopt;
     return *parsed;
   }
