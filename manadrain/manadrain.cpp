@@ -145,8 +145,30 @@ export namespace Manadrain {
 
       case '1': case '2': case '3': case '4':
       case '5': case '6': case '7': {
-        std::uint32_t octal = switch_char - '0';
-        return std::unexpected{BAD_ESCAPE::MALFORMED};
+        UcharPair octal_pair{switch_char - '0', switch_view};
+        std::optional<UcharPair> ahead_pair_opt{};
+
+        ahead_pair_opt = next_char(octal_pair.second)
+          .transform([](UcharPair ahead_pair) {
+            return UcharPair{ahead_pair.first - '0', ahead_pair.second};
+          });
+        if (not ahead_pair_opt || ahead_pair_opt->first > 7)
+          return octal_pair;
+        octal_pair.first = (octal_pair.first << 3) | ahead_pair_opt->first;
+        octal_pair.second = ahead_pair_opt->second;
+
+        if (octal_pair.first >= 32)
+          return octal_pair;
+
+        ahead_pair_opt = next_char(octal_pair.second)
+          .transform([](UcharPair ahead_pair) {
+            return UcharPair{ahead_pair.first - '0', ahead_pair.second};
+          });
+        if (not ahead_pair_opt || ahead_pair_opt->first > 7)
+          return octal_pair;
+        octal_pair.first = (octal_pair.first << 3) | ahead_pair_opt->first;
+        octal_pair.second = ahead_pair_opt->second;
+        return octal_pair;
       }
 
       default: return std::unexpected{BAD_ESCAPE::FELL_THROUGH};
