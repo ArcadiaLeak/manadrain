@@ -2,29 +2,18 @@ export module manadrain;
 import std;
 
 namespace Manadrain {
-  struct Token {};
-
-  using UcharPair = std::pair<std::uint32_t, std::string_view>;
-
-  bool is_hi_surrogate(std::uint32_t c) {
-    return (c >> 10) == (0xD800 >> 10); // 0xD800-0xDBFF
-  }
-
-  bool is_lo_surrogate(std::uint32_t c) {
-    return (c >> 10) == (0xDC00 >> 10); // 0xDC00-0xDFFF
-  }
-
-  std::uint32_t from_surrogate(std::uint32_t hi, std::uint32_t lo) {
-    return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
-  }
+  bool is_hi_surrogate(std::uint32_t c) { return (c >> 10) == (0xD800 >> 10); /* 0xD800-0xDBFF */ }
+  bool is_lo_surrogate(std::uint32_t c) { return (c >> 10) == (0xDC00 >> 10); /* 0xDC00-0xDFFF */ }
+  std::uint32_t from_surrogate( std::uint32_t hi, std::uint32_t lo)
+    { return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00); }
 
   enum class BAD_ESCAPE {
     MALFORMED,
     FELL_THROUGH
   };
-}
 
-export namespace Manadrain {
+  using UcharPair = std::pair<std::uint32_t, std::string_view>;
+
   std::optional<UcharPair> next_char(std::string_view source_view) {
     if (source_view.empty()) return std::nullopt;
     return UcharPair{source_view.front(), source_view | std::views::drop(1)};
@@ -186,6 +175,63 @@ export namespace Manadrain {
     return *parsed;
   }
 
+  /* Index: 0 -> 2-byte sequence, 1 -> 3-byte, ..., 4 -> 6-byte. */
+  std::array min_code_for_len = std::to_array<std::uint32_t>
+    ({ 0x80, 0x800, 0x10000, 0x00200000, 0x04000000 });
+
+  /* Index: 0 -> keep 5 bits, 1 -> 4 bits, ..., 4 -> 1 bit. */
+  std::array first_byte_mask = std::to_array<std::uint32_t>
+    ({ 0x1F, 0x0F, 0x07, 0x03, 0x01 });
+
+  int utf8_continuation(int first_byte) {
+    if (first_byte >= 0xC0 && first_byte <= 0xDF)
+      return 1;
+    else if (first_byte >= 0xE0 && first_byte <= 0xEF)
+      return 2;
+    else if (first_byte >= 0xF0 && first_byte <= 0xF7)
+      return 3;
+    else if (first_byte >= 0xF8 && first_byte <= 0xFB)
+      return 4;
+    else if (first_byte >= 0xFC && first_byte <= 0xFD)
+      return 5;
+    return -1;
+  }
+
+  std::optional<UcharPair> unicode_from_utf8(std::string_view start_view) {
+    std::optional<UcharPair> first_pair = next_char(start_view);
+    if (not first_pair)
+      return std::nullopt;
+
+    int first_byte = first_pair->first;
+    if (first_byte < 0x80)
+      return first_pair;
+
+    int cont_bytes = utf8_continuation(first_byte);
+    if (cont_bytes == -1)
+      return std::nullopt;
+
+    UcharPair code_pair{
+      first_byte & first_byte_mask[cont_bytes - 1],
+      first_pair->second
+    };
+
+    for (int i = 0; i < cont_bytes; i++) {
+      std::optional<UcharPair> cont_pair_opt = next_char(code_pair.second);
+      /* Continuation bytes must be 10xxxxxx (0x80..0xBF) */
+      if (not cont_pair_opt || cont_pair_opt->first < 0x80 || cont_pair_opt->first >= 0xC0)
+        return std::nullopt;
+      code_pair.first = (code_pair.first << 6) | (cont_pair_opt->first & 0x3F);
+      code_pair.second = cont_pair_opt->second;
+    }
+
+    if (code_pair.first < min_code_for_len[cont_bytes - 1])
+      return std::nullopt;
+
+    return code_pair;
+  }
+}
+
+export namespace Manadrain {
   int parse_program(std::string_view source_view) {
     if (next_token(source_view))
       return 1;
