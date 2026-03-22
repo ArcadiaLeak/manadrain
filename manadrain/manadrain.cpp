@@ -1,3 +1,7 @@
+module;
+#include <unicode/uchar.h>
+#include <unicode/utypes.h>
+
 export module manadrain;
 import std;
 
@@ -228,6 +232,16 @@ namespace Manadrain {
       return std::nullopt;
 
     return code_pair;
+  }
+
+  bool match_identifier(std::string_view lhs_view, std::string_view rhs_view) {
+    if (std::string_view{lhs_view | std::views::take(rhs_view.size())} != rhs_view)
+      return 0;
+    std::string_view lhs_tail = lhs_view | std::views::drop(rhs_view.size());
+    std::optional<UcharPair> ahead_pair_opt = unicode_from_utf8(lhs_tail);
+    if (not ahead_pair_opt)
+      return 1;
+    return !u_hasBinaryProperty(ahead_pair_opt->first, UCHAR_XID_CONTINUE);
   }
 }
 
