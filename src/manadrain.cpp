@@ -31,13 +31,17 @@ namespace Manadrain {
     return std::nullopt;
   }
 
+  enum class PARSE_ERROR {
+    ESCAPE_MALFORMED,
+    ESCAPE_MISMATCH
+  };
+
   enum class UTF16_MODE { DISABLED, NORMAL, REGEXP };
-  enum class BAD_ESCAPE { MALFORMED, MISMATCH };
 
   template<UTF16_MODE utf16_mode>
-  std::expected<UcharPair, BAD_ESCAPE> parse_escape(u32_string_view source_view) {
+  std::expected<UcharPair, PARSE_ERROR> parse_escape(u32_string_view source_view) {
     std::optional switch_pair = next_uchar32(source_view);
-    if (not switch_pair) return std::unexpected{BAD_ESCAPE::MISMATCH};
+    if (not switch_pair) return std::unexpected{PARSE_ERROR::ESCAPE_MISMATCH};
 
     auto [switch_char, switch_view] = *switch_pair;
     switch (switch_char) {
@@ -51,11 +55,11 @@ namespace Manadrain {
       case 'x': {
         std::optional hex0_pair = next_uchar32(switch_view).and_then(hex_digit);
         if (not hex0_pair)
-          return std::unexpected{BAD_ESCAPE::MALFORMED};
+          return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
         auto [hex0, hex0_view] = *hex0_pair;
         std::optional hex1_pair = next_uchar32(hex0_view).and_then(hex_digit);
         if (not hex1_pair)
-          return std::unexpected{BAD_ESCAPE::MALFORMED};
+          return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
         auto [hex1, hex1_view] = *hex1_pair;
         return UcharPair{(hex0 << 4) | hex1, hex1_view}; 
       }
@@ -63,7 +67,7 @@ namespace Manadrain {
       case 'u': {
         std::optional brace_pair = next_uchar32(switch_view);
         if (not brace_pair)
-          return std::unexpected{BAD_ESCAPE::MALFORMED};
+          return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
         if (brace_pair->first == '{' && utf16_mode != UTF16_MODE::DISABLED) {
           std::uint32_t utf16_char = 0;
           u32_string_view utf16_view = brace_pair->second;
@@ -71,16 +75,16 @@ namespace Manadrain {
           while (true) {
             std::optional end_pair_opt = next_uchar32(utf16_view);
             if (not end_pair_opt)
-              return std::unexpected{BAD_ESCAPE::MALFORMED};
+              return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
             if (end_pair_opt->first == '}')
               return UcharPair{utf16_char, end_pair_opt->second};
 
             std::optional hex_pair_opt = hex_digit(*end_pair_opt);
             if (not hex_pair_opt)
-              return std::unexpected{BAD_ESCAPE::MALFORMED};
+              return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
             utf16_char = (utf16_char << 4) | hex_pair_opt->first;
             if (utf16_char > 0x10FFFF)
-              return std::unexpected{BAD_ESCAPE::MALFORMED};
+              return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
             utf16_view = hex_pair_opt->second;
           }
         } else {
@@ -90,7 +94,7 @@ namespace Manadrain {
           for (int i = 0; i < 4; i++) {
             std::optional hex_pair_opt = next_uchar32(uni_view).and_then(hex_digit);
             if (not hex_pair_opt)
-              return std::unexpected{BAD_ESCAPE::MALFORMED};
+              return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
             high_surr = (high_surr << 4) | hex_pair_opt->first;
             uni_view = hex_pair_opt->second;
           }
@@ -123,7 +127,7 @@ namespace Manadrain {
       if (utf16_mode == UTF16_MODE::REGEXP) {
         std::optional ahead_pair = next_uchar32(switch_view);
         if (ahead_pair && std::isdigit(ahead_pair->first))
-          return std::unexpected{BAD_ESCAPE::MALFORMED};
+          return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
         return UcharPair{0, switch_view};
       }
       [[fallthrough]];
@@ -156,7 +160,7 @@ namespace Manadrain {
         return octal_pair;
       }
 
-      default: return std::unexpected{BAD_ESCAPE::MISMATCH};
+      default: return std::unexpected{PARSE_ERROR::ESCAPE_MISMATCH};
     }
   }
 
@@ -251,7 +255,7 @@ namespace Manadrain {
     return *parsed;
   }
 
-  u32_string new_u32_string(std::string narrow) {
+  u32_string new_u32_string(const std::string& narrow) {
     UErrorCode status = U_ZERO_ERROR;
 
     std::int32_t u16_size{};
@@ -280,10 +284,14 @@ namespace Manadrain {
 
     return wide;
   }
+
+  std::expected<u32_string, PARSE_ERROR> parse_string() {
+    return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+  }
 }
 
 export namespace Manadrain {
-  int parse_program(std::string source_str) {
+  int parse_program(const std::string& source_str) {
     u32_string wide_str{new_u32_string(source_str)};
     if (next_token(wide_str))
       return 1;

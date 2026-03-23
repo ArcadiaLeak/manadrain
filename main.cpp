@@ -25,7 +25,7 @@ int main(int argc, char* argv[]) {
     )
   );
 
-  Manadrain::parse_program(std::move(source_str));
+  Manadrain::parse_program(source_str);
   
   return 0;
 }
