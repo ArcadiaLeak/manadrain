@@ -1,14 +1,13 @@
 module;
 #include <unicode/uchar.h>
-#include <unicode/utypes.h>
-
+#include <unicode/ustring.h>
 export module manadrain;
 import std;
 
 namespace Manadrain {
   bool is_hi_surrogate(std::uint32_t c) { return (c >> 10) == (0xD800 >> 10); /* 0xD800-0xDBFF */ }
   bool is_lo_surrogate(std::uint32_t c) { return (c >> 10) == (0xDC00 >> 10); /* 0xDC00-0xDFFF */ }
-  std::uint32_t from_surrogate( std::uint32_t hi, std::uint32_t lo)
+  std::uint32_t from_surrogate(std::uint32_t hi, std::uint32_t lo)
     { return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00); }
 
   enum class BAD_ESCAPE {
@@ -16,13 +15,16 @@ namespace Manadrain {
     MISMATCH
   };
 
-  using UcharPair = std::pair<std::uint32_t, std::string_view>;
+  using u32_string = std::basic_string<UChar32>;
+  using u32_string_view = std::basic_string_view<UChar32>;
+  u32_string operator""_icu32(const char* str, std::size_t len) { return u32_string{str, str + len}; }
 
-  std::optional<UcharPair> next_char(std::string_view source_view) {
+  using UcharPair = std::pair<std::uint32_t, u32_string_view>;
+  std::optional<UcharPair> next_uchar32(u32_string_view source_view) {
     if (source_view.empty()) return std::nullopt;
     return UcharPair{source_view.front(), source_view | std::views::drop(1)};
   }
-  
+
   std::optional<UcharPair> hex_digit(UcharPair source_pair) {
     auto [digit, source_view] = source_pair;
     if (digit >= '0' && digit <= '9')
@@ -41,8 +43,8 @@ namespace Manadrain {
   };
 
   template<UTF16_MODE utf16_mode>
-  std::expected<UcharPair, BAD_ESCAPE> parse_escape(std::string_view source_view) {
-    std::optional switch_pair = next_char(source_view);
+  std::expected<UcharPair, BAD_ESCAPE> parse_escape(u32_string_view source_view) {
+    std::optional switch_pair = next_uchar32(source_view);
     if (not switch_pair) return std::unexpected{BAD_ESCAPE::MISMATCH};
 
     auto [switch_char, switch_view] = *switch_pair;
@@ -55,11 +57,11 @@ namespace Manadrain {
       case 'v': return UcharPair{'\v', switch_view};
 
       case 'x': {
-        std::optional hex0_pair = next_char(switch_view).and_then(hex_digit);
+        std::optional hex0_pair = next_uchar32(switch_view).and_then(hex_digit);
         if (not hex0_pair)
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         auto [hex0, hex0_view] = *hex0_pair;
-        std::optional hex1_pair = next_char(hex0_view).and_then(hex_digit);
+        std::optional hex1_pair = next_uchar32(hex0_view).and_then(hex_digit);
         if (not hex1_pair)
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         auto [hex1, hex1_view] = *hex1_pair;
@@ -67,15 +69,15 @@ namespace Manadrain {
       }
 
       case 'u': {
-        std::optional brace_pair = next_char(switch_view);
+        std::optional brace_pair = next_uchar32(switch_view);
         if (not brace_pair)
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         if (brace_pair->first == '{' && utf16_mode != UTF16_MODE::DISABLED) {
           std::uint32_t utf16_char = 0;
-          std::string_view utf16_view = brace_pair->second;
+          u32_string_view utf16_view = brace_pair->second;
 
           while (true) {
-            std::optional end_pair_opt = next_char(utf16_view);
+            std::optional end_pair_opt = next_uchar32(utf16_view);
             if (not end_pair_opt)
               return std::unexpected{BAD_ESCAPE::MALFORMED};
             if (end_pair_opt->first == '}')
@@ -90,11 +92,11 @@ namespace Manadrain {
             utf16_view = hex_pair_opt->second;
           }
         } else {
-          std::string_view uni_view = brace_pair->second;
+          u32_string_view uni_view = brace_pair->second;
           
           std::uint32_t high_surr = 0;
           for (int i = 0; i < 4; i++) {
-            std::optional hex_pair_opt = next_char(uni_view).and_then(hex_digit);
+            std::optional hex_pair_opt = next_uchar32(uni_view).and_then(hex_digit);
             if (not hex_pair_opt)
               return std::unexpected{BAD_ESCAPE::MALFORMED};
             high_surr = (high_surr << 4) | hex_pair_opt->first;
@@ -103,12 +105,12 @@ namespace Manadrain {
 
           if (
             is_hi_surrogate(high_surr) && utf16_mode == UTF16_MODE::REGEXP &&
-            uni_view.starts_with("\\u")
+            uni_view.starts_with("\\u"_icu32)
           ) {
             std::uint32_t low_surr = 0;
             uni_view.remove_prefix(2);
             for (int i = 0; i < 4; i++) {
-              std::optional hex_pair_opt = next_char(uni_view).and_then(hex_digit);
+              std::optional hex_pair_opt = next_uchar32(uni_view).and_then(hex_digit);
               if (not hex_pair_opt)
                 goto return_high_surr;
               low_surr = (low_surr << 4) | hex_pair_opt->first;
@@ -127,7 +129,7 @@ namespace Manadrain {
 
       case '0':
       if (utf16_mode == UTF16_MODE::REGEXP) {
-        std::optional ahead_pair = next_char(switch_view);
+        std::optional ahead_pair = next_uchar32(switch_view);
         if (ahead_pair && std::isdigit(ahead_pair->first))
           return std::unexpected{BAD_ESCAPE::MALFORMED};
         return UcharPair{0, switch_view};
@@ -139,7 +141,7 @@ namespace Manadrain {
         UcharPair octal_pair{switch_char - '0', switch_view};
         std::optional<UcharPair> ahead_pair_opt;
 
-        ahead_pair_opt = next_char(octal_pair.second)
+        ahead_pair_opt = next_uchar32(octal_pair.second)
           .transform([](UcharPair ahead_pair) {
             return UcharPair{ahead_pair.first - '0', ahead_pair.second};
           });
@@ -151,7 +153,7 @@ namespace Manadrain {
         if (octal_pair.first >= 32)
           return octal_pair;
 
-        ahead_pair_opt = next_char(octal_pair.second)
+        ahead_pair_opt = next_uchar32(octal_pair.second)
           .transform([](UcharPair ahead_pair) {
             return UcharPair{ahead_pair.first - '0', ahead_pair.second};
           });
@@ -166,172 +168,132 @@ namespace Manadrain {
     }
   }
 
-  /* Index: 0 -> 2-byte sequence, 1 -> 3-byte, ..., 4 -> 6-byte. */
-  std::array min_code_for_len = std::to_array<std::uint32_t>
-    ({ 0x80, 0x800, 0x10000, 0x00200000, 0x04000000 });
-
-  /* Index: 0 -> keep 5 bits, 1 -> 4 bits, ..., 4 -> 1 bit. */
-  std::array first_byte_mask = std::to_array<std::uint32_t>
-    ({ 0x1F, 0x0F, 0x07, 0x03, 0x01 });
-
-  int utf8_continuation(int first_byte) {
-    if (first_byte >= 0xC0 && first_byte <= 0xDF)
-      return 1;
-    else if (first_byte >= 0xE0 && first_byte <= 0xEF)
-      return 2;
-    else if (first_byte >= 0xF0 && first_byte <= 0xF7)
-      return 3;
-    else if (first_byte >= 0xF8 && first_byte <= 0xFB)
-      return 4;
-    else if (first_byte >= 0xFC && first_byte <= 0xFD)
-      return 5;
-    return -1;
-  }
-
-  std::optional<UcharPair> unicode_from_utf8(std::string_view start_view) {
-    std::optional first_pair = next_char(start_view);
-    if (not first_pair)
-      return std::nullopt;
-
-    int first_byte = first_pair->first;
-    if (first_byte < 0x80)
-      return first_pair;
-
-    int cont_bytes = utf8_continuation(first_byte);
-    if (cont_bytes == -1)
-      return std::nullopt;
-
-    UcharPair code_pair{
-      first_byte & first_byte_mask[cont_bytes - 1],
-      first_pair->second
-    };
-
-    for (int i = 0; i < cont_bytes; i++) {
-      std::optional cont_pair_opt = next_char(code_pair.second);
-      /* Continuation bytes must be 10xxxxxx (0x80..0xBF) */
-      if (not cont_pair_opt || cont_pair_opt->first < 0x80 || cont_pair_opt->first >= 0xC0)
-        return std::nullopt;
-      code_pair.first = (code_pair.first << 6) | (cont_pair_opt->first & 0x3F);
-      code_pair.second = cont_pair_opt->second;
-    }
-
-    if (code_pair.first < min_code_for_len[cont_bytes - 1])
-      return std::nullopt;
-
-    return code_pair;
-  }
-
-  bool match_identifier(std::string_view lhs_view, std::string_view rhs_view) {
+  bool match_identifier(u32_string_view lhs_view, u32_string_view rhs_view) {
     if (not lhs_view.starts_with(rhs_view))
       return 0;
     lhs_view.remove_prefix(rhs_view.size());
-    std::optional ahead_pair_opt = unicode_from_utf8(lhs_view);
+    std::optional ahead_pair_opt = next_uchar32(lhs_view);
     if (not ahead_pair_opt)
       return 1;
     return !u_hasBinaryProperty(ahead_pair_opt->first, UCHAR_XID_CONTINUE);
   }
 
-  using Trigraph = std::tuple<std::uint8_t, std::uint8_t, std::uint32_t>;
-  constexpr Trigraph trigraph(std::string_view str_view) {
-    std::string str{str_view}; str.resize(3);
-    return {str[0], str[1], str[2]};
-  }
-  constexpr Trigraph trigraph(std::uint32_t uchar) {
-    return {0, 0, uchar};
-  }
+  enum class PEEK_TYPE { ARROW, IN, IMPORT, OF, EXPORT, FUNCTION, IDENTIFIER };
+  enum class PEEK_LF { RETURN, IGNORE };
+  using PeekedToken = std::variant<std::uint32_t, PEEK_TYPE>;
 
-  using Tripair = std::pair<Trigraph, std::string_view>;
-  template<typename T>
-  constexpr Tripair tripair(T trigraph_arg, std::string_view tail_view) {
-    return {trigraph(trigraph_arg), tail_view};
-  }
-
-  enum class LINE_FEED { RETURN, IGNORE };
-
-  template<LINE_FEED LF>
-  std::optional<Trigraph> peek_token(std::string_view source_view) {
+  template<PEEK_LF LF>
+  std::optional<PeekedToken> peek_token(u32_string_view source_view) {
     std::optional<UcharPair> ch;
 
-    again: ch = next_char(source_view);
+    again: ch = next_uchar32(source_view);
     if (not ch)
       return std::nullopt;
 
-    if (std::isspace(ch->first)) {
-      if constexpr (LF == LINE_FEED::RETURN) if (ch->first == '\r' || ch->first == '\n')
-        return trigraph('\n');
+    if (u_isWhitespace(ch->first)) {
+      if constexpr (LF == PEEK_LF::RETURN) switch (ch->first) {
+        case '\r': case '\n': case 0x2028: case 0x2029:
+        return std::uint32_t{'\n'};
+      }
       source_view = ch->second;
       goto again;
     }
 
-    if (source_view.starts_with("//")) {
-      if constexpr (LF == LINE_FEED::RETURN)
-        return trigraph('\n');
-      std::string_view::iterator comment_end =
+    if (source_view.starts_with("//"_icu32)) {
+      if constexpr (LF == PEEK_LF::RETURN)
+        return std::uint32_t{'\n'};
+      u32_string_view::iterator comment_end =
         std::ranges::find_if(source_view, [](char c) { return c != '\r' || c != '\n'; });
-      source_view = std::string_view{comment_end, source_view.end()};
+      source_view = u32_string_view{comment_end, source_view.end()};
       goto again;
     }
 
-    if (source_view.starts_with("/*")) {
+    if (source_view.starts_with("/*"_icu32)) {
       bool done = false; 
       skip_delim: source_view.remove_prefix(2);
       if (done) goto again;
 
-      skip_text: ch = next_char(source_view);
+      skip_text: ch = next_uchar32(source_view);
       if (not ch)
         return std::nullopt;
 
       source_view = ch->second;
-      if constexpr (LF == LINE_FEED::RETURN) if (ch->first == '\r' || ch->first == '\n')
-        return trigraph('\n');
-      if (source_view.starts_with("*/"))
+      if constexpr (LF == PEEK_LF::RETURN) if (ch->first == '\r' || ch->first == '\n')
+        return std::uint32_t{'\n'};
+      if (source_view.starts_with("*/"_icu32))
         done = true;
       if (done) goto skip_delim; else goto skip_text;
     }
 
-    if (source_view.starts_with("=>"))
-      return trigraph("=>");
+    if (source_view.starts_with("=>"_icu32))
+      return PEEK_TYPE::ARROW;
 
-    static const std::array keyword_arr = std::to_array<std::string_view>
-      ({"in", "import", "of", "export", "function"});
-    for (std::string_view keyword : keyword_arr)
-      if (match_identifier(source_view, keyword)) return trigraph(keyword);
+    using KeywordPair = std::pair<PEEK_TYPE, u32_string>;
+    static const std::array keyword_arr = std::to_array<KeywordPair>({
+      { PEEK_TYPE::IN, "in"_icu32 },
+      { PEEK_TYPE::IMPORT, "import"_icu32 },
+      { PEEK_TYPE::OF, "of"_icu32 },
+      { PEEK_TYPE::EXPORT, "export"_icu32 },
+      { PEEK_TYPE::FUNCTION, "function"_icu32 }
+    });
+    for (const KeywordPair& keyword_pair : keyword_arr)
+      if (match_identifier(source_view, keyword_pair.second))
+        return keyword_pair.first;
 
-    if (source_view.starts_with("\\u")) {
+    if (source_view.starts_with("\\u"_icu32)) {
       std::expected escape = parse_escape<UTF16_MODE::NORMAL>(source_view);
       if (not escape)
         return std::nullopt;
-      if (u_hasBinaryProperty(escape->first, UCHAR_XID_START))
-        return trigraph("ide");
+      ch = *escape;
     }
-
-    if (ch->first >= 128) {
-      ch = unicode_from_utf8(source_view);
-      if (not ch)
-        return std::nullopt;
-      if constexpr (LF == LINE_FEED::RETURN) if (ch->first == 0x2028 || ch->first == 0x2029)
-        return trigraph('\n');
-    }
-
-    if (u_isWhitespace(ch->first))
-      goto again;
 
     if (u_hasBinaryProperty(ch->first, UCHAR_XID_START))
-      return trigraph("ide");
+      return PEEK_TYPE::IDENTIFIER;
 
-    return trigraph(ch->first);
+    return ch->first;
   }
 
-  std::optional<Trigraph> next_token(std::string_view source_view) {
-    std::optional parsed = peek_token<LINE_FEED::RETURN>(source_view);
+  std::optional<PeekedToken> next_token(u32_string_view source_view) {
+    std::optional parsed = peek_token<PEEK_LF::RETURN>(source_view);
     if (not parsed) return std::nullopt;
     return *parsed;
+  }
+
+  u32_string conv_narrow_str(std::string narrow) {
+    UErrorCode status = U_ZERO_ERROR;
+
+    std::int32_t u16_size{};
+    u_strFromUTF8(nullptr, 0, &u16_size, narrow.data(), -1, &status);
+    if (status == U_BUFFER_OVERFLOW_ERROR) status = U_ZERO_ERROR;
+    
+    std::basic_string<UChar> medium{}; medium.resize(u16_size);
+    u_strFromUTF8(medium.data(), u16_size + 1, nullptr, narrow.data(), -1, &status);
+
+    if (U_FAILURE(status))
+      throw std::runtime_error{
+        std::format("UTF-8 to UTF-16 failed: {}", u_errorName(status))
+      };
+
+    std::int32_t u32_size{};
+    u_strToUTF32(nullptr, 0, &u32_size, medium.data(), -1, &status);
+    if (status == U_BUFFER_OVERFLOW_ERROR) status = U_ZERO_ERROR;
+    
+    u32_string wide{}; wide.resize(u32_size);
+    u_strToUTF32(wide.data(), u32_size + 1, nullptr, medium.data(), -1, &status);
+
+    if (U_FAILURE(status))
+      throw std::runtime_error{
+        std::format("UTF-16 to UTF-32 failed: {}", u_errorName(status))
+      };
+
+    return wide;
   }
 }
 
 export namespace Manadrain {
-  int parse_program(std::string_view source_view) {
-    if (next_token(source_view))
+  int parse_program(std::string source_str) {
+    std::basic_string wide_str = conv_narrow_str(source_str);
+    if (next_token(wide_str))
       return 1;
     return 0;
   }
