@@ -5,6 +5,7 @@ export module manadrain;
 import std;
 
 namespace Manadrain {
+
 bool is_hi_surrogate(std::uint32_t c) {
   return (c >> 10) == (0xD800 >> 10); /* 0xD800-0xDBFF */
 }
@@ -39,20 +40,17 @@ std::optional<UcharPair> hex_digit(UcharPair source_pair) {
   return std::nullopt;
 }
 
-enum class PARSE_ERROR {
-  ESCAPE_MALFORMED,
-  ESCAPE_MISMATCH,
-  STRING_ENDED_ABRUPTLY
-};
+enum class BAD_STRING { UNEXPECTED_END };
+enum class BAD_ESCAPE { MALFORMED, MISMATCH };
+using ParseError = std::variant<BAD_ESCAPE, BAD_STRING>;
 
 enum class UTF16_MODE { DISABLED, NORMAL, REGEXP };
 
 template <UTF16_MODE utf16_mode>
-std::expected<UcharPair, PARSE_ERROR> parse_escape(
-    u32_string_view source_view) {
+std::expected<UcharPair, ParseError> parse_escape(u32_string_view source_view) {
   std::optional switch_pair = next_uchar32(source_view);
   if (not switch_pair)
-    return std::unexpected{PARSE_ERROR::ESCAPE_MISMATCH};
+    return std::unexpected{BAD_ESCAPE::MISMATCH};
 
   auto [switch_char, switch_view] = *switch_pair;
   switch (switch_char) {
@@ -72,11 +70,11 @@ std::expected<UcharPair, PARSE_ERROR> parse_escape(
     case 'x': {
       std::optional hex0_pair = next_uchar32(switch_view).and_then(hex_digit);
       if (not hex0_pair)
-        return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+        return std::unexpected{BAD_ESCAPE::MALFORMED};
       auto [hex0, hex0_view] = *hex0_pair;
       std::optional hex1_pair = next_uchar32(hex0_view).and_then(hex_digit);
       if (not hex1_pair)
-        return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+        return std::unexpected{BAD_ESCAPE::MALFORMED};
       auto [hex1, hex1_view] = *hex1_pair;
       return UcharPair{(hex0 << 4) | hex1, hex1_view};
     }
@@ -84,7 +82,7 @@ std::expected<UcharPair, PARSE_ERROR> parse_escape(
     case 'u': {
       std::optional brace_pair = next_uchar32(switch_view);
       if (not brace_pair)
-        return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+        return std::unexpected{BAD_ESCAPE::MALFORMED};
       if (brace_pair->first == '{' && utf16_mode != UTF16_MODE::DISABLED) {
         std::uint32_t utf16_char = 0;
         u32_string_view utf16_view = brace_pair->second;
@@ -92,16 +90,16 @@ std::expected<UcharPair, PARSE_ERROR> parse_escape(
         while (true) {
           std::optional end_pair_opt = next_uchar32(utf16_view);
           if (not end_pair_opt)
-            return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+            return std::unexpected{BAD_ESCAPE::MALFORMED};
           if (end_pair_opt->first == '}')
             return UcharPair{utf16_char, end_pair_opt->second};
 
           std::optional hex_pair_opt = hex_digit(*end_pair_opt);
           if (not hex_pair_opt)
-            return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+            return std::unexpected{BAD_ESCAPE::MALFORMED};
           utf16_char = (utf16_char << 4) | hex_pair_opt->first;
           if (utf16_char > 0x10FFFF)
-            return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+            return std::unexpected{BAD_ESCAPE::MALFORMED};
           utf16_view = hex_pair_opt->second;
         }
       } else {
@@ -112,7 +110,7 @@ std::expected<UcharPair, PARSE_ERROR> parse_escape(
           std::optional hex_pair_opt =
               next_uchar32(uni_view).and_then(hex_digit);
           if (not hex_pair_opt)
-            return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+            return std::unexpected{BAD_ESCAPE::MALFORMED};
           high_surr = (high_surr << 4) | hex_pair_opt->first;
           uni_view = hex_pair_opt->second;
         }
@@ -145,7 +143,7 @@ std::expected<UcharPair, PARSE_ERROR> parse_escape(
         std::optional ahead_pair = next_uchar32(switch_view);
 
         if (ahead_pair && std::isdigit(ahead_pair->first))
-          return std::unexpected{PARSE_ERROR::ESCAPE_MALFORMED};
+          return std::unexpected{BAD_ESCAPE::MALFORMED};
 
         return UcharPair{0, switch_view};
       }
@@ -187,7 +185,7 @@ std::expected<UcharPair, PARSE_ERROR> parse_escape(
     }
 
     default:
-      return std::unexpected{PARSE_ERROR::ESCAPE_MISMATCH};
+      return std::unexpected{BAD_ESCAPE::MISMATCH};
   }
 }
 
@@ -332,40 +330,65 @@ u32_string new_u32_string(const std::string& narrow) {
   return wide;
 }
 
-using ParseStringPair = std::pair<u32_string, u32_string_view>;
-std::expected<ParseStringPair, PARSE_ERROR> parse_string(
-    const UChar32 sep,
-    u32_string_view source_view) {
-  std::optional<UcharPair> ch;
+using StrPair = std::pair<u32_string, u32_string_view>;
+std::expected<StrPair, ParseError> parse_string(const UChar32 sep,
+                                                u32_string_view source_view) {
+  std::optional ch = next_uchar32(source_view);
   u32_string parsed{};
 
 again:
-  ch = next_uchar32(source_view);
   if (not ch)
-    return std::unexpected{PARSE_ERROR::STRING_ENDED_ABRUPTLY};
+    return std::unexpected{BAD_STRING::UNEXPECTED_END};
 
   if (sep == '`') {
-    if (source_view.starts_with("\r\n"_u32)) {
-      ch = next_uchar32(ch->second);
-      source_view = ch->second;
+    if (ch->first == '\r') {
+      if (ch->second.starts_with('\n'))
+        ch = next_uchar32(ch->second);
+      else
+        ch->first = '\n';
     }
-    if (source_view.starts_with("${"_u32)) {
-      ch = next_uchar32(ch->second);
-      return ParseStringPair{parsed, ch->second};
-    }
-  } else {
-    if (ch->first == '\r' || ch->first == '\n')
-      return std::unexpected{PARSE_ERROR::STRING_ENDED_ABRUPTLY};
-  }
+  } else if (ch->first == '\r' || ch->first == '\n')
+    return std::unexpected{BAD_STRING::UNEXPECTED_END};
 
   if (ch->first == sep)
-    return ParseStringPair{parsed, ch->second};
-  else
-    goto again;
+    return StrPair{parsed, ch->second};
+
+  if (ch->first == '$' && ch->second.starts_with('{') && sep == '`') {
+    ch = next_uchar32(ch->second);
+    return StrPair{parsed, ch->second};
+  }
+
+  if (ch->first == '\\') {
+    ch = next_uchar32(ch->second);
+    if (not ch)
+      return std::unexpected{BAD_STRING::UNEXPECTED_END};
+
+    switch (ch->first) {
+      case '\'':
+      case '\"':
+      case '\0':
+      case '\\':
+        ch = next_uchar32(ch->second);
+        return StrPair{parsed, ch->second};
+      case '\r':
+        if (ch->second.starts_with('\n'))
+          ch = next_uchar32(ch->second);
+        [[fallthrough]];
+      case '\n':
+        ch = next_uchar32(ch->second); /* ignore escaped newline sequence */
+        goto again;
+      default:
+        return std::unexpected{BAD_STRING::UNEXPECTED_END};
+    }
+  }
+
+  return std::unexpected{BAD_STRING::UNEXPECTED_END};
 }
+
 }  // namespace Manadrain
 
 export namespace Manadrain {
+
 int parse_program(const std::string& source_str) {
   u32_string wide_str{new_u32_string(source_str)};
   if (next_token(wide_str))
@@ -373,4 +396,5 @@ int parse_program(const std::string& source_str) {
   else
     return 0;
 }
+
 }  // namespace Manadrain
