@@ -83,7 +83,7 @@ std::expected<UChar32, ParseError> parse_escape(u32_string_view& src_view) {
       if (open_or_uchar == '{' && utf16_mode != UTF16_MODE::DISABLED) {
         std::uint32_t utf16_char = 0;
 
-        while (true) {
+        do {
           std::optional close_or_uchar = next_uchar32(src_view);
           if (not close_or_uchar)
             return std::unexpected{BAD_ESCAPE::MALFORMED};
@@ -96,7 +96,7 @@ std::expected<UChar32, ParseError> parse_escape(u32_string_view& src_view) {
           utf16_char = (utf16_char << 4) | *hex;
           if (utf16_char > 0x10FFFF)
             return std::unexpected{BAD_ESCAPE::MALFORMED};
-        }
+        } while (true);
       } else {
         std::uint32_t high_surr = 0;
         for (int i = 0; i < 4; i++) {
@@ -170,10 +170,9 @@ bool match_identifier(u32_string_view lhs_view, u32_string_view rhs_view) {
   if (not lhs_view.starts_with(rhs_view))
     return false;
   lhs_view.remove_prefix(rhs_view.size());
-  std::optional ahead = next_uchar32(lhs_view);
-  if (not ahead)
+  if (lhs_view.empty())
     return true;
-  return !u_hasBinaryProperty(*ahead, UCHAR_XID_CONTINUE);
+  return !u_hasBinaryProperty(lhs_view.front(), UCHAR_XID_CONTINUE);
 }
 
 enum class TOKEN_AHEAD { ARROW, IN, IMPORT, OF, EXPORT, FUNCTION, IDENTIFIER };
@@ -182,83 +181,81 @@ using TokenAhead = std::variant<UChar32, TOKEN_AHEAD>;
 
 template <LINETERM_BEHAVIOR LT>
 std::optional<TokenAhead> peek_token(u32_string_view src_view) {
-  std::optional<UChar32> ch;
-
-again:
-  ch = next_uchar32(src_view);
-  if (not ch)
-    return std::nullopt;
-
-  if (u_isWhitespace(*ch)) {
-    if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
-      switch (*ch) {
-        case '\r':
-        case '\n':
-        case 0x2028:
-        case 0x2029:
-          return '\n';
-      }
-    goto again;
-  }
-
-  if (src_view.starts_with("//"_u32)) {
-    if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
-      return '\n';
-    u32_string_view::iterator comment_end = std::ranges::find_if(
-        src_view, [](char c) { return c != '\r' || c != '\n'; });
-    src_view = u32_string_view{comment_end, src_view.end()};
-    goto again;
-  }
-
-  if (src_view.starts_with("/*"_u32)) {
-    bool done = false;
-  skip_delim:
-    src_view = src_view | std::views::drop(2);
-    if (done)
-      goto again;
-
-  skip_text:
-    ch = next_uchar32(src_view);
-    if (not ch)
+  do {
+    if (src_view.empty())
       return std::nullopt;
-    if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
-      if (*ch == '\r' || *ch == '\n')
+    UChar32 ch = src_view.front();
+
+    if (u_isWhitespace(ch)) {
+      if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
+        switch (ch) {
+          case '\r':
+          case '\n':
+          case 0x2028:
+          case 0x2029:
+            return '\n';
+        }
+      src_view = src_view | std::views::drop(1);
+      continue;
+    }
+
+    if (src_view.starts_with("//"_u32)) {
+      if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
         return '\n';
+      u32_string_view::iterator comment_end = std::ranges::find_if(
+          src_view, [](char c) { return c != '\r' || c != '\n'; });
+      src_view = u32_string_view{comment_end, src_view.end()};
+      continue;
+    }
 
-    if (src_view.starts_with("*/"_u32))
-      done = true;
-    if (done)
-      goto skip_delim;
-    else
-      goto skip_text;
-  }
+    if (src_view.starts_with("/*"_u32)) {
+      src_view = src_view | std::views::drop(2);
+      while (next_uchar32(src_view)) {
+        ch = src_view.front();
+        if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
+          if (ch == '\r' || ch == '\n')
+            return '\n';
 
-  if (src_view.starts_with("=>"_u32))
-    return TOKEN_AHEAD::ARROW;
+        if (src_view.starts_with("*/"_u32)) {
+          src_view = src_view | std::views::drop(2);
+          break;
+        }
+      }
+      continue;
+    }
 
-  using KeywordPair = std::pair<TOKEN_AHEAD, u32_string>;
-  static const std::array keyword_arr =
-      std::to_array<KeywordPair>({{TOKEN_AHEAD::IN, "in"_u32},
-                                  {TOKEN_AHEAD::IMPORT, "import"_u32},
-                                  {TOKEN_AHEAD::OF, "of"_u32},
-                                  {TOKEN_AHEAD::EXPORT, "export"_u32},
-                                  {TOKEN_AHEAD::FUNCTION, "function"_u32}});
+    if (src_view.starts_with("=>"_u32))
+      return TOKEN_AHEAD::ARROW;
 
-  for (const KeywordPair& keyword_pair : keyword_arr)
-    if (match_identifier(src_view, keyword_pair.second))
-      return keyword_pair.first;
+    using KeywordPair = std::pair<TOKEN_AHEAD, u32_string>;
+    static const std::array keyword_arr =
+        std::to_array<KeywordPair>({{TOKEN_AHEAD::IN, "in"_u32},
+                                    {TOKEN_AHEAD::IMPORT, "import"_u32},
+                                    {TOKEN_AHEAD::OF, "of"_u32},
+                                    {TOKEN_AHEAD::EXPORT, "export"_u32},
+                                    {TOKEN_AHEAD::FUNCTION, "function"_u32}});
 
-  if (src_view.starts_with("\\u"_u32)) {
-    std::expected ch_exp = parse_escape<UTF16_MODE::NORMAL>(src_view);
-    if (not ch_exp)
-      return std::nullopt;
-    ch = *ch_exp;
-  }
+    for (const KeywordPair& keyword_pair : keyword_arr)
+      if (match_identifier(src_view, keyword_pair.second))
+        return keyword_pair.first;
 
-  if (u_hasBinaryProperty(*ch, UCHAR_XID_START))
-    return TOKEN_AHEAD::IDENTIFIER;
+    if (src_view.starts_with("\\u"_u32)) {
+      src_view = src_view | std::views::drop(1);
 
-  return *ch;
+      u32_string_view esc_view{src_view};
+      if (parse_escape<UTF16_MODE::NORMAL>(esc_view)
+              .transform([](UChar32 esc) {
+                return u_hasBinaryProperty(esc, UCHAR_XID_START);
+              })
+              .value_or(false))
+        return TOKEN_AHEAD::IDENTIFIER;
+    }
+
+    if (u_hasBinaryProperty(ch, UCHAR_XID_START))
+      return TOKEN_AHEAD::IDENTIFIER;
+
+    return ch;
+  } while (true);
 }
 
 std::optional<TokenAhead> next_token(u32_string_view source_view) {
@@ -313,13 +310,14 @@ std::optional<UChar32> peek_uchar32(u32_string_view src_view, int idx = 0) {
   return next_uchar32(src_view);
 }
 
-std::expected<u32_string, ParseError> parse_string(const UChar32 sep,
-                                                   const JS::Mode js_mode,
-                                                   u32_string_view& src_view) {
+std::expected<u32_string, ParseError> parse_string_literal(
+    const UChar32 sep,
+    const JS::Mode js_mode,
+    u32_string_view& src_view) {
   u32_string string_literal{};
   UChar32 ch;
 
-  while (true) {
+  do {
     if (src_view.empty())
       return std::unexpected{BAD_STRING::UNEXPECTED_END};
     ch = src_view.front();
@@ -381,7 +379,7 @@ std::expected<u32_string, ParseError> parse_string(const UChar32 sep,
       }
     }
     string_literal.push_back(ch);
-  }
+  } while (true);
 }
 
 }  // namespace Manadrain
