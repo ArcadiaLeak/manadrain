@@ -10,16 +10,11 @@ namespace Manadrain {
   std::uint32_t from_surrogate(std::uint32_t hi, std::uint32_t lo)
     { return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00); }
 
-  enum class BAD_ESCAPE {
-    MALFORMED,
-    MISMATCH
-  };
-
   using u32_string = std::basic_string<UChar32>;
   using u32_string_view = std::basic_string_view<UChar32>;
-  u32_string operator""_icu32(const char* str, std::size_t len) { return u32_string{str, str + len}; }
+  u32_string operator""_u32(const char* str, std::size_t len) { return u32_string{str, str + len}; }
 
-  using UcharPair = std::pair<std::uint32_t, u32_string_view>;
+  using UcharPair = std::pair<UChar32, u32_string_view>;
   std::optional<UcharPair> next_uchar32(u32_string_view source_view) {
     if (source_view.empty()) return std::nullopt;
     return UcharPair{source_view.front(), source_view | std::views::drop(1)};
@@ -36,11 +31,8 @@ namespace Manadrain {
     return std::nullopt;
   }
 
-  enum class UTF16_MODE {
-    DISABLED,
-    NORMAL,
-    REGEXP
-  };
+  enum class UTF16_MODE { DISABLED, NORMAL, REGEXP };
+  enum class BAD_ESCAPE { MALFORMED, MISMATCH };
 
   template<UTF16_MODE utf16_mode>
   std::expected<UcharPair, BAD_ESCAPE> parse_escape(u32_string_view source_view) {
@@ -105,7 +97,7 @@ namespace Manadrain {
 
           if (
             is_hi_surrogate(high_surr) && utf16_mode == UTF16_MODE::REGEXP &&
-            uni_view.starts_with("\\u"_icu32)
+            uni_view.starts_with("\\u"_u32)
           ) {
             std::uint32_t low_surr = 0;
             uni_view.remove_prefix(2);
@@ -178,11 +170,11 @@ namespace Manadrain {
     return !u_hasBinaryProperty(ahead_pair_opt->first, UCHAR_XID_CONTINUE);
   }
 
-  enum class PEEK_TYPE { ARROW, IN, IMPORT, OF, EXPORT, FUNCTION, IDENTIFIER };
-  enum class PEEK_LF { RETURN, IGNORE };
-  using PeekedToken = std::variant<std::uint32_t, PEEK_TYPE>;
+  enum class PEEKED_STR { ARROW, IN, IMPORT, OF, EXPORT, FUNCTION, IDENTIFIER };
+  enum class LINETERM_BEHAVIOR { RETURN, IGNORE };
+  using PeekedToken = std::variant<UChar32, PEEKED_STR>;
 
-  template<PEEK_LF LF>
+  template<LINETERM_BEHAVIOR LT_BEHA>
   std::optional<PeekedToken> peek_token(u32_string_view source_view) {
     std::optional<UcharPair> ch;
 
@@ -191,24 +183,24 @@ namespace Manadrain {
       return std::nullopt;
 
     if (u_isWhitespace(ch->first)) {
-      if constexpr (LF == PEEK_LF::RETURN) switch (ch->first) {
+      if constexpr (LT_BEHA == LINETERM_BEHAVIOR::RETURN) switch (ch->first) {
         case '\r': case '\n': case 0x2028: case 0x2029:
-        return std::uint32_t{'\n'};
+        return '\n';
       }
       source_view = ch->second;
       goto again;
     }
 
-    if (source_view.starts_with("//"_icu32)) {
-      if constexpr (LF == PEEK_LF::RETURN)
-        return std::uint32_t{'\n'};
+    if (source_view.starts_with("//"_u32)) {
+      if constexpr (LT_BEHA == LINETERM_BEHAVIOR::RETURN)
+        return '\n';
       u32_string_view::iterator comment_end =
         std::ranges::find_if(source_view, [](char c) { return c != '\r' || c != '\n'; });
       source_view = u32_string_view{comment_end, source_view.end()};
       goto again;
     }
 
-    if (source_view.starts_with("/*"_icu32)) {
+    if (source_view.starts_with("/*"_u32)) {
       bool done = false; 
       skip_delim: source_view.remove_prefix(2);
       if (done) goto again;
@@ -218,29 +210,29 @@ namespace Manadrain {
         return std::nullopt;
 
       source_view = ch->second;
-      if constexpr (LF == PEEK_LF::RETURN) if (ch->first == '\r' || ch->first == '\n')
-        return std::uint32_t{'\n'};
-      if (source_view.starts_with("*/"_icu32))
+      if constexpr (LT_BEHA == LINETERM_BEHAVIOR::RETURN) if (ch->first == '\r' || ch->first == '\n')
+        return '\n';
+      if (source_view.starts_with("*/"_u32))
         done = true;
       if (done) goto skip_delim; else goto skip_text;
     }
 
-    if (source_view.starts_with("=>"_icu32))
-      return PEEK_TYPE::ARROW;
+    if (source_view.starts_with("=>"_u32))
+      return PEEKED_STR::ARROW;
 
-    using KeywordPair = std::pair<PEEK_TYPE, u32_string>;
+    using KeywordPair = std::pair<PEEKED_STR, u32_string>;
     static const std::array keyword_arr = std::to_array<KeywordPair>({
-      { PEEK_TYPE::IN, "in"_icu32 },
-      { PEEK_TYPE::IMPORT, "import"_icu32 },
-      { PEEK_TYPE::OF, "of"_icu32 },
-      { PEEK_TYPE::EXPORT, "export"_icu32 },
-      { PEEK_TYPE::FUNCTION, "function"_icu32 }
+      { PEEKED_STR::IN, "in"_u32 },
+      { PEEKED_STR::IMPORT, "import"_u32 },
+      { PEEKED_STR::OF, "of"_u32 },
+      { PEEKED_STR::EXPORT, "export"_u32 },
+      { PEEKED_STR::FUNCTION, "function"_u32 }
     });
     for (const KeywordPair& keyword_pair : keyword_arr)
       if (match_identifier(source_view, keyword_pair.second))
         return keyword_pair.first;
 
-    if (source_view.starts_with("\\u"_icu32)) {
+    if (source_view.starts_with("\\u"_u32)) {
       std::expected escape = parse_escape<UTF16_MODE::NORMAL>(source_view);
       if (not escape)
         return std::nullopt;
@@ -248,18 +240,18 @@ namespace Manadrain {
     }
 
     if (u_hasBinaryProperty(ch->first, UCHAR_XID_START))
-      return PEEK_TYPE::IDENTIFIER;
+      return PEEKED_STR::IDENTIFIER;
 
     return ch->first;
   }
 
   std::optional<PeekedToken> next_token(u32_string_view source_view) {
-    std::optional parsed = peek_token<PEEK_LF::RETURN>(source_view);
+    std::optional parsed = peek_token<LINETERM_BEHAVIOR::RETURN>(source_view);
     if (not parsed) return std::nullopt;
     return *parsed;
   }
 
-  u32_string conv_narrow_str(std::string narrow) {
+  u32_string new_u32_string(std::string narrow) {
     UErrorCode status = U_ZERO_ERROR;
 
     std::int32_t u16_size{};
@@ -292,7 +284,7 @@ namespace Manadrain {
 
 export namespace Manadrain {
   int parse_program(std::string source_str) {
-    std::basic_string wide_str = conv_narrow_str(source_str);
+    u32_string wide_str{new_u32_string(source_str)};
     if (next_token(wide_str))
       return 1;
     return 0;
