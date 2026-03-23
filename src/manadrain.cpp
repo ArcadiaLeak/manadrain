@@ -50,7 +50,7 @@ template <UTF16_MODE utf16_mode>
 std::expected<UcharPair, ParseError> parse_escape(u32_string_view source_view) {
   std::optional switch_pair = next_uchar32(source_view);
   if (not switch_pair)
-    return std::unexpected{BAD_ESCAPE::MISMATCH};
+    return std::unexpected{BAD_STRING::UNEXPECTED_END};
 
   auto [switch_char, switch_view] = *switch_pair;
   switch (switch_char) {
@@ -330,59 +330,97 @@ u32_string new_u32_string(const std::string& narrow) {
   return wide;
 }
 
-using StrPair = std::pair<u32_string, u32_string_view>;
-std::expected<StrPair, ParseError> parse_string(const UChar32 sep,
-                                                u32_string_view source_view) {
-  std::optional ch = next_uchar32(source_view);
-  u32_string parsed{};
+namespace JS {
+struct Mode {
+  std::bitset<8> flags;
+  bool is_strict() const { return flags[0]; }
+};
+}  // namespace JS
 
-again:
-  if (not ch)
-    return std::unexpected{BAD_STRING::UNEXPECTED_END};
+using StrlitPair = std::pair<u32_string, u32_string_view>;
+std::expected<StrlitPair, ParseError> parse_string(const UChar32 sep,
+                                                   const JS::Mode js_mode,
+                                                   u32_string_view src_view) {
+  u32_string string_literal{};
+  UChar32 ch;
 
-  if (sep == '`') {
-    if (ch->first == '\r') {
-      if (ch->second.starts_with('\n'))
-        ch = next_uchar32(ch->second);
+  auto linefeed_ahead = [&src_view]() -> bool {
+    return next_uchar32(src_view)
+        .transform([](UcharPair uchar_pair) {
+          return uchar_pair.second.starts_with('\n');
+        })
+        .value_or(false);
+  };
+
+  auto parse_strlit_escape = [&]() -> std::optional<ParseError> {
+    std::expected esc_pair = parse_escape<UTF16_MODE::NORMAL>(src_view);
+    if (not esc_pair) {
+      if (esc_pair.error() == ParseError{BAD_ESCAPE::MISMATCH})
+        /* ignore the '\' (could output a warning) */
+        src_view.remove_prefix(1);
       else
-        ch->first = '\n';
-    }
-  } else if (ch->first == '\r' || ch->first == '\n')
-    return std::unexpected{BAD_STRING::UNEXPECTED_END};
+        return esc_pair.error();
+    } else
+      ch = esc_pair->first;
+    return std::nullopt;
+  };
 
-  if (ch->first == sep)
-    return StrPair{parsed, ch->second};
+  while (true) {
+    if (src_view.empty())
+      return std::unexpected{BAD_STRING::UNEXPECTED_END};
+    ch = src_view.front();
 
-  if (ch->first == '$' && ch->second.starts_with('{') && sep == '`') {
-    ch = next_uchar32(ch->second);
-    return StrPair{parsed, ch->second};
-  }
-
-  if (ch->first == '\\') {
-    ch = next_uchar32(ch->second);
-    if (not ch)
+    if (sep == '`') {
+      if (ch == '\r') {
+        if (linefeed_ahead())
+          src_view.remove_prefix(1);
+        ch = '\n';
+      }
+    } else if (ch == '\r' || ch == '\n')
       return std::unexpected{BAD_STRING::UNEXPECTED_END};
 
-    switch (ch->first) {
-      case '\'':
-      case '\"':
-      case '\0':
-      case '\\':
-        ch = next_uchar32(ch->second);
-        return StrPair{parsed, ch->second};
-      case '\r':
-        if (ch->second.starts_with('\n'))
-          ch = next_uchar32(ch->second);
-        [[fallthrough]];
-      case '\n':
-        ch = next_uchar32(ch->second); /* ignore escaped newline sequence */
-        goto again;
-      default:
-        return std::unexpected{BAD_STRING::UNEXPECTED_END};
-    }
-  }
+    src_view.remove_prefix(1);
+    if (ch == sep)
+      return StrlitPair{string_literal, src_view};
 
-  return std::unexpected{BAD_STRING::UNEXPECTED_END};
+    if (ch == '$' && src_view.starts_with('{') && sep == '`') {
+      src_view.remove_prefix(1);
+      return StrlitPair{string_literal, src_view};
+    }
+
+    if (ch == '\\') {
+      if (src_view.empty())
+        return std::unexpected{BAD_STRING::UNEXPECTED_END};
+      ch = src_view.front();
+
+      switch (ch) {
+        case '\'':
+        case '\"':
+        case '\0':
+        case '\\':
+          src_view.remove_prefix(1);
+          break;
+        case '\r':
+          if (linefeed_ahead())
+            src_view.remove_prefix(1);
+          [[fallthrough]];
+        case '\n':
+          /* ignore escaped newline sequence */
+          src_view.remove_prefix(1);
+          continue;
+        default:
+          if (ch >= '0' && ch <= '9') {
+            if (!js_mode.is_strict() && !sep != '`') {
+              std::optional err = parse_strlit_escape();
+              if (err)
+                return std::unexpected{*err};
+            }
+          }
+          break;
+      }
+    }
+    string_literal.push_back(ch);
+  }
 }
 
 }  // namespace Manadrain
