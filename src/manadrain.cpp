@@ -17,17 +17,30 @@ std::uint32_t from_surrogate(std::uint32_t hi, std::uint32_t lo) {
 }
 
 using u32_string = std::basic_string<UChar32>;
-using u32_string_view = std::basic_string_view<UChar32>;
 u32_string operator""_u32(const char* str, std::size_t len) {
   return u32_string{str, str + len};
+}
+
+using u32_string_view = std::basic_string_view<UChar32>;
+u32_string_view& operator++(u32_string_view& str_view) {
+  str_view = str_view | std::views::drop(1);
+  return str_view;
+}
+u32_string_view operator++(u32_string_view& str_view, int) {
+  u32_string_view temp_view{str_view};
+  str_view = str_view | std::views::drop(1);
+  return temp_view;
 }
 
 std::optional<UChar32> next_uchar32(u32_string_view& src_view) {
   if (src_view.empty())
     return std::nullopt;
-  UChar32 ch = src_view.front();
-  src_view = src_view | std::views::drop(1);
+  UChar32 ch = (src_view++).front();
   return ch;
+}
+
+std::optional<UChar32> next_uchar32(u32_string_view&& src_view) {
+  return next_uchar32(src_view);
 }
 
 std::optional<UChar32> hex_digit(UChar32 digit) {
@@ -108,7 +121,7 @@ std::expected<UChar32, ParseError> parse_escape(u32_string_view& src_view) {
 
         if (is_hi_surrogate(high_surr) && utf16_mode == UTF16_MODE::REGEXP &&
             src_view.starts_with("\\u"_u32)) {
-          src_view = src_view | std::views::drop(2);
+          ++(++src_view);
           std::uint32_t low_surr = 0;
           for (int i = 0; i < 4; i++) {
             std::optional hex = next_uchar32(src_view).and_then(hex_digit);
@@ -166,6 +179,11 @@ std::expected<UChar32, ParseError> parse_escape(u32_string_view& src_view) {
   }
 }
 
+template <UTF16_MODE utf16_mode>
+std::expected<UChar32, ParseError> parse_escape(u32_string_view&& src_view) {
+  return parse_escape<utf16_mode>(src_view);
+}
+
 bool match_identifier(u32_string_view lhs_view, u32_string_view rhs_view) {
   if (not lhs_view.starts_with(rhs_view))
     return false;
@@ -195,7 +213,7 @@ std::optional<TokenAhead> peek_token(u32_string_view src_view) {
           case 0x2029:
             return '\n';
         }
-      src_view = src_view | std::views::drop(1);
+      ++src_view;
       continue;
     }
 
@@ -209,7 +227,7 @@ std::optional<TokenAhead> peek_token(u32_string_view src_view) {
     }
 
     if (src_view.starts_with("/*"_u32)) {
-      src_view = src_view | std::views::drop(2);
+      ++(++src_view);
       while (next_uchar32(src_view)) {
         ch = src_view.front();
         if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
@@ -217,7 +235,7 @@ std::optional<TokenAhead> peek_token(u32_string_view src_view) {
             return '\n';
 
         if (src_view.starts_with("*/"_u32)) {
-          src_view = src_view | std::views::drop(2);
+          ++(++src_view);
           break;
         }
       }
@@ -240,10 +258,7 @@ std::optional<TokenAhead> peek_token(u32_string_view src_view) {
         return keyword_pair.first;
 
     if (src_view.starts_with("\\u"_u32)) {
-      src_view = src_view | std::views::drop(1);
-
-      u32_string_view esc_view{src_view};
-      if (parse_escape<UTF16_MODE::NORMAL>(esc_view)
+      if (parse_escape<UTF16_MODE::NORMAL>(src_view++)
               .transform([](UChar32 esc) {
                 return u_hasBinaryProperty(esc, UCHAR_XID_START);
               })
@@ -305,11 +320,6 @@ struct Mode {
 };
 }  // namespace JS
 
-std::optional<UChar32> peek_uchar32(u32_string_view src_view, int idx = 0) {
-  src_view = src_view | std::views::drop(idx);
-  return next_uchar32(src_view);
-}
-
 std::expected<u32_string, ParseError> parse_string_literal(
     const UChar32 sep,
     const JS::Mode js_mode,
@@ -324,19 +334,20 @@ std::expected<u32_string, ParseError> parse_string_literal(
 
     if (sep == '`') {
       if (ch == '\r') {
-        if (peek_uchar32(src_view, 1) == '\n')
-          src_view = src_view | std::views::drop(1);
+        if (next_uchar32(src_view | std::views::drop(1)) == '\n')
+          ++src_view;
         ch = '\n';
       }
     } else if (ch == '\r' || ch == '\n')
       return std::unexpected{BAD_STRING::UNEXPECTED_END};
 
-    src_view = src_view | std::views::drop(1);
+    ++src_view;
     if (ch == sep)
       return string_literal;
 
-    if (ch == '$' && peek_uchar32(src_view) == '{' && sep == '`') {
-      src_view = src_view | std::views::drop(1);
+    if (ch == '$' && next_uchar32(u32_string_view{src_view}) == '{' &&
+        sep == '`') {
+      ++src_view;
       return string_literal;
     }
 
@@ -350,20 +361,30 @@ std::expected<u32_string, ParseError> parse_string_literal(
         case '\"':
         case '\0':
         case '\\':
-          src_view = src_view | std::views::drop(1);
+          ++src_view;
           break;
         case '\r':
-          if (peek_uchar32(src_view, 1) == '\n')
-            src_view = src_view | std::views::drop(1);
+          if (next_uchar32(src_view | std::views::drop(1)) == '\n')
+            ++src_view;
           [[fallthrough]];
         case '\n':
           /* ignore escaped newline sequence */
-          src_view = src_view | std::views::drop(1);
+          ++src_view;
           continue;
         default:
           if (ch >= '0' && ch <= '9') {
             if (!js_mode.is_strict() && !sep != '`')
               goto parse_strlit_escape;
+            bool followed_by_digit =
+                next_uchar32(src_view | std::views::drop(1))
+                    .transform([](UChar32 ahead) {
+                      return ahead >= '0' && ahead <= '9';
+                    })
+                    .value_or(false);
+            if (ch == '0' && !followed_by_digit) {
+              ++src_view;
+              ch = '\0';
+            }
           } else {
           parse_strlit_escape:
             std::expected ch_exp = parse_escape<UTF16_MODE::NORMAL>(src_view);
@@ -371,7 +392,7 @@ std::expected<u32_string, ParseError> parse_string_literal(
               ch = *ch_exp;
             else if (ch_exp.error() == ParseError{BAD_ESCAPE::MISMATCH})
               /* ignore the '\' (could output a warning) */
-              src_view = src_view | std::views::drop(1);
+              ++src_view;
             else
               return std::unexpected{ch_exp.error()};
           }
