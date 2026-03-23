@@ -26,7 +26,7 @@ std::optional<UChar32> next_uchar32(u32_string_view& src_view) {
   if (src_view.empty())
     return std::nullopt;
   UChar32 ch = src_view.front();
-  src_view.remove_prefix(1);
+  src_view = src_view | std::views::drop(1);
   return ch;
 }
 
@@ -108,7 +108,7 @@ std::expected<UChar32, ParseError> parse_escape(u32_string_view& src_view) {
 
         if (is_hi_surrogate(high_surr) && utf16_mode == UTF16_MODE::REGEXP &&
             src_view.starts_with("\\u"_u32)) {
-          src_view.remove_prefix(2);
+          src_view = src_view | std::views::drop(2);
           std::uint32_t low_surr = 0;
           for (int i = 0; i < 4; i++) {
             std::optional hex = next_uchar32(src_view).and_then(hex_digit);
@@ -213,7 +213,7 @@ again:
   if (src_view.starts_with("/*"_u32)) {
     bool done = false;
   skip_delim:
-    src_view.remove_prefix(2);
+    src_view = src_view | std::views::drop(2);
     if (done)
       goto again;
 
@@ -327,18 +327,18 @@ std::expected<u32_string, ParseError> parse_string(const UChar32 sep,
     if (sep == '`') {
       if (ch == '\r') {
         if (peek_uchar32(src_view, 1) == '\n')
-          src_view.remove_prefix(1);
+          src_view = src_view | std::views::drop(1);
         ch = '\n';
       }
     } else if (ch == '\r' || ch == '\n')
       return std::unexpected{BAD_STRING::UNEXPECTED_END};
 
-    src_view.remove_prefix(1);
+    src_view = src_view | std::views::drop(1);
     if (ch == sep)
       return string_literal;
 
     if (ch == '$' && peek_uchar32(src_view) == '{' && sep == '`') {
-      src_view.remove_prefix(1);
+      src_view = src_view | std::views::drop(1);
       return string_literal;
     }
 
@@ -352,15 +352,15 @@ std::expected<u32_string, ParseError> parse_string(const UChar32 sep,
         case '\"':
         case '\0':
         case '\\':
-          src_view.remove_prefix(1);
+          src_view = src_view | std::views::drop(1);
           break;
         case '\r':
           if (peek_uchar32(src_view, 1) == '\n')
-            src_view.remove_prefix(1);
+            src_view = src_view | std::views::drop(1);
           [[fallthrough]];
         case '\n':
           /* ignore escaped newline sequence */
-          src_view.remove_prefix(1);
+          src_view = src_view | std::views::drop(1);
           continue;
         default:
           if (ch >= '0' && ch <= '9') {
@@ -373,7 +373,7 @@ std::expected<u32_string, ParseError> parse_string(const UChar32 sep,
               ch = *ch_exp;
             else if (ch_exp.error() == ParseError{BAD_ESCAPE::MISMATCH})
               /* ignore the '\' (could output a warning) */
-              src_view.remove_prefix(1);
+              src_view = src_view | std::views::drop(1);
             else
               return std::unexpected{ch_exp.error()};
           }
