@@ -40,9 +40,8 @@ namespace Manadrain {
     REGEXP
   };
 
-  std::expected<UcharPair, BAD_ESCAPE> parse_escape(
-    std::string_view source_view, UTF16_MODE utf16_mode
-  ) {
+  template<UTF16_MODE utf16_mode>
+  std::expected<UcharPair, BAD_ESCAPE> parse_escape(std::string_view source_view) {
     std::optional switch_pair = next_char(source_view);
     if (not switch_pair) return std::unexpected{BAD_ESCAPE::MISMATCH};
 
@@ -237,72 +236,93 @@ namespace Manadrain {
     std::string str{str_view}; str.resize(3);
     return {str[0], str[1], str[2]};
   }
+  constexpr Trigraph trigraph(std::uint32_t uchar) {
+    return {0, 0, uchar};
+  }
 
   using Tripair = std::pair<Trigraph, std::string_view>;
-  constexpr Tripair tripair(std::string_view tri_view, std::string_view tail_view) {
-    return {trigraph(tri_view), tail_view};
+  template<typename T>
+  constexpr Tripair tripair(T trigraph_arg, std::string_view tail_view) {
+    return {trigraph(trigraph_arg), tail_view};
   }
 
   enum class LINE_FEED { RETURN, IGNORE };
 
   template<LINE_FEED LF>
-  std::optional<Tripair> peek_token(std::string_view source_view) {
-    while (true) {
-      std::optional uchar_pair = next_char(source_view);
+  std::optional<Trigraph> peek_token(std::string_view source_view) {
+    std::optional<UcharPair> ch;
 
-      if (uchar_pair && std::isspace(uchar_pair->first)) {
-        source_view = uchar_pair->second;
-        if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
-          return tripair("\0\0\n", source_view);
-        continue;
-      }
-
-      if (source_view.starts_with("//")) {
-        source_view.remove_prefix(2);
-        if constexpr (LF == LINE_FEED::RETURN)
-          return tripair("\0\0\n", source_view);
-        std::string_view::iterator comment_end =
-          std::ranges::find_if(source_view, [](char ch) { return ch != '\r' || ch != '\n'; });
-        source_view = std::string_view{comment_end, source_view.end()};
-        continue;
-      }
-
-      if (source_view.starts_with("/*")) {
-        bool done = false; 
-        skip_delim: source_view.remove_prefix(2);
-        if (done) continue;
-
-        skip_text: uchar_pair = next_char(source_view);
-        if (not uchar_pair)
-          return std::nullopt;
-
-        source_view = uchar_pair->second;
-        if ((uchar_pair->first == '\r' || uchar_pair->first == '\n') && LF == LINE_FEED::RETURN)
-          return tripair("\0\0\n", source_view);
-        if (source_view.starts_with("*/"))
-          done = true;
-        if (done) goto skip_delim; else goto skip_text;
-      }
-
-      if (source_view.starts_with("=>"))
-        return tripair("\0=>", source_view | std::views::drop(2));
-
-      static const std::array keyword_arr = std::to_array<std::string_view>
-        ({"in", "import", "of", "export", "function"});
-      for (std::string_view keyword : keyword_arr) {
-        if (match_identifier(source_view, keyword)) {
-          return tripair(
-            keyword,
-            source_view | std::views::drop(keyword.size())
-          );
-        }
-      }
-
+    again: ch = next_char(source_view);
+    if (not ch)
       return std::nullopt;
+
+    if (std::isspace(ch->first)) {
+      if constexpr (LF == LINE_FEED::RETURN) if (ch->first == '\r' || ch->first == '\n')
+        return trigraph('\n');
+      source_view = ch->second;
+      goto again;
     }
+
+    if (source_view.starts_with("//")) {
+      if constexpr (LF == LINE_FEED::RETURN)
+        return trigraph('\n');
+      std::string_view::iterator comment_end =
+        std::ranges::find_if(source_view, [](char c) { return c != '\r' || c != '\n'; });
+      source_view = std::string_view{comment_end, source_view.end()};
+      goto again;
+    }
+
+    if (source_view.starts_with("/*")) {
+      bool done = false; 
+      skip_delim: source_view.remove_prefix(2);
+      if (done) goto again;
+
+      skip_text: ch = next_char(source_view);
+      if (not ch)
+        return std::nullopt;
+
+      source_view = ch->second;
+      if constexpr (LF == LINE_FEED::RETURN) if (ch->first == '\r' || ch->first == '\n')
+        return trigraph('\n');
+      if (source_view.starts_with("*/"))
+        done = true;
+      if (done) goto skip_delim; else goto skip_text;
+    }
+
+    if (source_view.starts_with("=>"))
+      return trigraph("=>");
+
+    static const std::array keyword_arr = std::to_array<std::string_view>
+      ({"in", "import", "of", "export", "function"});
+    for (std::string_view keyword : keyword_arr)
+      if (match_identifier(source_view, keyword)) return trigraph(keyword);
+
+    if (source_view.starts_with("\\u")) {
+      std::expected escape = parse_escape<UTF16_MODE::NORMAL>(source_view);
+      if (not escape)
+        return std::nullopt;
+      if (u_hasBinaryProperty(escape->first, UCHAR_XID_START))
+        return trigraph("ide");
+    }
+
+    if (ch->first >= 128) {
+      ch = unicode_from_utf8(source_view);
+      if (not ch)
+        return std::nullopt;
+      if constexpr (LF == LINE_FEED::RETURN) if (ch->first == 0x2028 || ch->first == 0x2029)
+        return trigraph('\n');
+    }
+
+    if (u_isWhitespace(ch->first))
+      goto again;
+
+    if (u_hasBinaryProperty(ch->first, UCHAR_XID_START))
+      return trigraph("ide");
+
+    return trigraph(ch->first);
   }
 
-  std::optional<Tripair> next_token(std::string_view source_view) {
+  std::optional<Trigraph> next_token(std::string_view source_view) {
     std::optional parsed = peek_token<LINE_FEED::RETURN>(source_view);
     if (not parsed) return std::nullopt;
     return *parsed;
