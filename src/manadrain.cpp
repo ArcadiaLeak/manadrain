@@ -58,7 +58,7 @@ std::unexpected<T> return_err_and_rewind(
 }
 
 std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
-                                                ESC_RULE esc_rule) {
+                                                 ESC_RULE esc_rule) {
   const std::u32string_view outer_src_view{src_view};
 
   std::optional head = next_uchar32(src_view);
@@ -201,7 +201,8 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
   }
 }
 
-bool match_identifier(std::u32string_view lhs_view, std::u32string_view rhs_view) {
+bool match_identifier(std::u32string_view lhs_view,
+                      std::u32string_view rhs_view) {
   if (not lhs_view.starts_with(rhs_view))
     return false;
   lhs_view.remove_prefix(rhs_view.size());
@@ -388,14 +389,21 @@ std::optional<BAD_STRING> parse_escaped_uchar_in_string(
   }
 }
 
-std::expected<std::u32string, BAD_STRING> parse_quoted_string(
+namespace Token {
+struct StringLit {
+  char32_t sep;
+  std::u32string str;
+};
+}  // namespace Token
+
+std::expected<Token::StringLit, BAD_STRING> parse_quoted_string(
     const char32_t quote,
     const STRICTNESS strictness,
     std::u32string_view& src_view) {
   const std::u32string_view outer_src_view{src_view};
+  Token::StringLit token_lit{.sep = quote};
+  char32_t ch{};
 
-  std::u32string quoted_string{};
-  char32_t ch;
   do {
     if (src_view.empty())
       return return_err_and_rewind(src_view, outer_src_view,
@@ -414,12 +422,12 @@ std::expected<std::u32string, BAD_STRING> parse_quoted_string(
 
     src_view = src_view | std::views::drop(1);
     if (ch == quote)
-      return quoted_string;
+      return token_lit;
 
     if (ch == '$' && next_uchar32(std::u32string_view{src_view}) == '{' &&
         quote == '`') {
       src_view = src_view | std::views::drop(1);
-      return quoted_string;
+      return token_lit;
     }
 
     if (ch == '\\') {
@@ -432,7 +440,47 @@ std::expected<std::u32string, BAD_STRING> parse_quoted_string(
         continue;
     }
 
-    quoted_string.push_back(ch);
+    token_lit.str.push_back(ch);
+  } while (true);
+}
+
+namespace Token {
+struct Template {
+  char32_t sep;
+  std::u32string str;
+};
+}  // namespace Token
+
+std::expected<Token::Template, BAD_STRING> parse_template_part(
+    std::u32string_view& src_view) {
+  const std::u32string_view outer_src_view{src_view};
+  Token::Template template_tok{};
+  char32_t ch{};
+
+  do {
+    if (src_view.empty())
+      return return_err_and_rewind(src_view, outer_src_view,
+                                   BAD_STRING::UNEXPECTED_END);
+    ch = *next_uchar32(src_view);
+    if (ch == '`')
+      return template_tok;
+    if (ch == '$' && next_uchar32(std::u32string_view{src_view}) == '{') {
+      src_view = src_view | std::views::drop(1);
+      return template_tok;
+    }
+    if (ch == '\\') {
+      template_tok.str.push_back(ch);
+      if (src_view.empty())
+        return return_err_and_rewind(src_view, outer_src_view,
+                                     BAD_STRING::UNEXPECTED_END);
+      ch = *next_uchar32(src_view);
+    }
+    if (ch == '\r') {
+      if (next_uchar32(std::u32string_view{src_view}) == '\n')
+        src_view = src_view | std::views::drop(1);
+      ch = '\n';
+    }
+    template_tok.str.push_back(ch);
   } while (true);
 }
 
