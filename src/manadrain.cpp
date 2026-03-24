@@ -45,30 +45,17 @@ std::optional<UChar32> hex_digit(UChar32 digit) {
 }
 
 enum class BAD_ESCAPE { MALFORMED, MISMATCH };
-
-struct EscMode {
-  struct IDENTIFIER {};
-  struct REGEXP_ASCII {};
-  struct REGEXP_UTF16 {};
-
-  std::variant<IDENTIFIER, REGEXP_ASCII, REGEXP_UTF16> alt;
-
-  template <typename T>
-    requires(!std::same_as<std::remove_cvref_t<T>, EscMode>)
-  EscMode(T&& arg) : alt(std::forward<T>(arg)) {}
-  EscMode() = default;
-
-  bool is_identifier() const { return std::holds_alternative<IDENTIFIER>(alt); }
-  bool is_regexp_ascii() const {
-    return std::holds_alternative<REGEXP_ASCII>(alt);
-  }
-  bool is_regexp_utf16() const {
-    return std::holds_alternative<REGEXP_UTF16>(alt);
-  }
+enum class ESC_RULE {
+  IDENTIFIER,
+  REGEXP_ASCII,
+  REGEXP_UTF16,
+  STRING_IN_SLOPPY_MODE,
+  STRING_IN_STRICT_MODE,
+  STRING_IN_TEMPLATE
 };
 
 std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
-                                                EscMode esc_mode) {
+                                                ESC_RULE esc_rule) {
   auto escape_err = [&src_view, passed_view = src_view](BAD_ESCAPE error_tag) {
     src_view = passed_view;
     return std::unexpected{error_tag};
@@ -105,7 +92,7 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
       std::optional open_or_uchar = next_uchar32(src_view);
       if (not open_or_uchar)
         return escape_err(BAD_ESCAPE::MALFORMED);
-      if (open_or_uchar == '{' && !esc_mode.is_regexp_ascii()) {
+      if (open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII) {
         std::uint32_t utf16_char = 0;
 
         do {
@@ -131,7 +118,7 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
           high_surr = (high_surr << 4) | *hex;
         }
 
-        if (is_hi_surrogate(high_surr) && esc_mode.is_regexp_utf16() &&
+        if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16 &&
             src_view.starts_with("\\u"_u32)) {
           src_view = src_view | std::views::drop(2);
           std::uint32_t low_surr = 0;
@@ -150,7 +137,7 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
     }
 
     case '0':
-      if (esc_mode.is_regexp_utf16()) {
+      if (esc_rule == ESC_RULE::REGEXP_UTF16) {
         if (next_uchar32(src_view)
                 .transform([](UChar32 uch) { return std::isdigit(uch); })
                 .value_or(false))
@@ -265,7 +252,7 @@ std::optional<TokenAhead> peek_token(u32_string_view src_view) {
 
     if (src_view.starts_with("\\u"_u32)) {
       src_view = src_view | std::views::drop(1);
-      if (parse_escape(src_view, EscMode::IDENTIFIER{})
+      if (parse_escape(src_view, ESC_RULE::IDENTIFIER)
               .transform([](UChar32 esc) {
                 return u_hasBinaryProperty(esc, UCHAR_XID_START);
               })
@@ -400,7 +387,7 @@ std::expected<u32_string, BAD_STRING> parse_string_literal(
               return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
             return std::unexpected{BAD_STRING::OCTAL_ESCAPE_IN_STRICT_MODE};
           }
-          std::expected ch_exp = parse_escape(src_view, EscMode::IDENTIFIER{});
+          std::expected ch_exp = parse_escape(src_view, ESC_RULE::IDENTIFIER);
           if (ch_exp)
             ch = *ch_exp;
           else if (ch_exp.error() == BAD_ESCAPE::MISMATCH)
