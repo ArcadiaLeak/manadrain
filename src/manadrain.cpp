@@ -44,7 +44,7 @@ std::optional<UChar32> hex_digit(UChar32 digit) {
   return std::nullopt;
 }
 
-enum class BAD_ESCAPE { MALFORMED, MISMATCH };
+enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
 enum class ESC_RULE {
   IDENTIFIER,
   REGEXP_ASCII,
@@ -54,15 +54,21 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
+BAD_ESCAPE return_esc_err_and_rewind(u32_string_view& src_view,
+                                     const u32_string_view original_src_view,
+                                     BAD_ESCAPE error_tag) {
+  src_view = original_src_view;
+  return error_tag;
+}
+
 std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
                                                 ESC_RULE esc_rule) {
-  auto escape_err = [&src_view, passed_view = src_view](BAD_ESCAPE error_tag) {
-    src_view = passed_view;
-    return std::unexpected{error_tag};
-  };
+  const u32_string_view outer_src_view{src_view};
+
   std::optional head = next_uchar32(src_view);
   if (not head)
-    return escape_err(BAD_ESCAPE::MISMATCH);
+    return std::unexpected{return_esc_err_and_rewind(
+        src_view, outer_src_view, BAD_ESCAPE::PER_SE_BACKSLASH)};
 
   switch (*head) {
     case 'b':
@@ -81,40 +87,47 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
     case 'x': {
       std::optional hex0 = next_uchar32(src_view).and_then(hex_digit);
       if (not hex0)
-        return escape_err(BAD_ESCAPE::MALFORMED);
+        return std::unexpected{return_esc_err_and_rewind(
+            src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
       std::optional hex1 = next_uchar32(src_view).and_then(hex_digit);
       if (not hex1)
-        return escape_err(BAD_ESCAPE::MALFORMED);
+        return std::unexpected{return_esc_err_and_rewind(
+            src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
       return (*hex0 << 4) | *hex1;
     }
 
     case 'u': {
       std::optional open_or_uchar = next_uchar32(src_view);
       if (not open_or_uchar)
-        return escape_err(BAD_ESCAPE::MALFORMED);
+        return std::unexpected{return_esc_err_and_rewind(
+            src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
       if (open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII) {
         std::uint32_t utf16_char = 0;
 
         do {
           std::optional close_or_uchar = next_uchar32(src_view);
           if (not close_or_uchar)
-            return escape_err(BAD_ESCAPE::MALFORMED);
+            return std::unexpected{return_esc_err_and_rewind(
+                src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
           if (close_or_uchar == '}')
             return utf16_char;
 
           std::optional hex = hex_digit(*close_or_uchar);
           if (not hex)
-            return escape_err(BAD_ESCAPE::MALFORMED);
+            return std::unexpected{return_esc_err_and_rewind(
+                src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
           utf16_char = (utf16_char << 4) | *hex;
           if (utf16_char > 0x10FFFF)
-            return escape_err(BAD_ESCAPE::MALFORMED);
+            return std::unexpected{return_esc_err_and_rewind(
+                src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
         } while (true);
       } else {
         std::uint32_t high_surr = 0;
         for (int i = 0; i < 4; i++) {
           std::optional hex = next_uchar32(src_view).and_then(hex_digit);
           if (not hex)
-            return escape_err(BAD_ESCAPE::MALFORMED);
+            return std::unexpected{return_esc_err_and_rewind(
+                src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
           high_surr = (high_surr << 4) | *hex;
         }
 
@@ -137,13 +150,10 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
     }
 
     case '0':
-      if (esc_rule == ESC_RULE::REGEXP_UTF16) {
-        if (next_uchar32(src_view)
-                .transform([](UChar32 uch) { return std::isdigit(uch); })
-                .value_or(false))
-          return escape_err(BAD_ESCAPE::MALFORMED);
+      if (not next_uchar32(src_view)
+                  .transform([](UChar32 uch) { return std::isdigit(uch); })
+                  .value_or(false))
         return 0;
-      }
       [[fallthrough]];
 
     case '1':
@@ -152,28 +162,46 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
     case '4':
     case '5':
     case '6':
-    case '7': {
-      UChar32 octal = *head - '0';
-      std::optional<UChar32> ahead;
-      ahead = next_uchar32(src_view).transform(
-          [](UChar32 ahead_digit) { return ahead_digit - '0'; });
-      if (not ahead || *ahead > 7)
-        return octal;
-      octal = (octal << 3) | *ahead;
+    case '7':
+      switch (esc_rule) {
+        case ESC_RULE::STRING_IN_STRICT_MODE:
+          return std::unexpected{return_esc_err_and_rewind(
+              src_view, outer_src_view, BAD_ESCAPE::OCTAL_SEQ)};
+        case ESC_RULE::STRING_IN_TEMPLATE:
+        case ESC_RULE::REGEXP_UTF16:
+          return std::unexpected{return_esc_err_and_rewind(
+              src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
+        default:
+          UChar32 octal = *head - '0';
+          std::optional<UChar32> ahead;
+          ahead = next_uchar32(src_view).transform(
+              [](UChar32 ahead_digit) { return ahead_digit - '0'; });
+          if (not ahead || *ahead > 7)
+            return octal;
+          octal = (octal << 3) | *ahead;
 
-      if (octal >= 32)
-        return octal;
+          if (octal >= 32)
+            return octal;
 
-      ahead = next_uchar32(src_view).transform(
-          [](UChar32 ahead_digit) { return ahead_digit - '0'; });
-      if (not ahead || *ahead > 7)
-        return octal;
-      octal = (octal << 3) | *ahead;
-      return octal;
-    }
+          ahead = next_uchar32(src_view).transform(
+              [](UChar32 ahead_digit) { return ahead_digit - '0'; });
+          if (not ahead || *ahead > 7)
+            return octal;
+          octal = (octal << 3) | *ahead;
+          return octal;
+      }
+
+    case '8':
+    case '9':
+      if (esc_rule == ESC_RULE::STRING_IN_STRICT_MODE ||
+          esc_rule == ESC_RULE::STRING_IN_TEMPLATE)
+        return std::unexpected{return_esc_err_and_rewind(
+            src_view, outer_src_view, BAD_ESCAPE::MALFORMED)};
+      [[fallthrough]];
 
     default:
-      return escape_err(BAD_ESCAPE::MISMATCH);
+      return std::unexpected{return_esc_err_and_rewind(
+          src_view, outer_src_view, BAD_ESCAPE::PER_SE_BACKSLASH)};
   }
 }
 
@@ -307,22 +335,16 @@ u32_string new_u32_string(const std::string& narrow) {
   return wide;
 }
 
-namespace JS {
-struct Mode {
-  std::bitset<8> flags;
-  bool is_strict() const { return flags[0]; }
-};
-}  // namespace JS
-
+enum class STRICTNESS { SLOPPY, STRICT };
 enum class BAD_STRING {
   UNEXPECTED_END,
-  OCTAL_ESCAPE_IN_STRICT_MODE,
-  MALFORMED_ESCAPE_SEQUENCE
+  OCTAL_SEQ_IN_ESCAPE,
+  MALFORMED_SEQ_IN_ESCAPE
 };
 
 std::expected<u32_string, BAD_STRING> parse_string_literal(
     const UChar32 sep,
-    const JS::Mode js_mode,
+    const STRICTNESS strictness,
     u32_string_view& src_view) {
   u32_string string_literal{};
   UChar32 ch;
@@ -374,27 +396,21 @@ std::expected<u32_string, BAD_STRING> parse_string_literal(
           src_view = src_view | std::views::drop(1);
           continue;
         default:
-          if (std::isdigit(ch) &&
-              (ch != '0' ||
-               next_uchar32(src_view | std::views::drop(1))
-                   .transform([](UChar32 ahead) { return std::isdigit(ahead); })
-                   .value_or(false))) {
-            if (js_mode.is_strict() && (ch == '8' || ch == '9'))
-              /* Note: according to ES2021, \8 and \9 are not
-               * accepted in strict mode or in templates. */
-              return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
-            if (sep == '`')
-              return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
-            return std::unexpected{BAD_STRING::OCTAL_ESCAPE_IN_STRICT_MODE};
-          }
-          std::expected ch_exp = parse_escape(src_view, ESC_RULE::IDENTIFIER);
+          ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+          if (strictness == STRICTNESS::STRICT)
+            esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+          else if (sep == '`')
+            esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+          std::expected ch_exp = parse_escape(src_view, esc_rule);
           if (ch_exp)
             ch = *ch_exp;
-          else if (ch_exp.error() == BAD_ESCAPE::MISMATCH)
+          else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
+            return std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
+          else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
+            return std::unexpected{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
+          else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
             /* ignore the '\' (could output a warning) */
             src_view = src_view | std::views::drop(1);
-          else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
-            return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
           break;
       }
     }
