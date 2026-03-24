@@ -45,10 +45,30 @@ std::optional<UChar32> hex_digit(UChar32 digit) {
 }
 
 enum class BAD_ESCAPE { MALFORMED, MISMATCH };
-enum class UTF16_MODE { DISABLED, NORMAL, REGEXP };
 
-template <UTF16_MODE utf16_mode>
-std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view) {
+struct EscMode {
+  struct IDENTIFIER {};
+  struct REGEXP_ASCII {};
+  struct REGEXP_UTF16 {};
+
+  std::variant<IDENTIFIER, REGEXP_ASCII, REGEXP_UTF16> alt;
+
+  template <typename T>
+    requires(!std::same_as<std::remove_cvref_t<T>, EscMode>)
+  EscMode(T&& arg) : alt(std::forward<T>(arg)) {}
+  EscMode() = default;
+
+  bool is_identifier() const { return std::holds_alternative<IDENTIFIER>(alt); }
+  bool is_regexp_ascii() const {
+    return std::holds_alternative<REGEXP_ASCII>(alt);
+  }
+  bool is_regexp_utf16() const {
+    return std::holds_alternative<REGEXP_UTF16>(alt);
+  }
+};
+
+std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view,
+                                                EscMode esc_mode) {
   auto escape_err = [&src_view, passed_view = src_view](BAD_ESCAPE error_tag) {
     src_view = passed_view;
     return std::unexpected{error_tag};
@@ -85,7 +105,7 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view) {
       std::optional open_or_uchar = next_uchar32(src_view);
       if (not open_or_uchar)
         return escape_err(BAD_ESCAPE::MALFORMED);
-      if (open_or_uchar == '{' && utf16_mode != UTF16_MODE::DISABLED) {
+      if (open_or_uchar == '{' && !esc_mode.is_regexp_ascii()) {
         std::uint32_t utf16_char = 0;
 
         do {
@@ -111,7 +131,7 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view) {
           high_surr = (high_surr << 4) | *hex;
         }
 
-        if (is_hi_surrogate(high_surr) && utf16_mode == UTF16_MODE::REGEXP &&
+        if (is_hi_surrogate(high_surr) && esc_mode.is_regexp_utf16() &&
             src_view.starts_with("\\u"_u32)) {
           src_view = src_view | std::views::drop(2);
           std::uint32_t low_surr = 0;
@@ -130,7 +150,7 @@ std::expected<UChar32, BAD_ESCAPE> parse_escape(u32_string_view& src_view) {
     }
 
     case '0':
-      if (utf16_mode == UTF16_MODE::REGEXP) {
+      if (esc_mode.is_regexp_utf16()) {
         if (next_uchar32(src_view)
                 .transform([](UChar32 uch) { return std::isdigit(uch); })
                 .value_or(false))
@@ -245,7 +265,7 @@ std::optional<TokenAhead> peek_token(u32_string_view src_view) {
 
     if (src_view.starts_with("\\u"_u32)) {
       src_view = src_view | std::views::drop(1);
-      if (parse_escape<UTF16_MODE::NORMAL>(src_view)
+      if (parse_escape(src_view, EscMode::IDENTIFIER{})
               .transform([](UChar32 esc) {
                 return u_hasBinaryProperty(esc, UCHAR_XID_START);
               })
@@ -361,41 +381,33 @@ std::expected<u32_string, BAD_STRING> parse_string_literal(
             src_view = src_view | std::views::drop(1);
           [[fallthrough]];
         case '\n':
+        case 0x2028:
+        case 0x2029:
           /* ignore escaped newline sequence */
           src_view = src_view | std::views::drop(1);
           continue;
         default:
-          if (js_mode.is_strict() || sep == '`') {
-            if (ch >= '0' && ch <= '9') {
-              bool followed_by_digit =
-                  next_uchar32(src_view | std::views::drop(1))
-                      .transform([](UChar32 ahead) {
-                        return ahead >= '0' && ahead <= '9';
-                      })
-                      .value_or(false);
-              if (ch == '0' && !followed_by_digit) {
-                src_view = src_view | std::views::drop(1);
-                ch = '\0';
-              } else {
-                if (ch >= '8')
-                  /* Note: according to ES2021, \8 and \9 are not
-                   * accepted in strict mode or in templates. */
-                  return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
-                else
-                  return std::unexpected{
-                      BAD_STRING::OCTAL_ESCAPE_IN_STRICT_MODE};
-              }
-            }
-          } else {
-            std::expected ch_exp = parse_escape<UTF16_MODE::NORMAL>(src_view);
-            if (ch_exp)
-              ch = *ch_exp;
-            else if (ch_exp.error() == BAD_ESCAPE::MISMATCH)
-              /* ignore the '\' (could output a warning) */
-              src_view = src_view | std::views::drop(1);
-            else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
+          if (std::isdigit(ch) &&
+              (ch != '0' ||
+               next_uchar32(src_view | std::views::drop(1))
+                   .transform([](UChar32 ahead) { return std::isdigit(ahead); })
+                   .value_or(false))) {
+            if (js_mode.is_strict() && (ch == '8' || ch == '9'))
+              /* Note: according to ES2021, \8 and \9 are not
+               * accepted in strict mode or in templates. */
               return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
+            if (sep == '`')
+              return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
+            return std::unexpected{BAD_STRING::OCTAL_ESCAPE_IN_STRICT_MODE};
           }
+          std::expected ch_exp = parse_escape(src_view, EscMode::IDENTIFIER{});
+          if (ch_exp)
+            ch = *ch_exp;
+          else if (ch_exp.error() == BAD_ESCAPE::MISMATCH)
+            /* ignore the '\' (could output a warning) */
+            src_view = src_view | std::views::drop(1);
+          else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
+            return std::unexpected{BAD_STRING::MALFORMED_ESCAPE_SEQUENCE};
           break;
       }
     }
