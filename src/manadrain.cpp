@@ -342,19 +342,65 @@ enum class BAD_STRING {
   MALFORMED_SEQ_IN_ESCAPE
 };
 
-std::expected<u32_string, BAD_STRING> parse_string_literal(
-    const UChar32 sep,
+std::optional<BAD_STRING> parse_escaped_uchar_in_string(
+    const UChar32 quote,
+    const STRICTNESS strictness,
+    u32_string_view& src_view,
+    UChar32& ch,
+    bool& must_continue) {
+  if (src_view.empty())
+    return BAD_STRING::UNEXPECTED_END;
+  ch = src_view.front();
+  switch (ch) {
+    case '\'':
+    case '\"':
+    case '\0':
+    case '\\':
+      src_view = src_view | std::views::drop(1);
+      return std::nullopt;
+    case '\r':
+      if (next_uchar32(src_view | std::views::drop(1)) == '\n')
+        src_view = src_view | std::views::drop(1);
+      [[fallthrough]];
+    case '\n':
+    case 0x2028:
+    case 0x2029:
+      /* ignore escaped newline sequence */
+      src_view = src_view | std::views::drop(1);
+      must_continue = true;
+      return std::nullopt;
+    default:
+      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+      if (strictness == STRICTNESS::STRICT)
+        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+      else if (quote == '`')
+        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+      std::expected ch_exp = parse_escape(src_view, esc_rule);
+      if (ch_exp)
+        ch = *ch_exp;
+      else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
+        return BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
+      else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
+        return BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
+      else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
+        /* ignore the '\' (could output a warning) */
+        src_view = src_view | std::views::drop(1);
+      return std::nullopt;
+  }
+}
+
+std::expected<u32_string, BAD_STRING> parse_quoted_string(
+    const UChar32 quote,
     const STRICTNESS strictness,
     u32_string_view& src_view) {
-  u32_string string_literal{};
+  u32_string quoted_string{};
   UChar32 ch;
-
   do {
     if (src_view.empty())
       return std::unexpected{BAD_STRING::UNEXPECTED_END};
     ch = src_view.front();
 
-    if (sep == '`') {
+    if (quote == '`') {
       if (ch == '\r') {
         if (next_uchar32(src_view | std::views::drop(1)) == '\n')
           src_view = src_view | std::views::drop(1);
@@ -364,57 +410,26 @@ std::expected<u32_string, BAD_STRING> parse_string_literal(
       return std::unexpected{BAD_STRING::UNEXPECTED_END};
 
     src_view = src_view | std::views::drop(1);
-    if (ch == sep)
-      return string_literal;
+    if (ch == quote)
+      return quoted_string;
 
     if (ch == '$' && next_uchar32(u32_string_view{src_view}) == '{' &&
-        sep == '`') {
+        quote == '`') {
       src_view = src_view | std::views::drop(1);
-      return string_literal;
+      return quoted_string;
     }
 
     if (ch == '\\') {
-      if (src_view.empty())
-        return std::unexpected{BAD_STRING::UNEXPECTED_END};
-      ch = src_view.front();
-
-      switch (ch) {
-        case '\'':
-        case '\"':
-        case '\0':
-        case '\\':
-          src_view = src_view | std::views::drop(1);
-          break;
-        case '\r':
-          if (next_uchar32(src_view | std::views::drop(1)) == '\n')
-            src_view = src_view | std::views::drop(1);
-          [[fallthrough]];
-        case '\n':
-        case 0x2028:
-        case 0x2029:
-          /* ignore escaped newline sequence */
-          src_view = src_view | std::views::drop(1);
-          continue;
-        default:
-          ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-          if (strictness == STRICTNESS::STRICT)
-            esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-          else if (sep == '`')
-            esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-          std::expected ch_exp = parse_escape(src_view, esc_rule);
-          if (ch_exp)
-            ch = *ch_exp;
-          else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
-            return std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
-          else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
-            return std::unexpected{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
-          else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
-            /* ignore the '\' (could output a warning) */
-            src_view = src_view | std::views::drop(1);
-          break;
-      }
+      bool must_continue = false;
+      std::optional esc_error = parse_escaped_uchar_in_string(
+          quote, strictness, src_view, ch, must_continue);
+      if (esc_error)
+        return std::unexpected{*esc_error};
+      else if (must_continue)
+        continue;
     }
-    string_literal.push_back(ch);
+
+    quoted_string.push_back(ch);
   } while (true);
 }
 
