@@ -49,21 +49,26 @@ enum class ESC_RULE {
 };
 
 template <typename T>
-std::unexpected<T> return_err_and_rewind(
-    std::u32string_view& src_view,
-    const std::u32string_view original_src_view,
-    T error_tag) {
-  src_view = original_src_view;
+std::unexpected<T> return_err_and_rewind(std::u32string_view& src_view,
+                                         const std::u32string_view rewind_view,
+                                         T error_tag) {
+  src_view = rewind_view;
   return std::unexpected{error_tag};
+}
+
+std::nullopt_t return_opt_and_rewind(std::u32string_view& src_view,
+                                     const std::u32string_view rewind_view) {
+  src_view = rewind_view;
+  return std::nullopt;
 }
 
 std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
                                                  ESC_RULE esc_rule) {
-  const std::u32string_view outer_src_view{src_view};
+  const std::u32string_view rewind_view{src_view};
 
   std::optional head = next_uchar32(src_view);
   if (not head)
-    return return_err_and_rewind(src_view, outer_src_view,
+    return return_err_and_rewind(src_view, rewind_view,
                                  BAD_ESCAPE::PER_SE_BACKSLASH);
 
   switch (*head) {
@@ -83,11 +88,11 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
     case 'x': {
       std::optional hex0 = next_uchar32(src_view).and_then(hex_digit);
       if (not hex0)
-        return return_err_and_rewind(src_view, outer_src_view,
+        return return_err_and_rewind(src_view, rewind_view,
                                      BAD_ESCAPE::MALFORMED);
       std::optional hex1 = next_uchar32(src_view).and_then(hex_digit);
       if (not hex1)
-        return return_err_and_rewind(src_view, outer_src_view,
+        return return_err_and_rewind(src_view, rewind_view,
                                      BAD_ESCAPE::MALFORMED);
       return (*hex0 << 4) | *hex1;
     }
@@ -95,7 +100,7 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
     case 'u': {
       std::optional open_or_uchar = next_uchar32(src_view);
       if (not open_or_uchar)
-        return return_err_and_rewind(src_view, outer_src_view,
+        return return_err_and_rewind(src_view, rewind_view,
                                      BAD_ESCAPE::MALFORMED);
       if (open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII) {
         char32_t utf16_char = 0;
@@ -103,18 +108,18 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
         do {
           std::optional close_or_uchar = next_uchar32(src_view);
           if (not close_or_uchar)
-            return return_err_and_rewind(src_view, outer_src_view,
+            return return_err_and_rewind(src_view, rewind_view,
                                          BAD_ESCAPE::MALFORMED);
           if (close_or_uchar == '}')
             return utf16_char;
 
           std::optional hex = hex_digit(*close_or_uchar);
           if (not hex)
-            return return_err_and_rewind(src_view, outer_src_view,
+            return return_err_and_rewind(src_view, rewind_view,
                                          BAD_ESCAPE::MALFORMED);
           utf16_char = (utf16_char << 4) | *hex;
           if (utf16_char > 0x10FFFF)
-            return return_err_and_rewind(src_view, outer_src_view,
+            return return_err_and_rewind(src_view, rewind_view,
                                          BAD_ESCAPE::MALFORMED);
         } while (true);
       } else {
@@ -122,7 +127,7 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
         for (int i = 0; i < 4; i++) {
           std::optional hex = next_uchar32(src_view).and_then(hex_digit);
           if (not hex)
-            return return_err_and_rewind(src_view, outer_src_view,
+            return return_err_and_rewind(src_view, rewind_view,
                                          BAD_ESCAPE::MALFORMED);
           high_surr = (high_surr << 4) | *hex;
         }
@@ -161,11 +166,11 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
     case '7':
       switch (esc_rule) {
         case ESC_RULE::STRING_IN_STRICT_MODE:
-          return return_err_and_rewind(src_view, outer_src_view,
+          return return_err_and_rewind(src_view, rewind_view,
                                        BAD_ESCAPE::OCTAL_SEQ);
         case ESC_RULE::STRING_IN_TEMPLATE:
         case ESC_RULE::REGEXP_UTF16:
-          return return_err_and_rewind(src_view, outer_src_view,
+          return return_err_and_rewind(src_view, rewind_view,
                                        BAD_ESCAPE::MALFORMED);
         default:
           char32_t octal = *head - '0';
@@ -191,12 +196,12 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
     case '9':
       if (esc_rule == ESC_RULE::STRING_IN_STRICT_MODE ||
           esc_rule == ESC_RULE::STRING_IN_TEMPLATE)
-        return return_err_and_rewind(src_view, outer_src_view,
+        return return_err_and_rewind(src_view, rewind_view,
                                      BAD_ESCAPE::MALFORMED);
       [[fallthrough]];
 
     default:
-      return return_err_and_rewind(src_view, outer_src_view,
+      return return_err_and_rewind(src_view, rewind_view,
                                    BAD_ESCAPE::PER_SE_BACKSLASH);
   }
 }
@@ -400,13 +405,13 @@ std::expected<Token::StringLit, BAD_STRING> parse_quoted_string(
     const char32_t quote,
     const STRICTNESS strictness,
     std::u32string_view& src_view) {
-  const std::u32string_view outer_src_view{src_view};
+  const std::u32string_view rewind_view{src_view};
   Token::StringLit token_lit{.sep = quote};
   char32_t ch{};
 
   do {
     if (src_view.empty())
-      return return_err_and_rewind(src_view, outer_src_view,
+      return return_err_and_rewind(src_view, rewind_view,
                                    BAD_STRING::UNEXPECTED_END);
     ch = src_view.front();
 
@@ -417,7 +422,7 @@ std::expected<Token::StringLit, BAD_STRING> parse_quoted_string(
         ch = '\n';
       }
     } else if (ch == '\r' || ch == '\n')
-      return return_err_and_rewind(src_view, outer_src_view,
+      return return_err_and_rewind(src_view, rewind_view,
                                    BAD_STRING::UNEXPECTED_END);
 
     src_view = src_view | std::views::drop(1);
@@ -435,7 +440,7 @@ std::expected<Token::StringLit, BAD_STRING> parse_quoted_string(
       std::optional esc_error = parse_escaped_uchar_in_string(
           quote, strictness, src_view, ch, must_continue);
       if (esc_error)
-        return return_err_and_rewind(src_view, outer_src_view, *esc_error);
+        return return_err_and_rewind(src_view, rewind_view, *esc_error);
       else if (must_continue)
         continue;
     }
@@ -453,13 +458,13 @@ struct Template {
 
 std::expected<Token::Template, BAD_STRING> parse_template_part(
     std::u32string_view& src_view) {
-  const std::u32string_view outer_src_view{src_view};
+  const std::u32string_view rewind_view{src_view};
   Token::Template template_tok{};
   char32_t ch{};
 
   do {
     if (src_view.empty())
-      return return_err_and_rewind(src_view, outer_src_view,
+      return return_err_and_rewind(src_view, rewind_view,
                                    BAD_STRING::UNEXPECTED_END);
     ch = *next_uchar32(src_view);
     if (ch == '`')
@@ -471,7 +476,7 @@ std::expected<Token::Template, BAD_STRING> parse_template_part(
     if (ch == '\\') {
       template_tok.str.push_back(ch);
       if (src_view.empty())
-        return return_err_and_rewind(src_view, outer_src_view,
+        return return_err_and_rewind(src_view, rewind_view,
                                      BAD_STRING::UNEXPECTED_END);
       ch = *next_uchar32(src_view);
     }
@@ -481,6 +486,39 @@ std::expected<Token::Template, BAD_STRING> parse_template_part(
       ch = '\n';
     }
     template_tok.str.push_back(ch);
+  } while (true);
+}
+
+std::optional<std::u32string> parse_ident(std::u32string_view& src_view,
+                                          bool& ident_has_escape,
+                                          char32_t ch,
+                                          bool is_private) {
+  const std::u32string_view rewind_view{src_view};
+  std::u32string ident_str{};
+
+  if (is_private)
+    ident_str.push_back('#');
+
+  do {
+    const std::u32string_view snapback_view{src_view};
+    ident_str.push_back(ch);
+
+    if (src_view.empty())
+      return return_opt_and_rewind(src_view, rewind_view);
+    ch = *next_uchar32(src_view);
+
+    if (ch == '\\' && next_uchar32(std::u32string_view{src_view}) == 'u') {
+      std::expected ch_esc = parse_escape(src_view, ESC_RULE::IDENTIFIER);
+      if (not ch_esc)
+        return return_opt_and_rewind(src_view, rewind_view);
+      ch = *ch_esc;
+      ident_has_escape = true;
+    }
+
+    if (!u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE)) {
+      src_view = snapback_view;
+      return ident_str;
+    }
   } while (true);
 }
 
