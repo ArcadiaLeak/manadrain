@@ -1,0 +1,23 @@
+[
+  {
+    "id": "spirv_extension_list",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "STRING_LITERAL" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "COMMA" },
+          { "num": 1, "id": "STRING_LITERAL" }
+        ],
+        "nterm": [
+          { "num": 2, "id": "spirv_extension_list" }
+        ],
+        "rhs": [2, 0, 1]
+      }
+    ]
+  }
+]

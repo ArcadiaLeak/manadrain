@@ -1,0 +1,3725 @@
+[
+  {
+    "id": "type_specifier_nonarray",
+    "rule": [
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "VOID"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FLOAT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "INT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UINT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BOOL"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BVEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BVEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BVEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IVEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IVEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IVEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UVEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UVEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UVEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT2X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT2X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT2X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT3X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT3X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT3X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT4X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT4X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "MAT4X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DOUBLE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BFLOAT16_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FLOATE5M2_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FLOATE4M3_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FLOAT16_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FLOAT32_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FLOAT64_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "INT8_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UINT8_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "INT16_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UINT16_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "INT32_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UINT32_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "INT64_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UINT64_T"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DVEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DVEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DVEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BF16VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BF16VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "BF16VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FE5M2VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FE5M2VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FE5M2VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FE4M3VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FE4M3VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FE4M3VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I8VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I8VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I8VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I16VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I16VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I16VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I32VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I32VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I32VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U8VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U8VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U8VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U16VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U16VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U16VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U32VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U32VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U32VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64VEC2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64VEC3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64VEC4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT2X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT2X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT2X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT3X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT3X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT3X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT4X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT4X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "DMAT4X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT2X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT2X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT2X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT3X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT3X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT3X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT4X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT4X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16MAT4X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT2X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT2X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT2X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT3X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT3X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT3X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT4X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT4X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F32MAT4X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT2X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT2X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT2X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT3X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT3X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT3X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT4X2"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT4X3"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F64MAT4X4"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ACCSTRUCTNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ACCSTRUCTEXT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "RAYQUERYEXT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ATOMIC_UINT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLERCUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2DSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLERCUBESHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2DARRAYSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER1DSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER1DARRAYSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLERCUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLERCUBEARRAYSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLERCUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER1DSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2DSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLERCUBESHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER1DARRAYSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2DARRAYSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLERCUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLERCUBEARRAYSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLERCUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLERCUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLERCUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLERCUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLERSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2DRECTSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2DRECTSHADOW"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLERBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLERBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLERBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLERBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLER2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SAMPLER2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISAMPLER2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USAMPLER2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTUREBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTUREBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTUREBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTUREBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TEXTURE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16TEXTURE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ITEXTURE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UTEXTURE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGEBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGEBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGEBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGEBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IMAGE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16IMAGE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IIMAGE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UIMAGE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE1D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE2D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE3D"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE2DRECT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGECUBE"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGEBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGEBUFFER"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE1DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE2DARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGECUBEARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE2DMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "I64IMAGE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "U64IMAGE2DMSARRAY"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLEREXTERNALOES"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SAMPLEREXTERNAL2DY2YEXT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ATTACHMENTEXT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "IATTACHMENTEXT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UATTACHMENTEXT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SUBPASSINPUT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "SUBPASSINPUTMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SUBPASSINPUT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "F16SUBPASSINPUTMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISUBPASSINPUT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ISUBPASSINPUTMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USUBPASSINPUT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "USUBPASSINPUTMS"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FCOOPMATNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "ICOOPMATNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "UCOOPMATNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "COOPMAT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TENSORLAYOUTNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TENSORVIEWNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "FUNCTION"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "COOPVECNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TENSORARM"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "nterm": [
+          {
+            "num": 0,
+            "id": "spirv_type_specifier"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "HITOBJECTNV"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "HITOBJECTEXT"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "nterm": [
+          {
+            "num": 0,
+            "id": "struct_specifier"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      },
+      {
+        "token": [
+          {
+            "num": 0,
+            "id": "TYPE_NAME"
+          }
+        ],
+        "rhs": [
+          0
+        ]
+      }
+    ]
+  }
+]

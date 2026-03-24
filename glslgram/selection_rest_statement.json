@@ -1,0 +1,22 @@
+[
+  {
+    "id": "selection_rest_statement",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "ELSE" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "statement_scoped" }
+        ],
+        "rhs": [1, 0, 1]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "statement_scoped" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

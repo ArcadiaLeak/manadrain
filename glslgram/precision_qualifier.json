@@ -1,0 +1,25 @@
+[
+  {
+    "id": "precision_qualifier",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "HIGH_PRECISION" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "MEDIUM_PRECISION" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "LOW_PRECISION" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

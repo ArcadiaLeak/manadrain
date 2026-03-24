@@ -1,0 +1,23 @@
+[
+  {
+    "id": "spirv_capability_list",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "INTCONSTANT" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "COMMA" },
+          { "num": 1, "id": "INTCONSTANT" }
+        ],
+        "nterm": [
+          { "num": 2, "id": "spirv_capability_list" }
+        ],
+        "rhs": [2, 0, 1]
+      }
+    ]
+  }
+]

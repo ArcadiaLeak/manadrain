@@ -1,0 +1,73 @@
+[
+  {
+    "id": "assignment_operator",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "EQUAL" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "MUL_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "DIV_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "MOD_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "ADD_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SUB_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "LEFT_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "RIGHT_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "AND_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "XOR_ASSIGN" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "OR_ASSIGN" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

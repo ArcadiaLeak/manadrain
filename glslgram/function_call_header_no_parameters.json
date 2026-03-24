@@ -1,0 +1,22 @@
+[
+  {
+    "id": "function_call_header_no_parameters",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "VOID" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "function_call_header" }
+        ],
+        "rhs": [1, 0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "function_call_header" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

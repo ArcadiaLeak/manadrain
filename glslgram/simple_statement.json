@@ -1,0 +1,55 @@
+[
+  {
+    "id": "simple_statement",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "declaration_statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "expression_statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "selection_statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "switch_statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "case_label" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "iteration_statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "jump_statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "demote_statement" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

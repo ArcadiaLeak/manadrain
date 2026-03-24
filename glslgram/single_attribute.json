@@ -1,0 +1,24 @@
+[
+  {
+    "id": "single_attribute",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 3, "id": "constant_expression" }
+        ],
+        "rhs": [0, 1, 3, 2]
+      }
+    ]
+  }
+]

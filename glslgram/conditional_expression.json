@@ -1,0 +1,28 @@
+[
+  {
+    "id": "conditional_expression",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "logical_or_expression" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "QUESTION" },
+          { "num": 1, "id": "COLON" }
+        ],
+        "nterm": [
+          { "num": 2, "id": "logical_or_expression" },
+          { "num": 3, "id": "expression" },
+          { "num": 4, "id": "assignment_expression" }
+        ],
+        "midrule": [
+          { "num": 5 }
+        ],
+        "rhs": [2, 0, 5, 3, 1, 4]
+      }
+    ]
+  }
+]

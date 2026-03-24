@@ -1,0 +1,58 @@
+[
+  {
+    "id": "spirv_type_specifier",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_TYPE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 4, "id": "spirv_instruction_qualifier_list" },
+          { "num": 5, "id": "spirv_type_parameter_list" }
+        ],
+        "rhs": [0, 1, 4, 2, 5, 3]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_TYPE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 4, "id": "spirv_instruction_qualifier_list" },
+          { "num": 5, "id": "spirv_type_parameter_list" },
+          { "num": 6, "id": "spirv_requirements_list" }
+        ],
+        "rhs": [0, 1, 6, 2, 4, 2, 5, 3]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_TYPE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 3, "id": "spirv_instruction_qualifier_list" }
+        ],
+        "rhs": [0, 1, 3, 2]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_TYPE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 4, "id": "spirv_instruction_qualifier_list" },
+          { "num": 5, "id": "spirv_requirements_list" }
+        ],
+        "rhs": [0, 1, 5, 2, 4, 3]
+      }
+    ]
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "id": "selection_statement",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "selection_statement_nonattributed" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "attribute" },
+          { "num": 1, "id": "selection_statement_nonattributed" }
+        ],
+        "rhs": [0, 1]
+      }
+    ]
+  }
+]

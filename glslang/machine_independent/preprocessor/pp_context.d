@@ -1,0 +1,842 @@
+module glslang.machine_independent.preprocessor.pp_context;
+import glslang;
+
+import std.typecons;
+enum Tuple!(EFixedAtoms, string)[] tokens = [
+  tuple(EFixedAtoms.PPAtomAddAssign, "+="),
+  tuple(EFixedAtoms.PPAtomSubAssign, "-="),
+  tuple(EFixedAtoms.PPAtomMulAssign, "*="),
+  tuple(EFixedAtoms.PPAtomDivAssign, "/="),
+  tuple(EFixedAtoms.PPAtomModAssign, "%="),
+
+  tuple(EFixedAtoms.PpAtomRight, ">>"),
+  tuple(EFixedAtoms.PpAtomLeft, "<<"),
+  tuple(EFixedAtoms.PpAtomAnd, "&&"),
+  tuple(EFixedAtoms.PpAtomOr, "||"),
+  tuple(EFixedAtoms.PpAtomXor, "^^"),
+
+  tuple(EFixedAtoms.PpAtomRightAssign, ">>="),
+  tuple(EFixedAtoms.PpAtomLeftAssign, "<<="),
+  tuple(EFixedAtoms.PpAtomAndAssign, "&="),
+  tuple(EFixedAtoms.PpAtomOrAssign, "|="),
+  tuple(EFixedAtoms.PpAtomXorAssign, "^="),
+
+  tuple(EFixedAtoms.PpAtomEQ, "=="),
+  tuple(EFixedAtoms.PpAtomNE, "!="),
+  tuple(EFixedAtoms.PpAtomGE, ">="),
+  tuple(EFixedAtoms.PpAtomLE, "<="),
+
+  tuple(EFixedAtoms.PpAtomDecrement, "--"),
+  tuple(EFixedAtoms.PpAtomIncrement, "++"),
+
+  tuple(EFixedAtoms.PpAtomColonColon, "::"),
+
+  tuple(EFixedAtoms.PpAtomDefine, "define"),
+  tuple(EFixedAtoms.PpAtomUndef, "undef"),
+  tuple(EFixedAtoms.PpAtomIf, "if"),
+  tuple(EFixedAtoms.PpAtomElif, "elif"),
+  tuple(EFixedAtoms.PpAtomElse, "else"),
+  tuple(EFixedAtoms.PpAtomEndif, "endif"),
+  tuple(EFixedAtoms.PpAtomIfdef, "ifdef"),
+  tuple(EFixedAtoms.PpAtomIfndef, "ifndef"),
+  tuple(EFixedAtoms.PpAtomLine, "line"),
+  tuple(EFixedAtoms.PpAtomPragma, "pragma"),
+  tuple(EFixedAtoms.PpAtomError, "error"),
+
+  tuple(EFixedAtoms.PpAtomVersion, "version"),
+  tuple(EFixedAtoms.PpAtomCore, "core"),
+  tuple(EFixedAtoms.PpAtomCompatibility, "compatibility"),
+  tuple(EFixedAtoms.PpAtomEs, "es"),
+  tuple(EFixedAtoms.PpAtomExtension, "extension"),
+
+  tuple(EFixedAtoms.PpAtomLineMacro, "__LINE__"),
+  tuple(EFixedAtoms.PpAtomFileMacro, "__FILE__"),
+  tuple(EFixedAtoms.PpAtomVersionMacro, "__VERSION__"),
+
+  tuple(EFixedAtoms.PpAtomInclude, "include"),
+];
+
+class TPpContext {
+  import std.container.dlist;
+  import std.container.slist;
+
+  MacroSymbol[int] macroDefs;
+
+  int[string] atomMap;
+  string[int] stringMap;
+  int lastAtom;
+
+  string preamble;
+  string[] strings;
+  int currentString;
+
+  int previous_token;
+  TParseContextBase parseContext;
+  DList!int lastLineTokens;
+  DList!TSourceLoc lastLineTokenLocs;
+
+  enum int maxIfNesting = 65;
+
+  int ifdepth;
+  bool[maxIfNesting] elseSeen;
+  int elsetracker;
+
+  TShader.Includer includer;
+
+  bool inComment;
+  string rootFileName;
+  string currentSourceFile;
+
+  bool disableEscapeSequences;
+  bool inElseSkip;
+
+  SList!tInput inputStack;
+  bool errorOnVersion;
+  bool versionSeen;
+  
+  this(
+    TParseContextBase pc, string rootFileName, TShader.Includer inclr
+  ) {
+    preamble = null; strings = null; previous_token = '\n'; parseContext = pc;
+    includer = inclr; inComment = false; this.rootFileName = rootFileName;
+    currentSourceFile = rootFileName; disableEscapeSequences = false;
+    inElseSkip = false;
+
+    ifdepth = 0;
+    elsetracker = 0;
+
+    enum string s = "~!%^&*()-+=|,.<>/?;:[]{}#\\";
+    static foreach (ch; s)
+      addAtomFixed(ch, [ch]);
+    static foreach (token; tokens)
+      addAtomFixed(token.expand);
+    lastAtom = EFixedAtoms.PpAtomLast;
+  }
+
+  void addAtomFixed(int atom, string s) {
+    atomMap[s] = atom;
+    stringMap[atom] = s;
+  }
+
+  int getAddAtom(string s) {
+    int atom = get(atomMap, s, 0);
+    if (atom == 0) {
+      atom = lastAtom++;
+      addAtomFixed(atom, s);
+    }
+    return atom;
+  }
+
+  int tokenize(ref TPpToken ppToken) {
+    int stringifyDepth = 0;
+    TPpToken stringifiedToken;
+    while (true) {
+      int token = scanToken(ppToken);
+      token = tokenPaste(token, ppToken);
+
+      if (token == EndOfInput) {
+        missingEndifCheck;
+        return EndOfInput;
+      }
+      if (token == '#') {
+        if (previous_token == '\n') {
+          token = readCPPline(ppToken);
+          if (token == EndOfInput) {
+              missingEndifCheck;
+              return EndOfInput;
+          }
+          continue;
+        } else {
+          parseContext.ppError(ppToken.loc, "preprocessor directive cannot be preceded by another token", "#", "");
+          return EndOfInput;
+        }
+      }
+
+      import std.stdio;
+      writeln(token);
+
+      break;
+    }
+
+    return EndOfInput;
+  }
+
+  int readCPPline(ref TPpToken ppToken) {
+    int token = scanToken(ppToken);
+    
+    if (token == EFixedAtoms.PpAtomIdentifier) {
+      switch (get(atomMap, ppToken.nameStr, 0)) {
+        case EFixedAtoms.PpAtomDefine:
+          token = CPPdefine(ppToken);
+          break;
+        case EFixedAtoms.PpAtomElse:
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#else after #else", "#else", "");
+          elseSeen[elsetracker] = true;
+          if (ifdepth == 0)
+            parseContext.ppError(ppToken.loc, "mismatched statements", "#else", "");
+          token = extraTokenCheck(EFixedAtoms.PpAtomElse, ppToken, scanToken(ppToken));
+          token = CPPelse(0, ppToken);
+          break;
+        default:
+          parseContext.ppError(ppToken.loc, "invalid directive:", "#", ppToken.nameStr);
+          break;
+      }
+    } else if (token != '\n' && token != EndOfInput)
+      parseContext.ppError(ppToken.loc, "invalid directive", "#", "");
+
+    return token;
+  }
+
+  int extraTokenCheck(int contextAtom, ref TPpToken ppToken, int token) {
+    if (token != '\n' && token != EndOfInput) {
+      enum string message = "unexpected tokens following directive";
+
+      string label;
+      if (contextAtom == EFixedAtoms.PpAtomElse)
+        label = "#else";
+      else if (contextAtom == EFixedAtoms.PpAtomElif)
+        label = "#elif";
+      else if (contextAtom == EFixedAtoms.PpAtomEndif)
+        label = "#endif";
+      else if (contextAtom == EFixedAtoms.PpAtomIf)
+        label = "#if";
+      else if (contextAtom == EFixedAtoms.PpAtomLine)
+        label = "#line";
+      else
+        label = "";
+
+      if (parseContext.relaxedErrors)
+        parseContext.ppWarn(ppToken.loc, message, label, "");
+      else
+        parseContext.ppError(ppToken.loc, message, label, "");
+
+      while (token != '\n' && token != EndOfInput)
+        token = scanToken(ppToken);
+    }
+
+    return token;
+  }
+
+  void missingEndifCheck() {
+    if (ifdepth > 0)
+      parseContext.ppError(parseContext.getCurrentLoc, "missing #endif", "", "");
+  }
+
+  int CPPdefine(ref TPpToken ppToken) {
+    MacroSymbol mac;
+
+    int token = scanToken(ppToken);
+    if (token != EFixedAtoms.PpAtomIdentifier) {
+      parseContext.ppError(ppToken.loc, "must be followed by macro name", "#define", "");
+      return token;
+    }
+    if (ppToken.loc.string_ >= 0)
+      parseContext.reservedPpErrorCheck(ppToken.loc, ppToken.nameStr, "#define");
+
+    const int defAtom = getAddAtom(ppToken.nameStr);
+    TSourceLoc defineLoc = ppToken.loc;
+
+    token = scanToken(ppToken);
+    if (token == '(' && !ppToken.space) {
+      mac.functionLike = 1;
+      do {
+        token = scanToken(ppToken);
+        if (mac.args.length == 0 && token == ')')
+          break;
+        if (token != EFixedAtoms.PpAtomIdentifier) {
+          parseContext.ppError(ppToken.loc, "bad argument", "#define", "");
+          return token;
+        }
+        const int argAtom = getAddAtom(ppToken.nameStr);
+
+        bool duplicate = false;
+        foreach (arg; mac.args) {
+          if (arg == argAtom) {
+            parseContext.ppError(ppToken.loc, "duplicate macro parameter", "#define", "");
+            duplicate = true;
+            break;
+          }
+        }
+        if (!duplicate)
+          mac.args ~= argAtom;
+        token = scanToken(ppToken);
+      } while (token == ',');
+
+      if (token != ')') {
+        parseContext.ppError(ppToken.loc, "missing parenthesis", "#define", "");
+        return token;
+      }
+
+      token = scanToken(ppToken);
+    } else if (token != '\n' && token != EndOfInput && !ppToken.space) {
+      parseContext.ppWarn(ppToken.loc, "missing space after macro name", "#define", "");
+      return token;
+    }
+
+    int pendingPoundSymbols = 0;
+    TPpToken savePound;
+    while (token != '\n' && token != EndOfInput) {
+      if (token == '#') {
+        pendingPoundSymbols++;
+        if (pendingPoundSymbols == 0) {
+          savePound = ppToken;
+        }
+      } else if (pendingPoundSymbols == 0) {
+        mac.body.putToken(token, ppToken);
+      } else if (pendingPoundSymbols == 1) {
+        parseContext.requireProfile(ppToken.loc, ~EProfile(ES_PROFILE: 1), "stringify (#)");
+        parseContext.profileRequires(ppToken.loc, ~EProfile(ES_PROFILE: 1), 130, "", "stringify (#)");
+        bool isArg = false;
+        if (token == EFixedAtoms.PpAtomIdentifier)
+          foreach_reverse (arg; mac.args)
+            if (stringMap[arg] == ppToken.nameStr) {
+              isArg = true;
+              break;
+            }
+        if (!isArg) {
+          parseContext.ppError(ppToken.loc, "'#' is not followed by a macro parameter.", "#", "");
+          return token;
+        }
+        mac.body.putToken(tStringifyLevelInput.PUSH, ppToken);
+        mac.body.putToken(token, ppToken);
+        mac.body.putToken(tStringifyLevelInput.POP, ppToken);
+        pendingPoundSymbols = 0;
+      } else if (pendingPoundSymbols % 2 == 0) {
+        parseContext.requireProfile(ppToken.loc, ~EProfile(ES_PROFILE: 1), "token pasting (##)");
+        parseContext.profileRequires(ppToken.loc, ~EProfile(ES_PROFILE: 1), 130, "", "token pasting (##)");
+        foreach (i; 0..pendingPoundSymbols / 2)
+          mac.body.putToken(EFixedAtoms.PpAtomPaste, savePound);
+        mac.body.putToken(token, ppToken);
+        pendingPoundSymbols = 0;
+      } else {
+        parseContext.ppError(ppToken.loc, "Illegal sequence of paste (##) and stringify (#).", "#", "");
+        return token;
+      }
+      token = scanToken(ppToken);
+    }
+    if (pendingPoundSymbols != 0)
+      parseContext.ppError(ppToken.loc, "Macro ended with incomplete '#' paste/stringify operators", "#", "");
+
+    MacroSymbol* existing = defAtom in macroDefs;
+    if (existing !is null) {
+      if (!existing.undef) {
+        if (existing.functionLike != mac.functionLike)
+          parseContext.ppError(
+            defineLoc, "Macro redefined; function-like versus object-like:",
+            "#define", stringMap[defAtom]
+          );
+        else if (existing.args.length != mac.args.length)
+          parseContext.ppError(
+            defineLoc, "Macro redefined; different number of arguments:",
+            "#define", stringMap[defAtom]
+          );
+        else {
+          if (existing.args != mac.args)
+            parseContext.ppError(
+              defineLoc, "Macro redefined; different argument names:",
+              "#define", stringMap[defAtom]
+            );
+          existing.body.reset;
+          mac.body.reset;
+          int newToken;
+          bool firstToken = true;
+          do {
+            int oldToken;
+            TPpToken oldPpToken;
+            TPpToken newPpToken;
+            oldToken = existing.body.getToken(parseContext, oldPpToken);
+            newToken = mac.body.getToken(parseContext, newPpToken);
+            if (firstToken) {
+              newPpToken.space = oldPpToken.space;
+              firstToken = false;
+            }
+            if (oldToken != newToken || oldPpToken != newPpToken) {
+              parseContext.ppError(
+                defineLoc, "Macro redefined; different substitutions:",
+                "#define", stringMap[defAtom]
+              );
+              break;
+            }
+          } while (newToken != EndOfInput);
+        }
+      }
+      *existing = mac;
+    } else
+      addMacroDef(defAtom, mac);
+
+    return '\n';
+  }
+
+  void addMacroDef(int atom, MacroSymbol macroDef) {
+    macroDefs[atom] = macroDef;
+  }
+
+  int eval(
+    int token, int precedence, bool shortCircuit,
+    ref int res, ref bool err, ref TPpToken ppToken
+  ) {
+    TSourceLoc loc = ppToken.loc;
+    if (token == EFixedAtoms.PpAtomIdentifier) {
+      if (ppToken.nameStr == "defined") {
+        if (isMacroInput) {
+          if (parseContext.relaxedErrors)
+            parseContext.ppWarn(
+              ppToken.loc, "nonportable when expanded from macros for preprocessor expression",
+              "defined", ""
+          );
+          else
+            parseContext.ppError(
+              ppToken.loc, "cannot use in preprocessor expression when expanded from macros",
+              "defined", ""
+            );
+        }
+        bool needclose = 0;
+        token = scanToken(ppToken);
+        if (token == '(') {
+          needclose = true;
+          token = scanToken(ppToken);
+        }
+        if (token != EFixedAtoms.PpAtomIdentifier) {
+          parseContext.ppError(loc, "incorrect directive, expected identifier", "preprocessor evaluation", "");
+          err = true;
+          res = 0;
+          return token;
+        }
+
+        MacroSymbol* macro_ = atomMap.get(ppToken.nameStr, 0) in macroDefs;
+        res = macro_ !is null ? !macro_.undef : 0;
+        token = scanToken(ppToken);
+        if (needclose) {
+          if (token != ')') {
+            parseContext.ppError(loc, "expected ')'", "preprocessor evaluation", "");
+            err = true;
+            res = 0;
+            return token;
+          }
+          token = scanToken(ppToken);
+        }
+      } else {
+        token = tokenPaste(token, ppToken);
+        token = evalToToken(token, shortCircuit, res, err, ppToken);
+      }
+    }
+
+    assert(0);
+  }
+
+  int evalToToken(
+    int token, bool shortCircuit,
+    ref int res, ref bool err, ref TPpToken ppToken
+  ) {
+    while (token == EFixedAtoms.PpAtomIdentifier && ppToken.nameStr != "defined") {
+      
+    }
+
+    return token;
+  }
+
+  enum MacroExpandResult {
+    MacroExpandNotStarted,
+    MacroExpandError,
+    MacroExpandStarted,
+    MacroExpandUndef
+  }
+
+  MacroExpandResult MacroExpand(
+    ref TPpToken ppToken, bool expandUndef, bool newLineOkay
+  ) {
+    ppToken.space = false;
+    int macroAtom = atomMap.get(ppToken.nameStr, 0);
+    if (ppToken.fullyExpanded)
+      return MacroExpandResult.MacroExpandNotStarted;
+
+    import std.conv;
+    switch (macroAtom) {
+      case EFixedAtoms.PpAtomLineMacro:
+        if (ppToken.ival == 0)
+          ppToken.ival = cast(int) parseContext.getCurrentLoc.line;
+        ppToken.nameStr = ppToken.ival.to!string;
+        UngetToken(EFixedAtoms.PpAtomConstInt, ppToken);
+        return MacroExpandResult.MacroExpandStarted;
+
+      case EFixedAtoms.PpAtomFileMacro: {
+        if (parseContext.getCurrentLoc.name)
+          parseContext.ppRequireExtensions(
+            ppToken.loc, [E_GL_GOOGLE_cpp_style_line_directive],
+            "filename-based __FILE__"
+          );
+        ppToken.ival = cast(int) parseContext.getCurrentLoc.string_;
+        ppToken.nameStr = ppToken.loc.getStringNameOrNum;
+        UngetToken(EFixedAtoms.PpAtomConstInt, ppToken);
+        return MacroExpandResult.MacroExpandStarted;
+      }
+
+      case EFixedAtoms.PpAtomVersionMacro:
+        ppToken.ival = parseContext.version_;
+        ppToken.nameStr = ppToken.ival.to!string;
+        UngetToken(EFixedAtoms.PpAtomConstInt, ppToken);
+        return MacroExpandResult.MacroExpandStarted;
+
+      default:
+        break;
+    }
+
+    MacroSymbol* macro_ = macroAtom == 0
+      ? null
+      : macroAtom in macroDefs;
+
+    if (macro_ !is null && macro_.busy) {
+      ppToken.fullyExpanded = true;
+      return MacroExpandResult.MacroExpandNotStarted;
+    }
+
+    if ((macro_ is null || macro_.undef) && !expandUndef)
+      return MacroExpandResult.MacroExpandNotStarted;
+
+    if ((macro_ is null || macro_.undef) && expandUndef) {
+      pushInput(new tZeroInput(this));
+      return MacroExpandResult.MacroExpandUndef;
+    }
+
+    tMacroInput in_ = new tMacroInput(this);
+
+    TSourceLoc loc = ppToken.loc;
+    in_.mac = macro_;
+    if (macro_.functionLike) {
+      TPpToken parenToken;
+      int token = scanToken(parenToken);
+      if (newLineOkay) {
+        while (token == '\n')
+          token = scanToken(parenToken);
+      }
+      if (token != '(') {
+        UngetToken(token, parenToken);
+        return MacroExpandResult.MacroExpandNotStarted;
+      }
+      in_.args.length = in_.mac.args.length;
+      foreach (ref arg; in_.args)
+        arg = new TokenStream;
+      in_.expandedArgs.length = in_.mac.args.length;
+      in_.expandedArgs[] = null;
+      size_t arg = 0;
+      bool tokenRecorded = false;
+      do {
+        SList!int nestStack;
+        while (true) {
+          token = scanToken(ppToken);
+          if (token == EndOfInput || token == tMarkerInput.marker) {
+            parseContext.ppError(loc, "End of input in macro", "macro expansion", stringMap[macroAtom]);
+            return MacroExpandResult.MacroExpandError;
+          }
+          if (token == '\n') {
+            if (!newLineOkay) {
+              parseContext.ppError(loc, "End of line in macro substitution:", "macro expansion", stringMap[macroAtom]);
+              return MacroExpandResult.MacroExpandError;
+            }
+            continue;
+          }
+          if (token == '#') {
+            parseContext.ppError(ppToken.loc, "unexpected '#'", "macro expansion", stringMap[macroAtom]);
+            return MacroExpandResult.MacroExpandError;
+          }
+          if (in_.mac.args.length == 0 && token != ')')
+            break;
+          if (nestStack.empty && (token == ',' || token == ')'))
+            break;
+          if (token == '(')
+            nestStack.insertFront = ')';
+          else if (!nestStack.empty && token == nestStack.front)
+            nestStack.removeFront;
+
+          if (get(atomMap, ppToken.nameStr, 0) == EFixedAtoms.PpAtomLineMacro)
+            ppToken.ival = cast(int) parseContext.getCurrentLoc.line;
+
+          in_.args[arg].putToken(token, ppToken);
+          tokenRecorded = true;
+        }
+
+        if (token == ')') {
+          if (in_.mac.args.length == 1 && !tokenRecorded)
+            break;
+          arg++;
+          break;
+        }
+        arg++;
+      } while (arg < in_.mac.args.length);
+
+      if (arg < in_.mac.args.length)
+        parseContext.ppError(loc, "Too few args in Macro", "macro expansion", stringMap[macroAtom]);
+      else if (token != ')') {
+        int depth = 0;
+        while (token != EndOfInput && (depth > 0 || token != ')')) {
+          if (token == ')' || token == '}')
+            depth--;
+          token = scanToken(ppToken);
+          if (token == '(' || token == '{')
+            depth++;
+        }
+
+        if (token == EndOfInput) {
+          parseContext.ppError(loc, "End of input in macro", "macro expansion", stringMap[macroAtom]);
+          return MacroExpandResult.MacroExpandError;
+        }
+        parseContext.ppError(loc, "Too many args in macro", "macro expansion", stringMap[macroAtom]);
+      }
+
+      foreach (i; 0..in_.mac.args.length)
+        in_.expandedArgs[i] = PrescanMacroArg(in_.args[i], ppToken, newLineOkay);
+    }
+
+    pushInput(in_);
+    macro_.busy = 1;
+    macro_.body.reset;
+
+    return MacroExpandResult.MacroExpandStarted;
+  }
+
+  TokenStream* PrescanMacroArg(
+    TokenStream* arg, ref TPpToken ppToken, bool newLineOkay
+  ) {
+    TokenStream* expandedArg = new TokenStream;
+    pushInput(new tMarkerInput(this));
+    pushTokenStreamInput(arg);
+    int token;
+    while (
+      (token = scanToken(ppToken)) != tMarkerInput.marker && token != EndOfInput
+    ) {
+      token = tokenPaste(token, ppToken);
+      if (token == EFixedAtoms.PpAtomIdentifier) {
+        final switch (MacroExpand(ppToken, false, newLineOkay)) {
+          case MacroExpandResult.MacroExpandNotStarted:
+            break;
+          case MacroExpandResult.MacroExpandError:
+            while (
+              (token = scanToken(ppToken)) != tMarkerInput.marker && token != EndOfInput
+            ) {}
+            break;
+          case MacroExpandResult.MacroExpandStarted:
+          case MacroExpandResult.MacroExpandUndef:
+            continue;
+        }
+      }
+      if (token == tMarkerInput.marker || token == EndOfInput)
+        break;
+      expandedArg.putToken(token, ppToken);
+    }
+
+    if (token != tMarkerInput.marker)
+      expandedArg = null;
+
+    return expandedArg;
+  }
+
+  void UngetToken(int token, ref TPpToken ppToken) {
+    pushInput(new tUngotTokenInput(this, token, ppToken));
+  }
+
+  int CPPif(ref TPpToken ppToken) {
+    int token = scanToken(ppToken);
+    if (ifdepth >= maxIfNesting || elsetracker >= maxIfNesting) {
+      parseContext.ppError(ppToken.loc, "maximum nesting depth exceeded", "#if", "");
+      return EndOfInput;
+    } else {
+      elsetracker++;
+      ifdepth++;
+    }
+    int res = 0;
+    bool err = false;
+    token = eval(token, eval_prec.MIN_PRECEDENCE, false, res, err, ppToken);
+    token = extraTokenCheck(EFixedAtoms.PpAtomIf, ppToken, token);
+    if (!res && !err)
+      token = CPPelse(1, ppToken);
+    
+    return token;
+  }
+
+  int CPPelse(int matchelse, ref TPpToken ppToken) {
+    inElseSkip = true;
+    int depth = 0;
+    int token = scanToken(ppToken);
+
+    while (token != EndOfInput) {
+      if (token != '#') {
+        while (token != '\n' && token != EndOfInput)
+          token = scanToken(ppToken);
+        
+        if (token == EndOfInput)
+          return token;
+
+        token = scanToken(ppToken);
+        continue;
+      }
+
+      if ((token = scanToken(ppToken)) != EFixedAtoms.PpAtomIdentifier)
+        continue;
+
+      int nextAtom = atomMap.get(ppToken.nameStr, 0);
+      if (
+        nextAtom == EFixedAtoms.PpAtomIf ||
+        nextAtom == EFixedAtoms.PpAtomIfdef ||
+        nextAtom == EFixedAtoms.PpAtomIfndef
+      ) {
+        depth++;
+        if (ifdepth >= maxIfNesting || elsetracker >= maxIfNesting) {
+          parseContext.ppError(ppToken.loc, "maximum nesting depth exceeded", "#if/#ifdef/#ifndef", "");
+          return EndOfInput;
+        } else {
+          ifdepth++;
+          elsetracker++;
+        }
+      } else if (nextAtom == EFixedAtoms.PpAtomEndif) {
+        token = extraTokenCheck(nextAtom, ppToken, scanToken(ppToken));
+        elseSeen[elsetracker] = false;
+        --elsetracker;
+        if (depth == 0) {
+          if (ifdepth > 0)
+            --ifdepth;
+          break;
+        }
+        --depth;
+        --ifdepth;
+      } else if (matchelse && depth == 0) {
+        if (nextAtom == EFixedAtoms.PpAtomElse) {
+          elseSeen[elsetracker] = true;
+          token = extraTokenCheck(nextAtom, ppToken, scanToken(ppToken));
+          break;
+        } else if (nextAtom == EFixedAtoms.PpAtomElif) {
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#elif after #else", "#elif", "");
+          if (ifdepth > 0) {
+            --ifdepth;
+            elseSeen[elsetracker] = false;
+            --elsetracker;
+          }
+          inElseSkip = false;
+          return CPPif(ppToken);
+        } else if (nextAtom == EFixedAtoms.PpAtomElse) {
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#else after #else", "#else", "");
+          else
+            elseSeen[elsetracker] = true;
+          token = extraTokenCheck(nextAtom, ppToken, scanToken(ppToken));
+        } else if (nextAtom == EFixedAtoms.PpAtomElif)
+          if (elseSeen[elsetracker])
+            parseContext.ppError(ppToken.loc, "#elif after #else", "#elif", "");
+      }
+    }
+
+    inElseSkip = false;
+    return token;
+  }
+
+  int scanToken(ref TPpToken ppToken) {
+    int token = EndOfInput;
+
+    while (!inputStack.empty) {
+      token = inputStack.front.scan(ppToken);
+      if (token != EndOfInput || inputStack.empty)
+        break;
+      popInput;
+    }
+    if (!inputStack.empty && inputStack.front.isStringInput && !inElseSkip) {
+      if (token == '\n') {
+        lastLineTokens.clear;
+        lastLineTokenLocs.clear;
+      } else {
+        lastLineTokens ~= token;
+        lastLineTokenLocs ~= ppToken.loc;
+      }
+    }
+    return token;
+  }
+
+  bool peekPasting() => !inputStack.empty && inputStack.front.peekPasting;
+  bool peekContinuedPasting(int a) => !inputStack.empty && inputStack.front.peekContinuedPasting(a);
+  bool endOfReplacementList() => inputStack.empty || inputStack.front.endOfReplacementList;
+  bool isMacroInput() => inputStack.empty || inputStack.front.isMacroInput;
+
+  int tokenPaste(int token, ref TPpToken ppToken) {
+    if (token == EFixedAtoms.PpAtomPaste) {
+      parseContext.ppError(ppToken.loc, "unexpected location", "##", "");
+      return scanToken(ppToken);
+    }
+
+    int resultToken = token;
+
+    while (peekPasting) {
+      TPpToken pastedPpToken;
+
+      token = scanToken(pastedPpToken);
+      assert(token == EFixedAtoms.PpAtomPaste);
+
+      if (endOfReplacementList) {
+        parseContext.ppError(ppToken.loc, "unexpected location; end of replacement list", "##", "");
+        break;
+      }
+
+      do {
+        token = scanToken(pastedPpToken);
+
+        if (token == tMarkerInput.marker) {
+          parseContext.ppError(ppToken.loc, "unexpected location; end of argument", "##", "");
+          return resultToken;
+        }
+
+        switch (resultToken) {
+          case EFixedAtoms.PpAtomIdentifier:
+            break;
+          case '=': case '!': case '-': case '~': case '+': case '*':
+          case '/': case '%': case '<': case '>': case '|': case '^':
+          case '&':
+          case EFixedAtoms.PpAtomRight: case EFixedAtoms.PpAtomLeft:
+          case EFixedAtoms.PpAtomAnd: case EFixedAtoms.PpAtomOr:
+          case EFixedAtoms.PpAtomXor:
+            ppToken.nameStr = stringMap[resultToken];
+            pastedPpToken.nameStr = stringMap[token];
+            break;
+          default:
+            parseContext.ppError(ppToken.loc, "not supported for these tokens", "##", "");
+            return resultToken;
+        }
+
+        ppToken.name ~= pastedPpToken.name[];
+        if (resultToken != EFixedAtoms.PpAtomIdentifier) {
+          uint newToken = get(atomMap, ppToken.nameStr, 0);
+          if (newToken > 0)
+            resultToken = newToken;
+          else
+            parseContext.ppError(ppToken.loc, "combined token is invalid", "##", "");
+        }
+      } while (peekContinuedPasting(resultToken));
+    }
+
+    return resultToken;
+  }
+
+  void pushTokenStreamInput(
+    TokenStream* ts, bool prepasting = false, bool expanded = false
+  ) {
+    pushInput(new tTokenInput(this, ts, prepasting, expanded));
+    ts.reset();
+  }
+
+  void pushInput(tInput input) {
+    inputStack.insertFront(input);
+    input.notifyActivated;
+  }
+
+  void popInput() {
+    inputStack.front.notifyDeleted;
+    inputStack.removeFront;
+  }
+
+  void setInput(TInputScanner input, bool versionWillBeError) {
+    assert(inputStack.empty);
+
+    pushInput(new tStringInput(this, input));
+
+    errorOnVersion = versionWillBeError;
+    versionSeen = false;
+  }
+}

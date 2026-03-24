@@ -1,0 +1,25 @@
+[
+  {
+    "id": "function_call_generic",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "function_call_header_with_parameters" }
+        ],
+        "rhs": [1, 0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "function_call_header_no_parameters" }
+        ],
+        "rhs": [1, 0]
+      }
+    ]
+  }
+]

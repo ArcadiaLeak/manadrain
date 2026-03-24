@@ -1,0 +1,46 @@
+[
+  {
+    "id": "function_prototype",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "function_declarator" }
+        ],
+        "rhs": [1, 0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "function_declarator" },
+          { "num": 2, "id": "attribute" }
+        ],
+        "rhs": [1, 0, 2]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "attribute" },
+          { "num": 2, "id": "function_declarator" }
+        ],
+        "rhs": [1, 2, 0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "attribute" },
+          { "num": 2, "id": "function_declarator" }
+        ],
+        "rhs": [1, 2, 0, 1]
+      }
+    ]
+  }
+]

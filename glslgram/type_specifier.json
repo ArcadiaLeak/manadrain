@@ -1,0 +1,22 @@
+[
+  {
+    "id": "type_specifier",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "type_specifier_nonarray" },
+          { "num": 1, "id": "type_parameter_specifier_opt" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "type_specifier_nonarray" },
+          { "num": 1, "id": "type_parameter_specifier_opt" },
+          { "num": 2, "id": "array_specifier" }
+        ],
+        "rhs": [0, 1, 2]
+      }
+    ]
+  }
+]

@@ -1,0 +1,19 @@
+[
+  {
+    "id": "for_init_statement",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "expression_statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "declaration_statement" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

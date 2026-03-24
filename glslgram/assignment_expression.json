@@ -1,0 +1,21 @@
+[
+  {
+    "id": "assignment_expression",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "conditional_expression" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "unary_expression" },
+          { "num": 1, "id": "assignment_operator" },
+          { "num": 2, "id": "assignment_expression" }
+        ],
+        "rhs": [0, 1, 2]
+      }
+    ]
+  }
+]

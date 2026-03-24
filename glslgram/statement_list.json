@@ -1,0 +1,20 @@
+[
+  {
+    "id": "statement_list",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "statement" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "statement_list" },
+          { "num": 1, "id": "statement" }
+        ],
+        "rhs": [0, 1]
+      }
+    ]
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "id": "layout_qualifier_id",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "IDENTIFIER" },
+          { "num": 1, "id": "EQUAL" }
+        ],
+        "nterm": [
+          { "num": 2, "id": "constant_expression" }
+        ],
+        "rhs": [0, 1, 2]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SHARED" }
+        ],
+        "rhs": [0]
+      }
+    ]
+  }
+]

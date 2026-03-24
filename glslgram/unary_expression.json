@@ -1,0 +1,38 @@
+[
+  {
+    "id": "unary_expression",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "postfix_expression" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "INC_OP" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "unary_expression" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "DEC_OP" }
+        ],
+        "nterm": [
+          { "num": 1, "id": "unary_expression" }
+        ],
+        "rhs": [0, 1]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "unary_operator" },
+          { "num": 1, "id": "unary_expression" }
+        ],
+        "rhs": [0, 1]
+      }
+    ]
+  }
+]

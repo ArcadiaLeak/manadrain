@@ -1,0 +1,110 @@
+[
+  {
+    "id": "spirv_decorate_qualifier",
+    "rule": [
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "INTCONSTANT" },
+          { "num": 3, "id": "RIGHT_PAREN" }
+        ],
+        "rhs": [0, 1, 2, 3]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "INTCONSTANT" },
+          { "num": 4, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 5, "id": "spirv_requirements_list" }
+        ],
+        "rhs": [0, 1, 5, 2, 3, 4]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "INTCONSTANT" },
+          { "num": 4, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 5, "id": "spirv_decorate_parameter_list" }
+        ],
+        "rhs": [0, 1, 3, 2, 5, 4]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "INTCONSTANT" },
+          { "num": 4, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 5, "id": "spirv_requirements_list" },
+          { "num": 6, "id": "spirv_decorate_parameter_list" }
+        ],
+        "rhs": [0, 1, 5, 2, 3, 2, 6, 4]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE_ID" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "INTCONSTANT" },
+          { "num": 4, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 5, "id": "spirv_decorate_id_parameter_list" }
+        ],
+        "rhs": [0, 1, 3, 2, 5, 4]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE_ID" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "INTCONSTANT" },
+          { "num": 4, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 5, "id": "spirv_requirements_list" },
+          { "num": 6, "id": "spirv_decorate_id_parameter_list" }
+        ],
+        "rhs": [0, 1, 5, 2, 3, 2, 6, 4]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE_STRING" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "INTCONSTANT" },
+          { "num": 4, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 5, "id": "spirv_decorate_string_parameter_list" }
+        ],
+        "rhs": [0, 1, 3, 2, 5, 4]
+      },
+      {
+        "token": [
+          { "num": 0, "id": "SPIRV_DECORATE_STRING" },
+          { "num": 1, "id": "LEFT_PAREN" },
+          { "num": 2, "id": "COMMA" },
+          { "num": 3, "id": "INTCONSTANT" },
+          { "num": 4, "id": "RIGHT_PAREN" }
+        ],
+        "nterm": [
+          { "num": 5, "id": "spirv_requirements_list" },
+          { "num": 6, "id": "spirv_decorate_string_parameter_list" }
+        ],
+        "rhs": [0, 1, 5, 2, 3, 2, 6, 4]
+      }
+    ]
+  }
+]

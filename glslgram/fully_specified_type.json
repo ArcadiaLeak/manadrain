@@ -1,0 +1,20 @@
+[
+  {
+    "id": "fully_specified_type",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "type_specifier" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "type_qualifier" },
+          { "num": 1, "id": "type_specifier" }
+        ],
+        "rhs": [0, 1]
+      }
+    ]
+  }
+]

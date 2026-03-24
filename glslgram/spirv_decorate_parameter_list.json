@@ -1,0 +1,23 @@
+[
+  {
+    "id": "spirv_decorate_parameter_list",
+    "rule": [
+      {
+        "nterm": [
+          { "num": 0, "id": "spirv_decorate_parameter" }
+        ],
+        "rhs": [0]
+      },
+      {
+        "nterm": [
+          { "num": 0, "id": "spirv_decorate_parameter_list" },
+          { "num": 1, "id": "spirv_decorate_parameter" }
+        ],
+        "token": [
+          { "num": 2, "id": "COMMA" }
+        ],
+        "rhs": [0, 2, 1]
+      }
+    ]
+  }
+]
