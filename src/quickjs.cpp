@@ -233,8 +233,6 @@ typedef enum {
     JS_GC_PHASE_REMOVE_CYCLES,
 } JSGCPhaseEnum;
 
-typedef enum OPCodeEnum OPCodeEnum;
-
 struct JSRuntime {
     JSMallocFunctions mf;
     JSMallocState malloc_state;
@@ -1345,10 +1343,10 @@ static JSValue js_error_toString(JSContext *ctx, JSValueConst this_val,
 static JSVarRef *js_global_object_find_uninitialized_var(JSContext *ctx, JSObject *p,
                                                          JSAtom atom, BOOL is_lexical);
 
-static const JSClassExoticMethods js_arguments_exotic_methods;
-static const JSClassExoticMethods js_string_exotic_methods;
-static const JSClassExoticMethods js_proxy_exotic_methods;
-static const JSClassExoticMethods js_module_ns_exotic_methods;
+extern const JSClassExoticMethods js_arguments_exotic_methods;
+extern const JSClassExoticMethods js_string_exotic_methods;
+extern const JSClassExoticMethods js_proxy_exotic_methods;
+extern const JSClassExoticMethods js_module_ns_exotic_methods;
 static JSClassID js_class_id_alloc = JS_CLASS_INIT_COUNT;
 
 static void js_trigger_gc(JSRuntime *rt, size_t size)
@@ -6807,7 +6805,7 @@ void JS_ComputeMemoryUsage(JSRuntime *rt, JSMemoryUsage *s)
 
 void JS_DumpMemoryUsage(FILE *fp, const JSMemoryUsage *s, JSRuntime *rt)
 {
-    fprintf(fp, "QuickJS memory usage -- " CONFIG_VERSION " version, %d-bit, malloc limit: %"PRId64"\n\n",
+    fprintf(fp, "QuickJS memory usage -- _VERSION_ version, %d-bit, malloc limit: %" PRId64 "\n\n",
             (int)sizeof(void *) * 8, s->malloc_limit);
 #if 1
     if (rt) {
@@ -6869,63 +6867,63 @@ void JS_DumpMemoryUsage(FILE *fp, const JSMemoryUsage *s, JSRuntime *rt)
     fprintf(fp, "%-20s %8s %8s\n", "NAME", "COUNT", "SIZE");
 
     if (s->malloc_count) {
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per block)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per block)\n",
                 "memory allocated", s->malloc_count, s->malloc_size,
                 (double)s->malloc_size / s->malloc_count);
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%d overhead, %0.1f average slack)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%d overhead, %0.1f average slack)\n",
                 "memory used", s->memory_used_count, s->memory_used_size,
                 MALLOC_OVERHEAD, ((double)(s->malloc_size - s->memory_used_size) /
                                   s->memory_used_count));
     }
     if (s->atom_count) {
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per atom)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per atom)\n",
                 "atoms", s->atom_count, s->atom_size,
                 (double)s->atom_size / s->atom_count);
     }
     if (s->str_count) {
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per string)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per string)\n",
                 "strings", s->str_count, s->str_size,
                 (double)s->str_size / s->str_count);
     }
     if (s->obj_count) {
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per object)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per object)\n",
                 "objects", s->obj_count, s->obj_size,
                 (double)s->obj_size / s->obj_count);
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per object)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per object)\n",
                 "  properties", s->prop_count, s->prop_size,
                 (double)s->prop_count / s->obj_count);
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per shape)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per shape)\n",
                 "  shapes", s->shape_count, s->shape_size,
                 (double)s->shape_size / s->shape_count);
     }
     if (s->js_func_count) {
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "\n",
                 "bytecode functions", s->js_func_count, s->js_func_size);
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per function)\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per function)\n",
                 "  bytecode", s->js_func_count, s->js_func_code_size,
                 (double)s->js_func_code_size / s->js_func_count);
         if (s->js_func_pc2line_count) {
-            fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per function)\n",
+            fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per function)\n",
                     "  pc2line", s->js_func_pc2line_count,
                     s->js_func_pc2line_size,
                     (double)s->js_func_pc2line_size / s->js_func_pc2line_count);
         }
     }
     if (s->c_func_count) {
-        fprintf(fp, "%-20s %8"PRId64"\n", "C functions", s->c_func_count);
+        fprintf(fp, "%-20s %8" PRId64 "\n", "C functions", s->c_func_count);
     }
     if (s->array_count) {
-        fprintf(fp, "%-20s %8"PRId64"\n", "arrays", s->array_count);
+        fprintf(fp, "%-20s %8" PRId64 "\n", "arrays", s->array_count);
         if (s->fast_array_count) {
-            fprintf(fp, "%-20s %8"PRId64"\n", "  fast arrays", s->fast_array_count);
-            fprintf(fp, "%-20s %8"PRId64" %8"PRId64"  (%0.1f per fast array)\n",
+            fprintf(fp, "%-20s %8" PRId64 "\n", "  fast arrays", s->fast_array_count);
+            fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "  (%0.1f per fast array)\n",
                     "  elements", s->fast_array_elements,
                     s->fast_array_elements * (int)sizeof(JSValue),
                     (double)s->fast_array_elements / s->fast_array_count);
         }
     }
     if (s->binary_object_count) {
-        fprintf(fp, "%-20s %8"PRId64" %8"PRId64"\n",
+        fprintf(fp, "%-20s %8" PRId64 " %8" PRId64 "\n",
                 "binary objects", s->binary_object_count, s->binary_object_size);
     }
 }
@@ -15750,7 +15748,7 @@ static int js_arguments_define_own_property(JSContext *ctx,
                              flags | JS_PROP_NO_EXOTIC);
 }
 
-static const JSClassExoticMethods js_arguments_exotic_methods = {
+const JSClassExoticMethods js_arguments_exotic_methods = {
     .define_own_property = js_arguments_define_own_property,
 };
 
@@ -29752,7 +29750,7 @@ static int js_module_ns_has(JSContext *ctx, JSValueConst obj, JSAtom atom)
     return (find_own_property1(JS_VALUE_GET_OBJ(obj), atom) != NULL);
 }
 
-static const JSClassExoticMethods js_module_ns_exotic_methods = {
+const JSClassExoticMethods js_module_ns_exotic_methods = {
     .has_property = js_module_ns_has,
 };
 
@@ -44568,7 +44566,7 @@ static int js_string_delete_property(JSContext *ctx,
     return TRUE;
 }
 
-static const JSClassExoticMethods js_string_exotic_methods = {
+const JSClassExoticMethods js_string_exotic_methods = {
     .get_own_property = js_string_get_own_property,
     .define_own_property = js_string_define_own_property,
     .delete_property = js_string_delete_property,
@@ -50401,7 +50399,7 @@ static int js_resolve_proxy(JSContext *ctx, JSValueConst *pval, BOOL throw_excep
     return 0;
 }
 
-static const JSClassExoticMethods js_proxy_exotic_methods = {
+const JSClassExoticMethods js_proxy_exotic_methods = {
     .get_own_property = js_proxy_get_own_property,
     .define_own_property = js_proxy_define_own_property,
     .delete_property = js_proxy_delete_property,
