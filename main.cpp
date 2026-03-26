@@ -4,9 +4,11 @@ struct Parser {
   std::shared_ptr<void> handle_ptr;
 
   struct promise_type {
-    void unhandled_exception() {}
+    std::optional<char32_t> result;
 
-    void return_value(std::optional<char32_t> char_opt) {}
+    auto initial_suspend() noexcept { return std::suspend_always{}; }
+    auto final_suspend() noexcept { return std::suspend_always{}; }
+    void unhandled_exception() {}
 
     Parser get_return_object() {
       std::coroutine_handle<promise_type> outer_handle{
@@ -23,8 +25,7 @@ struct Parser {
       return {ptr};
     }
 
-    auto initial_suspend() noexcept { return std::suspend_always{}; }
-    auto final_suspend() noexcept { return std::suspend_always{}; }
+    void return_value(std::optional<char32_t> char_opt) { result = char_opt; }
   };
 
   struct Uchar {
@@ -46,7 +47,18 @@ Parser hex_digit() {
 }
 
 int main(int argc, char* argv[]) {
-  hex_digit();
+  Parser parser{hex_digit()};
+
+  std::coroutine_handle handle =
+      std::coroutine_handle<Parser::promise_type>::from_address(
+          parser.handle_ptr.get());
+  std::println("{}", handle.done());
+  handle.resume();
+  std::println("{}", handle.done());
+  handle.resume();
+  std::println("{}", handle.done());
+  std::println("{}",
+               static_cast<std::uint32_t>(handle.promise().result.value()));
 
   return 0;
 }
