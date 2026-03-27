@@ -1,49 +1,94 @@
 import std;
 
 namespace Manadrain {
-struct UcharAwaitable {};
+struct Driver {
+  char32_t request_uchar() { return 'b'; }
+};
 
-template <typename R>
-struct Parser {
+struct UcharAwaiter {
+  Driver driver;
+
+  bool await_ready() { return false; }
+  char32_t await_resume() { return driver.request_uchar(); }
+
   template <typename P>
-  struct UcharAwaiter {
-    std::coroutine_handle<P> coro_handle;
-
-    bool await_ready() { return false; }
-    void await_suspend(std::coroutine_handle<P> h) { coro_handle = h; }
-    char32_t await_resume() { return coro_handle.promise().uchar; }
-  };
-
-  struct Promise {
-    std::expected<R, int> result;
-    char32_t uchar;
-
-    auto initial_suspend() noexcept { return std::suspend_never{}; }
-    auto final_suspend() noexcept { return std::suspend_always{}; }
-
-    void unhandled_exception() { result = std::unexpected{-1}; }
-    void return_value(R ret) { result = ret; }
-
-    auto get_return_object() {
-      return Parser{std::coroutine_handle<Promise>::from_promise(*this)};
-    }
-
-    auto await_transform(UcharAwaitable awaitable) {
-      return UcharAwaiter<Promise>{};
-    }
-  };
-  using promise_type = Promise;
-
-  std::coroutine_handle<Promise> coro_handle;
-  bool done() { return coro_handle.done(); }
-  void push_uchar_and_resume(char32_t uchar) {
-    coro_handle.promise().uchar = uchar;
-    coro_handle.resume();
+  std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
+    driver = h.promise().driver;
+    return h;
   }
 };
 
-Parser<char32_t> hex_digit() {
-  char32_t digit{co_await UcharAwaitable{}};
+template <typename R>
+struct Parser;
+
+template <typename R>
+struct ParserPromise {
+  std::expected<R, std::exception_ptr> result;
+  std::coroutine_handle<> caller_handle;
+  Driver driver;
+
+  void return_value(R ret) { result = ret; }
+  void unhandled_exception() {
+    result = std::unexpected{std::current_exception()};
+  }
+
+  auto get_return_object() {
+    std::coroutine_handle coro_handle =
+        std::coroutine_handle<ParserPromise>::from_promise(*this);
+    return Parser<R>{coro_handle};
+  }
+
+  struct Awaiter {
+    std::coroutine_handle<> caller_handle;
+
+    std::coroutine_handle<> await_suspend(
+        std::coroutine_handle<ParserPromise> h) noexcept {
+      if (caller_handle)
+        return caller_handle;
+      return std::noop_coroutine();
+    }
+
+    bool await_ready() noexcept { return false; }
+    void await_resume() noexcept {}
+  };
+
+  auto initial_suspend() noexcept { return std::suspend_always{}; }
+  auto final_suspend() noexcept { return Awaiter{caller_handle}; }
+};
+
+template <typename R>
+struct Parser {
+  using promise_type = ParserPromise<R>;
+  std::coroutine_handle<promise_type> coro_handle;
+
+  struct Awaiter {
+    Parser parser;
+
+    R await_resume() {
+      std::expected<R, std::exception_ptr> result =
+          std::move(parser.coro_handle.promise().result);
+      parser.coro_handle.destroy();
+      if (result)
+        return *result;
+      std::rethrow_exception(result.error());
+    }
+
+    template <typename P>
+    std::coroutine_handle<promise_type> await_suspend(
+        std::coroutine_handle<P> h) {
+      parser.coro_handle.promise().driver = h.promise().driver;
+      parser.coro_handle.promise().caller_handle = h;
+      return parser.coro_handle;
+    }
+
+    bool await_ready() { return false; }
+  };
+
+  Awaiter operator co_await() const noexcept { return {*this}; }
+};
+
+Parser<std::uint32_t> hex_digit() {
+  char32_t digit{co_await UcharAwaiter{}};
   if (digit >= '0' && digit <= '9')
     co_return digit - '0';
   if (digit >= 'A' && digit <= 'F')
@@ -51,6 +96,14 @@ Parser<char32_t> hex_digit() {
   if (digit >= 'a' && digit <= 'f')
     co_return digit - 'a' + 10;
   throw std::exception{};
+}
+
+struct Wrapper {
+  std::uint32_t num;
+};
+
+Parser<Wrapper> hex_digit_wrapper() {
+  co_return {co_await hex_digit()};
 }
 }  // namespace Manadrain
 
@@ -73,16 +126,11 @@ int main(int argc, char* argv[]) {
   std::string source_str = std::ranges::to<std::string>(std::ranges::subrange(
       std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}));
 
-  Manadrain::Parser parser{Manadrain::hex_digit()};
+  Manadrain::Parser parser{Manadrain::hex_digit_wrapper()};
+  parser.coro_handle.promise().driver = Manadrain::Driver{};
+  parser.coro_handle.resume();
 
-  for (char32_t uchar : source_str) {
-    if (parser.done())
-      break;
-    parser.push_uchar_and_resume(uchar);
-  }
-
-  std::println(
-      "{}", static_cast<std::uint32_t>(*parser.coro_handle.promise().result));
+  std::println("{}", parser.coro_handle.promise().result->num);
   parser.coro_handle.destroy();
 
   return 0;
