@@ -33,56 +33,51 @@ struct UcharAwaiter {
 };
 
 template <typename R>
-struct ParseCoro;
-
-template <typename R>
-struct ParsePromise {
-  R result;
-  std::exception_ptr except;
-  std::coroutine_handle<> caller_handle;
-  std::shared_ptr<ParseDriver> driver;
-
-  void return_value(R ret) { result = ret; }
-  void unhandled_exception() { except = std::current_exception(); }
-
-  auto get_return_object() {
-    std::coroutine_handle coro_handle =
-        std::coroutine_handle<ParsePromise>::from_promise(*this);
-    return ParseCoro<R>{coro_handle};
-  }
-
-  struct Awaiter {
+struct ParseCoro {
+  struct promise_type {
+    R result;
+    std::exception_ptr except;
     std::coroutine_handle<> caller_handle;
+    std::shared_ptr<ParseDriver> driver;
 
-    std::coroutine_handle<> await_suspend(
-        std::coroutine_handle<ParsePromise> h) noexcept {
-      if (caller_handle)
-        return caller_handle;
-      return std::noop_coroutine();
+    void return_value(R ret) { result = std::move(ret); }
+    void unhandled_exception() { except = std::current_exception(); }
+
+    auto get_return_object() {
+      std::coroutine_handle coro_handle =
+          std::coroutine_handle<promise_type>::from_promise(*this);
+      return ParseCoro<R>{coro_handle};
     }
 
-    bool await_ready() noexcept { return false; }
-    void await_resume() noexcept {}
+    struct Awaiter {
+      std::coroutine_handle<> caller_handle;
+
+      std::coroutine_handle<> await_suspend(
+          std::coroutine_handle<promise_type> h) noexcept {
+        if (caller_handle)
+          return caller_handle;
+        return std::noop_coroutine();
+      }
+
+      bool await_ready() noexcept { return false; }
+      void await_resume() noexcept {}
+    };
+
+    auto initial_suspend() noexcept { return std::suspend_always{}; }
+    auto final_suspend() noexcept { return Awaiter{caller_handle}; }
   };
 
-  auto initial_suspend() noexcept { return std::suspend_always{}; }
-  auto final_suspend() noexcept { return Awaiter{caller_handle}; }
-};
-
-template <typename R>
-struct ParseCoro {
-  using promise_type = ParsePromise<R>;
   std::coroutine_handle<promise_type> coro_handle;
 
   struct Awaiter {
-    ParseCoro parse_coro;
+    std::coroutine_handle<promise_type> nested_handle;
 
     R await_resume() {
-      std::exception_ptr except = parse_coro.coro_handle.promise().except;
-      R result = std::move(parse_coro.coro_handle.promise().result);
-      std::shared_ptr driver = parse_coro.coro_handle.promise().driver;
-      parse_coro.coro_handle.destroy();
-
+      R result = std::move(nested_handle.promise().result);
+      std::exception_ptr except = nested_handle.promise().except;
+      std::shared_ptr driver = nested_handle.promise().driver;
+      
+      nested_handle.destroy();
       if (except)
         std::rethrow_exception(except);
 
@@ -97,15 +92,15 @@ struct ParseCoro {
     std::coroutine_handle<promise_type> await_suspend(
         std::coroutine_handle<P> h) {
       h.promise().driver->push_view();
-      parse_coro.coro_handle.promise().driver = h.promise().driver;
-      parse_coro.coro_handle.promise().caller_handle = h;
-      return parse_coro.coro_handle;
+      nested_handle.promise().driver = h.promise().driver;
+      nested_handle.promise().caller_handle = h;
+      return nested_handle;
     }
 
     bool await_ready() { return false; }
   };
 
-  Awaiter operator co_await() const noexcept { return {*this}; }
+  Awaiter operator co_await() const noexcept { return {coro_handle}; }
 };
 
 ParseCoro<std::optional<std::uint32_t>> hex_digit() {
