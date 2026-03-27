@@ -1,84 +1,56 @@
 import std;
 
 namespace Manadrain {
+struct UcharAwaitable {};
+
+template <typename R>
 struct Parser {
-  struct UcharTaker {
-    virtual void take_uchar(char32_t) = 0;
-  };
+  template <typename P>
+  struct UcharAwaiter {
+    std::coroutine_handle<P> coro_handle;
 
-  struct Uchar {
-    struct Awaiter : UcharTaker {
-      char32_t uchar;
-
-      void take_uchar(char32_t passed_uchar) override { uchar = passed_uchar; }
-
-      bool await_ready() { return false; }
-      char32_t await_resume() { return uchar; }
-
-      template <typename T>
-      void await_suspend(std::coroutine_handle<T> h) {
-        h.promise().cur_awaiter = this;
-      }
-    };
-  };
-
-  struct Invoke {
-    char32_t await_resume() { return 'a'; }
     bool await_ready() { return false; }
-
-    template <typename T>
-    void await_suspend(std::coroutine_handle<T> h) {}
+    void await_suspend(std::coroutine_handle<P> h) { coro_handle = h; }
+    char32_t await_resume() { return coro_handle.promise().uchar; }
   };
-
-  struct Promise;
-
-  struct HandleDeleter {
-    using pointer = std::coroutine_handle<Promise>;
-    void operator()(pointer h) const { h.destroy(); }
-  };
-
-  using Handle = std::unique_ptr<Promise, HandleDeleter>;
-  Handle coro_handle;
 
   struct Promise {
-    std::optional<char32_t> result;
-    UcharTaker* cur_awaiter;
+    std::expected<R, int> result;
+    char32_t uchar;
 
     auto initial_suspend() noexcept { return std::suspend_never{}; }
     auto final_suspend() noexcept { return std::suspend_always{}; }
-    void unhandled_exception() {}
 
-    void return_value(std::optional<char32_t> char_opt) { result = char_opt; }
+    void unhandled_exception() { result = std::unexpected{-1}; }
+    void return_value(R ret) { result = ret; }
 
-    Uchar::Awaiter await_transform(Uchar awaitable) { return Uchar::Awaiter{}; }
+    auto get_return_object() {
+      return Parser{std::coroutine_handle<Promise>::from_promise(*this)};
+    }
 
-    Parser get_return_object() {
-      return Parser{
-          Handle{std::coroutine_handle<Promise>::from_promise(*this)}};
+    auto await_transform(UcharAwaitable awaitable) {
+      return UcharAwaiter<Promise>{};
     }
   };
   using promise_type = Promise;
 
-  Promise& promise() { return coro_handle.get().promise(); }
-
+  std::coroutine_handle<Promise> coro_handle;
+  bool done() { return coro_handle.done(); }
   void push_uchar_and_resume(char32_t uchar) {
-    coro_handle.get().promise().cur_awaiter->take_uchar(uchar);
-    coro_handle.get().promise().cur_awaiter = nullptr;
-    coro_handle.get().resume();
+    coro_handle.promise().uchar = uchar;
+    coro_handle.resume();
   }
-
-  bool done() { return coro_handle.get().done(); }
 };
 
-Parser hex_digit() {
-  char32_t digit{co_await Parser::Uchar{}};
+Parser<char32_t> hex_digit() {
+  char32_t digit{co_await UcharAwaitable{}};
   if (digit >= '0' && digit <= '9')
     co_return digit - '0';
   if (digit >= 'A' && digit <= 'F')
     co_return digit - 'A' + 10;
   if (digit >= 'a' && digit <= 'f')
     co_return digit - 'a' + 10;
-  co_return std::nullopt;
+  throw std::exception{};
 }
 }  // namespace Manadrain
 
@@ -109,8 +81,9 @@ int main(int argc, char* argv[]) {
     parser.push_uchar_and_resume(uchar);
   }
 
-  std::println("{}",
-               static_cast<std::uint32_t>(parser.promise().result.value()));
+  std::println(
+      "{}", static_cast<std::uint32_t>(*parser.coro_handle.promise().result));
+  parser.coro_handle.destroy();
 
   return 0;
 }
