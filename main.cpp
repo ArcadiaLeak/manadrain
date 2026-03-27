@@ -2,8 +2,6 @@ import std;
 
 namespace Manadrain {
 struct Parser {
-  std::shared_ptr<void> handle_ptr;
-
   struct UcharTaker {
     virtual void take_uchar(char32_t) = 0;
   };
@@ -18,8 +16,8 @@ struct Parser {
       char32_t await_resume() { return uchar; }
 
       template <typename T>
-      void await_suspend(std::coroutine_handle<T> handle) {
-        handle.promise().cur_awaiter = this;
+      void await_suspend(std::coroutine_handle<T> h) {
+        h.promise().cur_awaiter = this;
       }
     };
   };
@@ -29,8 +27,18 @@ struct Parser {
     bool await_ready() { return false; }
 
     template <typename T>
-    void await_suspend(std::coroutine_handle<T> handle) {}
+    void await_suspend(std::coroutine_handle<T> h) {}
   };
+
+  struct Promise;
+
+  struct HandleDeleter {
+    using pointer = std::coroutine_handle<Promise>;
+    void operator()(pointer h) const { h.destroy(); }
+  };
+
+  using Handle = std::unique_ptr<Promise, HandleDeleter>;
+  Handle coro_handle;
 
   struct Promise {
     std::optional<char32_t> result;
@@ -45,41 +53,21 @@ struct Parser {
     Uchar::Awaiter await_transform(Uchar awaitable) { return Uchar::Awaiter{}; }
 
     Parser get_return_object() {
-      std::coroutine_handle<Promise> handle_from_this{
-          std::coroutine_handle<Promise>::from_promise(*this)};
-
-      std::shared_ptr<void> handle_ptr{
-          handle_from_this.address(), [](void* addr) {
-            std::coroutine_handle<Promise> handle_from_addr{
-                std::coroutine_handle<Promise>::from_address(addr)};
-            if (addr)
-              handle_from_addr.destroy();
-          }};
-
-      return Parser{handle_ptr};
+      return Parser{
+          Handle{std::coroutine_handle<Promise>::from_promise(*this)}};
     }
   };
   using promise_type = Promise;
 
-  Promise& promise() {
-    std::coroutine_handle coro_handle =
-        std::coroutine_handle<Promise>::from_address(handle_ptr.get());
-    return coro_handle.promise();
-  }
+  Promise& promise() { return coro_handle.get().promise(); }
 
   void push_uchar_and_resume(char32_t uchar) {
-    std::coroutine_handle coro_handle =
-        std::coroutine_handle<Promise>::from_address(handle_ptr.get());
-    coro_handle.promise().cur_awaiter->take_uchar(uchar);
-    coro_handle.promise().cur_awaiter = nullptr;
-    coro_handle.resume();
+    coro_handle.get().promise().cur_awaiter->take_uchar(uchar);
+    coro_handle.get().promise().cur_awaiter = nullptr;
+    coro_handle.get().resume();
   }
 
-  bool done() {
-    std::coroutine_handle coro_handle =
-        std::coroutine_handle<Promise>::from_address(handle_ptr.get());
-    return coro_handle.done();
-  }
+  bool done() { return coro_handle.get().done(); }
 };
 
 Parser hex_digit() {
