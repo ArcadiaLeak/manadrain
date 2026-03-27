@@ -1,4 +1,4 @@
-// LEGACY OCTAL ESCAPE SEQUENCES (non‑strict mode only)
+A// LEGACY OCTAL ESCAPE SEQUENCES (non‑strict mode only)
 // They are deprecated – avoid using them in new code.
 
 // 1. Octal escapes in strings: \ followed by 1–3 octal digits
