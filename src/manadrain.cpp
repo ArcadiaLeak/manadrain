@@ -170,7 +170,12 @@ struct ParseCoro {
   NestingAwaiter operator co_await() const noexcept { return {coro_handle}; }
 };
 
-ParseCoro<std::optional<std::uint32_t>> parse_hex() {
+template <typename T>
+using ParseOptional = ParseCoro<std::optional<T>>;
+template <typename T, typename U>
+using ParseExpected = ParseCoro<std::expected<T, U>>;
+
+ParseOptional<std::uint32_t> parse_hex() {
   std::optional digit{co_await Command::Shift{}};
   if (not digit)
     co_return std::nullopt;
@@ -193,7 +198,7 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-ParseCoro<std::expected<char32_t, BAD_ESCAPE>> parse_escape(ESC_RULE esc_rule) {
+ParseExpected<char32_t, BAD_ESCAPE> parse_escape(ESC_RULE esc_rule) {
   std::optional head = co_await Command::Shift{};
   if (not head)
     co_return std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
@@ -380,7 +385,7 @@ enum class LINETERM_BEHAVIOR { RETURN, IGNORE };
 using TokenAhead = std::variant<char32_t, TOKEN_AHEAD>;
 
 template <LINETERM_BEHAVIOR LT>
-ParseCoro<std::optional<TokenAhead>> peek_token() {
+ParseOptional<TokenAhead> peek_token() {
   std::size_t idx = 0;
   do {
     std::optional ch = co_await Command::Peek{idx};
@@ -472,7 +477,7 @@ struct String {
   const char32_t sep;
   std::u32string str;
 
-  ParseCoro<std::expected<char32_t, BAD_STRING>> parse_escaped_uchar(
+  ParseExpected<char32_t, BAD_STRING> parse_escaped_uchar(
       const STRICTNESS strictness,
       bool& must_continue) {
     std::optional ch = co_await Command::Peek{};
@@ -516,7 +521,7 @@ struct String {
     }
   }
 
-  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse(
+  ParseExpected<std::u32string_view, BAD_STRING> parse(
       const STRICTNESS strictness) {
     std::optional<char32_t> ch{};
     do {
@@ -563,7 +568,7 @@ struct Template {
   char32_t sep;
   std::u32string str;
 
-  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse_part() {
+  ParseExpected<std::u32string_view, BAD_STRING> parse_part() {
     std::optional<char32_t> ch{};
     do {
       ch = co_await Command::Shift{};
@@ -594,7 +599,7 @@ struct Template {
 struct Identifier {
   std::u32string str;
 
-  ParseCoro<std::optional<char32_t>> parse_id_continue(bool& ident_has_escape) {
+  ParseOptional<char32_t> parse_id_continue(bool& ident_has_escape) {
     std::optional ch = co_await Command::Shift{};
     if (not ch)
       co_return std::nullopt;
@@ -610,9 +615,9 @@ struct Identifier {
     co_return ch;
   }
 
-  ParseCoro<std::optional<std::u32string_view>> parse(char32_t id_start,
-                                                      bool& ident_has_escape,
-                                                      bool is_private) {
+  ParseOptional<std::u32string_view> parse(char32_t id_start,
+                                           bool& ident_has_escape,
+                                           bool is_private) {
     if (is_private)
       str.push_back('#');
     str.push_back(id_start);
