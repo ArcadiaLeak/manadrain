@@ -467,50 +467,98 @@ enum class BAD_STRING {
   MALFORMED_SEQ_IN_ESCAPE
 };
 
-ParseCoro<std::expected<char32_t, BAD_STRING>> parse_escaped_uchar_in_string(
-    const char32_t quote,
-    const STRICTNESS strictness,
-    bool& must_continue) {
-  std::optional ch = co_await Command::Peek{};
-  if (not ch)
-    co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
-  switch (*ch) {
-    case '\'':
-    case '\"':
-    case '\0':
-    case '\\':
-      co_await Command::Drop{1};
-      co_return *ch;
-    case '\r':
-      if (co_await Command::Peek{} == '\n')
+namespace Token {
+struct String {
+  const char32_t sep;
+  std::u32string str;
+
+  ParseCoro<std::expected<char32_t, BAD_STRING>> parse_escaped_uchar(
+      const STRICTNESS strictness,
+      bool& must_continue) {
+    std::optional ch = co_await Command::Peek{};
+    if (not ch)
+      co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+    switch (*ch) {
+      case '\'':
+      case '\"':
+      case '\0':
+      case '\\':
         co_await Command::Drop{1};
-      [[fallthrough]];
-    case '\n':
-    case 0x2028:
-    case 0x2029:
-      /* ignore escaped newline sequence */
-      co_await Command::Drop{1};
-      must_continue = true;
-      co_return *ch;
-    default:
-      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-      if (strictness == STRICTNESS::STRICT)
-        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-      else if (quote == '`')
-        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-      std::expected ch_exp = co_await parse_escape(esc_rule);
-      if (ch_exp)
-        ch = *ch_exp;
-      else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
-        co_return std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
-      else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
-        co_return std::unexpected{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
-      else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
-        /* ignore the '\' (could output a warning) */
+        co_return *ch;
+      case '\r':
+        if (co_await Command::Peek{1} == '\n')
+          co_await Command::Drop{1};
+        [[fallthrough]];
+      case '\n':
+      case 0x2028:
+      case 0x2029:
+        /* ignore escaped newline sequence */
         co_await Command::Drop{1};
-      co_return *ch;
+        must_continue = true;
+        co_return *ch;
+      default:
+        ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+        if (strictness == STRICTNESS::STRICT)
+          esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+        else if (sep == '`')
+          esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+        std::expected ch_exp = co_await parse_escape(esc_rule);
+        if (ch_exp)
+          ch = *ch_exp;
+        else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
+          co_return std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
+        else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
+          co_return std::unexpected{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
+        else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
+          /* ignore the '\' (could output a warning) */
+          co_await Command::Drop{1};
+        co_return *ch;
+    }
   }
-}
+
+  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse(
+      const STRICTNESS strictness) {
+    std::optional<char32_t> ch{};
+
+    do {
+      ch = co_await Command::Peek{};
+      if (not ch)
+        co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+
+      if (sep == '`') {
+        if (ch == '\r') {
+          if (co_await Command::Peek{1} == '\n')
+            co_await Command::Drop{1};
+          ch = '\n';
+        }
+      } else if (ch == '\r' || ch == '\n')
+        co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+
+      co_await Command::Drop{1};
+      if (ch == sep)
+        co_return str;
+
+      if (ch == '$' && co_await Command::Peek{} == '{' && sep == '`') {
+        co_await Command::Drop{1};
+        co_return str;
+      }
+
+      if (ch == '\\') {
+        bool must_continue = false;
+        std::expected esc_exp =
+            co_await parse_escaped_uchar(strictness, must_continue);
+        if (not esc_exp)
+          co_return std::unexpected{esc_exp.error()};
+        else if (must_continue)
+          continue;
+      }
+
+      str.push_back(*ch);
+    } while (true);
+  }
+};
+}  // namespace Token
+
 }  // namespace Manadrain
 
 export namespace Manadrain {
