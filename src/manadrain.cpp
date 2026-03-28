@@ -551,6 +551,8 @@ struct String {
           co_return std::unexpected{esc_exp.error()};
         else if (must_continue)
           continue;
+        else
+          ch = *esc_exp;
       }
 
       str.push_back(*ch);
@@ -563,7 +565,8 @@ struct String {
 
 export namespace Manadrain {
 void Parse(std::string source_str) {
-  ParseCoro parse_coro{parse_escape(ESC_RULE::IDENTIFIER)};
+  Token::String token_str{'\"'};
+  ParseCoro parse_coro{token_str.parse(STRICTNESS::SLOPPY)};
   parse_coro.coro_handle.promise().driver =
       std::make_shared<ParseDriver>(utf32_convert(source_str));
   parse_coro.coro_handle.resume();
