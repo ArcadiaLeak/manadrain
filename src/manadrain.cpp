@@ -519,7 +519,6 @@ struct String {
   ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse(
       const STRICTNESS strictness) {
     std::optional<char32_t> ch{};
-
     do {
       ch = co_await Command::Peek{};
       if (not ch)
@@ -559,8 +558,73 @@ struct String {
     } while (true);
   }
 };
-}  // namespace Token
 
+struct Template {
+  char32_t sep;
+  std::u32string str;
+
+  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse_part() {
+    std::optional<char32_t> ch{};
+    do {
+      ch = co_await Command::Shift{};
+      if (not ch)
+        co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+      if (ch == '`')
+        co_return str;
+      if (ch == '$' && co_await Command::Peek{} == '{') {
+        co_await Command::Drop{1};
+        co_return str;
+      }
+      if (ch == '\\') {
+        str.push_back(*ch);
+        ch = co_await Command::Shift{};
+        if (not ch)
+          co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+      }
+      if (ch == '\r') {
+        if (co_await Command::Peek{} == '\n')
+          co_await Command::Drop{1};
+        ch = '\n';
+      }
+      str.push_back(*ch);
+    } while (true);
+  }
+};
+
+struct Identifier {
+  std::u32string str;
+
+  ParseCoro<std::optional<char32_t>> parse_id_continue(bool& ident_has_escape) {
+    std::optional ch = co_await Command::Shift{};
+    if (not ch)
+      co_return std::nullopt;
+    if (ch == '\\' && co_await Command::Peek{} == 'u') {
+      std::expected ch_esc = co_await parse_escape(ESC_RULE::IDENTIFIER);
+      if (not ch_esc)
+        co_return std::nullopt;
+      ch = *ch_esc;
+      ident_has_escape = true;
+    }
+    if (not u_hasBinaryProperty(*ch, UCHAR_XID_CONTINUE))
+      co_return std::nullopt;
+    co_return ch;
+  }
+
+  ParseCoro<std::optional<std::u32string_view>> parse(char32_t id_start,
+                                                      bool& ident_has_escape,
+                                                      bool is_private) {
+    if (is_private)
+      str.push_back('#');
+    str.push_back(id_start);
+    do {
+      std::optional ch = co_await parse_id_continue(ident_has_escape);
+      if (not ch)
+        co_return str;
+      str.push_back(*ch);
+    } while (true);
+  }
+};
+}  // namespace Token
 }  // namespace Manadrain
 
 export namespace Manadrain {
