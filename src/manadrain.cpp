@@ -24,7 +24,7 @@ struct ParseDriver {
 };
 
 namespace Command {
-struct Uchar {
+struct Shift {
   std::shared_ptr<ParseDriver> driver;
 
   bool await_ready() { return false; }
@@ -45,10 +45,15 @@ struct Uchar {
 
 struct StartsWith {
   std::u32string_view rhs;
+  std::size_t idx;
   std::shared_ptr<ParseDriver> driver;
 
   bool await_ready() { return false; }
-  bool await_resume() { return driver->view_stack.top().starts_with(rhs); }
+  bool await_resume() {
+    if (driver->view_stack.top().size() <= idx)
+      return false;
+    return driver->view_stack.top().substr(idx).starts_with(rhs);
+  }
 
   template <typename P>
   std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
@@ -75,13 +80,14 @@ struct Drop {
 };
 
 struct Peek {
+  std::size_t idx;
   std::shared_ptr<ParseDriver> driver;
 
   bool await_ready() { return false; }
   std::optional<char32_t> await_resume() {
-    if (driver->view_stack.top().empty())
+    if (driver->view_stack.top().size() <= idx)
       return std::nullopt;
-    return driver->view_stack.top().front();
+    return driver->view_stack.top()[idx];
   }
 
   template <typename P>
@@ -164,8 +170,8 @@ struct ParseCoro {
   NestingAwaiter operator co_await() const noexcept { return {coro_handle}; }
 };
 
-ParseCoro<std::optional<std::uint32_t>> hex_digit() {
-  std::optional digit{co_await Command::Uchar{}};
+ParseCoro<std::optional<std::uint32_t>> parse_hex() {
+  std::optional digit{co_await Command::Shift{}};
   if (not digit)
     co_return std::nullopt;
   if (*digit >= '0' && *digit <= '9')
@@ -188,7 +194,7 @@ enum class ESC_RULE {
 };
 
 ParseCoro<std::expected<char32_t, BAD_ESCAPE>> parse_escape(ESC_RULE esc_rule) {
-  std::optional head = co_await Command::Uchar{};
+  std::optional head = co_await Command::Shift{};
   if (not head)
     co_return std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
 
@@ -207,25 +213,25 @@ ParseCoro<std::expected<char32_t, BAD_ESCAPE>> parse_escape(ESC_RULE esc_rule) {
       co_return '\v';
 
     case 'x': {
-      std::optional hex0 = co_await hex_digit();
+      std::optional hex0 = co_await parse_hex();
       if (not hex0)
         co_return std::unexpected{BAD_ESCAPE::MALFORMED};
-      std::optional hex1 = co_await hex_digit();
+      std::optional hex1 = co_await parse_hex();
       if (not hex1)
         co_return std::unexpected{BAD_ESCAPE::MALFORMED};
       co_return (*hex0 << 4) | *hex1;
     }
 
     case 'u': {
-      std::optional open_or_uchar = co_await Command::Uchar{};
+      std::optional open_or_uchar = co_await Command::Shift{};
       if (not open_or_uchar)
         co_return std::unexpected{BAD_ESCAPE::MALFORMED};
       if (open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII) {
         char32_t utf16_char = 0;
         do {
-          std::optional hex = co_await hex_digit();
+          std::optional hex = co_await parse_hex();
           if (not hex) {
-            std::optional close_or_uchar = co_await Command::Uchar{};
+            std::optional close_or_uchar = co_await Command::Shift{};
             if (not close_or_uchar)
               co_return std::unexpected{BAD_ESCAPE::MALFORMED};
             if (close_or_uchar == '}')
@@ -238,7 +244,7 @@ ParseCoro<std::expected<char32_t, BAD_ESCAPE>> parse_escape(ESC_RULE esc_rule) {
       } else {
         char32_t high_surr = 0;
         for (int i = 0; i < 4; i++) {
-          std::optional hex = co_await hex_digit();
+          std::optional hex = co_await parse_hex();
           if (not hex)
             co_return std::unexpected{BAD_ESCAPE::MALFORMED};
           high_surr = (high_surr << 4) | *hex;
@@ -249,7 +255,7 @@ ParseCoro<std::expected<char32_t, BAD_ESCAPE>> parse_escape(ESC_RULE esc_rule) {
           co_await Command::Drop{2};
           char32_t low_surr = 0;
           for (int i = 0; i < 4; i++) {
-            std::optional hex = co_await hex_digit();
+            std::optional hex = co_await parse_hex();
             if (not hex)
               co_return high_surr;
             low_surr = (low_surr << 4) | *hex;
@@ -262,11 +268,12 @@ ParseCoro<std::expected<char32_t, BAD_ESCAPE>> parse_escape(ESC_RULE esc_rule) {
       }
     }
 
-    case '0':
-      if (not(co_await Command::Peek{})
-                 .transform([](char32_t uch) { return std::isdigit(uch); })
-                 .value_or(false))
+    case '0': {
+      std::optional ahead = co_await Command::Peek{};
+      if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
+                  .value_or(false))
         co_return 0;
+    }
       [[fallthrough]];
 
     case '1':
@@ -357,16 +364,109 @@ std::u32string utf32_convert(const std::string& narrow) {
                           return static_cast<char32_t>(uchar);
                         })};
 }
+
+ParseCoro<bool> match_identifier(std::size_t idx,
+                                 std::u32string_view rhs_view) {
+  if (not co_await Command::StartsWith{rhs_view, idx})
+    co_return false;
+  std::optional ch = co_await Command::Peek{idx + rhs_view.size()};
+  if (not ch)
+    co_return false;
+  co_return !u_hasBinaryProperty(*ch, UCHAR_XID_CONTINUE);
+}
+
+enum class TOKEN_AHEAD { ARROW, IN, IMPORT, OF, EXPORT, FUNCTION, IDENTIFIER };
+enum class LINETERM_BEHAVIOR { RETURN, IGNORE };
+using TokenAhead = std::variant<char32_t, TOKEN_AHEAD>;
+
+template <LINETERM_BEHAVIOR LT>
+ParseCoro<std::optional<TokenAhead>> peek_token() {
+  std::size_t idx = 0;
+  do {
+    std::optional ch = co_await Command::Peek{idx};
+    if (not ch)
+      co_return std::nullopt;
+
+    if (u_isWhitespace(*ch)) {
+      if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
+        switch (*ch) {
+          case '\r':
+          case '\n':
+          case 0x2028:
+          case 0x2029:
+            co_return U'\n';
+        }
+      ++idx;
+      continue;
+    }
+
+    if (co_await Command::StartsWith{U"//", idx}) {
+      if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
+        co_return U'\n';
+      ++idx;
+      do {
+        std::optional lb_opt = co_await Command::Peek{++idx};
+        if (not lb_opt || lb_opt == '\r' || lb_opt == '\n')
+          break;
+      } while (true);
+      continue;
+    }
+
+    if (co_await Command::StartsWith{U"/*", idx}) {
+      ++idx;
+      do {
+        std::optional delim_opt = co_await Command::Peek{++idx};
+        if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
+          if (delim_opt == '\r' || delim_opt == '\n')
+            co_return U'\n';
+        if (co_await Command::StartsWith{U"*/", idx}) {
+          idx += 2;
+          break;
+        }
+      } while (true);
+      continue;
+    }
+
+    if (co_await Command::StartsWith{U"=>", idx})
+      co_return TOKEN_AHEAD::ARROW;
+
+    using KeywordPair = std::pair<TOKEN_AHEAD, std::u32string>;
+    static const std::array keyword_arr =
+        std::to_array<KeywordPair>({{TOKEN_AHEAD::IN, U"in"},
+                                    {TOKEN_AHEAD::IMPORT, U"import"},
+                                    {TOKEN_AHEAD::OF, U"of"},
+                                    {TOKEN_AHEAD::EXPORT, U"export"},
+                                    {TOKEN_AHEAD::FUNCTION, U"function"}});
+
+    for (const KeywordPair& keyword_pair : keyword_arr)
+      if (co_await match_identifier(idx, keyword_pair.second))
+        co_return keyword_pair.first;
+
+    if (co_await Command::StartsWith{U"\\u"}) {
+      co_await Command::Drop{1};
+      std::expected esc_exp = co_await parse_escape(ESC_RULE::IDENTIFIER);
+      if (esc_exp
+              .transform([](char32_t esc) {
+                return u_hasBinaryProperty(esc, UCHAR_XID_START);
+              })
+              .value_or(false))
+        co_return TOKEN_AHEAD::IDENTIFIER;
+    }
+
+    if (u_hasBinaryProperty(*ch, UCHAR_XID_START))
+      co_return TOKEN_AHEAD::IDENTIFIER;
+
+    co_return ch;
+  } while (true);
+}
 }  // namespace Manadrain
 
 export namespace Manadrain {
 void Parse(std::string source_str) {
-  ParseCoro parse_coro{hex_digit()};
+  ParseCoro parse_coro{parse_escape(ESC_RULE::IDENTIFIER)};
   parse_coro.coro_handle.promise().driver =
       std::make_shared<ParseDriver>(utf32_convert(source_str));
   parse_coro.coro_handle.resume();
-
-  std::println("{}", parse_coro.coro_handle.promise().result.value());
   parse_coro.coro_handle.destroy();
 }
 }  // namespace Manadrain
