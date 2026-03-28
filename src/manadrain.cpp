@@ -459,6 +459,58 @@ ParseCoro<std::optional<TokenAhead>> peek_token() {
     co_return ch;
   } while (true);
 }
+
+enum class STRICTNESS { SLOPPY, STRICT };
+enum class BAD_STRING {
+  UNEXPECTED_END,
+  OCTAL_SEQ_IN_ESCAPE,
+  MALFORMED_SEQ_IN_ESCAPE
+};
+
+ParseCoro<std::expected<char32_t, BAD_STRING>> parse_escaped_uchar_in_string(
+    const char32_t quote,
+    const STRICTNESS strictness,
+    bool& must_continue) {
+  std::optional ch = co_await Command::Peek{};
+  if (not ch)
+    co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+  switch (*ch) {
+    case '\'':
+    case '\"':
+    case '\0':
+    case '\\':
+      co_await Command::Drop{1};
+      co_return *ch;
+    case '\r':
+      if (co_await Command::Peek{} == '\n')
+        co_await Command::Drop{1};
+      [[fallthrough]];
+    case '\n':
+    case 0x2028:
+    case 0x2029:
+      /* ignore escaped newline sequence */
+      co_await Command::Drop{1};
+      must_continue = true;
+      co_return *ch;
+    default:
+      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+      if (strictness == STRICTNESS::STRICT)
+        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+      else if (quote == '`')
+        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+      std::expected ch_exp = co_await parse_escape(esc_rule);
+      if (ch_exp)
+        ch = *ch_exp;
+      else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
+        co_return std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
+      else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
+        co_return std::unexpected{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
+      else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
+        /* ignore the '\' (could output a warning) */
+        co_await Command::Drop{1};
+      co_return *ch;
+  }
+}
 }  // namespace Manadrain
 
 export namespace Manadrain {
