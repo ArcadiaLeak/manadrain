@@ -5,7 +5,6 @@ export module manadrain;
 import std;
 
 namespace Manadrain {
-
 bool is_hi_surrogate(char32_t c) {
   return (c >> 10) == (0xD800 >> 10); /* 0xD800-0xDBFF */
 }
@@ -16,26 +15,166 @@ char32_t from_surrogate(char32_t hi, char32_t lo) {
   return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
 }
 
-std::optional<char32_t> next_uchar32(std::u32string_view& src_view) {
-  if (src_view.empty())
-    return std::nullopt;
-  char32_t ch = src_view.front();
-  src_view = src_view | std::views::drop(1);
-  return ch;
-}
+struct ParseDriver {
+  std::u32string source_str;
+  std::stack<std::u32string_view> view_stack;
 
-std::optional<char32_t> next_uchar32(std::u32string_view&& src_view) {
-  return next_uchar32(src_view);
-}
+  ParseDriver(std::u32string str)
+      : source_str{std::move(str)}, view_stack{{source_str}} {}
+};
 
-std::optional<char32_t> hex_digit(char32_t digit) {
-  if (digit >= '0' && digit <= '9')
-    return digit - '0';
-  if (digit >= 'A' && digit <= 'F')
-    return digit - 'A' + 10;
-  if (digit >= 'a' && digit <= 'f')
-    return digit - 'a' + 10;
-  return std::nullopt;
+namespace Command {
+struct Uchar {
+  std::shared_ptr<ParseDriver> driver;
+
+  bool await_ready() { return false; }
+  std::optional<char32_t> await_resume() {
+    if (driver->view_stack.top().empty())
+      return std::nullopt;
+    char32_t ch = driver->view_stack.top().front();
+    driver->view_stack.top() = driver->view_stack.top() | std::views::drop(1);
+    return ch;
+  }
+
+  template <typename P>
+  std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
+    driver = h.promise().driver;
+    return h;
+  }
+};
+
+struct StartsWith {
+  std::u32string_view rhs;
+  std::shared_ptr<ParseDriver> driver;
+
+  bool await_ready() { return false; }
+  bool await_resume() { return driver->view_stack.top().starts_with(rhs); }
+
+  template <typename P>
+  std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
+    driver = h.promise().driver;
+    return h;
+  }
+};
+
+struct Drop {
+  std::size_t count;
+  std::shared_ptr<ParseDriver> driver;
+
+  bool await_ready() { return false; }
+  void await_resume() {
+    driver->view_stack.top() =
+        driver->view_stack.top() | std::views::drop(count);
+  }
+
+  template <typename P>
+  std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
+    driver = h.promise().driver;
+    return h;
+  }
+};
+
+struct Peek {
+  std::shared_ptr<ParseDriver> driver;
+
+  bool await_ready() { return false; }
+  std::optional<char32_t> await_resume() {
+    if (driver->view_stack.top().empty())
+      return std::nullopt;
+    return driver->view_stack.top().front();
+  }
+
+  template <typename P>
+  std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
+    driver = h.promise().driver;
+    return h;
+  }
+};
+}  // namespace Command
+
+template <typename R>
+struct ParseCoro {
+  struct promise_type {
+    R result;
+    std::exception_ptr except;
+    std::coroutine_handle<> caller_handle;
+    std::shared_ptr<ParseDriver> driver;
+
+    void return_value(R ret) { result = std::move(ret); }
+    void unhandled_exception() { except = std::current_exception(); }
+
+    auto get_return_object() {
+      std::coroutine_handle coro_handle =
+          std::coroutine_handle<promise_type>::from_promise(*this);
+      return ParseCoro<R>{coro_handle};
+    }
+
+    struct FinalizingAwaiter {
+      std::coroutine_handle<> caller_handle;
+
+      std::coroutine_handle<> await_suspend(
+          std::coroutine_handle<promise_type> h) noexcept {
+        if (caller_handle)
+          return caller_handle;
+        return std::noop_coroutine();
+      }
+
+      bool await_ready() noexcept { return false; }
+      void await_resume() noexcept {}
+    };
+
+    auto initial_suspend() noexcept { return std::suspend_always{}; }
+    auto final_suspend() noexcept { return FinalizingAwaiter{caller_handle}; }
+  };
+
+  std::coroutine_handle<promise_type> coro_handle;
+
+  struct NestingAwaiter {
+    std::coroutine_handle<promise_type> nested_handle;
+
+    R await_resume() {
+      R result = std::move(nested_handle.promise().result);
+      std::exception_ptr except = nested_handle.promise().except;
+      std::shared_ptr driver = nested_handle.promise().driver;
+
+      nested_handle.destroy();
+      if (except)
+        std::rethrow_exception(except);
+
+      std::u32string_view shifted_view = driver->view_stack.top();
+      driver->view_stack.pop();
+      if (result)
+        driver->view_stack.top() = shifted_view;
+      return result;
+    }
+
+    template <typename P>
+    std::coroutine_handle<promise_type> await_suspend(
+        std::coroutine_handle<P> h) {
+      std::shared_ptr driver = h.promise().driver;
+      driver->view_stack.push(driver->view_stack.top());
+      nested_handle.promise().driver = driver;
+      nested_handle.promise().caller_handle = h;
+      return nested_handle;
+    }
+
+    bool await_ready() { return false; }
+  };
+
+  NestingAwaiter operator co_await() const noexcept { return {coro_handle}; }
+};
+
+ParseCoro<std::optional<std::uint32_t>> hex_digit() {
+  std::optional digit{co_await Command::Uchar{}};
+  if (not digit)
+    co_return std::nullopt;
+  if (*digit >= '0' && *digit <= '9')
+    co_return *digit - '0';
+  if (*digit >= 'A' && *digit <= 'F')
+    co_return *digit - 'A' + 10;
+  if (*digit >= 'a' && *digit <= 'f')
+    co_return *digit - 'a' + 10;
+  co_return std::nullopt;
 }
 
 enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
@@ -48,113 +187,86 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-template <typename T>
-std::unexpected<T> return_err_and_rewind(std::u32string_view& src_view,
-                                         const std::u32string_view rewind_view,
-                                         T error_tag) {
-  src_view = rewind_view;
-  return std::unexpected{error_tag};
-}
-
-std::nullopt_t return_opt_and_rewind(std::u32string_view& src_view,
-                                     const std::u32string_view rewind_view) {
-  src_view = rewind_view;
-  return std::nullopt;
-}
-
-std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
-                                                 ESC_RULE esc_rule) {
-  const std::u32string_view rewind_view{src_view};
-
-  std::optional head = next_uchar32(src_view);
+ParseCoro<std::expected<char32_t, BAD_ESCAPE>> parse_escape(ESC_RULE esc_rule) {
+  std::optional head = co_await Command::Uchar{};
   if (not head)
-    return return_err_and_rewind(src_view, rewind_view,
-                                 BAD_ESCAPE::PER_SE_BACKSLASH);
+    co_return std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
 
   switch (*head) {
     case 'b':
-      return '\b';
+      co_return '\b';
     case 'f':
-      return '\f';
+      co_return '\f';
     case 'n':
-      return '\n';
+      co_return '\n';
     case 'r':
-      return '\r';
+      co_return '\r';
     case 't':
-      return '\t';
+      co_return '\t';
     case 'v':
-      return '\v';
+      co_return '\v';
 
     case 'x': {
-      std::optional hex0 = next_uchar32(src_view).and_then(hex_digit);
+      std::optional hex0 = co_await hex_digit();
       if (not hex0)
-        return return_err_and_rewind(src_view, rewind_view,
-                                     BAD_ESCAPE::MALFORMED);
-      std::optional hex1 = next_uchar32(src_view).and_then(hex_digit);
+        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+      std::optional hex1 = co_await hex_digit();
       if (not hex1)
-        return return_err_and_rewind(src_view, rewind_view,
-                                     BAD_ESCAPE::MALFORMED);
-      return (*hex0 << 4) | *hex1;
+        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+      co_return (*hex0 << 4) | *hex1;
     }
 
     case 'u': {
-      std::optional open_or_uchar = next_uchar32(src_view);
+      std::optional open_or_uchar = co_await Command::Uchar{};
       if (not open_or_uchar)
-        return return_err_and_rewind(src_view, rewind_view,
-                                     BAD_ESCAPE::MALFORMED);
+        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
       if (open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII) {
         char32_t utf16_char = 0;
-
         do {
-          std::optional close_or_uchar = next_uchar32(src_view);
-          if (not close_or_uchar)
-            return return_err_and_rewind(src_view, rewind_view,
-                                         BAD_ESCAPE::MALFORMED);
-          if (close_or_uchar == '}')
-            return utf16_char;
-
-          std::optional hex = hex_digit(*close_or_uchar);
-          if (not hex)
-            return return_err_and_rewind(src_view, rewind_view,
-                                         BAD_ESCAPE::MALFORMED);
+          std::optional hex = co_await hex_digit();
+          if (not hex) {
+            std::optional close_or_uchar = co_await Command::Uchar{};
+            if (not close_or_uchar)
+              co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+            if (close_or_uchar == '}')
+              co_return utf16_char;
+          }
           utf16_char = (utf16_char << 4) | *hex;
           if (utf16_char > 0x10FFFF)
-            return return_err_and_rewind(src_view, rewind_view,
-                                         BAD_ESCAPE::MALFORMED);
+            co_return std::unexpected{BAD_ESCAPE::MALFORMED};
         } while (true);
       } else {
         char32_t high_surr = 0;
         for (int i = 0; i < 4; i++) {
-          std::optional hex = next_uchar32(src_view).and_then(hex_digit);
+          std::optional hex = co_await hex_digit();
           if (not hex)
-            return return_err_and_rewind(src_view, rewind_view,
-                                         BAD_ESCAPE::MALFORMED);
+            co_return std::unexpected{BAD_ESCAPE::MALFORMED};
           high_surr = (high_surr << 4) | *hex;
         }
 
         if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16 &&
-            src_view.starts_with(U"\\u")) {
-          src_view = src_view | std::views::drop(2);
+            (co_await Command::StartsWith{U"\\u"})) {
+          co_await Command::Drop{2};
           char32_t low_surr = 0;
           for (int i = 0; i < 4; i++) {
-            std::optional hex = next_uchar32(src_view).and_then(hex_digit);
+            std::optional hex = co_await hex_digit();
             if (not hex)
-              return high_surr;
+              co_return high_surr;
             low_surr = (low_surr << 4) | *hex;
           }
           if (is_lo_surrogate(low_surr))
-            return from_surrogate(high_surr, low_surr);
+            co_return from_surrogate(high_surr, low_surr);
         }
 
-        return high_surr;
+        co_return high_surr;
       }
     }
 
     case '0':
-      if (not next_uchar32(std::u32string_view{src_view})
-                  .transform([](char32_t uch) { return std::isdigit(uch); })
-                  .value_or(false))
-        return 0;
+      if (not(co_await Command::Peek{})
+                 .transform([](char32_t uch) { return std::isdigit(uch); })
+                 .value_or(false))
+        co_return 0;
       [[fallthrough]];
 
     case '1':
@@ -166,142 +278,48 @@ std::expected<char32_t, BAD_ESCAPE> parse_escape(std::u32string_view& src_view,
     case '7':
       switch (esc_rule) {
         case ESC_RULE::STRING_IN_STRICT_MODE:
-          return return_err_and_rewind(src_view, rewind_view,
-                                       BAD_ESCAPE::OCTAL_SEQ);
+          co_return std::unexpected{BAD_ESCAPE::OCTAL_SEQ};
+
         case ESC_RULE::STRING_IN_TEMPLATE:
         case ESC_RULE::REGEXP_UTF16:
-          return return_err_and_rewind(src_view, rewind_view,
-                                       BAD_ESCAPE::MALFORMED);
+          co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+
         default:
           char32_t octal = *head - '0';
           std::optional<char32_t> ahead;
-          ahead = next_uchar32(src_view).transform(
-              [](char32_t ahead_digit) { return ahead_digit - '0'; });
+          ahead =
+              (co_await Command::Peek{}).transform([](char32_t ahead_digit) {
+                return ahead_digit - '0';
+              });
           if (not ahead || *ahead > 7)
-            return octal;
+            co_return octal;
+          co_await Command::Drop{1};
           octal = (octal << 3) | *ahead;
 
           if (octal >= 32)
-            return octal;
+            co_return octal;
 
-          ahead = next_uchar32(src_view).transform(
-              [](char32_t ahead_digit) { return ahead_digit - '0'; });
+          ahead =
+              (co_await Command::Peek{}).transform([](char32_t ahead_digit) {
+                return ahead_digit - '0';
+              });
           if (not ahead || *ahead > 7)
-            return octal;
+            co_return octal;
+          co_await Command::Drop{1};
           octal = (octal << 3) | *ahead;
-          return octal;
+          co_return octal;
       }
 
     case '8':
     case '9':
       if (esc_rule == ESC_RULE::STRING_IN_STRICT_MODE ||
           esc_rule == ESC_RULE::STRING_IN_TEMPLATE)
-        return return_err_and_rewind(src_view, rewind_view,
-                                     BAD_ESCAPE::MALFORMED);
+        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
       [[fallthrough]];
 
     default:
-      return return_err_and_rewind(src_view, rewind_view,
-                                   BAD_ESCAPE::PER_SE_BACKSLASH);
+      co_return std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
   }
-}
-
-bool match_identifier(std::u32string_view lhs_view,
-                      std::u32string_view rhs_view) {
-  if (not lhs_view.starts_with(rhs_view))
-    return false;
-  lhs_view.remove_prefix(rhs_view.size());
-  if (lhs_view.empty())
-    return true;
-  return !u_hasBinaryProperty(lhs_view.front(), UCHAR_XID_CONTINUE);
-}
-
-enum class TOKEN_AHEAD { ARROW, IN, IMPORT, OF, EXPORT, FUNCTION, IDENTIFIER };
-enum class LINETERM_BEHAVIOR { RETURN, IGNORE };
-using TokenAhead = std::variant<char32_t, TOKEN_AHEAD>;
-
-template <LINETERM_BEHAVIOR LT>
-std::optional<TokenAhead> peek_token(std::u32string_view src_view) {
-  do {
-    if (src_view.empty())
-      return std::nullopt;
-    char32_t ch = src_view.front();
-
-    if (u_isWhitespace(ch)) {
-      if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
-        switch (ch) {
-          case '\r':
-          case '\n':
-          case 0x2028:
-          case 0x2029:
-            return U'\n';
-        }
-      src_view = src_view | std::views::drop(1);
-      continue;
-    }
-
-    if (src_view.starts_with(U"//")) {
-      if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
-        return U'\n';
-      std::u32string_view::iterator comment_end = std::ranges::find_if(
-          src_view, [](char c) { return c != '\r' || c != '\n'; });
-      src_view = std::u32string_view{comment_end, src_view.end()};
-      continue;
-    }
-
-    if (src_view.starts_with(U"/*")) {
-      src_view = src_view | std::views::drop(2);
-      while (next_uchar32(src_view)) {
-        ch = src_view.front();
-        if constexpr (LT == LINETERM_BEHAVIOR::RETURN)
-          if (ch == '\r' || ch == '\n')
-            return U'\n';
-
-        if (src_view.starts_with(U"*/")) {
-          src_view = src_view | std::views::drop(2);
-          break;
-        }
-      }
-      continue;
-    }
-
-    if (src_view.starts_with(U"=>"))
-      return TOKEN_AHEAD::ARROW;
-
-    using KeywordPair = std::pair<TOKEN_AHEAD, std::u32string>;
-    static const std::array keyword_arr =
-        std::to_array<KeywordPair>({{TOKEN_AHEAD::IN, U"in"},
-                                    {TOKEN_AHEAD::IMPORT, U"import"},
-                                    {TOKEN_AHEAD::OF, U"of"},
-                                    {TOKEN_AHEAD::EXPORT, U"export"},
-                                    {TOKEN_AHEAD::FUNCTION, U"function"}});
-
-    for (const KeywordPair& keyword_pair : keyword_arr)
-      if (match_identifier(src_view, keyword_pair.second))
-        return keyword_pair.first;
-
-    if (src_view.starts_with(U"\\u")) {
-      src_view = src_view | std::views::drop(1);
-      if (parse_escape(src_view, ESC_RULE::IDENTIFIER)
-              .transform([](char32_t esc) {
-                return u_hasBinaryProperty(esc, UCHAR_XID_START);
-              })
-              .value_or(false))
-        return TOKEN_AHEAD::IDENTIFIER;
-    }
-
-    if (u_hasBinaryProperty(ch, UCHAR_XID_START))
-      return TOKEN_AHEAD::IDENTIFIER;
-
-    return ch;
-  } while (true);
-}
-
-std::optional<TokenAhead> next_token(std::u32string_view source_view) {
-  std::optional parsed = peek_token<LINETERM_BEHAVIOR::RETURN>(source_view);
-  if (not parsed)
-    return std::nullopt;
-  return *parsed;
 }
 
 std::u32string utf32_convert(const std::string& narrow) {
@@ -339,199 +357,16 @@ std::u32string utf32_convert(const std::string& narrow) {
                           return static_cast<char32_t>(uchar);
                         })};
 }
-
-enum class STRICTNESS { SLOPPY, STRICT };
-enum class BAD_STRING {
-  UNEXPECTED_END,
-  OCTAL_SEQ_IN_ESCAPE,
-  MALFORMED_SEQ_IN_ESCAPE
-};
-
-std::optional<BAD_STRING> parse_escaped_uchar_in_string(
-    const char32_t quote,
-    const STRICTNESS strictness,
-    std::u32string_view& src_view,
-    char32_t& ch,
-    bool& must_continue) {
-  if (src_view.empty())
-    return BAD_STRING::UNEXPECTED_END;
-  ch = src_view.front();
-  switch (ch) {
-    case '\'':
-    case '\"':
-    case '\0':
-    case '\\':
-      src_view = src_view | std::views::drop(1);
-      return std::nullopt;
-    case '\r':
-      if (next_uchar32(src_view | std::views::drop(1)) == '\n')
-        src_view = src_view | std::views::drop(1);
-      [[fallthrough]];
-    case '\n':
-    case 0x2028:
-    case 0x2029:
-      /* ignore escaped newline sequence */
-      src_view = src_view | std::views::drop(1);
-      must_continue = true;
-      return std::nullopt;
-    default:
-      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-      if (strictness == STRICTNESS::STRICT)
-        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-      else if (quote == '`')
-        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-      std::expected ch_exp = parse_escape(src_view, esc_rule);
-      if (ch_exp)
-        ch = *ch_exp;
-      else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
-        return BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
-      else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
-        return BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
-      else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
-        /* ignore the '\' (could output a warning) */
-        src_view = src_view | std::views::drop(1);
-      return std::nullopt;
-  }
-}
-
-namespace Token {
-struct StringLit {
-  char32_t sep;
-  std::u32string str;
-};
-}  // namespace Token
-
-std::expected<Token::StringLit, BAD_STRING> parse_quoted_string(
-    const char32_t quote,
-    const STRICTNESS strictness,
-    std::u32string_view& src_view) {
-  const std::u32string_view rewind_view{src_view};
-  Token::StringLit token_lit{.sep = quote};
-  char32_t ch{};
-
-  do {
-    if (src_view.empty())
-      return return_err_and_rewind(src_view, rewind_view,
-                                   BAD_STRING::UNEXPECTED_END);
-    ch = src_view.front();
-
-    if (quote == '`') {
-      if (ch == '\r') {
-        if (next_uchar32(src_view | std::views::drop(1)) == '\n')
-          src_view = src_view | std::views::drop(1);
-        ch = '\n';
-      }
-    } else if (ch == '\r' || ch == '\n')
-      return return_err_and_rewind(src_view, rewind_view,
-                                   BAD_STRING::UNEXPECTED_END);
-
-    src_view = src_view | std::views::drop(1);
-    if (ch == quote)
-      return token_lit;
-
-    if (ch == '$' && next_uchar32(std::u32string_view{src_view}) == '{' &&
-        quote == '`') {
-      src_view = src_view | std::views::drop(1);
-      return token_lit;
-    }
-
-    if (ch == '\\') {
-      bool must_continue = false;
-      std::optional esc_error = parse_escaped_uchar_in_string(
-          quote, strictness, src_view, ch, must_continue);
-      if (esc_error)
-        return return_err_and_rewind(src_view, rewind_view, *esc_error);
-      else if (must_continue)
-        continue;
-    }
-
-    token_lit.str.push_back(ch);
-  } while (true);
-}
-
-namespace Token {
-struct Template {
-  char32_t sep;
-  std::u32string str;
-};
-}  // namespace Token
-
-std::expected<Token::Template, BAD_STRING> parse_template_part(
-    std::u32string_view& src_view) {
-  const std::u32string_view rewind_view{src_view};
-  Token::Template template_tok{};
-  char32_t ch{};
-
-  do {
-    if (src_view.empty())
-      return return_err_and_rewind(src_view, rewind_view,
-                                   BAD_STRING::UNEXPECTED_END);
-    ch = *next_uchar32(src_view);
-    if (ch == '`')
-      return template_tok;
-    if (ch == '$' && next_uchar32(std::u32string_view{src_view}) == '{') {
-      src_view = src_view | std::views::drop(1);
-      return template_tok;
-    }
-    if (ch == '\\') {
-      template_tok.str.push_back(ch);
-      if (src_view.empty())
-        return return_err_and_rewind(src_view, rewind_view,
-                                     BAD_STRING::UNEXPECTED_END);
-      ch = *next_uchar32(src_view);
-    }
-    if (ch == '\r') {
-      if (next_uchar32(std::u32string_view{src_view}) == '\n')
-        src_view = src_view | std::views::drop(1);
-      ch = '\n';
-    }
-    template_tok.str.push_back(ch);
-  } while (true);
-}
-
-std::optional<std::u32string> parse_ident(std::u32string_view& src_view,
-                                          bool& ident_has_escape,
-                                          char32_t ch,
-                                          bool is_private) {
-  const std::u32string_view rewind_view{src_view};
-  std::u32string ident_str{};
-
-  if (is_private)
-    ident_str.push_back('#');
-
-  do {
-    const std::u32string_view snapback_view{src_view};
-    ident_str.push_back(ch);
-
-    if (src_view.empty())
-      return return_opt_and_rewind(src_view, rewind_view);
-    ch = *next_uchar32(src_view);
-
-    if (ch == '\\' && next_uchar32(std::u32string_view{src_view}) == 'u') {
-      std::expected ch_esc = parse_escape(src_view, ESC_RULE::IDENTIFIER);
-      if (not ch_esc)
-        return return_opt_and_rewind(src_view, rewind_view);
-      ch = *ch_esc;
-      ident_has_escape = true;
-    }
-
-    if (!u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE)) {
-      src_view = snapback_view;
-      return ident_str;
-    }
-  } while (true);
-}
-
 }  // namespace Manadrain
 
 export namespace Manadrain {
+void Parse(std::string source_str) {
+  ParseCoro parse_coro{hex_digit()};
+  parse_coro.coro_handle.promise().driver =
+      std::make_shared<ParseDriver>(utf32_convert(source_str));
+  parse_coro.coro_handle.resume();
 
-int parse_program(const std::string& source_str) {
-  std::u32string wide_str{utf32_convert(source_str)};
-  if (next_token(wide_str))
-    return 1;
-  else
-    return 0;
+  std::println("{}", parse_coro.coro_handle.promise().result.value());
+  parse_coro.coro_handle.destroy();
 }
-
 }  // namespace Manadrain
