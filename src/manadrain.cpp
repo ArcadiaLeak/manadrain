@@ -544,6 +544,62 @@ struct Identifier {
     } while (true);
   }
 };
+
+ParseCoro<std::size_t> whitespace() {
+  std::size_t idx = 0;
+  while (true) {
+    std::optional ch = co_await Command::Peek{idx};
+    if (not ch)
+      co_return idx;
+
+    if (u_isWhitespace(*ch)) {
+      ++idx;
+      continue;
+    }
+
+    if (ch == '\\') {
+      std::size_t esc_idx{idx};
+      std::optional esc_opt = co_await Command::Peek{++esc_idx};
+      if (not esc_opt)
+        co_return idx;
+      if (esc_opt == '\r' || esc_opt == '\n' || esc_opt == 0x2028 ||
+          esc_opt == 0x2029) {
+        idx = esc_idx;
+        continue;
+      }
+    }
+
+    if (co_await Command::StartsWith{U"//", idx}) {
+      std::size_t comment_idx{idx};
+      ++comment_idx;
+      while (true) {
+        std::optional lb_opt = co_await Command::Peek{++comment_idx};
+        if (not lb_opt || lb_opt == '\r' || lb_opt == '\n' ||
+            lb_opt == 0x2028 || lb_opt == 0x2029)
+          break;
+      }
+      idx = comment_idx;
+      continue;
+    }
+
+    if (co_await Command::StartsWith{U"/*", idx}) {
+      std::size_t comment_idx{idx};
+      ++(++comment_idx);
+      while (true) {
+        std::optional asterisk_opt = co_await Command::Peek{comment_idx};
+        if (not asterisk_opt)
+          co_return idx;
+        std::optional slash_opt = co_await Command::Peek{++comment_idx};
+        if (asterisk_opt == '*' && slash_opt == '/')
+          break;
+      }
+      idx = comment_idx;
+      continue;
+    }
+
+    co_return idx;
+  }
+}
 }  // namespace Token
 }  // namespace Manadrain
 
