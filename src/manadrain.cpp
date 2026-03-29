@@ -545,12 +545,13 @@ struct Identifier {
   }
 };
 
-ParseCoro<std::size_t> whitespace() {
+ParseCoro<bool> whitespace() {
   std::size_t idx = 0;
+
   while (true) {
     std::optional ch = co_await Command::Peek{idx};
     if (not ch)
-      co_return idx;
+      goto mismatch_or_eof;
 
     if (u_isWhitespace(*ch)) {
       ++idx;
@@ -561,7 +562,7 @@ ParseCoro<std::size_t> whitespace() {
       std::size_t esc_idx{idx};
       std::optional esc_opt = co_await Command::Peek{++esc_idx};
       if (not esc_opt)
-        co_return idx;
+        goto mismatch_or_eof;
       if (esc_opt == '\r' || esc_opt == '\n' || esc_opt == 0x2028 ||
           esc_opt == 0x2029) {
         idx = esc_idx;
@@ -588,7 +589,7 @@ ParseCoro<std::size_t> whitespace() {
       while (true) {
         std::optional asterisk_opt = co_await Command::Peek{comment_idx};
         if (not asterisk_opt)
-          co_return idx;
+          goto mismatch_or_eof;
         std::optional slash_opt = co_await Command::Peek{++comment_idx};
         if (asterisk_opt == '*' && slash_opt == '/')
           break;
@@ -597,7 +598,9 @@ ParseCoro<std::size_t> whitespace() {
       continue;
     }
 
-    co_return idx;
+  mismatch_or_eof:
+    co_await Command::Drop{idx};
+    co_return idx > 0;
   }
 }
 }  // namespace Token
