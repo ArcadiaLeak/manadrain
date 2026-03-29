@@ -511,10 +511,12 @@ struct Template {
   }
 };
 
-struct Identifier {
+struct Word {
   std::u32string str;
+  bool ident_has_escape;
+  bool is_private;
 
-  ParseOptional<char32_t> parse_id_continue(bool& ident_has_escape) {
+  ParseOptional<char32_t> parse_id_continue() {
     std::optional ch = co_await Command::Shift{};
     if (not ch)
       co_return std::nullopt;
@@ -530,14 +532,15 @@ struct Identifier {
     co_return ch;
   }
 
-  ParseOptional<std::u32string_view> parse(char32_t id_start,
-                                           bool& ident_has_escape,
-                                           bool is_private) {
+  ParseOptional<std::u32string_view> parse() {
     if (is_private)
       str.push_back('#');
-    str.push_back(id_start);
+    std::optional id_start = co_await Command::Shift{};
+    if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
+      co_return std::nullopt;
+    str.push_back(*id_start);
     do {
-      std::optional ch = co_await parse_id_continue(ident_has_escape);
+      std::optional ch = co_await parse_id_continue();
       if (not ch)
         co_return str;
       str.push_back(*ch);
@@ -545,29 +548,17 @@ struct Identifier {
   }
 };
 
-ParseCoro<bool> whitespace() {
+ParseCoro<std::size_t> whitespace() {
   std::size_t idx = 0;
 
   while (true) {
     std::optional ch = co_await Command::Peek{idx};
     if (not ch)
-      goto mismatch_or_eof;
+      co_return idx;
 
     if (u_isWhitespace(*ch)) {
       ++idx;
       continue;
-    }
-
-    if (ch == '\\') {
-      std::size_t esc_idx{idx};
-      std::optional esc_opt = co_await Command::Peek{++esc_idx};
-      if (not esc_opt)
-        goto mismatch_or_eof;
-      if (esc_opt == '\r' || esc_opt == '\n' || esc_opt == 0x2028 ||
-          esc_opt == 0x2029) {
-        idx = esc_idx;
-        continue;
-      }
     }
 
     if (co_await Command::StartsWith{U"//", idx}) {
@@ -589,7 +580,7 @@ ParseCoro<bool> whitespace() {
       while (true) {
         std::optional asterisk_opt = co_await Command::Peek{comment_idx};
         if (not asterisk_opt)
-          goto mismatch_or_eof;
+          co_return idx;
         std::optional slash_opt = co_await Command::Peek{++comment_idx};
         if (asterisk_opt == '*' && slash_opt == '/')
           break;
@@ -598,18 +589,50 @@ ParseCoro<bool> whitespace() {
       continue;
     }
 
-  mismatch_or_eof:
-    co_await Command::Drop{idx};
-    co_return idx > 0;
+    co_return idx;
   }
 }
 }  // namespace Token
+
+enum class VAR_INIT { VAR, LET, CONST };
+
+ParseOptional<std::monostate> parse_var_decl() {
+  std::size_t space = co_await Token::whitespace();
+  if (not space)
+    co_return std::nullopt;
+  co_await Command::Drop{space};
+
+  Token::Word var_init{};
+  if (not co_await var_init.parse())
+    co_return std::nullopt;
+
+  static const std::unordered_map<std::u32string_view, VAR_INIT> legal_match{
+      {U"var", VAR_INIT::VAR},
+      {U"let", VAR_INIT::LET},
+      {U"const", VAR_INIT::CONST}};
+  std::optional legal_init =
+      legal_match.contains(var_init.str)
+          ? std::make_optional(legal_match.find(var_init.str)->second)
+          : std::nullopt;
+  if (not legal_init)
+    co_return std::nullopt;
+
+  space = co_await Token::whitespace();
+  if (not space)
+    co_return std::nullopt;
+  co_await Command::Drop{space};
+
+  Token::Word var_name{};
+  if (not co_await var_name.parse())
+    co_return std::nullopt;
+
+  co_return std::monostate{};
+}
 }  // namespace Manadrain
 
 export namespace Manadrain {
 void Parse(std::string source_str) {
-  Token::String token_str{'\"'};
-  ParseCoro parse_coro{token_str.parse(STRICTNESS::SLOPPY)};
+  ParseCoro parse_coro = parse_var_decl();
   parse_coro.coro_handle.promise().driver =
       std::make_shared<ParseDriver>(utf32_convert(source_str));
   parse_coro.coro_handle.resume();
