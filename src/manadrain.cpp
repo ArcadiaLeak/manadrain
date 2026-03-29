@@ -172,6 +172,8 @@ struct ParseCoro {
 
 template <typename T>
 using ParseOptional = ParseCoro<std::optional<T>>;
+template <typename T>
+using ParseShared = ParseCoro<std::shared_ptr<T>>;
 template <typename T, typename U>
 using ParseExpected = ParseCoro<std::expected<T, U>>;
 
@@ -512,7 +514,7 @@ struct Template {
 };
 
 struct Word {
-  std::u32string str;
+  std::u32string text;
   bool ident_has_escape;
   bool is_private;
 
@@ -534,16 +536,16 @@ struct Word {
 
   ParseOptional<std::u32string_view> parse() {
     if (is_private)
-      str.push_back('#');
+      text.push_back('#');
     std::optional id_start = co_await Command::Shift{};
     if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
       co_return std::nullopt;
-    str.push_back(*id_start);
+    text.push_back(*id_start);
     do {
       std::optional ch = co_await parse_id_continue();
       if (not ch)
-        co_return str;
-      str.push_back(*ch);
+        co_return text;
+      text.push_back(*ch);
     } while (true);
   }
 };
@@ -594,39 +596,42 @@ ParseCoro<std::size_t> whitespace() {
 }
 }  // namespace Token
 
-enum class VAR_INIT { VAR, LET, CONST };
+struct DeclaratorLet {};
+struct DeclaratorConst {};
+struct DeclaratorLegacy {};
+using DeclaratorVar =
+    std::variant<DeclaratorLegacy, DeclaratorLet, DeclaratorConst>;
 
-ParseOptional<std::monostate> parse_var_decl() {
+ParseShared<DeclaratorVar> parse_var_decl() {
   std::size_t space = co_await Token::whitespace();
   if (not space)
-    co_return std::nullopt;
+    co_return nullptr;
   co_await Command::Drop{space};
 
   Token::Word var_init{};
   if (not co_await var_init.parse())
-    co_return std::nullopt;
+    co_return nullptr;
 
-  static const std::unordered_map<std::u32string_view, VAR_INIT> legal_match{
-      {U"var", VAR_INIT::VAR},
-      {U"let", VAR_INIT::LET},
-      {U"const", VAR_INIT::CONST}};
-  std::optional legal_init =
-      legal_match.contains(var_init.str)
-          ? std::make_optional(legal_match.find(var_init.str)->second)
-          : std::nullopt;
-  if (not legal_init)
-    co_return std::nullopt;
+  std::shared_ptr<DeclaratorVar> var_decl{};
+  if (var_init.text == U"let")
+    var_decl = std::make_shared<DeclaratorVar>(DeclaratorLet{});
+  if (var_init.text == U"const")
+    var_decl = std::make_shared<DeclaratorVar>(DeclaratorConst{});
+  if (var_init.text == U"var")
+    var_decl = std::make_shared<DeclaratorVar>(DeclaratorLegacy{});
+  if (not var_decl)
+    co_return nullptr;
 
   space = co_await Token::whitespace();
   if (not space)
-    co_return std::nullopt;
+    co_return nullptr;
   co_await Command::Drop{space};
 
   Token::Word var_name{};
   if (not co_await var_name.parse())
-    co_return std::nullopt;
+    co_return nullptr;
 
-  co_return std::monostate{};
+  co_return var_decl;
 }
 }  // namespace Manadrain
 
