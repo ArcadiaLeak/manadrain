@@ -261,7 +261,7 @@ ParseExpected<char32_t, BAD_ESCAPE> parse_escape(ESC_RULE esc_rule) {
         co_return std::unexpected{BAD_ESCAPE::MALFORMED};
       if (open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII) {
         char32_t utf16_char = 0;
-        do {
+        while (true) {
           std::optional hex = co_await parse_hex();
           if (not hex) {
             std::optional close_or_uchar = cur_state.shift();
@@ -273,7 +273,7 @@ ParseExpected<char32_t, BAD_ESCAPE> parse_escape(ESC_RULE esc_rule) {
           utf16_char = (utf16_char << 4) | *hex;
           if (utf16_char > 0x10FFFF)
             co_return std::unexpected{BAD_ESCAPE::MALFORMED};
-        } while (true);
+        }
       } else {
         char32_t high_surr = 0;
         for (int i = 0; i < 4; i++) {
@@ -473,7 +473,7 @@ struct String {
       co_return std::unexpected{BAD_STRING::MISMATCH};
     sep = *ch;
 
-    do {
+    while (true) {
       ch = cur_state.peek();
       if (not ch)
         co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
@@ -509,7 +509,7 @@ struct String {
       }
 
       str.push_back(*ch);
-    } while (true);
+    }
   }
 };
 
@@ -520,7 +520,7 @@ struct Template {
   ParseExpected<std::u32string_view, BAD_STRING> parse_part() {
     INJECT_CURRENT_STATE
     std::optional<char32_t> ch{};
-    do {
+    while (true) {
       ch = cur_state.shift();
       if (not ch)
         co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
@@ -542,7 +542,7 @@ struct Template {
         ch = '\n';
       }
       str.push_back(*ch);
-    } while (true);
+    }
   }
 };
 
@@ -576,12 +576,12 @@ struct Word {
     if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
       co_return std::nullopt;
     text.push_back(*id_start);
-    do {
+    while (true) {
       std::optional ch = co_await parse_id_continue();
       if (not ch)
         co_return text;
       text.push_back(*ch);
-    } while (true);
+    }
   }
 };
 }  // namespace Token
