@@ -3,6 +3,8 @@
 // Strict mode (optional, but enables private fields, etc.)
 'use strict';
 
+import { setTimeout } from 'os';
+
 // ======================= DECLARATIONS =======================
 
 // Variables: var, let, const
@@ -119,7 +121,20 @@ switch (x) {
 for (let i = 0; i < 10; i++) { }
 for (let key in obj) { }
 for (let value of arr) { }
-for await (let value of asyncIterable) { } // see async iterable later
+
+const asyncIterable = {
+    [Symbol.asyncIterator]: async function* () {
+        yield 1;
+        await new Promise(r => setTimeout(r, 10));
+        yield 2;
+    }
+};
+(async () => {
+    for await (const val of asyncIterable) {
+        console.log(val);
+    }
+})();
+for await (let value of asyncIterable) { } 
 
 // while / do-while
 while (false) { }
@@ -234,7 +249,7 @@ export function exportedFunc() { }
 export default class DefaultExport { }
 export { Base as AliasBase };
 // Dynamic import (returns a promise)
-const dynamicImport = import('./some-module.js').catch(console.error);
+const dynamicImport = import('./some-module.js').catch(console.log);
 
 // import.meta
 console.log(import.meta.url);
@@ -269,21 +284,21 @@ let promise = new Promise((resolve, reject) => {
 });
 promise
     .then(val => console.log(val))
-    .catch(err => console.error(err))
+    .catch(err => console.log(err))
     .finally(() => console.log('finally'));
 
 Promise.all([Promise.resolve(1), Promise.resolve(2)])
     .then(([one, two]) => console.log(one, two));
 
 Promise.race([promise, new Promise((_, reject) => setTimeout(reject, 50))])
-    .catch(err => console.error('race lost'));
+    .catch(err => console.log('race lost'));
 
 async function runAsync() {
     try {
         const val = await promise;
         console.log(val);
     } catch (err) {
-        console.error(err);
+        console.log(err);
     }
 }
 runAsync();
@@ -293,7 +308,7 @@ runAsync();
 try {
     throw new Error('Something went wrong');
 } catch (err) {
-    console.error(err.message);
+    console.log(err.message);
 } finally {
     console.log('cleanup');
 }
@@ -375,13 +390,6 @@ b &&= 10;           // b becomes 10 (5 && 10)
 let c = 0;
 c ||= 100;          // c becomes 100 (0 || 100)
 
-// ======================= WITH STATEMENT (deprecated but valid) =======================
-
-with (obj) {
-    // inside with, properties of obj become local variables
-    console.log(aAlias); // aAlias is obj.aAlias? Actually obj doesn't have aAlias, so careful.
-}
-
 // ======================= EVAL & ARGUMENTS =======================
 
 let evaled = eval('2 + 2'); // 4
@@ -439,22 +447,6 @@ let random = Math.random();
 let namedGroups = /(?<year>\d{4})-(?<month>\d{2})-(?<day>\d{2})/;
 let match = namedGroups.exec('2025-03-30');
 if (match) console.log(match.groups.year);
-
-// ======================= ASYNC ITERATION =======================
-
-// Creating an async iterable
-const asyncIterable = {
-    [Symbol.asyncIterator]: async function* () {
-        yield 1;
-        await new Promise(r => setTimeout(r, 10));
-        yield 2;
-    }
-};
-(async () => {
-    for await (const val of asyncIterable) {
-        console.log(val);
-    }
-})();
 
 // ======================= TOP-LEVEL AWAIT (in modules) =======================
 // If this file is a module, we can use top‑level await
