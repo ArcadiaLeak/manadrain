@@ -1,5 +1,13 @@
-import manadrain;
-import std;
+#include <filesystem>
+#include <fstream>
+#include <string>
+#include <print>
+#include <ranges>
+#include <iostream>
+
+namespace Manadrain {
+void Parse(std::string source_str);
+}
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {

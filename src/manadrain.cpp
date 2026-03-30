@@ -1,8 +1,16 @@
-module;
 #include <unicode/uchar.h>
 #include <unicode/ustring.h>
-export module manadrain;
-import std;
+
+#include <optional>
+#include <expected>
+#include <deque>
+#include <coroutine>
+#include <string>
+#include <variant>
+#include <ranges>
+#include <stack>
+#include <format>
+#include <memory>
 
 namespace Manadrain {
 bool is_hi_surrogate(char32_t c) {
@@ -596,46 +604,52 @@ ParseCoro<std::size_t> whitespace() {
 }
 }  // namespace Token
 
-struct DeclaratorLet {};
-struct DeclaratorConst {};
-struct DeclaratorLegacy {};
-using DeclaratorVar =
-    std::variant<DeclaratorLegacy, DeclaratorLet, DeclaratorConst>;
+struct VariableLet {
+  Token::Word var_name;
+};
+struct VariableCst {
+  Token::Word var_name;
+};
+struct VariableVar {
+  Token::Word var_name;
+};
+using Variable = std::variant<VariableVar, VariableLet, VariableCst>;
 
-ParseShared<DeclaratorVar> parse_var_decl() {
-  std::size_t space = co_await Token::whitespace();
-  if (not space)
-    co_return nullptr;
-  co_await Command::Drop{space};
+ParseShared<Variable> parse_var_decl() {
+  co_await Command::Drop{co_await Token::whitespace()};
 
   Token::Word var_init{};
   if (not co_await var_init.parse())
     co_return nullptr;
 
-  std::shared_ptr<DeclaratorVar> var_decl{};
-  if (var_init.text == U"let")
-    var_decl = std::make_shared<DeclaratorVar>(DeclaratorLet{});
-  if (var_init.text == U"const")
-    var_decl = std::make_shared<DeclaratorVar>(DeclaratorConst{});
-  if (var_init.text == U"var")
-    var_decl = std::make_shared<DeclaratorVar>(DeclaratorLegacy{});
-  if (not var_decl)
-    co_return nullptr;
-
-  space = co_await Token::whitespace();
+  std::size_t space = co_await Token::whitespace();
   if (not space)
     co_return nullptr;
   co_await Command::Drop{space};
 
+  std::shared_ptr<Variable> var_decl{};
+  if (var_init.text == U"let")
+    var_decl = std::make_shared<Variable>(VariableLet{});
+  if (var_init.text == U"const")
+    var_decl = std::make_shared<Variable>(VariableCst{});
+  if (var_init.text == U"var")
+    var_decl = std::make_shared<Variable>(VariableVar{});
+  if (not var_decl)
+    co_return nullptr;
+
   Token::Word var_name{};
   if (not co_await var_name.parse())
     co_return nullptr;
+  var_decl->visit(
+      [&var_name](auto decl) { decl.var_name = std::move(var_name); });
+
+  if (co_await Command::Peek{co_await Token::whitespace()} == '=') {
+    co_return var_decl;
+  }
 
   co_return var_decl;
 }
-}  // namespace Manadrain
 
-export namespace Manadrain {
 void Parse(std::string source_str) {
   ParseCoro parse_coro = parse_var_decl();
   parse_coro.coro_handle.promise().driver =
