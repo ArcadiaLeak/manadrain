@@ -41,8 +41,9 @@ struct ParseState {
     return src_view.substr(idx).starts_with(rhs);
   }
 
-  void drop(std::size_t count = 1) {
+  std::size_t drop(std::size_t count = 1) {
     src_view = src_view | std::views::drop(count);
+    return count;
   }
 
   std::optional<char32_t> peek(std::size_t idx = 0) {
@@ -283,7 +284,7 @@ ParseExpected<char32_t, BAD_ESCAPE> parse_escape(ESC_RULE esc_rule) {
         }
 
         if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16 &&
-            (cur_state.starts_with(U"\\u"))) {
+            cur_state.starts_with(U"\\u")) {
           cur_state.drop(2);
           char32_t low_surr = 0;
           for (int i = 0; i < 4; i++) {
@@ -596,16 +597,12 @@ using Variable = std::variant<VariableVar, VariableLet, VariableCst>;
 
 ParseShared<Variable> parse_var_decl() {
   INJECT_CURRENT_STATE
-  cur_state.drop(cur_state.space_size());
-
   Token::Word var_init{};
   if (not co_await var_init.parse())
     co_return nullptr;
 
-  std::size_t space = cur_state.space_size();
-  if (not space)
+  if (not cur_state.drop(cur_state.space_size()))
     co_return nullptr;
-  cur_state.drop(space);
 
   std::shared_ptr<Variable> var_decl{};
   if (var_init.text == U"let")
@@ -622,16 +619,13 @@ ParseShared<Variable> parse_var_decl() {
     co_return nullptr;
   var_decl->visit(
       [&var_name](auto& decl) { decl.var_name = std::move(var_name); });
+  cur_state.drop(cur_state.space_size());
 
-  space = cur_state.space_size();
-  if (cur_state.peek(space) == '=') {
-    cur_state.drop(space);
-    cur_state.drop();
+  std::optional ch = cur_state.shift();
+  if (ch == '=') {
     cur_state.drop(cur_state.space_size());
-
     Token::String token_str{};
     co_await token_str.parse(STRICTNESS::SLOPPY);
-
     var_decl->visit(
         [&token_str](auto& decl) { decl.initial = std::move(token_str); });
   }
@@ -639,8 +633,14 @@ ParseShared<Variable> parse_var_decl() {
   co_return var_decl;
 }
 
+ParseShared<Variable> parse_statement() {
+  INJECT_CURRENT_STATE
+  cur_state.drop(cur_state.space_size());
+  co_return co_await parse_var_decl();
+}
+
 void Parse(std::string src_string) {
-  ParseCoro parse_coro = parse_var_decl();
+  ParseCoro parse_coro = parse_statement();
   parse_coro.coro_handle.promise().driver =
       std::make_shared<ParseDriver>(utf32_convert(src_string));
   parse_coro.coro_handle.resume();
