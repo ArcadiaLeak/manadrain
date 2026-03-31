@@ -453,20 +453,24 @@ struct String {
   char32_t sep;
   std::u32string str;
 
-  ParseCoro<std::expected<char32_t, BAD_STRING>> parse_escaped_uchar(
+  ParseCoro<bool> parse_escaped_uchar(
       const STRICTNESS strictness,
+      std::expected<char32_t, BAD_STRING>& parsed,
       bool& must_continue) {
     INJECT_CURRENT_STATE
     std::optional ch = cur_state.peek();
-    if (not ch)
-      co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+    if (not ch) {
+      parsed = std::unexpected{BAD_STRING::UNEXPECTED_END};
+      co_return parsed.has_value();
+    }
     switch (*ch) {
       case '\'':
       case '\"':
       case '\0':
       case '\\':
         cur_state.drop();
-        co_return *ch;
+        parsed = *ch;
+        co_return parsed.has_value();
       case '\r':
         if (cur_state.peek() == '\n')
           cur_state.drop();
@@ -477,7 +481,8 @@ struct String {
         /* ignore escaped newline sequence */
         cur_state.drop();
         must_continue = true;
-        co_return *ch;
+        parsed = *ch;
+        co_return parsed.has_value();
       default:
         ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
         if (strictness == STRICTNESS::STRICT)
@@ -487,31 +492,39 @@ struct String {
         std::expected<char32_t, BAD_ESCAPE> ch_exp{};
         if (co_await parse_escape(esc_rule, ch_exp))
           ch = *ch_exp;
-        else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
-          co_return std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
-        else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ)
-          co_return std::unexpected{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
-        else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
+        else if (ch_exp.error() == BAD_ESCAPE::MALFORMED) {
+          parsed = std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
+          co_return parsed.has_value();
+        } else if (ch_exp.error() == BAD_ESCAPE::OCTAL_SEQ) {
+          parsed = std::unexpected{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
+          co_return parsed.has_value();
+        } else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
           /* ignore the '\' (could output a warning) */
           cur_state.drop();
-        co_return *ch;
+        parsed = *ch;
+        co_return parsed.has_value();
     }
   }
 
-  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse(
-      const STRICTNESS strictness) {
+  ParseCoro<bool> parse(
+      const STRICTNESS strictness,
+      std::expected<std::u32string_view, BAD_STRING>& parsed) {
     INJECT_CURRENT_STATE
     std::optional ch = cur_state.shift();
     if (not ch || not ch.transform([](char32_t qt) {
           return qt == '\'' || qt == '"' || qt == '`';
-        }))
-      co_return std::unexpected{BAD_STRING::MISMATCH};
+        })) {
+      parsed = std::unexpected{BAD_STRING::MISMATCH};
+      co_return parsed.has_value();
+    }
     sep = *ch;
 
     while (true) {
       ch = cur_state.peek();
-      if (not ch)
-        co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+      if (not ch) {
+        parsed = std::unexpected{BAD_STRING::UNEXPECTED_END};
+        co_return parsed.has_value();
+      }
 
       if (sep == '`') {
         if (ch == '\r') {
@@ -519,25 +532,31 @@ struct String {
             cur_state.drop();
           ch = '\n';
         }
-      } else if (ch == '\r' || ch == '\n')
-        co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+      } else if (ch == '\r' || ch == '\n') {
+        parsed = std::unexpected{BAD_STRING::UNEXPECTED_END};
+        co_return parsed.has_value();
+      }
 
       cur_state.drop();
-      if (ch == sep)
-        co_return str;
+      if (ch == sep) {
+        parsed = str;
+        co_return parsed.has_value();
+      }
 
       if (ch == '$' && cur_state.peek() == '{' && sep == '`') {
         cur_state.drop();
-        co_return str;
+        parsed = str;
+        co_return parsed.has_value();
       }
 
       if (ch == '\\') {
-        bool must_continue = false;
-        std::expected esc_exp =
-            co_await parse_escaped_uchar(strictness, must_continue);
-        if (not esc_exp)
-          co_return std::unexpected{esc_exp.error()};
-        else if (must_continue)
+        bool must_continue{false};
+        std::expected<char32_t, BAD_STRING> esc_exp{};
+        if (not co_await parse_escaped_uchar(strictness, esc_exp,
+                                             must_continue)) {
+          parsed = std::unexpected{esc_exp.error()};
+          co_return parsed.has_value();
+        } else if (must_continue)
           continue;
         else
           ch = *esc_exp;
@@ -552,24 +571,32 @@ struct Template {
   char32_t sep;
   std::u32string str;
 
-  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse_part() {
+  ParseCoro<bool> parse_part(
+      std::expected<std::u32string_view, BAD_STRING>& parsed) {
     INJECT_CURRENT_STATE
     std::optional<char32_t> ch{};
     while (true) {
       ch = cur_state.shift();
-      if (not ch)
-        co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
-      if (ch == '`')
-        co_return str;
+      if (not ch) {
+        parsed = std::unexpected{BAD_STRING::UNEXPECTED_END};
+        co_return parsed.has_value();
+      }
+      if (ch == '`') {
+        parsed = str;
+        co_return parsed.has_value();
+      }
       if (ch == '$' && cur_state.peek() == '{') {
         cur_state.drop();
-        co_return str;
+        parsed = str;
+        co_return parsed.has_value();
       }
       if (ch == '\\') {
         str.push_back(*ch);
         ch = cur_state.shift();
-        if (not ch)
-          co_return std::unexpected{BAD_STRING::UNEXPECTED_END};
+        if (not ch) {
+          parsed = std::unexpected{BAD_STRING::UNEXPECTED_END};
+          co_return parsed.has_value();
+        }
       }
       if (ch == '\r') {
         if (cur_state.peek() == '\n')
@@ -659,10 +686,11 @@ ParseCoro<std::shared_ptr<Variable>> parse_var_decl() {
   std::optional ch = cur_state.shift();
   if (ch == '=') {
     cur_state.drop(cur_state.space_size());
-    Token::String token_str{};
-    co_await token_str.parse(STRICTNESS::SLOPPY);
+    Token::String token_owner{};
+    std::expected<std::u32string_view, BAD_STRING> token_view;
+    co_await token_owner.parse(STRICTNESS::SLOPPY, token_view);
     var_decl->visit(
-        [&token_str](auto& decl) { decl.initial = std::move(token_str); });
+        [&token_owner](auto& decl) { decl.initial = std::move(token_owner); });
   }
 
   co_return var_decl;
