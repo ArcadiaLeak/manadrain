@@ -122,25 +122,24 @@ struct CurrentState {
 
 #define INJECT_CURRENT_STATE ParseState& cur_state{co_await CurrentState{}};
 
-template <typename R>
 struct ParseCoro {
   struct promise_type {
-    R result;
+    bool result;
     std::exception_ptr except;
-    std::coroutine_handle<> caller_handle;
+    std::coroutine_handle<promise_type> caller_handle;
     std::shared_ptr<ParseDriver> driver;
 
-    void return_value(R ret) { result = std::move(ret); }
+    void return_value(bool ret) { result = ret; }
     void unhandled_exception() { except = std::current_exception(); }
 
     auto get_return_object() {
       std::coroutine_handle coro_handle =
           std::coroutine_handle<promise_type>::from_promise(*this);
-      return ParseCoro<R>{coro_handle};
+      return ParseCoro{coro_handle};
     }
 
     struct FinalizeAwaiter {
-      std::coroutine_handle<> caller_handle;
+      std::coroutine_handle<promise_type> caller_handle;
 
       std::coroutine_handle<> await_suspend(
           std::coroutine_handle<promise_type> h) noexcept {
@@ -162,8 +161,8 @@ struct ParseCoro {
   struct NestedCallAwaiter {
     std::coroutine_handle<promise_type> nested_handle;
 
-    R await_resume() {
-      R result = std::move(nested_handle.promise().result);
+    bool await_resume() {
+      bool result = nested_handle.promise().result;
       std::exception_ptr except = nested_handle.promise().except;
       std::shared_ptr driver = nested_handle.promise().driver;
 
@@ -178,9 +177,8 @@ struct ParseCoro {
       return result;
     }
 
-    template <typename P>
     std::coroutine_handle<promise_type> await_suspend(
-        std::coroutine_handle<P> h) {
+        std::coroutine_handle<promise_type> h) {
       std::shared_ptr driver = h.promise().driver;
       driver->state_stack.push(driver->state_stack.top());
       nested_handle.promise().driver = driver;
@@ -194,7 +192,7 @@ struct ParseCoro {
   NestedCallAwaiter operator co_await() const noexcept { return {coro_handle}; }
 };
 
-ParseCoro<bool> parse_hex(std::uint32_t& parsed) {
+ParseCoro parse_hex(std::uint32_t& parsed) {
   INJECT_CURRENT_STATE
   std::optional digit = cur_state.shift();
   if (not digit)
@@ -224,8 +222,8 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-ParseCoro<bool> parse_escape(ESC_RULE esc_rule,
-                             std::expected<char32_t, BAD_ESCAPE>& parsed) {
+ParseCoro parse_escape(ESC_RULE esc_rule,
+                       std::expected<char32_t, BAD_ESCAPE>& parsed) {
   INJECT_CURRENT_STATE
   std::optional head = cur_state.shift();
   if (not head) {
@@ -429,8 +427,7 @@ std::u32string utf32_convert(const std::string& narrow) {
                         })};
 }
 
-ParseCoro<bool> match_identifier(std::size_t idx,
-                                 std::u32string_view rhs_view) {
+ParseCoro match_identifier(std::size_t idx, std::u32string_view rhs_view) {
   INJECT_CURRENT_STATE
   if (not cur_state.starts_with(rhs_view, idx))
     co_return false;
@@ -453,10 +450,9 @@ struct String {
   char32_t sep;
   std::u32string str;
 
-  ParseCoro<bool> parse_escaped_uchar(
-      const STRICTNESS strictness,
-      std::expected<char32_t, BAD_STRING>& parsed,
-      bool& must_continue) {
+  ParseCoro parse_escaped_uchar(const STRICTNESS strictness,
+                                std::expected<char32_t, BAD_STRING>& parsed,
+                                bool& must_continue) {
     INJECT_CURRENT_STATE
     std::optional ch = cur_state.peek();
     if (not ch) {
@@ -506,8 +502,8 @@ struct String {
     }
   }
 
-  ParseCoro<bool> parse(const STRICTNESS strictness,
-                        std::optional<BAD_STRING>& err_opt) {
+  ParseCoro parse(const STRICTNESS strictness,
+                  std::optional<BAD_STRING>& err_opt) {
     INJECT_CURRENT_STATE
     std::optional ch = cur_state.shift();
     if (not ch || not ch.transform([](char32_t qt) {
@@ -567,7 +563,7 @@ struct Template {
   char32_t sep;
   std::u32string str;
 
-  ParseCoro<bool> parse_part(std::optional<BAD_STRING>& err_opt) {
+  ParseCoro parse_part(std::optional<BAD_STRING>& err_opt) {
     INJECT_CURRENT_STATE
     std::optional<char32_t> ch{};
     while (true) {
@@ -605,7 +601,7 @@ struct Word {
   bool ident_has_escape;
   bool is_private;
 
-  ParseCoro<bool> parse_id_continue(char32_t& parsed) {
+  ParseCoro parse_id_continue(char32_t& parsed) {
     INJECT_CURRENT_STATE
     std::optional ch = cur_state.shift();
     if (not ch)
@@ -623,7 +619,7 @@ struct Word {
     co_return 1;
   }
 
-  ParseCoro<bool> parse() {
+  ParseCoro parse() {
     INJECT_CURRENT_STATE
     if (is_private)
       text.push_back('#');
@@ -650,7 +646,7 @@ struct VariableCst : VariableBase {};
 struct VariableVar : VariableBase {};
 using Variable = std::variant<VariableVar, VariableLet, VariableCst>;
 
-ParseCoro<bool> parse_var_decl() {
+ParseCoro parse_var_decl() {
   INJECT_CURRENT_STATE
   Token::Word var_init{};
   if (not co_await var_init.parse())
@@ -690,7 +686,7 @@ ParseCoro<bool> parse_var_decl() {
   co_return 1;
 }
 
-ParseCoro<bool> parse_statement() {
+ParseCoro parse_statement() {
   INJECT_CURRENT_STATE
   cur_state.drop(cur_state.space_size());
   co_return co_await parse_var_decl();
