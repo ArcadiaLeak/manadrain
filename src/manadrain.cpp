@@ -194,25 +194,24 @@ struct ParseCoro {
   NestedCallAwaiter operator co_await() const noexcept { return {coro_handle}; }
 };
 
-template <typename T>
-using ParseOptional = ParseCoro<std::optional<T>>;
-template <typename T>
-using ParseShared = ParseCoro<std::shared_ptr<T>>;
-template <typename T, typename U>
-using ParseExpected = ParseCoro<std::expected<T, U>>;
-
-ParseOptional<std::uint32_t> parse_hex() {
+ParseCoro<bool> parse_hex(std::uint32_t& parsed) {
   INJECT_CURRENT_STATE
   std::optional digit = cur_state.shift();
   if (not digit)
-    co_return std::nullopt;
-  if (*digit >= '0' && *digit <= '9')
-    co_return *digit - '0';
-  if (*digit >= 'A' && *digit <= 'F')
-    co_return *digit - 'A' + 10;
-  if (*digit >= 'a' && *digit <= 'f')
-    co_return *digit - 'a' + 10;
-  co_return std::nullopt;
+    co_return 0;
+  if (*digit >= '0' && *digit <= '9') {
+    parsed = *digit - '0';
+    co_return 1;
+  }
+  if (*digit >= 'A' && *digit <= 'F') {
+    parsed = *digit - 'A' + 10;
+    co_return 1;
+  }
+  if (*digit >= 'a' && *digit <= 'f') {
+    parsed = *digit - 'a' + 10;
+    co_return 1;
+  }
+  co_return 0;
 }
 
 enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
@@ -225,62 +224,86 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-ParseExpected<char32_t, BAD_ESCAPE> parse_escape(ESC_RULE esc_rule) {
+ParseCoro<bool> parse_escape(ESC_RULE esc_rule,
+                             std::expected<char32_t, BAD_ESCAPE>& parsed) {
   INJECT_CURRENT_STATE
   std::optional head = cur_state.shift();
-  if (not head)
-    co_return std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
+  if (not head) {
+    parsed = std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
+    co_return parsed.has_value();
+  }
 
   switch (*head) {
     case 'b':
-      co_return '\b';
+      parsed = '\b';
+      co_return parsed.has_value();
     case 'f':
-      co_return '\f';
+      parsed = '\f';
+      co_return parsed.has_value();
     case 'n':
-      co_return '\n';
+      parsed = '\n';
+      co_return parsed.has_value();
     case 'r':
-      co_return '\r';
+      parsed = '\r';
+      co_return parsed.has_value();
     case 't':
-      co_return '\t';
+      parsed = '\t';
+      co_return parsed.has_value();
     case 'v':
-      co_return '\v';
+      parsed = '\v';
+      co_return parsed.has_value();
 
     case 'x': {
-      std::optional hex0 = co_await parse_hex();
-      if (not hex0)
-        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
-      std::optional hex1 = co_await parse_hex();
-      if (not hex1)
-        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
-      co_return (*hex0 << 4) | *hex1;
+      std::uint32_t hex0{};
+      if (not co_await parse_hex(hex0)) {
+        parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+        co_return parsed.has_value();
+      }
+      std::uint32_t hex1{};
+      if (not co_await parse_hex(hex1)) {
+        parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+        co_return parsed.has_value();
+      }
+      parsed = (hex0 << 4) | hex1;
+      co_return parsed.has_value();
     }
 
     case 'u': {
       std::optional open_or_uchar = cur_state.shift();
-      if (not open_or_uchar)
-        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+      if (not open_or_uchar) {
+        parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+        co_return parsed.has_value();
+      }
       if (open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII) {
         char32_t utf16_char = 0;
         while (true) {
-          std::optional hex = co_await parse_hex();
-          if (not hex) {
+          std::uint32_t hex{};
+          if (not co_await parse_hex(hex)) {
             std::optional close_or_uchar = cur_state.shift();
-            if (not close_or_uchar)
-              co_return std::unexpected{BAD_ESCAPE::MALFORMED};
-            if (close_or_uchar == '}')
-              co_return utf16_char;
+            if (not close_or_uchar) {
+              parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+              co_return parsed.has_value();
+            }
+            if (close_or_uchar == '}') {
+              parsed = utf16_char;
+              co_return parsed.has_value();
+            }
           }
-          utf16_char = (utf16_char << 4) | *hex;
-          if (utf16_char > 0x10FFFF)
-            co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+          utf16_char = (utf16_char << 4) | hex;
+          if (utf16_char > 0x10FFFF) {
+            parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+            co_return parsed.has_value();
+          }
         }
       } else {
         char32_t high_surr = 0;
         for (int i = 0; i < 4; i++) {
-          std::optional hex = co_await parse_hex();
-          if (not hex)
-            co_return std::unexpected{BAD_ESCAPE::MALFORMED};
-          high_surr = (high_surr << 4) | *hex;
+          std::uint32_t hex{};
+          if (not co_await parse_hex(hex)) {
+            parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+            co_return parsed.has_value();
+          }
+          high_surr = (high_surr << 4) | hex;
         }
 
         if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16 &&
@@ -288,24 +311,31 @@ ParseExpected<char32_t, BAD_ESCAPE> parse_escape(ESC_RULE esc_rule) {
           cur_state.drop(2);
           char32_t low_surr = 0;
           for (int i = 0; i < 4; i++) {
-            std::optional hex = co_await parse_hex();
-            if (not hex)
-              co_return high_surr;
-            low_surr = (low_surr << 4) | *hex;
+            std::uint32_t hex{};
+            if (not co_await parse_hex(hex)) {
+              parsed = high_surr;
+              co_return parsed.has_value();
+            }
+            low_surr = (low_surr << 4) | hex;
           }
-          if (is_lo_surrogate(low_surr))
-            co_return from_surrogate(high_surr, low_surr);
+          if (is_lo_surrogate(low_surr)) {
+            parsed = from_surrogate(high_surr, low_surr);
+            co_return parsed.has_value();
+          }
         }
 
-        co_return high_surr;
+        parsed = high_surr;
+        co_return parsed.has_value();
       }
     }
 
     case '0': {
       std::optional ahead = cur_state.peek();
       if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
-                  .value_or(false))
-        co_return 0;
+                  .value_or(false)) {
+        parsed = 0;
+        co_return parsed.has_value();
+      }
     }
       [[fallthrough]];
 
@@ -318,43 +348,48 @@ ParseExpected<char32_t, BAD_ESCAPE> parse_escape(ESC_RULE esc_rule) {
     case '7':
       switch (esc_rule) {
         case ESC_RULE::STRING_IN_STRICT_MODE:
-          co_return std::unexpected{BAD_ESCAPE::OCTAL_SEQ};
+          parsed = std::unexpected{BAD_ESCAPE::OCTAL_SEQ};
+          co_return parsed.has_value();
 
         case ESC_RULE::STRING_IN_TEMPLATE:
         case ESC_RULE::REGEXP_UTF16:
-          co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+          parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+          co_return parsed.has_value();
 
         default:
-          char32_t octal = *head - '0';
+          parsed = *head - '0';
           std::optional<char32_t> ahead;
           ahead = cur_state.peek().transform(
               [](char32_t ahead_digit) { return ahead_digit - '0'; });
           if (not ahead || *ahead > 7)
-            co_return octal;
+            co_return parsed.has_value();
           cur_state.drop();
-          octal = (octal << 3) | *ahead;
+          parsed = (*parsed << 3) | *ahead;
 
-          if (octal >= 32)
-            co_return octal;
+          if (*parsed >= 32)
+            co_return parsed.has_value();
 
           ahead = cur_state.peek().transform(
               [](char32_t ahead_digit) { return ahead_digit - '0'; });
           if (not ahead || *ahead > 7)
-            co_return octal;
+            co_return parsed.has_value();
           cur_state.drop();
-          octal = (octal << 3) | *ahead;
-          co_return octal;
+          parsed = (*parsed << 3) | *ahead;
+          co_return parsed.has_value();
       }
 
     case '8':
     case '9':
       if (esc_rule == ESC_RULE::STRING_IN_STRICT_MODE ||
-          esc_rule == ESC_RULE::STRING_IN_TEMPLATE)
-        co_return std::unexpected{BAD_ESCAPE::MALFORMED};
+          esc_rule == ESC_RULE::STRING_IN_TEMPLATE) {
+        parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
+        co_return parsed.has_value();
+      }
       [[fallthrough]];
 
     default:
-      co_return std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
+      parsed = std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
+      co_return parsed.has_value();
   }
 }
 
@@ -418,7 +453,7 @@ struct String {
   char32_t sep;
   std::u32string str;
 
-  ParseExpected<char32_t, BAD_STRING> parse_escaped_uchar(
+  ParseCoro<std::expected<char32_t, BAD_STRING>> parse_escaped_uchar(
       const STRICTNESS strictness,
       bool& must_continue) {
     INJECT_CURRENT_STATE
@@ -449,8 +484,8 @@ struct String {
           esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
         else if (sep == '`')
           esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-        std::expected ch_exp = co_await parse_escape(esc_rule);
-        if (ch_exp)
+        std::expected<char32_t, BAD_ESCAPE> ch_exp{};
+        if (co_await parse_escape(esc_rule, ch_exp))
           ch = *ch_exp;
         else if (ch_exp.error() == BAD_ESCAPE::MALFORMED)
           co_return std::unexpected{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
@@ -463,7 +498,7 @@ struct String {
     }
   }
 
-  ParseExpected<std::u32string_view, BAD_STRING> parse(
+  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse(
       const STRICTNESS strictness) {
     INJECT_CURRENT_STATE
     std::optional ch = cur_state.shift();
@@ -517,7 +552,7 @@ struct Template {
   char32_t sep;
   std::u32string str;
 
-  ParseExpected<std::u32string_view, BAD_STRING> parse_part() {
+  ParseCoro<std::expected<std::u32string_view, BAD_STRING>> parse_part() {
     INJECT_CURRENT_STATE
     std::optional<char32_t> ch{};
     while (true) {
@@ -551,14 +586,14 @@ struct Word {
   bool ident_has_escape;
   bool is_private;
 
-  ParseOptional<char32_t> parse_id_continue() {
+  ParseCoro<std::optional<char32_t>> parse_id_continue() {
     INJECT_CURRENT_STATE
     std::optional ch = cur_state.shift();
     if (not ch)
       co_return std::nullopt;
     if (ch == '\\' && cur_state.peek() == 'u') {
-      std::expected ch_esc = co_await parse_escape(ESC_RULE::IDENTIFIER);
-      if (not ch_esc)
+      std::expected<char32_t, BAD_ESCAPE> ch_esc{};
+      if (not co_await parse_escape(ESC_RULE::IDENTIFIER, ch_esc))
         co_return std::nullopt;
       ch = *ch_esc;
       ident_has_escape = true;
@@ -568,7 +603,7 @@ struct Word {
     co_return ch;
   }
 
-  ParseOptional<std::u32string_view> parse() {
+  ParseCoro<std::optional<std::u32string_view>> parse() {
     INJECT_CURRENT_STATE
     if (is_private)
       text.push_back('#');
@@ -595,7 +630,7 @@ struct VariableCst : VariableBase {};
 struct VariableVar : VariableBase {};
 using Variable = std::variant<VariableVar, VariableLet, VariableCst>;
 
-ParseShared<Variable> parse_var_decl() {
+ParseCoro<std::shared_ptr<Variable>> parse_var_decl() {
   INJECT_CURRENT_STATE
   Token::Word var_init{};
   if (not co_await var_init.parse())
@@ -633,7 +668,7 @@ ParseShared<Variable> parse_var_decl() {
   co_return var_decl;
 }
 
-ParseShared<Variable> parse_statement() {
+ParseCoro<std::shared_ptr<Variable>> parse_statement() {
   INJECT_CURRENT_STATE
   cur_state.drop(cur_state.space_size());
   co_return co_await parse_var_decl();
