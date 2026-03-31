@@ -8,7 +8,6 @@
 #include <memory>
 #include <optional>
 #include <ranges>
-#include <stack>
 #include <string>
 #include <variant>
 
@@ -98,20 +97,36 @@ struct ParseState {
   }
 };
 
+struct ParsePromise;
+
 struct ParseDriver {
   std::u32string src_string;
-  std::stack<ParseState> state_stack;
+  std::deque<std::pair<std::coroutine_handle<ParsePromise>, ParseState>>
+      coro_deque;
 
-  ParseDriver(std::u32string str)
-      : src_string{std::move(str)},
-        state_stack{{ParseState{std::u32string_view{src_string}}}} {}
+  ParseDriver(std::coroutine_handle<ParsePromise> root_handle,
+              std::u32string param_src_string)
+      : src_string{std::move(param_src_string)}, coro_deque{} {
+    coro_deque.push_front({root_handle, ParseState{src_string}});
+  }
+};
+
+struct NestedCallAwaiter {
+  std::coroutine_handle<ParsePromise> orig_callee_handle;
+  std::shared_ptr<ParseDriver> driver;
+
+  bool await_resume();
+  std::coroutine_handle<ParsePromise> await_suspend(
+      std::coroutine_handle<ParsePromise>);
+
+  bool await_ready() { return false; }
 };
 
 struct CurrentState {
   std::shared_ptr<ParseDriver> driver;
 
   bool await_ready() { return false; }
-  ParseState& await_resume() { return driver->state_stack.top(); }
+  ParseState& await_resume() { return driver->coro_deque[0].second; }
 
   template <typename P>
   std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
@@ -122,75 +137,70 @@ struct CurrentState {
 
 #define INJECT_CURRENT_STATE ParseState& cur_state{co_await CurrentState{}};
 
-struct ParseCoro {
-  struct promise_type {
-    bool result;
-    std::exception_ptr except;
-    std::coroutine_handle<promise_type> caller_handle;
-    std::shared_ptr<ParseDriver> driver;
+struct FinalizeAwaiter {
+  std::shared_ptr<ParseDriver> driver;
 
-    void return_value(bool ret) { result = ret; }
-    void unhandled_exception() { except = std::current_exception(); }
+  std::coroutine_handle<> await_suspend(
+      std::coroutine_handle<ParsePromise> h) noexcept {
+    if (driver->coro_deque.size() > 1)
+      return driver->coro_deque[1].first;
+    return std::noop_coroutine();
+  }
 
-    auto get_return_object() {
-      std::coroutine_handle coro_handle =
-          std::coroutine_handle<promise_type>::from_promise(*this);
-      return ParseCoro{coro_handle};
-    }
-
-    struct FinalizeAwaiter {
-      std::coroutine_handle<promise_type> caller_handle;
-
-      std::coroutine_handle<> await_suspend(
-          std::coroutine_handle<promise_type> h) noexcept {
-        if (caller_handle)
-          return caller_handle;
-        return std::noop_coroutine();
-      }
-
-      bool await_ready() noexcept { return false; }
-      void await_resume() noexcept {}
-    };
-
-    auto initial_suspend() noexcept { return std::suspend_always{}; }
-    auto final_suspend() noexcept { return FinalizeAwaiter{caller_handle}; }
-  };
-
-  std::coroutine_handle<promise_type> coro_handle;
-
-  struct NestedCallAwaiter {
-    std::coroutine_handle<promise_type> nested_handle;
-
-    bool await_resume() {
-      bool result = nested_handle.promise().result;
-      std::exception_ptr except = nested_handle.promise().except;
-      std::shared_ptr driver = nested_handle.promise().driver;
-
-      nested_handle.destroy();
-      if (except)
-        std::rethrow_exception(except);
-
-      ParseState top_state = driver->state_stack.top();
-      driver->state_stack.pop();
-      if (result)
-        driver->state_stack.top() = top_state;
-      return result;
-    }
-
-    std::coroutine_handle<promise_type> await_suspend(
-        std::coroutine_handle<promise_type> h) {
-      std::shared_ptr driver = h.promise().driver;
-      driver->state_stack.push(driver->state_stack.top());
-      nested_handle.promise().driver = driver;
-      nested_handle.promise().caller_handle = h;
-      return nested_handle;
-    }
-
-    bool await_ready() { return false; }
-  };
-
-  NestedCallAwaiter operator co_await() const noexcept { return {coro_handle}; }
+  bool await_ready() noexcept { return false; }
+  void await_resume() noexcept {}
 };
+
+struct ParseCoro {
+  using promise_type = ParsePromise;
+  std::coroutine_handle<ParsePromise> coro_handle;
+
+  NestedCallAwaiter operator co_await() const noexcept {
+    return NestedCallAwaiter{coro_handle};
+  }
+};
+
+struct ParsePromise {
+  bool ended_in_success;
+  std::exception_ptr thrown_err;
+  std::shared_ptr<ParseDriver> driver;
+
+  void return_value(bool ok) { ended_in_success = ok; }
+  void unhandled_exception() { thrown_err = std::current_exception(); }
+
+  ParseCoro get_return_object() {
+    std::coroutine_handle coro_handle =
+        std::coroutine_handle<ParsePromise>::from_promise(*this);
+    return ParseCoro{coro_handle};
+  }
+
+  auto initial_suspend() noexcept { return std::suspend_always{}; }
+  auto final_suspend() noexcept { return FinalizeAwaiter{driver}; }
+};
+
+bool NestedCallAwaiter::await_resume() {
+  std::coroutine_handle callee_handle = driver->coro_deque[0].first;
+  bool ended_in_success = callee_handle.promise().ended_in_success;
+  std::exception_ptr thrown_err = callee_handle.promise().thrown_err;
+
+  callee_handle.destroy();
+  if (thrown_err)
+    std::rethrow_exception(thrown_err);
+
+  if (ended_in_success)
+    driver->coro_deque[1].second = driver->coro_deque[0].second;
+  driver->coro_deque.pop_front();
+  return ended_in_success;
+}
+
+std::coroutine_handle<ParsePromise> NestedCallAwaiter::await_suspend(
+    std::coroutine_handle<ParsePromise> caller_handle) {
+  driver = caller_handle.promise().driver;
+  driver->coro_deque.push_front(
+      {orig_callee_handle, driver->coro_deque[0].second});
+  orig_callee_handle.promise().driver = driver;
+  return orig_callee_handle;
+}
 
 ParseCoro parse_hex(std::uint32_t& parsed) {
   INJECT_CURRENT_STATE
@@ -694,8 +704,8 @@ ParseCoro parse_statement() {
 
 void Parse(std::string src_string) {
   ParseCoro parse_coro = parse_statement();
-  parse_coro.coro_handle.promise().driver =
-      std::make_shared<ParseDriver>(utf32_convert(src_string));
+  parse_coro.coro_handle.promise().driver = std::make_shared<ParseDriver>(
+      parse_coro.coro_handle, utf32_convert(src_string));
   parse_coro.coro_handle.resume();
   parse_coro.coro_handle.destroy();
 }
