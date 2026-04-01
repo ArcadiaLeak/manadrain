@@ -102,13 +102,12 @@ struct ParsePromise;
 struct ParseFrame {
   std::coroutine_handle<ParsePromise> self_handle;
   std::coroutine_handle<ParsePromise> transfer_handle;
-  ParseState state;
+  std::shared_ptr<ParseState> state;
 };
 
 struct ParseDriver {
   std::shared_ptr<char32_t[]> src_buffer;
   std::size_t src_buffer_size;
-
   std::stack<ParseFrame> coro_stack;
 };
 
@@ -121,11 +120,13 @@ struct NestedCallAwaiter {
   std::coroutine_handle<> await_suspend(std::coroutine_handle<ParsePromise>);
 };
 
-struct AcquireStateRef {
+struct AcquireStatePtr {
   std::shared_ptr<ParseDriver> driver;
 
   bool await_ready() { return false; }
-  ParseState& await_resume() { return driver->coro_stack.top().state; }
+  std::shared_ptr<ParseState> await_resume() {
+    return driver->coro_stack.top().state;
+  }
 
   template <typename P>
   std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
@@ -182,7 +183,8 @@ struct ParsePromise {
   NestedCallAwaiter await_transform(ParseCoro nested_coro) {
     nested_coro.coro_handle.promise().driver = driver;
     driver->coro_stack.push({.self_handle = nested_coro.coro_handle,
-                             .state = driver->coro_stack.top().state});
+                             .state = std::make_shared<ParseState>(
+                                 *driver->coro_stack.top().state)});
     return NestedCallAwaiter{};
   }
 
@@ -214,11 +216,11 @@ std::coroutine_handle<> FinalAwaiter::await_suspend(
   if (driver->coro_stack.size() == 1)
     return std::noop_coroutine();
 
-  ParseState frame_state = driver->coro_stack.top().state;
+  ParseState frame_state = *driver->coro_stack.top().state;
   driver->coro_stack.pop();
 
   if (ended_in_success)
-    driver->coro_stack.top().state = frame_state;
+    *driver->coro_stack.top().state = frame_state;
 
   driver->coro_stack.top().transfer_handle = h;
   return driver->coro_stack.top().self_handle;
@@ -245,8 +247,8 @@ std::coroutine_handle<> NestedCallAwaiter::await_suspend(
 }
 
 ParseCoro parse_hex(std::uint32_t& parsed) {
-  ParseState& cur_state = co_await AcquireStateRef{};
-  std::optional digit = cur_state.shift();
+  std::shared_ptr cur_state = co_await AcquireStatePtr{};
+  std::optional digit = cur_state->shift();
   if (not digit)
     co_return 0;
   if (*digit >= '0' && *digit <= '9') {
@@ -276,8 +278,8 @@ enum class ESC_RULE {
 
 ParseCoro parse_escape(ESC_RULE esc_rule,
                        std::expected<char32_t, BAD_ESCAPE>& parsed) {
-  ParseState& cur_state = co_await AcquireStateRef{};
-  std::optional head = cur_state.shift();
+  std::shared_ptr cur_state = co_await AcquireStatePtr{};
+  std::optional head = cur_state->shift();
   if (not head) {
     parsed = std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
     co_return parsed.has_value();
@@ -319,7 +321,7 @@ ParseCoro parse_escape(ESC_RULE esc_rule,
     }
 
     case 'u': {
-      std::optional open_or_uchar = cur_state.shift();
+      std::optional open_or_uchar = cur_state->shift();
       if (not open_or_uchar) {
         parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
         co_return parsed.has_value();
@@ -329,7 +331,7 @@ ParseCoro parse_escape(ESC_RULE esc_rule,
         while (true) {
           std::uint32_t hex{};
           if (not co_await parse_hex(hex)) {
-            std::optional close_or_uchar = cur_state.shift();
+            std::optional close_or_uchar = cur_state->shift();
             if (not close_or_uchar) {
               parsed = std::unexpected{BAD_ESCAPE::MALFORMED};
               co_return parsed.has_value();
@@ -357,8 +359,8 @@ ParseCoro parse_escape(ESC_RULE esc_rule,
         }
 
         if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16 &&
-            cur_state.starts_with(U"\\u")) {
-          cur_state.drop(2);
+            cur_state->starts_with(U"\\u")) {
+          cur_state->drop(2);
           char32_t low_surr = 0;
           for (int i = 0; i < 4; i++) {
             std::uint32_t hex{};
@@ -380,7 +382,7 @@ ParseCoro parse_escape(ESC_RULE esc_rule,
     }
 
     case '0': {
-      std::optional ahead = cur_state.peek();
+      std::optional ahead = cur_state->peek();
       if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
                   .value_or(false)) {
         parsed = 0;
@@ -409,21 +411,21 @@ ParseCoro parse_escape(ESC_RULE esc_rule,
         default:
           parsed = *head - '0';
           std::optional<char32_t> ahead;
-          ahead = cur_state.peek().transform(
+          ahead = cur_state->peek().transform(
               [](char32_t ahead_digit) { return ahead_digit - '0'; });
           if (not ahead || *ahead > 7)
             co_return parsed.has_value();
-          cur_state.drop();
+          cur_state->drop();
           parsed = (*parsed << 3) | *ahead;
 
           if (*parsed >= 32)
             co_return parsed.has_value();
 
-          ahead = cur_state.peek().transform(
+          ahead = cur_state->peek().transform(
               [](char32_t ahead_digit) { return ahead_digit - '0'; });
           if (not ahead || *ahead > 7)
             co_return parsed.has_value();
-          cur_state.drop();
+          cur_state->drop();
           parsed = (*parsed << 3) | *ahead;
           co_return parsed.has_value();
       }
@@ -486,10 +488,10 @@ std::shared_ptr<char32_t[]> make_shared_u32buffer(
 }
 
 ParseCoro match_identifier(std::size_t idx, std::u32string_view rhs_view) {
-  ParseState& cur_state = co_await AcquireStateRef{};
-  if (not cur_state.starts_with(rhs_view, idx))
+  std::shared_ptr cur_state = co_await AcquireStatePtr{};
+  if (not cur_state->starts_with(rhs_view, idx))
     co_return false;
-  std::optional ch = cur_state.peek(idx + rhs_view.size());
+  std::optional ch = cur_state->peek(idx + rhs_view.size());
   if (not ch)
     co_return false;
   co_return !u_hasBinaryProperty(*ch, UCHAR_XID_CONTINUE);
@@ -511,8 +513,8 @@ struct String {
   ParseCoro parse_escaped_uchar(const STRICTNESS strictness,
                                 std::expected<char32_t, BAD_STRING>& parsed,
                                 bool& must_continue) {
-    ParseState& cur_state = co_await AcquireStateRef{};
-    std::optional ch = cur_state.peek();
+    std::shared_ptr cur_state = co_await AcquireStatePtr{};
+    std::optional ch = cur_state->peek();
     if (not ch) {
       parsed = std::unexpected{BAD_STRING::UNEXPECTED_END};
       co_return parsed.has_value();
@@ -522,18 +524,18 @@ struct String {
       case '\"':
       case '\0':
       case '\\':
-        cur_state.drop();
+        cur_state->drop();
         parsed = *ch;
         co_return parsed.has_value();
       case '\r':
-        if (cur_state.peek() == '\n')
-          cur_state.drop();
+        if (cur_state->peek() == '\n')
+          cur_state->drop();
         [[fallthrough]];
       case '\n':
       case 0x2028:
       case 0x2029:
         /* ignore escaped newline sequence */
-        cur_state.drop();
+        cur_state->drop();
         must_continue = true;
         parsed = *ch;
         co_return parsed.has_value();
@@ -554,7 +556,7 @@ struct String {
           co_return parsed.has_value();
         } else if (ch_exp.error() == BAD_ESCAPE::PER_SE_BACKSLASH)
           /* ignore the '\' (could output a warning) */
-          cur_state.drop();
+          cur_state->drop();
         parsed = *ch;
         co_return parsed.has_value();
     }
@@ -562,8 +564,8 @@ struct String {
 
   ParseCoro parse(const STRICTNESS strictness,
                   std::optional<BAD_STRING>& err_opt) {
-    ParseState& cur_state = co_await AcquireStateRef{};
-    std::optional ch = cur_state.shift();
+    std::shared_ptr cur_state = co_await AcquireStatePtr{};
+    std::optional ch = cur_state->shift();
     if (not ch || not ch.transform([](char32_t qt) {
           return qt == '\'' || qt == '"' || qt == '`';
         })) {
@@ -573,7 +575,7 @@ struct String {
     sep = *ch;
 
     while (true) {
-      ch = cur_state.peek();
+      ch = cur_state->peek();
       if (not ch) {
         err_opt = BAD_STRING::UNEXPECTED_END;
         co_return !err_opt.has_value();
@@ -581,8 +583,8 @@ struct String {
 
       if (sep == '`') {
         if (ch == '\r') {
-          if (cur_state.peek() == '\n')
-            cur_state.drop();
+          if (cur_state->peek() == '\n')
+            cur_state->drop();
           ch = '\n';
         }
       } else if (ch == '\r' || ch == '\n') {
@@ -590,12 +592,12 @@ struct String {
         co_return !err_opt.has_value();
       }
 
-      cur_state.drop();
+      cur_state->drop();
       if (ch == sep)
         co_return !err_opt.has_value();
 
-      if (ch == '$' && cur_state.peek() == '{' && sep == '`') {
-        cur_state.drop();
+      if (ch == '$' && cur_state->peek() == '{' && sep == '`') {
+        cur_state->drop();
         co_return !err_opt.has_value();
       }
 
@@ -622,31 +624,31 @@ struct Template {
   std::u32string buffer;
 
   ParseCoro parse_part(std::optional<BAD_STRING>& err_opt) {
-    ParseState& cur_state = co_await AcquireStateRef{};
+    std::shared_ptr cur_state = co_await AcquireStatePtr{};
     std::optional<char32_t> ch{};
     while (true) {
-      ch = cur_state.shift();
+      ch = cur_state->shift();
       if (not ch) {
         err_opt = BAD_STRING::UNEXPECTED_END;
         co_return !err_opt.has_value();
       }
       if (ch == '`')
         co_return !err_opt.has_value();
-      if (ch == '$' && cur_state.peek() == '{') {
-        cur_state.drop();
+      if (ch == '$' && cur_state->peek() == '{') {
+        cur_state->drop();
         co_return !err_opt.has_value();
       }
       if (ch == '\\') {
         buffer.push_back(*ch);
-        ch = cur_state.shift();
+        ch = cur_state->shift();
         if (not ch) {
           err_opt = BAD_STRING::UNEXPECTED_END;
           co_return !err_opt.has_value();
         }
       }
       if (ch == '\r') {
-        if (cur_state.peek() == '\n')
-          cur_state.drop();
+        if (cur_state->peek() == '\n')
+          cur_state->drop();
         ch = '\n';
       }
       buffer.push_back(*ch);
@@ -660,11 +662,11 @@ struct Word {
   bool is_private;
 
   ParseCoro parse_id_continue(char32_t& parsed) {
-    ParseState& cur_state = co_await AcquireStateRef{};
-    std::optional ch = cur_state.shift();
+    std::shared_ptr cur_state = co_await AcquireStatePtr{};
+    std::optional ch = cur_state->shift();
     if (not ch)
       co_return 0;
-    if (ch == '\\' && cur_state.peek() == 'u') {
+    if (ch == '\\' && cur_state->peek() == 'u') {
       std::expected<char32_t, BAD_ESCAPE> ch_esc{};
       if (not co_await parse_escape(ESC_RULE::IDENTIFIER, ch_esc))
         co_return 0;
@@ -678,10 +680,10 @@ struct Word {
   }
 
   ParseCoro parse() {
-    ParseState& cur_state = co_await AcquireStateRef{};
+    std::shared_ptr cur_state = co_await AcquireStatePtr{};
     if (is_private)
       buffer.push_back('#');
-    std::optional id_start = cur_state.shift();
+    std::optional id_start = cur_state->shift();
     if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
       co_return 0;
     buffer.push_back(*id_start);
@@ -705,12 +707,12 @@ struct VariableVar : VariableBase {};
 using Variable = std::variant<VariableVar, VariableLet, VariableCst>;
 
 ParseCoro parse_var_decl() {
-  ParseState& cur_state = co_await AcquireStateRef{};
+  std::shared_ptr cur_state = co_await AcquireStatePtr{};
   Token::Word var_init{};
   if (not co_await var_init.parse())
     co_return 0;
 
-  if (not cur_state.drop(cur_state.space_size()))
+  if (not cur_state->drop(cur_state->space_size()))
     co_return 0;
 
   std::shared_ptr<Variable> var_decl{};
@@ -728,11 +730,11 @@ ParseCoro parse_var_decl() {
     co_return 0;
   var_decl->visit(
       [&var_name](auto& decl) { decl.var_name = std::move(var_name); });
-  cur_state.drop(cur_state.space_size());
+  cur_state->drop(cur_state->space_size());
 
-  std::optional ch = cur_state.shift();
+  std::optional ch = cur_state->shift();
   if (ch == '=') {
-    cur_state.drop(cur_state.space_size());
+    cur_state->drop(cur_state->space_size());
     Token::String string_token{};
     std::optional<BAD_STRING> token_err{};
     co_await string_token.parse(STRICTNESS::SLOPPY, token_err);
@@ -744,8 +746,8 @@ ParseCoro parse_var_decl() {
 }
 
 ParseCoro parse_statement() {
-  ParseState& cur_state = co_await AcquireStateRef{};
-  cur_state.drop(cur_state.space_size());
+  std::shared_ptr cur_state = co_await AcquireStatePtr{};
+  cur_state->drop(cur_state->space_size());
   co_return parse_var_decl();
 }
 
@@ -757,7 +759,7 @@ void Parse(std::shared_ptr<char[]> src_buffer) {
 
   std::u32string_view root_src_view{driver->src_buffer.get(),
                                     driver->src_buffer_size};
-  ParseState root_state{root_src_view};
+  std::shared_ptr root_state = std::make_shared<ParseState>(root_src_view);
   ParseFrame root_frame{.self_handle = root_coro.coro_handle,
                         .state = root_state};
   driver->coro_stack.push(root_frame);
