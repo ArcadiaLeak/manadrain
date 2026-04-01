@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <stack>
 #include <string>
 #include <variant>
 
@@ -98,16 +99,21 @@ struct ParseState {
 };
 
 struct ParsePromise;
+struct ParseFrame {
+  std::coroutine_handle<ParsePromise> self_handle;
+  std::coroutine_handle<ParsePromise> transfer_handle;
+  ParseState state;
+};
 
 struct ParseDriver {
   std::u32string src_string;
-  std::deque<std::pair<std::coroutine_handle<ParsePromise>, ParseState>>
-      coro_deque;
+  std::stack<ParseFrame> coro_stack;
 
   ParseDriver(std::coroutine_handle<ParsePromise> root_handle,
               std::u32string param_src_string)
-      : src_string{std::move(param_src_string)}, coro_deque{} {
-    coro_deque.push_front({root_handle, ParseState{src_string}});
+      : src_string{std::move(param_src_string)}, coro_stack{} {
+    coro_stack.push(
+        {.self_handle = root_handle, .state = {.src_view = src_string}});
   }
 };
 
@@ -115,18 +121,17 @@ struct NestedCallAwaiter {
   std::coroutine_handle<ParsePromise> orig_callee_handle;
   std::shared_ptr<ParseDriver> driver;
 
-  bool await_resume();
-  std::coroutine_handle<ParsePromise> await_suspend(
-      std::coroutine_handle<ParsePromise>);
+  std::coroutine_handle<> await_suspend(std::coroutine_handle<ParsePromise>);
 
   bool await_ready() { return false; }
+  bool await_resume();
 };
 
 struct CurrentState {
   std::shared_ptr<ParseDriver> driver;
 
   bool await_ready() { return false; }
-  ParseState& await_resume() { return driver->coro_deque[0].second; }
+  ParseState& await_resume() { return driver->coro_stack.top().state; }
 
   template <typename P>
   std::coroutine_handle<P> await_suspend(std::coroutine_handle<P> h) {
@@ -137,15 +142,9 @@ struct CurrentState {
 
 #define INJECT_CURRENT_STATE ParseState& cur_state{co_await CurrentState{}};
 
-struct FinalizeAwaiter {
-  std::shared_ptr<ParseDriver> driver;
-
+struct FinalAwaiter {
   std::coroutine_handle<> await_suspend(
-      std::coroutine_handle<ParsePromise> h) noexcept {
-    if (driver->coro_deque.size() > 1)
-      return driver->coro_deque[1].first;
-    return std::noop_coroutine();
-  }
+      std::coroutine_handle<ParsePromise>) noexcept;
 
   bool await_ready() noexcept { return false; }
   void await_resume() noexcept {}
@@ -175,11 +174,29 @@ struct ParsePromise {
   }
 
   auto initial_suspend() noexcept { return std::suspend_always{}; }
-  auto final_suspend() noexcept { return FinalizeAwaiter{driver}; }
+  auto final_suspend() noexcept { return FinalAwaiter{}; }
 };
 
+std::coroutine_handle<> FinalAwaiter::await_suspend(
+    std::coroutine_handle<ParsePromise> h) noexcept {
+  std::stack<ParseFrame>& coro_stack = h.promise().driver->coro_stack;
+  bool ended_in_success = h.promise().ended_in_success;
+
+  ParseState frame_state = coro_stack.top().state;
+  coro_stack.pop();
+  if (coro_stack.empty())
+    return std::noop_coroutine();
+
+  if (ended_in_success)
+    coro_stack.top().state = frame_state;
+  coro_stack.top().transfer_handle = h;
+  return coro_stack.top().self_handle;
+}
+
 bool NestedCallAwaiter::await_resume() {
-  std::coroutine_handle callee_handle = driver->coro_deque[0].first;
+  std::coroutine_handle callee_handle =
+      driver->coro_stack.top().transfer_handle;
+  driver->coro_stack.top().transfer_handle = nullptr;
   bool ended_in_success = callee_handle.promise().ended_in_success;
   std::exception_ptr thrown_err = callee_handle.promise().thrown_err;
 
@@ -187,17 +204,14 @@ bool NestedCallAwaiter::await_resume() {
   if (thrown_err)
     std::rethrow_exception(thrown_err);
 
-  if (ended_in_success)
-    driver->coro_deque[1].second = driver->coro_deque[0].second;
-  driver->coro_deque.pop_front();
   return ended_in_success;
 }
 
-std::coroutine_handle<ParsePromise> NestedCallAwaiter::await_suspend(
+std::coroutine_handle<> NestedCallAwaiter::await_suspend(
     std::coroutine_handle<ParsePromise> caller_handle) {
   driver = caller_handle.promise().driver;
-  driver->coro_deque.push_front(
-      {orig_callee_handle, driver->coro_deque[0].second});
+  driver->coro_stack.push({.self_handle = orig_callee_handle,
+                           .state = driver->coro_stack.top().state});
   orig_callee_handle.promise().driver = driver;
   return orig_callee_handle;
 }
@@ -458,7 +472,7 @@ enum class BAD_STRING {
 namespace Token {
 struct String {
   char32_t sep;
-  std::u32string str;
+  std::u32string buffer;
 
   ParseCoro parse_escaped_uchar(const STRICTNESS strictness,
                                 std::expected<char32_t, BAD_STRING>& parsed,
@@ -564,14 +578,14 @@ struct String {
           ch = *esc_exp;
       }
 
-      str.push_back(*ch);
+      buffer.push_back(*ch);
     }
   }
 };
 
 struct Template {
   char32_t sep;
-  std::u32string str;
+  std::u32string buffer;
 
   ParseCoro parse_part(std::optional<BAD_STRING>& err_opt) {
     INJECT_CURRENT_STATE
@@ -589,7 +603,7 @@ struct Template {
         co_return !err_opt.has_value();
       }
       if (ch == '\\') {
-        str.push_back(*ch);
+        buffer.push_back(*ch);
         ch = cur_state.shift();
         if (not ch) {
           err_opt = BAD_STRING::UNEXPECTED_END;
@@ -601,13 +615,13 @@ struct Template {
           cur_state.drop();
         ch = '\n';
       }
-      str.push_back(*ch);
+      buffer.push_back(*ch);
     }
   }
 };
 
 struct Word {
-  std::u32string text;
+  std::u32string buffer;
   bool ident_has_escape;
   bool is_private;
 
@@ -632,16 +646,16 @@ struct Word {
   ParseCoro parse() {
     INJECT_CURRENT_STATE
     if (is_private)
-      text.push_back('#');
+      buffer.push_back('#');
     std::optional id_start = cur_state.shift();
     if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
       co_return 0;
-    text.push_back(*id_start);
+    buffer.push_back(*id_start);
     while (true) {
       char32_t ch{};
       if (not co_await parse_id_continue(ch))
         co_return 1;
-      text.push_back(ch);
+      buffer.push_back(ch);
     }
   }
 };
@@ -666,11 +680,11 @@ ParseCoro parse_var_decl() {
     co_return 0;
 
   std::shared_ptr<Variable> var_decl{};
-  if (var_init.text == U"let")
+  if (var_init.buffer == U"let")
     var_decl = std::make_shared<Variable>(VariableLet{});
-  if (var_init.text == U"const")
+  if (var_init.buffer == U"const")
     var_decl = std::make_shared<Variable>(VariableCst{});
-  if (var_init.text == U"var")
+  if (var_init.buffer == U"var")
     var_decl = std::make_shared<Variable>(VariableVar{});
   if (not var_decl)
     co_return 0;
@@ -692,7 +706,6 @@ ParseCoro parse_var_decl() {
       decl.initial = std::move(string_token);
     });
   }
-
   co_return 1;
 }
 
