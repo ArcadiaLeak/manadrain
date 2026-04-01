@@ -10,6 +10,7 @@
 #include <ranges>
 #include <stack>
 #include <string>
+#include <unordered_map>
 #include <variant>
 
 namespace Manadrain {
@@ -613,7 +614,6 @@ struct String {
         else
           ch = *esc_exp;
       }
-
       buffer.push_back(*ch);
     }
   }
@@ -697,50 +697,47 @@ struct Word {
 };
 }  // namespace Token
 
-struct VariableBase {
-  Token::Word var_name;
-  Token::String initial;
+struct Variable {
+  struct VariableLet {};
+  struct VariableCst {};
+  struct VariableVar {};
+  using Kind = std::variant<VariableVar, VariableLet, VariableCst>;
+
+  Kind kind;
+  Token::Word name;
+  Token::String init;
 };
-struct VariableLet : VariableBase {};
-struct VariableCst : VariableBase {};
-struct VariableVar : VariableBase {};
-using Variable = std::variant<VariableVar, VariableLet, VariableCst>;
 
 ParseCoro parse_var_decl() {
   std::shared_ptr cur_state = co_await AcquireStatePtr{};
-  Token::Word var_init{};
-  if (not co_await var_init.parse())
+  std::shared_ptr var_decl = std::make_shared<Variable>();
+
+  Token::Word var_keyword{};
+  if (not co_await var_keyword.parse())
     co_return 0;
+
+  static const std::unordered_map<std::u32string_view, Variable::Kind>
+      var_kind_match = {{U"let", Variable::VariableLet{}},
+                        {U"const", Variable::VariableCst{}},
+                        {U"var", Variable::VariableVar{}}};
+  std::unordered_map<std::u32string_view, Variable::Kind>::const_iterator
+      var_kind_it = var_kind_match.find(var_keyword.buffer);
+  if (var_kind_it == var_kind_match.end())
+    co_return 0;
+  var_decl->kind = var_kind_it->second;
 
   if (not cur_state->drop(cur_state->space_size()))
     co_return 0;
 
-  std::shared_ptr<Variable> var_decl{};
-  if (var_init.buffer == U"let")
-    var_decl = std::make_shared<Variable>(VariableLet{});
-  if (var_init.buffer == U"const")
-    var_decl = std::make_shared<Variable>(VariableCst{});
-  if (var_init.buffer == U"var")
-    var_decl = std::make_shared<Variable>(VariableVar{});
-  if (not var_decl)
+  if (not co_await var_decl->name.parse())
     co_return 0;
-
-  Token::Word var_name{};
-  if (not co_await var_name.parse())
-    co_return 0;
-  var_decl->visit(
-      [&var_name](auto& decl) { decl.var_name = std::move(var_name); });
   cur_state->drop(cur_state->space_size());
 
   std::optional ch = cur_state->shift();
   if (ch == '=') {
     cur_state->drop(cur_state->space_size());
-    Token::String string_token{};
-    std::optional<BAD_STRING> token_err{};
-    co_await string_token.parse(STRICTNESS::SLOPPY, token_err);
-    var_decl->visit([&string_token](auto& decl) {
-      decl.initial = std::move(string_token);
-    });
+    std::optional<BAD_STRING> var_init_err{};
+    co_await var_decl->init.parse(STRICTNESS::SLOPPY, var_init_err);
   }
   co_return 1;
 }
