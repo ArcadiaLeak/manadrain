@@ -118,7 +118,6 @@ struct ParseDriver {
 };
 
 struct NestedCallAwaiter {
-  std::coroutine_handle<ParsePromise> orig_callee_handle;
   std::shared_ptr<ParseDriver> driver;
 
   std::coroutine_handle<> await_suspend(std::coroutine_handle<ParsePromise>);
@@ -127,7 +126,7 @@ struct NestedCallAwaiter {
   bool await_resume();
 };
 
-struct CurrentState {
+struct AcquireStateRef {
   std::shared_ptr<ParseDriver> driver;
 
   bool await_ready() { return false; }
@@ -140,7 +139,12 @@ struct CurrentState {
   }
 };
 
-#define INJECT_CURRENT_STATE ParseState& cur_state{co_await CurrentState{}};
+struct InitialAwaiter {
+  void await_suspend(std::coroutine_handle<ParsePromise>) noexcept {}
+  bool await_ready() noexcept { return false; }
+
+  void await_resume() noexcept;
+};
 
 struct FinalAwaiter {
   std::coroutine_handle<> await_suspend(
@@ -153,10 +157,6 @@ struct FinalAwaiter {
 struct ParseCoro {
   using promise_type = ParsePromise;
   std::coroutine_handle<ParsePromise> coro_handle;
-
-  NestedCallAwaiter operator co_await() const noexcept {
-    return NestedCallAwaiter{coro_handle};
-  }
 };
 
 struct ParsePromise {
@@ -164,8 +164,11 @@ struct ParsePromise {
   std::exception_ptr thrown_err;
   std::shared_ptr<ParseDriver> driver;
 
-  void return_value(bool ok) { ended_in_success = ok; }
   void unhandled_exception() { thrown_err = std::current_exception(); }
+  void return_value(bool ok) { ended_in_success = ok; }
+  void return_value(ParseCoro tail_coro) {
+    driver->coro_stack.top().transfer_handle = tail_coro.coro_handle;
+  }
 
   ParseCoro get_return_object() {
     std::coroutine_handle coro_handle =
@@ -173,14 +176,31 @@ struct ParsePromise {
     return ParseCoro{coro_handle};
   }
 
-  auto initial_suspend() noexcept { return std::suspend_always{}; }
+  auto initial_suspend() noexcept { return InitialAwaiter{}; }
   auto final_suspend() noexcept { return FinalAwaiter{}; }
+
+  NestedCallAwaiter await_transform(ParseCoro nested_coro) {
+    nested_coro.coro_handle.promise().driver = driver;
+    driver->coro_stack.push({.self_handle = nested_coro.coro_handle,
+                             .state = driver->coro_stack.top().state});
+    return NestedCallAwaiter{};
+  }
+
+  template <typename T>
+  T&& await_transform(T&& awaiter) {
+    return std::forward<T>(awaiter);
+  }
 };
+
+void InitialAwaiter::await_resume() noexcept {}
 
 std::coroutine_handle<> FinalAwaiter::await_suspend(
     std::coroutine_handle<ParsePromise> h) noexcept {
   std::stack<ParseFrame>& coro_stack = h.promise().driver->coro_stack;
   bool ended_in_success = h.promise().ended_in_success;
+
+  if (coro_stack.top().transfer_handle)
+    return coro_stack.top().transfer_handle;
 
   ParseState frame_state = coro_stack.top().state;
   coro_stack.pop();
@@ -210,14 +230,11 @@ bool NestedCallAwaiter::await_resume() {
 std::coroutine_handle<> NestedCallAwaiter::await_suspend(
     std::coroutine_handle<ParsePromise> caller_handle) {
   driver = caller_handle.promise().driver;
-  driver->coro_stack.push({.self_handle = orig_callee_handle,
-                           .state = driver->coro_stack.top().state});
-  orig_callee_handle.promise().driver = driver;
-  return orig_callee_handle;
+  return driver->coro_stack.top().self_handle;
 }
 
 ParseCoro parse_hex(std::uint32_t& parsed) {
-  INJECT_CURRENT_STATE
+  ParseState& cur_state = co_await AcquireStateRef{};
   std::optional digit = cur_state.shift();
   if (not digit)
     co_return 0;
@@ -248,7 +265,7 @@ enum class ESC_RULE {
 
 ParseCoro parse_escape(ESC_RULE esc_rule,
                        std::expected<char32_t, BAD_ESCAPE>& parsed) {
-  INJECT_CURRENT_STATE
+  ParseState& cur_state = co_await AcquireStateRef{};
   std::optional head = cur_state.shift();
   if (not head) {
     parsed = std::unexpected{BAD_ESCAPE::PER_SE_BACKSLASH};
@@ -452,7 +469,7 @@ std::u32string utf32_convert(const std::string& narrow) {
 }
 
 ParseCoro match_identifier(std::size_t idx, std::u32string_view rhs_view) {
-  INJECT_CURRENT_STATE
+  ParseState& cur_state = co_await AcquireStateRef{};
   if (not cur_state.starts_with(rhs_view, idx))
     co_return false;
   std::optional ch = cur_state.peek(idx + rhs_view.size());
@@ -477,7 +494,7 @@ struct String {
   ParseCoro parse_escaped_uchar(const STRICTNESS strictness,
                                 std::expected<char32_t, BAD_STRING>& parsed,
                                 bool& must_continue) {
-    INJECT_CURRENT_STATE
+    ParseState& cur_state = co_await AcquireStateRef{};
     std::optional ch = cur_state.peek();
     if (not ch) {
       parsed = std::unexpected{BAD_STRING::UNEXPECTED_END};
@@ -528,7 +545,7 @@ struct String {
 
   ParseCoro parse(const STRICTNESS strictness,
                   std::optional<BAD_STRING>& err_opt) {
-    INJECT_CURRENT_STATE
+    ParseState& cur_state = co_await AcquireStateRef{};
     std::optional ch = cur_state.shift();
     if (not ch || not ch.transform([](char32_t qt) {
           return qt == '\'' || qt == '"' || qt == '`';
@@ -566,7 +583,7 @@ struct String {
       }
 
       if (ch == '\\') {
-        bool must_continue{false};
+        bool must_continue = false;
         std::expected<char32_t, BAD_STRING> esc_exp{};
         if (not co_await parse_escaped_uchar(strictness, esc_exp,
                                              must_continue)) {
@@ -588,7 +605,7 @@ struct Template {
   std::u32string buffer;
 
   ParseCoro parse_part(std::optional<BAD_STRING>& err_opt) {
-    INJECT_CURRENT_STATE
+    ParseState& cur_state = co_await AcquireStateRef{};
     std::optional<char32_t> ch{};
     while (true) {
       ch = cur_state.shift();
@@ -626,7 +643,7 @@ struct Word {
   bool is_private;
 
   ParseCoro parse_id_continue(char32_t& parsed) {
-    INJECT_CURRENT_STATE
+    ParseState& cur_state = co_await AcquireStateRef{};
     std::optional ch = cur_state.shift();
     if (not ch)
       co_return 0;
@@ -644,7 +661,7 @@ struct Word {
   }
 
   ParseCoro parse() {
-    INJECT_CURRENT_STATE
+    ParseState& cur_state = co_await AcquireStateRef{};
     if (is_private)
       buffer.push_back('#');
     std::optional id_start = cur_state.shift();
@@ -671,7 +688,7 @@ struct VariableVar : VariableBase {};
 using Variable = std::variant<VariableVar, VariableLet, VariableCst>;
 
 ParseCoro parse_var_decl() {
-  INJECT_CURRENT_STATE
+  ParseState& cur_state = co_await AcquireStateRef{};
   Token::Word var_init{};
   if (not co_await var_init.parse())
     co_return 0;
@@ -700,7 +717,7 @@ ParseCoro parse_var_decl() {
   if (ch == '=') {
     cur_state.drop(cur_state.space_size());
     Token::String string_token{};
-    std::optional<BAD_STRING> token_err;
+    std::optional<BAD_STRING> token_err{};
     co_await string_token.parse(STRICTNESS::SLOPPY, token_err);
     var_decl->visit([&string_token](auto& decl) {
       decl.initial = std::move(string_token);
@@ -710,7 +727,7 @@ ParseCoro parse_var_decl() {
 }
 
 ParseCoro parse_statement() {
-  INJECT_CURRENT_STATE
+  ParseState& cur_state = co_await AcquireStateRef{};
   cur_state.drop(cur_state.space_size());
   co_return co_await parse_var_decl();
 }
