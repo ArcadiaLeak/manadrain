@@ -107,6 +107,8 @@ struct ParseFrame {
 
 struct ParseDriver {
   std::shared_ptr<char32_t[]> src_buffer;
+  std::size_t src_buffer_size;
+
   std::stack<ParseFrame> coro_stack;
 };
 
@@ -442,7 +444,8 @@ ParseCoro parse_escape(ESC_RULE esc_rule,
 }
 
 std::shared_ptr<char32_t[]> make_shared_u32buffer(
-    std::shared_ptr<char[]> narrow) {
+    std::shared_ptr<char[]> narrow,
+    std::size_t& wide_buf_size) {
   UErrorCode status = U_ZERO_ERROR;
 
   std::int32_t u16_size{};
@@ -472,13 +475,14 @@ std::shared_ptr<char32_t[]> make_shared_u32buffer(
     throw std::runtime_error{
         std::format("UTF-16 to UTF-32 failed: {}", u_errorName(status))};
 
-  std::shared_ptr ret = std::make_shared<char32_t[]>(wide.size() + 1);
+  wide_buf_size = wide.size();
+  std::shared_ptr wide_buf = std::make_shared<char32_t[]>(wide_buf_size);
   std::ranges::copy(wide | std::views::transform([](UChar32 uchar) {
                       return static_cast<char32_t>(uchar);
                     }),
-                    ret.get());
+                    wide_buf.get());
 
-  return ret;
+  return wide_buf;
 }
 
 ParseCoro match_identifier(std::size_t idx, std::u32string_view rhs_view) {
@@ -748,9 +752,11 @@ ParseCoro parse_statement() {
 void Parse(std::shared_ptr<char[]> src_buffer) {
   ParseCoro root_coro = parse_statement();
   std::shared_ptr driver = std::make_shared<ParseDriver>();
-  driver->src_buffer = make_shared_u32buffer(src_buffer);
+  driver->src_buffer =
+      make_shared_u32buffer(src_buffer, driver->src_buffer_size);
 
-  std::u32string_view root_src_view{driver->src_buffer.get()};
+  std::u32string_view root_src_view{driver->src_buffer.get(),
+                                    driver->src_buffer_size};
   ParseState root_state{root_src_view};
   ParseFrame root_frame{.self_handle = root_coro.coro_handle,
                         .state = root_state};
