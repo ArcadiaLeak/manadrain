@@ -106,15 +106,8 @@ struct ParseFrame {
 };
 
 struct ParseDriver {
-  std::u32string src_string;
+  std::shared_ptr<char32_t[]> src_buffer;
   std::stack<ParseFrame> coro_stack;
-
-  ParseDriver(std::coroutine_handle<ParsePromise> root_handle,
-              std::u32string param_src_string)
-      : src_string{std::move(param_src_string)}, coro_stack{} {
-    coro_stack.push({.self_handle = root_handle,
-                     .state = ParseState{.src_view = src_string}});
-  }
 };
 
 struct NestedCallAwaiter {
@@ -448,17 +441,18 @@ ParseCoro parse_escape(ESC_RULE esc_rule,
   }
 }
 
-std::u32string utf32_convert(const std::string& narrow) {
+std::shared_ptr<char32_t[]> make_shared_u32buffer(
+    std::shared_ptr<char[]> narrow) {
   UErrorCode status = U_ZERO_ERROR;
 
   std::int32_t u16_size{};
-  u_strFromUTF8(nullptr, 0, &u16_size, narrow.data(), -1, &status);
+  u_strFromUTF8(nullptr, 0, &u16_size, narrow.get(), -1, &status);
   if (status == U_BUFFER_OVERFLOW_ERROR)
     status = U_ZERO_ERROR;
 
   std::u16string medium{};
   medium.resize(u16_size);
-  u_strFromUTF8(medium.data(), u16_size + 1, nullptr, narrow.data(), -1,
+  u_strFromUTF8(medium.data(), u16_size + 1, nullptr, narrow.get(), -1,
                 &status);
 
   if (U_FAILURE(status))
@@ -478,10 +472,13 @@ std::u32string utf32_convert(const std::string& narrow) {
     throw std::runtime_error{
         std::format("UTF-16 to UTF-32 failed: {}", u_errorName(status))};
 
-  return std::u32string{std::from_range,
-                        wide | std::views::transform([](UChar32 uchar) {
-                          return static_cast<char32_t>(uchar);
-                        })};
+  std::shared_ptr ret = std::make_shared<char32_t[]>(wide.size() + 1);
+  std::ranges::copy(wide | std::views::transform([](UChar32 uchar) {
+                      return static_cast<char32_t>(uchar);
+                    }),
+                    ret.get());
+
+  return ret;
 }
 
 ParseCoro match_identifier(std::size_t idx, std::u32string_view rhs_view) {
@@ -748,9 +745,17 @@ ParseCoro parse_statement() {
   co_return parse_var_decl();
 }
 
-void Parse(std::string src_string) {
-  std::shared_ptr driver = std::make_shared<ParseDriver>(
-      parse_statement().coro_handle, utf32_convert(src_string));
+void Parse(std::shared_ptr<char[]> src_buffer) {
+  ParseCoro root_coro = parse_statement();
+  std::shared_ptr driver = std::make_shared<ParseDriver>();
+  driver->src_buffer = make_shared_u32buffer(src_buffer);
+
+  std::u32string_view root_src_view{driver->src_buffer.get()};
+  ParseState root_state{root_src_view};
+  ParseFrame root_frame{.self_handle = root_coro.coro_handle,
+                        .state = root_state};
+  driver->coro_stack.push(root_frame);
+
   driver->coro_stack.top().self_handle.promise().driver = driver;
   driver->coro_stack.top().self_handle.resume();
   driver->coro_stack.top().self_handle.destroy();
