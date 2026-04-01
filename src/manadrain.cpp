@@ -112,18 +112,18 @@ struct ParseDriver {
   ParseDriver(std::coroutine_handle<ParsePromise> root_handle,
               std::u32string param_src_string)
       : src_string{std::move(param_src_string)}, coro_stack{} {
-    coro_stack.push(
-        {.self_handle = root_handle, .state = {.src_view = src_string}});
+    coro_stack.push({.self_handle = root_handle,
+                     .state = ParseState{.src_view = src_string}});
   }
 };
 
 struct NestedCallAwaiter {
   std::shared_ptr<ParseDriver> driver;
 
-  std::coroutine_handle<> await_suspend(std::coroutine_handle<ParsePromise>);
-
   bool await_ready() { return false; }
   bool await_resume();
+
+  std::coroutine_handle<> await_suspend(std::coroutine_handle<ParsePromise>);
 };
 
 struct AcquireStateRef {
@@ -140,10 +140,14 @@ struct AcquireStateRef {
 };
 
 struct InitialAwaiter {
-  void await_suspend(std::coroutine_handle<ParsePromise>) noexcept {}
-  bool await_ready() noexcept { return false; }
+  std::coroutine_handle<ParsePromise> coro_handle;
 
+  bool await_ready() noexcept { return false; }
   void await_resume() noexcept;
+
+  void await_suspend(std::coroutine_handle<ParsePromise> h) noexcept {
+    coro_handle = h;
+  }
 };
 
 struct FinalAwaiter {
@@ -167,6 +171,7 @@ struct ParsePromise {
   void unhandled_exception() { thrown_err = std::current_exception(); }
   void return_value(bool ok) { ended_in_success = ok; }
   void return_value(ParseCoro tail_coro) {
+    tail_coro.coro_handle.promise().driver = driver;
     driver->coro_stack.top().transfer_handle = tail_coro.coro_handle;
   }
 
@@ -192,25 +197,36 @@ struct ParsePromise {
   }
 };
 
-void InitialAwaiter::await_resume() noexcept {}
+void InitialAwaiter::await_resume() noexcept {
+  std::shared_ptr driver = coro_handle.promise().driver;
+  if (not driver->coro_stack.top().transfer_handle)
+    return;
+
+  driver->coro_stack.top().self_handle.destroy();
+  driver->coro_stack.top().self_handle =
+      driver->coro_stack.top().transfer_handle;
+  driver->coro_stack.top().transfer_handle = nullptr;
+}
 
 std::coroutine_handle<> FinalAwaiter::await_suspend(
     std::coroutine_handle<ParsePromise> h) noexcept {
-  std::stack<ParseFrame>& coro_stack = h.promise().driver->coro_stack;
+  std::shared_ptr driver = h.promise().driver;
   bool ended_in_success = h.promise().ended_in_success;
 
-  if (coro_stack.top().transfer_handle)
-    return coro_stack.top().transfer_handle;
+  if (driver->coro_stack.top().transfer_handle)
+    return driver->coro_stack.top().transfer_handle;
 
-  ParseState frame_state = coro_stack.top().state;
-  coro_stack.pop();
-  if (coro_stack.empty())
+  if (driver->coro_stack.size() == 1)
     return std::noop_coroutine();
 
+  ParseState frame_state = driver->coro_stack.top().state;
+  driver->coro_stack.pop();
+
   if (ended_in_success)
-    coro_stack.top().state = frame_state;
-  coro_stack.top().transfer_handle = h;
-  return coro_stack.top().self_handle;
+    driver->coro_stack.top().state = frame_state;
+
+  driver->coro_stack.top().transfer_handle = h;
+  return driver->coro_stack.top().self_handle;
 }
 
 bool NestedCallAwaiter::await_resume() {
@@ -729,14 +745,14 @@ ParseCoro parse_var_decl() {
 ParseCoro parse_statement() {
   ParseState& cur_state = co_await AcquireStateRef{};
   cur_state.drop(cur_state.space_size());
-  co_return co_await parse_var_decl();
+  co_return parse_var_decl();
 }
 
 void Parse(std::string src_string) {
-  ParseCoro parse_coro = parse_statement();
-  parse_coro.coro_handle.promise().driver = std::make_shared<ParseDriver>(
-      parse_coro.coro_handle, utf32_convert(src_string));
-  parse_coro.coro_handle.resume();
-  parse_coro.coro_handle.destroy();
+  std::shared_ptr driver = std::make_shared<ParseDriver>(
+      parse_statement().coro_handle, utf32_convert(src_string));
+  driver->coro_stack.top().self_handle.promise().driver = driver;
+  driver->coro_stack.top().self_handle.resume();
+  driver->coro_stack.top().self_handle.destroy();
 }
 }  // namespace Manadrain
