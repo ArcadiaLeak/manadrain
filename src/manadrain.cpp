@@ -706,46 +706,49 @@ struct Variable {
   Kind kind;
   Token::Word name;
   Token::String init;
-};
 
-ParseCoro parse_var_decl() {
-  std::shared_ptr cur_state = co_await AcquireStatePtr{};
-  std::shared_ptr var_decl = std::make_shared<Variable>();
+  ParseCoro parse() {
+    std::shared_ptr cur_state = co_await AcquireStatePtr{};
 
-  Token::Word var_keyword{};
-  if (not co_await var_keyword.parse())
-    co_return 0;
+    Token::Word var_keyword{};
+    if (not co_await var_keyword.parse())
+      co_return 0;
 
-  static const std::unordered_map<std::u32string_view, Variable::Kind>
-      var_kind_match = {{U"let", Variable::VariableLet{}},
-                        {U"const", Variable::VariableCst{}},
-                        {U"var", Variable::VariableVar{}}};
-  std::unordered_map<std::u32string_view, Variable::Kind>::const_iterator
-      var_kind_it = var_kind_match.find(var_keyword.buffer);
-  if (var_kind_it == var_kind_match.end())
-    co_return 0;
-  var_decl->kind = var_kind_it->second;
+    static const std::unordered_map<std::u32string_view, Variable::Kind>
+        var_kind_match = {{U"let", Variable::VariableLet{}},
+                          {U"const", Variable::VariableCst{}},
+                          {U"var", Variable::VariableVar{}}};
+    std::unordered_map<std::u32string_view, Variable::Kind>::const_iterator
+        var_kind_it = var_kind_match.find(var_keyword.buffer);
+    if (var_kind_it == var_kind_match.end())
+      co_return 0;
+    kind = var_kind_it->second;
 
-  if (not cur_state->drop(cur_state->space_size()))
-    co_return 0;
+    if (not cur_state->drop(cur_state->space_size()))
+      co_return 0;
 
-  if (not co_await var_decl->name.parse())
-    co_return 0;
-  cur_state->drop(cur_state->space_size());
-
-  std::optional ch = cur_state->shift();
-  if (ch == '=') {
+    if (not co_await name.parse())
+      co_return 0;
     cur_state->drop(cur_state->space_size());
-    std::optional<BAD_STRING> var_init_err{};
-    co_await var_decl->init.parse(STRICTNESS::SLOPPY, var_init_err);
+
+    std::optional ch = cur_state->shift();
+    if (ch == '=') {
+      cur_state->drop(cur_state->space_size());
+      std::optional<BAD_STRING> var_init_err{};
+      co_await init.parse(STRICTNESS::SLOPPY, var_init_err);
+    }
+    co_return 1;
   }
-  co_return 1;
-}
+};
 
 ParseCoro parse_statement() {
   std::shared_ptr cur_state = co_await AcquireStatePtr{};
   cur_state->drop(cur_state->space_size());
-  co_return parse_var_decl();
+
+  std::shared_ptr var_decl = std::make_shared<Variable>();
+  co_await var_decl->parse();
+
+  co_return 1;
 }
 
 void Parse(std::shared_ptr<char[]> src_buffer) {
