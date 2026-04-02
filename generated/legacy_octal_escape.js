@@ -1,5 +1,5 @@
 // LEGACY OCTAL ESCAPE SEQUENCES (non‑strict mode only)
-// They are deprecated – avoid using them in new code.
+/* They are deprecated – avoid using them in new code. */
 
 // 1. Octal escapes in strings: \ followed by 1–3 octal digits
 let greeting = "\110\145\154\154\157\41"; // octal: H e l l o !
