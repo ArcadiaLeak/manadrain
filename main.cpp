@@ -2,6 +2,7 @@
 #include <fstream>
 #include <iostream>
 #include <print>
+#include <ranges>
 
 #include "manadrain.hpp"
 
@@ -22,12 +23,9 @@ int main(int argc, char* argv[]) {
     throw std::runtime_error{std::format("could not open file: {}", filepath)};
   file >> std::noskipws;
 
-  Manadrain::ParseBuffer parse_buffer{
-      .buffer = std::ranges::istream_view<char>{file} |
-                std::ranges::to<std::string>()};
-  std::size_t i = 1;
-  int ch = static_cast<int>(*parse_buffer.read(i));
-  std::println("{} {}", ch, i);
+  Manadrain::ParseDriver parse_buffer{
+      .buffer = std::ranges::istream_view<std::uint8_t>{file} |
+                std::ranges::to<std::basic_string<std::uint8_t>>()};
 
   return 0;
 }
