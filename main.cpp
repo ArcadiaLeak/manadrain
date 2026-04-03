@@ -2,12 +2,8 @@
 #include <fstream>
 #include <iostream>
 #include <print>
-#include <ranges>
-#include <string>
 
-namespace Manadrain {
-void Parse(const std::string& src_string);
-}
+#include "manadrain.hpp"
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
@@ -26,9 +22,12 @@ int main(int argc, char* argv[]) {
     throw std::runtime_error{std::format("could not open file: {}", filepath)};
   file >> std::noskipws;
 
-  const std::string src_string =
-      std::ranges::istream_view<char>{file} | std::ranges::to<std::string>();
-  Manadrain::Parse(src_string);
+  Manadrain::ParseBuffer parse_buffer{
+      .buffer = std::ranges::istream_view<char>{file} |
+                std::ranges::to<std::string>()};
+  std::size_t i = 1;
+  int ch = static_cast<int>(*parse_buffer.read(i));
+  std::println("{} {}", ch, i);
 
   return 0;
 }
