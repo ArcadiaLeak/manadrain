@@ -6,7 +6,7 @@
 #include <string>
 
 namespace Manadrain {
-void Parse(std::shared_ptr<char[]> src_buffer);
+void Parse(const std::string& src_string);
 }
 
 int main(int argc, char* argv[]) {
@@ -24,12 +24,11 @@ int main(int argc, char* argv[]) {
   std::ifstream file{filepath, std::ios::binary};
   if (not file.is_open())
     throw std::runtime_error{std::format("could not open file: {}", filepath)};
+  file >> std::noskipws;
 
-  uintmax_t filesize = std::filesystem::file_size(filepath);
-  std::shared_ptr buffer = std::make_shared<char[]>(filesize + 1);
-  file.read(buffer.get(), filesize);
-
-  Manadrain::Parse(buffer);
+  const std::string src_string =
+      std::ranges::istream_view<char>{file} | std::ranges::to<std::string>();
+  Manadrain::Parse(src_string);
 
   return 0;
 }
