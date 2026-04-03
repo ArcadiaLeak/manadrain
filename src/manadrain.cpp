@@ -228,7 +228,7 @@ void ParseData::populate(const std::string& narrow) {
 namespace Token {
 struct String {
   char32_t sep;
-  std::u32string buffer;
+  std::shared_ptr<const std::u32string> text;
 };
 }  // namespace Token
 
@@ -433,10 +433,126 @@ bool Common::parse_escape_b(ESC_RULE esc_rule,
     state = state_backup;
   return ok;
 }
+
+struct String : Common {
+  STRICTNESS strictness;
+  char32_t sep;
+  std::u32string buffer;
+
+  int parse_escaped_uchar(std::pair<char32_t, BAD_STRING>& parsed);
+  int parse_iter(BAD_STRING& err);
+  bool parse(std::pair<Token::String, BAD_STRING>& parsed);
+};
+
+int String::parse_escaped_uchar(std::pair<char32_t, BAD_STRING>& parsed) {
+  std::optional head = view_peek(state.textview);
+  if (not head) {
+    parsed.second = BAD_STRING::UNEXPECTED_END;
+    return 0;
+  }
+  switch (*head) {
+    case '\'':
+    case '\"':
+    case '\0':
+    case '\\':
+      parsed.first = *head;
+      view_drop(state.textview, 1);
+      return 1;
+    case '\n':
+      parsed.first = *head;
+      view_drop(state.textview, 1);
+      return 2;
+    default:
+      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+      if (strictness == STRICTNESS::STRICT)
+        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+      else if (sep == '`')
+        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+      std::pair<char32_t, BAD_ESCAPE> ch_esc{};
+      if (parse_escape_b(esc_rule, ch_esc))
+        head = ch_esc.first;
+      else if (ch_esc.second == BAD_ESCAPE::MALFORMED) {
+        parsed.second = BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
+        return 0;
+      } else if (ch_esc.second == BAD_ESCAPE::OCTAL_SEQ) {
+        parsed.second = BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
+        return 0;
+      } else if (ch_esc.second == BAD_ESCAPE::PER_SE_BACKSLASH)
+        /* ignore the '\' (could output a warning) */
+        view_drop(state.textview, 1);
+      parsed.first = *head;
+      return 1;
+  }
+}
+
+int String::parse_iter(BAD_STRING& err) {
+  if (state.textview.empty()) {
+    err = BAD_STRING::UNEXPECTED_END;
+    return 0;
+  }
+  char32_t ch = view_shift(state.textview);
+
+  if (sep != '`' || ch == '\n') {
+    err = BAD_STRING::UNEXPECTED_END;
+    return 0;
+  }
+
+  if (ch == sep)
+    return 1;
+
+  if (ch == '$' && view_peek(state.textview) == '{' && sep == '`') {
+    view_drop(state.textview, 1);
+    return 1;
+  }
+
+  if (ch == '\\') {
+    std::pair<char32_t, BAD_STRING> esc_uchar{};
+    int esc_ok = parse_escaped_uchar(esc_uchar);
+    if (not esc_ok) {
+      err = esc_uchar.second;
+      return 0;
+    } else if (esc_ok == 2)
+      return 2;
+    else
+      ch = esc_uchar.first;
+  }
+  buffer.push_back(ch);
+  return 2;
+}
+
+bool String::parse(std::pair<Token::String, BAD_STRING>& parsed) {
+  const ParseState state_backup{state};
+  std::optional head = view_shift_opt(state.textview);
+  if (not head.transform([](char32_t qt) {
+                return qt == '\'' || qt == '"' || qt == '`';
+              })
+              .value_or(false)) {
+    parsed.second = BAD_STRING::MISMATCH;
+    return 0;
+  }
+  sep = *head;
+
+  while (true) {
+    int ok = parse_iter(parsed.second);
+    switch (ok) {
+      case 0:
+        state = state_backup;
+        return 0;
+      case 1:
+        parsed.first = Token::String{
+            .sep = sep, .text = std::make_shared<const std::u32string>(buffer)};
+        return 1;
+      default:
+        continue;
+    }
+  }
+}
 }  // namespace Parser
 
 void Parse(const std::string& src_string) {
-  std::shared_ptr parse_data = std::make_shared<ParseData>();
-  parse_data->populate(src_string);
+  ParseData parse_data{};
+  parse_data.populate(src_string);
+
+  Parser::String parser{parse_data.meta, ParseState{parse_data.text}};
 }
 }  // namespace Manadrain
