@@ -31,7 +31,26 @@ std::optional<char32_t> ParseDriver::shift() {
   return ch;
 }
 
-void ParseDriver::drop(std::int32_t count) {
+void ParseDriver::drop(std::uint32_t count) {
   U8_FWD_N(buffer.data(), state.idx, buffer.size(), count);
+}
+
+bool ParseDriver::parseEscape(ESC_RULE esc_rule,
+                              std::pair<char32_t, BAD_ESCAPE>& either) {
+  std::optional head{shift()};
+  if (not head) {
+    either.second = BAD_ESCAPE::PER_SE_BACKSLASH;
+    return 0;
+  }
+  return 0;
+}
+
+bool ParseDriver::parseEscape_b(ESC_RULE esc_rule,
+                                std::pair<char32_t, BAD_ESCAPE>& parsed) {
+  const ParseState state_backup{state};
+  bool ok = parseEscape(esc_rule, parsed);
+  if (not ok)
+    state = state_backup;
+  return ok;
 }
 }  // namespace Manadrain

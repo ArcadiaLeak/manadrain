@@ -1,8 +1,18 @@
 #include <string>
 
 namespace Manadrain {
+enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
+enum class ESC_RULE {
+  IDENTIFIER,
+  REGEXP_ASCII,
+  REGEXP_UTF16,
+  STRING_IN_SLOPPY_MODE,
+  STRING_IN_STRICT_MODE,
+  STRING_IN_TEMPLATE
+};
+
 struct ParseState {
-  std::int32_t idx;
+  std::uint32_t idx;
 };
 
 struct ParseDriver {
@@ -11,6 +21,10 @@ struct ParseDriver {
 
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
-  void drop(std::int32_t count);
+  void drop(std::uint32_t count);
+
+  bool parseEscape(ESC_RULE esc_rule, std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscape_b(ESC_RULE esc_rule,
+                     std::pair<char32_t, BAD_ESCAPE>& parsed);
 };
 }  // namespace Manadrain
