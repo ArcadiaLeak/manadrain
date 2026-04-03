@@ -167,32 +167,8 @@ struct ParseData {
   std::u32string text;
 
   void populate_iter(std::basic_string_view<UChar32>& textview);
-  void populate(std::basic_string_view<UChar32> textview);
+  void populate(const std::string& narrow);
 };
-
-struct CommonParser {
-  std::span<UnitMetadata> metadata;
-  ParseState state;
-
-  bool parse_hex_b(std::uint32_t& digit);
-  bool parse_escape(ESC_RULE esc_rule, std::pair<char32_t, BAD_ESCAPE>& parsed);
-  bool parse_escape_b(ESC_RULE esc_rule,
-                      std::pair<char32_t, BAD_ESCAPE>& parsed);
-  bool parse_escape_hex(std::pair<char32_t, BAD_ESCAPE>& parsed);
-  bool parse_escape_uni(ESC_RULE esc_rule,
-                        std::pair<char32_t, BAD_ESCAPE>& parsed);
-  bool parse_escape_uni_braced(std::pair<char32_t, BAD_ESCAPE>& parsed);
-  bool parse_escape_uni_fixed(ESC_RULE esc_rule,
-                              std::pair<char32_t, BAD_ESCAPE>& parsed);
-};
-
-bool CommonParser::parse_hex_b(std::uint32_t& digit) {
-  ParseState fork_state{state};
-  bool ok = fork_state.parse_hex(digit);
-  if (ok)
-    state = fork_state;
-  return ok;
-}
 
 void ParseData::populate_iter(std::basic_string_view<UChar32>& textview) {
   UChar32 ch = view_shift(textview);
@@ -212,14 +188,76 @@ void ParseData::populate_iter(std::basic_string_view<UChar32>& textview) {
                    .colu = newline_seen ? 0 : meta.back().colu + 1});
 }
 
-void ParseData::populate(std::basic_string_view<UChar32> textview) {
+void ParseData::populate(const std::string& narrow) {
+  UErrorCode status = U_ZERO_ERROR;
+
+  std::int32_t u16_size{};
+  u_strFromUTF8(nullptr, 0, &u16_size, narrow.data(), -1, &status);
+  if (status == U_BUFFER_OVERFLOW_ERROR)
+    status = U_ZERO_ERROR;
+
+  std::u16string medium{};
+  medium.resize(u16_size);
+  u_strFromUTF8(medium.data(), u16_size + 1, nullptr, narrow.data(), -1,
+                &status);
+
+  if (U_FAILURE(status))
+    throw std::runtime_error{
+        std::format("UTF-8 to UTF-16 failed: {}", u_errorName(status))};
+
+  std::int32_t u32_size{};
+  u_strToUTF32(nullptr, 0, &u32_size, medium.data(), -1, &status);
+  if (status == U_BUFFER_OVERFLOW_ERROR)
+    status = U_ZERO_ERROR;
+
+  std::basic_string<UChar32> wide{};
+  wide.resize(u32_size);
+  u_strToUTF32(wide.data(), u32_size + 1, nullptr, medium.data(), -1, &status);
+
+  if (U_FAILURE(status))
+    throw std::runtime_error{
+        std::format("UTF-16 to UTF-32 failed: {}", u_errorName(status))};
+
+  std::basic_string_view<UChar32> textview{wide};
   meta.emplace_back(UnitMetadata{.line = 1, .colu = 0});
   while (not textview.empty())
     populate_iter(textview);
   meta.pop_back();
 }
 
-bool CommonParser::parse_escape_hex(std::pair<char32_t, BAD_ESCAPE>& parsed) {
+namespace Token {
+struct String {
+  char32_t sep;
+  std::u32string buffer;
+};
+}  // namespace Token
+
+namespace Parser {
+struct Common {
+  std::span<UnitMetadata> metadata;
+  ParseState state;
+
+  bool parse_hex_b(std::uint32_t& digit);
+  bool parse_escape(ESC_RULE esc_rule, std::pair<char32_t, BAD_ESCAPE>& parsed);
+  bool parse_escape_b(ESC_RULE esc_rule,
+                      std::pair<char32_t, BAD_ESCAPE>& parsed);
+  bool parse_escape_hex(std::pair<char32_t, BAD_ESCAPE>& parsed);
+  bool parse_escape_uni(ESC_RULE esc_rule,
+                        std::pair<char32_t, BAD_ESCAPE>& parsed);
+  bool parse_escape_uni_braced(std::pair<char32_t, BAD_ESCAPE>& parsed);
+  bool parse_escape_uni_fixed(ESC_RULE esc_rule,
+                              std::pair<char32_t, BAD_ESCAPE>& parsed);
+};
+
+bool Common::parse_hex_b(std::uint32_t& digit) {
+  ParseState fork_state{state};
+  bool ok = fork_state.parse_hex(digit);
+  if (ok)
+    state = fork_state;
+  return ok;
+}
+
+bool Common::parse_escape_hex(std::pair<char32_t, BAD_ESCAPE>& parsed) {
   std::uint32_t hex0{};
   if (not parse_hex_b(hex0)) {
     parsed.second = BAD_ESCAPE::MALFORMED;
@@ -234,8 +272,7 @@ bool CommonParser::parse_escape_hex(std::pair<char32_t, BAD_ESCAPE>& parsed) {
   return 1;
 }
 
-bool CommonParser::parse_escape_uni_braced(
-    std::pair<char32_t, BAD_ESCAPE>& parsed) {
+bool Common::parse_escape_uni_braced(std::pair<char32_t, BAD_ESCAPE>& parsed) {
   char32_t utf16_char = 0;
   while (true) {
     std::uint32_t hex{};
@@ -258,9 +295,8 @@ bool CommonParser::parse_escape_uni_braced(
   }
 }
 
-bool CommonParser::parse_escape_uni_fixed(
-    ESC_RULE esc_rule,
-    std::pair<char32_t, BAD_ESCAPE>& parsed) {
+bool Common::parse_escape_uni_fixed(ESC_RULE esc_rule,
+                                    std::pair<char32_t, BAD_ESCAPE>& parsed) {
   char32_t high_surr = 0;
   for (int i = 0; i < 4; i++) {
     std::uint32_t hex{};
@@ -292,8 +328,8 @@ bool CommonParser::parse_escape_uni_fixed(
   return 1;
 }
 
-bool CommonParser::parse_escape_uni(ESC_RULE esc_rule,
-                                    std::pair<char32_t, BAD_ESCAPE>& parsed) {
+bool Common::parse_escape_uni(ESC_RULE esc_rule,
+                              std::pair<char32_t, BAD_ESCAPE>& parsed) {
   std::optional open_or_uchar = view_shift_opt(state.textview);
   if (not open_or_uchar) {
     parsed.second = BAD_ESCAPE::MALFORMED;
@@ -304,8 +340,8 @@ bool CommonParser::parse_escape_uni(ESC_RULE esc_rule,
              : parse_escape_uni_fixed(esc_rule, parsed);
 }
 
-bool CommonParser::parse_escape(ESC_RULE esc_rule,
-                                std::pair<char32_t, BAD_ESCAPE>& parsed) {
+bool Common::parse_escape(ESC_RULE esc_rule,
+                          std::pair<char32_t, BAD_ESCAPE>& parsed) {
   std::optional head = view_shift_opt(state.textview);
   if (not head) {
     parsed.second = BAD_ESCAPE::PER_SE_BACKSLASH;
@@ -389,52 +425,18 @@ bool CommonParser::parse_escape(ESC_RULE esc_rule,
   }
 }
 
-bool CommonParser::parse_escape_b(ESC_RULE esc_rule,
-                                  std::pair<char32_t, BAD_ESCAPE>& parsed) {
+bool Common::parse_escape_b(ESC_RULE esc_rule,
+                            std::pair<char32_t, BAD_ESCAPE>& parsed) {
   const ParseState state_backup{state};
   bool ok = parse_escape(esc_rule, parsed);
   if (not ok)
     state = state_backup;
   return ok;
 }
-
-std::shared_ptr<ParseData> populate_parse_data(const std::string& narrow) {
-  UErrorCode status = U_ZERO_ERROR;
-
-  std::int32_t u16_size{};
-  u_strFromUTF8(nullptr, 0, &u16_size, narrow.data(), -1, &status);
-  if (status == U_BUFFER_OVERFLOW_ERROR)
-    status = U_ZERO_ERROR;
-
-  std::u16string medium{};
-  medium.resize(u16_size);
-  u_strFromUTF8(medium.data(), u16_size + 1, nullptr, narrow.data(), -1,
-                &status);
-
-  if (U_FAILURE(status))
-    throw std::runtime_error{
-        std::format("UTF-8 to UTF-16 failed: {}", u_errorName(status))};
-
-  std::int32_t u32_size{};
-  u_strToUTF32(nullptr, 0, &u32_size, medium.data(), -1, &status);
-  if (status == U_BUFFER_OVERFLOW_ERROR)
-    status = U_ZERO_ERROR;
-
-  std::basic_string<UChar32> wide{};
-  wide.resize(u32_size);
-  u_strToUTF32(wide.data(), u32_size + 1, nullptr, medium.data(), -1, &status);
-
-  if (U_FAILURE(status))
-    throw std::runtime_error{
-        std::format("UTF-16 to UTF-32 failed: {}", u_errorName(status))};
-
-  std::shared_ptr parse_data = std::make_shared<ParseData>();
-  parse_data->populate(wide);
-
-  return parse_data;
-}
+}  // namespace Parser
 
 void Parse(const std::string& src_string) {
-  std::shared_ptr parse_data = populate_parse_data(src_string);
+  std::shared_ptr parse_data = std::make_shared<ParseData>();
+  parse_data->populate(src_string);
 }
 }  // namespace Manadrain
