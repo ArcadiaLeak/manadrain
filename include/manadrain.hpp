@@ -21,6 +21,7 @@ struct ParseDriver {
 
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
+  std::u32string_view take(std::uint32_t count, std::u32string& buf);
   void drop(std::uint32_t count);
 
   bool parseHex(std::uint32_t& digit);
@@ -29,5 +30,11 @@ struct ParseDriver {
   bool parseEscape(ESC_RULE esc_rule, std::pair<char32_t, BAD_ESCAPE>& either);
   bool parseEscape_b(ESC_RULE esc_rule,
                      std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscapeHex(std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscapeUni(ESC_RULE esc_rule,
+                      std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscapeBraceSeq(std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscapeFixedSeq(ESC_RULE esc_rule,
+                           std::pair<char32_t, BAD_ESCAPE>& either);
 };
 }  // namespace Manadrain
