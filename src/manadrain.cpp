@@ -200,6 +200,63 @@ bool ParseDriver::parseEscape(ESC_RULE esc_rule,
       return 1;
     case 'x':
       return parseEscapeHex(either);
+    case 'u':
+      return parseEscapeUni(esc_rule, either);
+    case '0': {
+      std::optional ahead{peek()};
+      if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
+                  .value_or(false)) {
+        either.first = 0;
+        return 1;
+      }
+    }
+      [[fallthrough]];
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+      switch (esc_rule) {
+        case ESC_RULE::STRING_IN_STRICT_MODE:
+          either.second = BAD_ESCAPE::OCTAL_SEQ;
+          return 0;
+
+        case ESC_RULE::STRING_IN_TEMPLATE:
+        case ESC_RULE::REGEXP_UTF16:
+          either.second = BAD_ESCAPE::MALFORMED;
+          return 0;
+
+        default:
+          either.first = *head - '0';
+          std::optional<char32_t> ahead;
+          ahead = peek().transform(
+              [](char32_t ahead_digit) { return ahead_digit - '0'; });
+          if (not ahead || *ahead > 7)
+            return 1;
+          drop(1);
+          either.first = (either.first << 3) | *ahead;
+
+          if (either.first >= 32)
+            return 1;
+
+          ahead = peek().transform(
+              [](char32_t ahead_digit) { return ahead_digit - '0'; });
+          if (not ahead || *ahead > 7)
+            return 1;
+          drop(1);
+          either.first = (either.first << 3) | *ahead;
+          return 1;
+      }
+    case '8':
+    case '9':
+      if (esc_rule == ESC_RULE::STRING_IN_STRICT_MODE ||
+          esc_rule == ESC_RULE::STRING_IN_TEMPLATE) {
+        either.second = BAD_ESCAPE::MALFORMED;
+        return 0;
+      }
+      [[fallthrough]];
     default:
       either.second = BAD_ESCAPE::PER_SE_BACKSLASH;
       return 0;
