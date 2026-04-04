@@ -44,7 +44,6 @@ struct NODE_VARDECL {
 
 struct ParseState {
   std::uint32_t idx;
-  bool newline_seen;
 };
 
 struct ParseDriver {
@@ -56,7 +55,8 @@ struct ParseDriver {
   std::u32string_view take(std::uint32_t count, std::u32string& buf);
   void drop(std::uint32_t count);
 
-  bool parseSpace();
+  std::optional<std::monostate> parseSpace(bool& newline_seen);
+  std::optional<std::monostate> parseSpace();
 
   bool parseHex(std::uint32_t& digit);
   bool parseHex_b(std::uint32_t& digit);

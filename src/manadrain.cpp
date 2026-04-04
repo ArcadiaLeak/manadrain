@@ -434,9 +434,8 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
   }
 }
 
-bool ParseDriver::parseSpace() {
+std::optional<std::monostate> ParseDriver::parseSpace(bool& newline_seen) {
   const ParseState b{state};
-  state.newline_seen = 0;
   std::u32string take_buf{};
 
   while (true) {
@@ -444,7 +443,7 @@ bool ParseDriver::parseSpace() {
 
     if (*ch == '\r' || *ch == '\n' || *ch == 0x2028 || *ch == 0x2029) {
       drop(1);
-      state.newline_seen = 1;
+      newline_seen = 1;
       continue;
     }
 
@@ -477,8 +476,15 @@ bool ParseDriver::parseSpace() {
       continue;
     }
 
-    return b.idx < state.idx;
+    if (b.idx < state.idx)
+      return std::monostate{};
+    return std::nullopt;
   }
+}
+
+std::optional<std::monostate> ParseDriver::parseSpace() {
+  bool newline_seen{};
+  return parseSpace(newline_seen);
 }
 
 bool ParseDriver::parseVardecl(NODE_VARDECL& vardecl) {
@@ -495,20 +501,28 @@ bool ParseDriver::parseVardecl(NODE_VARDECL& vardecl) {
     return 0;
   vardecl.kind = var_kind_it->second;
 
-  if (not parseSpace())
+  if (not parseSpace()
+              .transform([&](auto) { return parseWord(false, vardecl.name); })
+              .value_or(false))
     return 0;
-  if (not parseWord(false, vardecl.name))
-    return 0;
-  parseSpace();
 
-  std::optional ch{shift()};
-  if (ch == '=') {
-    parseSpace();
+  const ParseState state_backup{state};
+  std::optional ch = parseSpace().and_then([this](auto) { return shift(); });
+  if (ch != '=')
+    state = state_backup;
+  else {
     BAD_STRING string_err;
-    parseString(STRICTNESS::SLOPPY, vardecl.init, string_err);
+    parseSpace().transform([&](auto) {
+      return parseString(STRICTNESS::SLOPPY, vardecl.init, string_err);
+    });
   }
 
-  return 1;
+  bool newline_seen{};
+  ch = parseSpace(newline_seen).and_then([this](auto) { return peek(); });
+  if (not ch || *ch == ';' || *ch == '}' || newline_seen)
+    return 1;
+
+  return 0;
 }
 
 bool ParseDriver::parseStatement() {
