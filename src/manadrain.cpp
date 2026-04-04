@@ -3,6 +3,7 @@
 
 #include <format>
 #include <optional>
+#include <unordered_map>
 
 #include "manadrain.hpp"
 
@@ -340,48 +341,48 @@ int ParseDriver::parseString_escape_b(STRICTNESS strictness,
 }
 
 bool ParseDriver::parseString(STRICTNESS strictness,
-                              std::pair<TOKEN_STRING, BAD_STRING>& either) {
+                              TOKEN_STRING& token,
+                              BAD_STRING& err) {
   std::optional ch{shift()};
   if (not ch || !(*ch == '\'' || *ch == '"' || *ch == '`')) {
-    either.second = BAD_STRING::MISMATCH;
+    err = BAD_STRING::MISMATCH;
     return 0;
   }
-  either.first =
-      TOKEN_STRING{.sep = *ch, .content = std::make_shared<std::string>()};
-  std::string& content = *either.first.content;
+  token = TOKEN_STRING{.sep = *ch, .content = std::make_shared<std::string>()};
+  std::string& content = *token.content;
 
   while (true) {
     ch = peek();
     if (not ch) {
-      either.second = BAD_STRING::UNEXPECTED_END;
+      err = BAD_STRING::UNEXPECTED_END;
       return 0;
     }
 
-    if (either.first.sep == '`') {
+    if (token.sep == '`') {
       if (*ch == '\r') {
         if (peek() == '\n')
           drop(1);
         ch = '\n';
       }
     } else if (*ch == '\r' || *ch == '\n') {
-      either.second = BAD_STRING::UNEXPECTED_END;
+      err = BAD_STRING::UNEXPECTED_END;
       return 0;
     }
 
     drop(1);
-    if (*ch == either.first.sep)
+    if (*ch == token.sep)
       return 1;
 
-    if (*ch == '$' && peek() == '{' && either.first.sep == '`') {
+    if (*ch == '$' && peek() == '{' && token.sep == '`') {
       drop(1);
       return 1;
     }
 
     if (*ch == '\\') {
       std::pair<char32_t, BAD_STRING> ch_esc{};
-      int ok = parseString_escape_b(strictness, either.first.sep, ch_esc);
+      int ok = parseString_escape_b(strictness, token.sep, ch_esc);
       if (not ok) {
-        either.second = ch_esc.second;
+        err = ch_esc.second;
         return 0;
       } else if (ok == 2)
         continue;
@@ -437,7 +438,7 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
 }
 
 bool ParseDriver::parseSpace() {
-  const ParseState state_backup{state};
+  const ParseState b{state};
   state.newline_seen = 0;
   std::u32string take_buf{};
 
@@ -479,9 +480,50 @@ bool ParseDriver::parseSpace() {
       continue;
     }
 
-    break;
+    return b.idx < state.idx;
+  }
+}
+
+bool ParseDriver::parseVardecl(NODE_VARDECL& vardecl) {
+  TOKEN_WORD var_kind_s{};
+  if (not parseWord(false, var_kind_s))
+    return 0;
+
+  static const std::unordered_map<std::string_view, NODE_VARDECL::KIND>
+      var_kind_m = {{"let", NODE_VARDECL::KIND_LET{}},
+                    {"const", NODE_VARDECL::KIND_CONST{}},
+                    {"var", NODE_VARDECL::KIND_VAR{}}};
+  auto var_kind_it = var_kind_m.find(*var_kind_s.content);
+  if (var_kind_it == var_kind_m.end())
+    return 0;
+  vardecl.kind = var_kind_it->second;
+
+  if (not parseSpace())
+    return 0;
+  if (not parseWord(false, vardecl.name))
+    return 0;
+  parseSpace();
+
+  std::optional ch{shift()};
+  if (ch == '=') {
+    parseSpace();
+    BAD_STRING string_err;
+    parseString(STRICTNESS::SLOPPY, vardecl.init, string_err);
   }
 
-  return state_backup.idx < state.idx;
+  return 1;
+}
+
+bool ParseDriver::parseStatement() {
+  const ParseState state_backup{state};
+  parseSpace();
+
+  NODE_VARDECL vardecl{};
+  if (not parseVardecl(vardecl)) {
+    state = state_backup;
+    return 0;
+  }
+
+  return 1;
 }
 }  // namespace Manadrain

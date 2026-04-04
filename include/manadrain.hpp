@@ -1,5 +1,6 @@
 #include <memory>
 #include <string>
+#include <variant>
 
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
@@ -31,6 +32,17 @@ struct TOKEN_WORD {
   std::shared_ptr<std::string> content;
 };
 
+struct NODE_VARDECL {
+  struct KIND_LET {};
+  struct KIND_CONST {};
+  struct KIND_VAR {};
+  using KIND = std::variant<KIND_LET, KIND_CONST, KIND_VAR>;
+
+  KIND kind;
+  TOKEN_WORD name;
+  TOKEN_STRING init;
+};
+
 struct ParseState {
   std::uint32_t idx;
   bool newline_seen;
@@ -45,6 +57,8 @@ struct ParseDriver {
   std::u32string_view take(std::uint32_t count, std::u32string& buf);
   void drop(std::uint32_t count);
 
+  bool parseSpace();
+
   bool parseHex(std::uint32_t& digit);
   bool parseHex_b(std::uint32_t& digit);
 
@@ -58,8 +72,7 @@ struct ParseDriver {
   bool parseEscape_fixedSeq(ESC_RULE esc_rule,
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
-  bool parseString(STRICTNESS strictness,
-                   std::pair<TOKEN_STRING, BAD_STRING>& either);
+  bool parseString(STRICTNESS strictness, TOKEN_STRING& token, BAD_STRING& err);
   int parseString_escape(STRICTNESS strictness,
                          char32_t sep,
                          std::pair<char32_t, BAD_STRING>& either);
@@ -70,6 +83,7 @@ struct ParseDriver {
   bool parseWord(bool is_private, TOKEN_WORD& word);
   bool parseWord_idContinue(char32_t& ch, TOKEN_WORD& word);
 
-  bool parseSpace();
+  bool parseVardecl(NODE_VARDECL& vardecl);
+  bool parseStatement();
 };
 }  // namespace Manadrain
