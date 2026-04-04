@@ -19,6 +19,10 @@ enum class BAD_STRING {
   MALFORMED_SEQ_IN_ESCAPE,
   MISMATCH
 };
+enum BAD_TOKEN { UNEXPECTED_COMMENT_END };
+
+struct TOK_EOF {};
+using TOKEN_TYPE = std::variant<TOK_EOF>;
 
 struct TOKEN_STRING {
   char32_t sep;
@@ -31,7 +35,12 @@ struct TOKEN_WORD {
   std::string content;
 };
 
-struct NODE_VARDECL {
+struct TOKEN {
+  bool newline_seen;
+  TOKEN_TYPE type;
+};
+
+struct STMT_VARDECL {
   struct KIND_LET {};
   struct KIND_CONST {};
   struct KIND_VAR {};
@@ -54,9 +63,6 @@ struct ParseDriver {
   std::optional<char32_t> shift();
   std::u32string_view take(std::uint32_t count, std::u32string& buf);
   void drop(std::uint32_t count);
-
-  std::optional<std::monostate> parseSpace(bool& newline_seen);
-  std::optional<std::monostate> parseSpace();
 
   bool parseHex(std::uint32_t& digit);
   bool parseHex_b(std::uint32_t& digit);
@@ -82,7 +88,6 @@ struct ParseDriver {
   bool parseWord(bool is_private, TOKEN_WORD& word);
   bool parseWord_idContinue(char32_t& ch, TOKEN_WORD& word);
 
-  bool parseVardecl(NODE_VARDECL& vardecl);
-  bool parseStatement();
+  bool parseToken(TOKEN& token, BAD_TOKEN& err);
 };
 }  // namespace Manadrain

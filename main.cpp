@@ -28,7 +28,6 @@ int main(int argc, char* argv[]) {
   Manadrain::ParseDriver parse_driver{
       .buffer = std::ranges::istream_view<std::uint8_t>{file} |
                 std::ranges::to<std::basic_string<std::uint8_t>>()};
-  parse_driver.parseStatement();
 
   return 0;
 }

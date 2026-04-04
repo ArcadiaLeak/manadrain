@@ -25,6 +25,9 @@ static std::string_view codepoint_cv(char32_t ch,
     return {};
   return std::string_view{cp_storage.data(), len};
 }
+static bool is_newline(char32_t ch) {
+  return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
+}
 
 namespace Manadrain {
 std::optional<char32_t> ParseDriver::peek() {
@@ -434,16 +437,25 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
   }
 }
 
-std::optional<std::monostate> ParseDriver::parseSpace(bool& newline_seen) {
-  const ParseState b{state};
+bool ParseDriver::parseToken(TOKEN& token, BAD_TOKEN& err) {
   std::u32string take_buf{};
 
   while (true) {
     std::optional ch{peek()};
+    if (not ch) {
+      token.type = TOK_EOF{};
+      return 1;
+    }
 
-    if (*ch == '\r' || *ch == '\n' || *ch == 0x2028 || *ch == 0x2029) {
+    if (take(2, take_buf) == U"\r\n") {
+      drop(2);
+      token.newline_seen = 1;
+      continue;
+    }
+
+    if (is_newline(*ch)) {
       drop(1);
-      newline_seen = 1;
+      token.newline_seen = 1;
       continue;
     }
 
@@ -455,8 +467,7 @@ std::optional<std::monostate> ParseDriver::parseSpace(bool& newline_seen) {
     if (take(2, take_buf) == U"//") {
       while (true) {
         ch = peek();
-        if (not ch || *ch == '\r' || *ch == '\n' || *ch == 0x2028 ||
-            *ch == 0x2029)
+        if (not ch || is_newline(*ch))
           break;
         drop(1);
       }
@@ -467,74 +478,22 @@ std::optional<std::monostate> ParseDriver::parseSpace(bool& newline_seen) {
       drop(2);
       while (true) {
         take(2, take_buf);
-        if (take_buf.empty() || take_buf == U"*/") {
+        if (take_buf.empty()) {
+          err = BAD_TOKEN::UNEXPECTED_COMMENT_END;
+          return 0;
+        }
+        if (take_buf == U"*/") {
           drop(2);
           break;
         }
+        if (is_newline(take_buf.front()))
+          token.newline_seen = 1;
         drop(1);
       }
       continue;
     }
 
-    if (b.idx < state.idx)
-      return std::monostate{};
-    return std::nullopt;
-  }
-}
-
-std::optional<std::monostate> ParseDriver::parseSpace() {
-  bool newline_seen{};
-  return parseSpace(newline_seen);
-}
-
-bool ParseDriver::parseVardecl(NODE_VARDECL& vardecl) {
-  TOKEN_WORD var_kind_s{};
-  if (not parseWord(false, var_kind_s))
-    return 0;
-
-  static const std::unordered_map<std::string_view, NODE_VARDECL::KIND>
-      var_kind_m = {{"let", NODE_VARDECL::KIND_LET{}},
-                    {"const", NODE_VARDECL::KIND_CONST{}},
-                    {"var", NODE_VARDECL::KIND_VAR{}}};
-  auto var_kind_it = var_kind_m.find(var_kind_s.content);
-  if (var_kind_it == var_kind_m.end())
-    return 0;
-  vardecl.kind = var_kind_it->second;
-
-  if (not parseSpace()
-              .transform([&](auto) { return parseWord(false, vardecl.name); })
-              .value_or(false))
-    return 0;
-
-  const ParseState state_backup{state};
-  std::optional ch = parseSpace().and_then([this](auto) { return shift(); });
-  if (ch != '=')
-    state = state_backup;
-  else {
-    BAD_STRING string_err;
-    parseSpace().transform([&](auto) {
-      return parseString(STRICTNESS::SLOPPY, vardecl.init, string_err);
-    });
-  }
-
-  bool newline_seen{};
-  ch = parseSpace(newline_seen).and_then([this](auto) { return peek(); });
-  if (not ch || *ch == ';' || *ch == '}' || newline_seen)
-    return 1;
-
-  return 0;
-}
-
-bool ParseDriver::parseStatement() {
-  const ParseState state_backup{state};
-  parseSpace();
-
-  NODE_VARDECL vardecl{};
-  if (not parseVardecl(vardecl)) {
-    state = state_backup;
     return 0;
   }
-
-  return 1;
 }
 }  // namespace Manadrain
