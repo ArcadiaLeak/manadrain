@@ -348,8 +348,7 @@ bool ParseDriver::parseString(STRICTNESS strictness,
     err = BAD_STRING::MISMATCH;
     return 0;
   }
-  token = TOKEN_STRING{.sep = *ch, .content = std::make_shared<std::string>()};
-  std::string& content = *token.content;
+  token.sep = *ch;
 
   while (true) {
     ch = peek();
@@ -391,7 +390,7 @@ bool ParseDriver::parseString(STRICTNESS strictness,
     }
 
     std::array<char, 4> cp_storage;
-    content.append(codepoint_cv(*ch, cp_storage));
+    token.content.append(codepoint_cv(*ch, cp_storage));
   }
 }
 
@@ -418,13 +417,11 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
   if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
     return 0;
   drop(1);
-  word = TOKEN_WORD{.is_private = is_private,
-                    .content = std::make_shared<std::string>()};
-  std::string& content = *word.content;
+  word.is_private = is_private;
   if (is_private)
-    content.push_back('#');
+    word.content.push_back('#');
   std::array<char, 4> cp_storage;
-  content.append(codepoint_cv(*id_start, cp_storage));
+  word.content.append(codepoint_cv(*id_start, cp_storage));
 
   while (true) {
     const ParseState state_backup{state};
@@ -433,7 +430,7 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
       state = state_backup;
       return 1;
     }
-    content.append(codepoint_cv(ch, cp_storage));
+    word.content.append(codepoint_cv(ch, cp_storage));
   }
 }
 
@@ -493,7 +490,7 @@ bool ParseDriver::parseVardecl(NODE_VARDECL& vardecl) {
       var_kind_m = {{"let", NODE_VARDECL::KIND_LET{}},
                     {"const", NODE_VARDECL::KIND_CONST{}},
                     {"var", NODE_VARDECL::KIND_VAR{}}};
-  auto var_kind_it = var_kind_m.find(*var_kind_s.content);
+  auto var_kind_it = var_kind_m.find(var_kind_s.content);
   if (var_kind_it == var_kind_m.end())
     return 0;
   vardecl.kind = var_kind_it->second;

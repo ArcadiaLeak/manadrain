@@ -1,4 +1,3 @@
-#include <memory>
 #include <string>
 #include <variant>
 
@@ -23,13 +22,13 @@ enum class BAD_STRING {
 
 struct TOKEN_STRING {
   char32_t sep;
-  std::shared_ptr<std::string> content;
+  std::string content;
 };
 
 struct TOKEN_WORD {
   bool ident_has_escape;
   bool is_private;
-  std::shared_ptr<std::string> content;
+  std::string content;
 };
 
 struct NODE_VARDECL {
