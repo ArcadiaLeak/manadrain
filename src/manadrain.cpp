@@ -15,13 +15,14 @@ static bool is_lo_surrogate(char32_t c) {
 static char32_t from_surrogate(char32_t hi, char32_t lo) {
   return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
 }
-static std::string_view codepoint_cv(char32_t ch) {
-  std::array<char, 4> cp_buf{};
+static std::string_view codepoint_cv(char32_t ch,
+                                     std::array<char, 4>& cp_storage) {
   std::uint32_t len{}, err{};
-  U8_APPEND(cp_buf.data(), len, cp_buf.size(), ch, err);
+  cp_storage = {};
+  U8_APPEND(cp_storage.data(), len, cp_storage.size(), ch, err);
   if (err)
     return {};
-  return std::string_view{cp_buf.data(), len};
+  return std::string_view{cp_storage.data(), len};
 }
 
 namespace Manadrain {
@@ -46,18 +47,18 @@ std::optional<char32_t> ParseDriver::shift() {
 }
 
 std::u32string_view ParseDriver::take(std::uint32_t count,
-                                      std::u32string& buf) {
-  buf.clear();
+                                      std::u32string& storage) {
+  storage.clear();
   const ParseState state_backup{state};
   for (std::uint32_t i = 0; i < count; i++) {
     std::optional ch{peek()};
     if (not ch)
       break;
     drop(1);
-    buf.push_back(*ch);
+    storage.push_back(*ch);
   }
   state = state_backup;
-  return buf;
+  return storage;
 }
 
 void ParseDriver::drop(std::uint32_t count) {
@@ -388,7 +389,8 @@ bool ParseDriver::parseString(STRICTNESS strictness,
         ch = ch_esc.first;
     }
 
-    content.append(codepoint_cv(*ch));
+    std::array<char, 4> cp_storage;
+    content.append(codepoint_cv(*ch, cp_storage));
   }
 }
 
@@ -420,7 +422,8 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
   std::string& content = *word.content;
   if (is_private)
     content.push_back('#');
-  content.append(codepoint_cv(*id_start));
+  std::array<char, 4> cp_storage;
+  content.append(codepoint_cv(*id_start, cp_storage));
 
   while (true) {
     const ParseState state_backup{state};
@@ -429,7 +432,56 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
       state = state_backup;
       return 1;
     }
-    content.append(codepoint_cv(ch));
+    content.append(codepoint_cv(ch, cp_storage));
   }
+}
+
+bool ParseDriver::parseSpace() {
+  const ParseState state_backup{state};
+  state.newline_seen = 0;
+  std::u32string take_buf{};
+
+  while (true) {
+    std::optional ch{peek()};
+
+    if (*ch == '\r' || *ch == '\n' || *ch == 0x2028 || *ch == 0x2029) {
+      drop(1);
+      state.newline_seen = 1;
+      continue;
+    }
+
+    if (u_isWhitespace(*ch)) {
+      drop(1);
+      continue;
+    }
+
+    if (take(2, take_buf) == U"//") {
+      while (true) {
+        ch = peek();
+        if (not ch || *ch == '\r' || *ch == '\n' || *ch == 0x2028 ||
+            *ch == 0x2029)
+          break;
+        drop(1);
+      }
+      continue;
+    }
+
+    if (take(2, take_buf) == U"/*") {
+      drop(2);
+      while (true) {
+        take(2, take_buf);
+        if (take_buf.empty() || take_buf == U"*/") {
+          drop(2);
+          break;
+        }
+        drop(1);
+      }
+      continue;
+    }
+
+    break;
+  }
+
+  return state_backup.idx < state.idx;
 }
 }  // namespace Manadrain

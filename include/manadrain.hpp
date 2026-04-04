@@ -33,6 +33,7 @@ struct TOKEN_WORD {
 
 struct ParseState {
   std::uint32_t idx;
+  bool newline_seen;
 };
 
 struct ParseDriver {
@@ -68,5 +69,7 @@ struct ParseDriver {
 
   bool parseWord(bool is_private, TOKEN_WORD& word);
   bool parseWord_idContinue(char32_t& ch, TOKEN_WORD& word);
+
+  bool parseSpace();
 };
 }  // namespace Manadrain
