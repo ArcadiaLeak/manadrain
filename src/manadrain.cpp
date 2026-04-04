@@ -2,11 +2,7 @@
 #include <unicode/ustring.h>
 
 #include <format>
-#include <memory>
 #include <optional>
-#include <unordered_map>
-#include <variant>
-#include <vector>
 
 #include "manadrain.hpp"
 
@@ -87,7 +83,7 @@ bool ParseDriver::parseHex_b(std::uint32_t& digit) {
   return ok;
 }
 
-bool ParseDriver::parseEscapeHex(std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_hex(std::pair<char32_t, BAD_ESCAPE>& either) {
   std::uint32_t hex0{};
   if (not parseHex_b(hex0)) {
     either.second = BAD_ESCAPE::MALFORMED;
@@ -102,7 +98,8 @@ bool ParseDriver::parseEscapeHex(std::pair<char32_t, BAD_ESCAPE>& either) {
   return 1;
 }
 
-bool ParseDriver::parseEscapeBraceSeq(std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_braceSeq(
+    std::pair<char32_t, BAD_ESCAPE>& either) {
   char32_t utf16_char = 0;
   while (true) {
     std::uint32_t hex{};
@@ -125,8 +122,9 @@ bool ParseDriver::parseEscapeBraceSeq(std::pair<char32_t, BAD_ESCAPE>& either) {
   }
 }
 
-bool ParseDriver::parseEscapeFixedSeq(ESC_RULE esc_rule,
-                                      std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_fixedSeq(
+    ESC_RULE esc_rule,
+    std::pair<char32_t, BAD_ESCAPE>& either) {
   char32_t high_surr = 0;
   for (int i = 0; i < 4; i++) {
     std::uint32_t hex{};
@@ -160,16 +158,16 @@ bool ParseDriver::parseEscapeFixedSeq(ESC_RULE esc_rule,
   return 1;
 }
 
-bool ParseDriver::parseEscapeUni(ESC_RULE esc_rule,
-                                 std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_uni(ESC_RULE esc_rule,
+                                  std::pair<char32_t, BAD_ESCAPE>& either) {
   std::optional open_or_uchar{shift()};
   if (not open_or_uchar) {
     either.second = BAD_ESCAPE::MALFORMED;
     return 0;
   }
   return open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII
-             ? parseEscapeBraceSeq(either)
-             : parseEscapeFixedSeq(esc_rule, either);
+             ? parseEscape_braceSeq(either)
+             : parseEscape_fixedSeq(esc_rule, either);
 }
 
 bool ParseDriver::parseEscape(ESC_RULE esc_rule,
@@ -199,9 +197,9 @@ bool ParseDriver::parseEscape(ESC_RULE esc_rule,
       either.first = '\v';
       return 1;
     case 'x':
-      return parseEscapeHex(either);
+      return parseEscape_hex(either);
     case 'u':
-      return parseEscapeUni(esc_rule, either);
+      return parseEscape_uni(esc_rule, either);
     case '0': {
       std::optional ahead{peek()};
       if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
@@ -270,5 +268,55 @@ bool ParseDriver::parseEscape_b(ESC_RULE esc_rule,
   if (not ok)
     state = state_backup;
   return ok;
+}
+
+int ParseDriver::parseString_escape(STRICTNESS strictness,
+                                    const TokenString& token,
+                                    std::pair<char32_t, BAD_STRING>& either) {
+  std::optional ch{peek()};
+  if (not ch) {
+    either.second = BAD_STRING::UNEXPECTED_END;
+    return 0;
+  }
+  switch (*ch) {
+    case '\'':
+    case '\"':
+    case '\0':
+    case '\\':
+      drop(1);
+      either.first = *ch;
+      return 1;
+    case '\r':
+      if (peek() == '\n')
+        drop(1);
+      [[fallthrough]];
+    case '\n':
+    case 0x2028:
+    case 0x2029:
+      /* ignore escaped newline sequence */
+      drop(1);
+      either.first = *ch;
+      return 2;
+    default:
+      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+      if (strictness == STRICTNESS::STRICT)
+        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+      else if (token.sep == '`')
+        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+      std::pair<char32_t, BAD_ESCAPE> ch_esc{};
+      if (parseEscape_b(esc_rule, ch_esc))
+        ch = ch_esc.first;
+      else if (ch_esc.second == BAD_ESCAPE::MALFORMED) {
+        either.second = BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
+        return 0;
+      } else if (ch_esc.second == BAD_ESCAPE::OCTAL_SEQ) {
+        either.second = BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
+        return 0;
+      } else if (ch_esc.second == BAD_ESCAPE::PER_SE_BACKSLASH)
+        /* ignore the '\' (could output a warning) */
+        drop(1);
+      either.first = *ch;
+      return 1;
+  }
 }
 }  // namespace Manadrain

@@ -1,7 +1,8 @@
+#include <memory>
 #include <string>
 
 namespace Manadrain {
-enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
+enum class STRICTNESS { SLOPPY, STRICT };
 enum class ESC_RULE {
   IDENTIFIER,
   REGEXP_ASCII,
@@ -9,6 +10,19 @@ enum class ESC_RULE {
   STRING_IN_SLOPPY_MODE,
   STRING_IN_STRICT_MODE,
   STRING_IN_TEMPLATE
+};
+
+enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
+enum class BAD_STRING {
+  UNEXPECTED_END,
+  OCTAL_SEQ_IN_ESCAPE,
+  MALFORMED_SEQ_IN_ESCAPE,
+  MISMATCH
+};
+
+struct TokenString {
+  char32_t sep;
+  std::shared_ptr<const std::string> content;
 };
 
 struct ParseState {
@@ -30,11 +44,15 @@ struct ParseDriver {
   bool parseEscape(ESC_RULE esc_rule, std::pair<char32_t, BAD_ESCAPE>& either);
   bool parseEscape_b(ESC_RULE esc_rule,
                      std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscapeHex(std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscapeUni(ESC_RULE esc_rule,
-                      std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscapeBraceSeq(std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscapeFixedSeq(ESC_RULE esc_rule,
-                           std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscape_hex(std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscape_uni(ESC_RULE esc_rule,
+                       std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscape_braceSeq(std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscape_fixedSeq(ESC_RULE esc_rule,
+                            std::pair<char32_t, BAD_ESCAPE>& either);
+
+  int parseString_escape(STRICTNESS strictness,
+                         const TokenString& token,
+                         std::pair<char32_t, BAD_STRING>& either);
 };
 }  // namespace Manadrain

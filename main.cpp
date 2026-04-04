@@ -19,8 +19,10 @@ int main(int argc, char* argv[]) {
   }
 
   std::ifstream file{filepath, std::ios::binary};
-  if (not file.is_open())
-    throw std::runtime_error{std::format("could not open file: {}", filepath)};
+  if (not file.is_open()) {
+    std::println(std::cerr, "Error: could not open file: {}", filepath);
+    return 1;
+  }
   file >> std::noskipws;
 
   Manadrain::ParseDriver parse_buffer{
