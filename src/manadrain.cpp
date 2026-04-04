@@ -15,6 +15,13 @@ static bool is_lo_surrogate(char32_t c) {
 static char32_t from_surrogate(char32_t hi, char32_t lo) {
   return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
 }
+static std::string_view cp_convert(char32_t ch, std::array<char, 4>& cp_buf) {
+  std::uint32_t idx{}, err{};
+  U8_APPEND(cp_buf.data(), idx, cp_buf.size(), ch, err);
+  if (err)
+    return std::string_view{};
+  return std::string_view{cp_buf.data(), idx};
+}
 
 namespace Manadrain {
 std::optional<char32_t> ParseDriver::peek() {
@@ -271,7 +278,7 @@ bool ParseDriver::parseEscape_b(ESC_RULE esc_rule,
 }
 
 int ParseDriver::parseString_escape(STRICTNESS strictness,
-                                    const TokenString& token,
+                                    char32_t sep,
                                     std::pair<char32_t, BAD_STRING>& either) {
   std::optional ch{peek()};
   if (not ch) {
@@ -301,7 +308,7 @@ int ParseDriver::parseString_escape(STRICTNESS strictness,
       ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
       if (strictness == STRICTNESS::STRICT)
         esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-      else if (token.sep == '`')
+      else if (sep == '`')
         esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
       std::pair<char32_t, BAD_ESCAPE> ch_esc{};
       if (parseEscape_b(esc_rule, ch_esc))
@@ -317,6 +324,72 @@ int ParseDriver::parseString_escape(STRICTNESS strictness,
         drop(1);
       either.first = *ch;
       return 1;
+  }
+}
+
+int ParseDriver::parseString_escape_b(STRICTNESS strictness,
+                                      char32_t sep,
+                                      std::pair<char32_t, BAD_STRING>& either) {
+  const ParseState state_backup{state};
+  int ok = parseString_escape(strictness, sep, either);
+  if (not ok)
+    state = state_backup;
+  return ok;
+}
+
+bool ParseDriver::parseString(STRICTNESS strictness,
+                              std::pair<TokenString, BAD_STRING>& either) {
+  std::optional ch{shift()};
+  if (not ch || !(*ch == '\'' || *ch == '"' || *ch == '`')) {
+    either.second = BAD_STRING::MISMATCH;
+    return 0;
+  }
+  std::shared_ptr content_ptr = std::make_shared<std::string>();
+  either.first.sep = *ch;
+  either.first.content = content_ptr;
+  std::string& content = *content_ptr;
+
+  while (true) {
+    ch = peek();
+    if (not ch) {
+      either.second = BAD_STRING::UNEXPECTED_END;
+      return 0;
+    }
+
+    if (either.first.sep == '`') {
+      if (*ch == '\r') {
+        if (peek() == '\n')
+          drop(1);
+        ch = '\n';
+      }
+    } else if (*ch == '\r' || *ch == '\n') {
+      either.second = BAD_STRING::UNEXPECTED_END;
+      return 0;
+    }
+
+    drop(1);
+    if (*ch == either.first.sep)
+      return 1;
+
+    if (*ch == '$' && peek() == '{' && either.first.sep == '`') {
+      drop(1);
+      return 1;
+    }
+
+    if (*ch == '\\') {
+      std::pair<char32_t, BAD_STRING> ch_esc{};
+      int ok = parseString_escape_b(strictness, either.first.sep, ch_esc);
+      if (not ok) {
+        either.second = ch_esc.second;
+        return 0;
+      } else if (ok == 2)
+        continue;
+      else
+        ch = ch_esc.first;
+    }
+
+    std::array<char, 4> cp_buf{};
+    content.append(cp_convert(*ch, cp_buf));
   }
 }
 }  // namespace Manadrain

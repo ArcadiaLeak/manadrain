@@ -30,7 +30,7 @@ struct ParseState {
 };
 
 struct ParseDriver {
-  std::basic_string<std::uint8_t> buffer;
+  const std::basic_string<std::uint8_t> buffer;
   ParseState state;
 
   std::optional<char32_t> peek();
@@ -51,8 +51,13 @@ struct ParseDriver {
   bool parseEscape_fixedSeq(ESC_RULE esc_rule,
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
+  bool parseString(STRICTNESS strictness,
+                   std::pair<TokenString, BAD_STRING>& either);
   int parseString_escape(STRICTNESS strictness,
-                         const TokenString& token,
+                         char32_t sep,
                          std::pair<char32_t, BAD_STRING>& either);
+  int parseString_escape_b(STRICTNESS strictness,
+                           char32_t sep,
+                           std::pair<char32_t, BAD_STRING>& either);
 };
 }  // namespace Manadrain
