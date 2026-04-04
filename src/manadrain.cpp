@@ -15,12 +15,13 @@ static bool is_lo_surrogate(char32_t c) {
 static char32_t from_surrogate(char32_t hi, char32_t lo) {
   return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
 }
-static std::string_view cp_convert(char32_t ch, std::array<char, 4>& cp_buf) {
-  std::uint32_t idx{}, err{};
-  U8_APPEND(cp_buf.data(), idx, cp_buf.size(), ch, err);
+static std::string_view codepoint_cv(char32_t ch) {
+  std::array<char, 4> cp_buf{};
+  std::uint32_t len{}, err{};
+  U8_APPEND(cp_buf.data(), len, cp_buf.size(), ch, err);
   if (err)
-    return std::string_view{};
-  return std::string_view{cp_buf.data(), idx};
+    return {};
+  return std::string_view{cp_buf.data(), len};
 }
 
 namespace Manadrain {
@@ -338,16 +339,15 @@ int ParseDriver::parseString_escape_b(STRICTNESS strictness,
 }
 
 bool ParseDriver::parseString(STRICTNESS strictness,
-                              std::pair<TokenString, BAD_STRING>& either) {
+                              std::pair<TOKEN_STRING, BAD_STRING>& either) {
   std::optional ch{shift()};
   if (not ch || !(*ch == '\'' || *ch == '"' || *ch == '`')) {
     either.second = BAD_STRING::MISMATCH;
     return 0;
   }
-  std::shared_ptr content_ptr = std::make_shared<std::string>();
-  either.first.sep = *ch;
-  either.first.content = content_ptr;
-  std::string& content = *content_ptr;
+  either.first =
+      TOKEN_STRING{.sep = *ch, .content = std::make_shared<std::string>()};
+  std::string& content = *either.first.content;
 
   while (true) {
     ch = peek();
@@ -388,8 +388,48 @@ bool ParseDriver::parseString(STRICTNESS strictness,
         ch = ch_esc.first;
     }
 
-    std::array<char, 4> cp_buf{};
-    content.append(cp_convert(*ch, cp_buf));
+    content.append(codepoint_cv(*ch));
+  }
+}
+
+bool ParseDriver::parseWord_idContinue(char32_t& ch_esc, TOKEN_WORD& word) {
+  std::optional ch{peek()};
+  if (not ch)
+    return 0;
+  drop(1);
+  if (*ch == '\\' && peek() == 'u') {
+    std::pair<char32_t, BAD_ESCAPE> ret_esc{};
+    if (not parseEscape_b(ESC_RULE::IDENTIFIER, ret_esc))
+      return 0;
+    ch = ret_esc.first;
+    word.ident_has_escape = true;
+  }
+  if (not u_hasBinaryProperty(*ch, UCHAR_XID_CONTINUE))
+    return 0;
+  ch_esc = *ch;
+  return 1;
+}
+
+bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
+  std::optional id_start{peek()};
+  if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
+    return 0;
+  drop(1);
+  word = TOKEN_WORD{.is_private = is_private,
+                    .content = std::make_shared<std::string>()};
+  std::string& content = *word.content;
+  if (is_private)
+    content.push_back('#');
+  content.append(codepoint_cv(*id_start));
+
+  while (true) {
+    const ParseState state_backup{state};
+    char32_t ch{};
+    if (not parseWord_idContinue(ch, word)) {
+      state = state_backup;
+      return 1;
+    }
+    content.append(codepoint_cv(ch));
   }
 }
 }  // namespace Manadrain

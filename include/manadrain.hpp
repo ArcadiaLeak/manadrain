@@ -20,9 +20,15 @@ enum class BAD_STRING {
   MISMATCH
 };
 
-struct TokenString {
+struct TOKEN_STRING {
   char32_t sep;
-  std::shared_ptr<const std::string> content;
+  std::shared_ptr<std::string> content;
+};
+
+struct TOKEN_WORD {
+  bool ident_has_escape;
+  bool is_private;
+  std::shared_ptr<std::string> content;
 };
 
 struct ParseState {
@@ -52,12 +58,15 @@ struct ParseDriver {
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
   bool parseString(STRICTNESS strictness,
-                   std::pair<TokenString, BAD_STRING>& either);
+                   std::pair<TOKEN_STRING, BAD_STRING>& either);
   int parseString_escape(STRICTNESS strictness,
                          char32_t sep,
                          std::pair<char32_t, BAD_STRING>& either);
   int parseString_escape_b(STRICTNESS strictness,
                            char32_t sep,
                            std::pair<char32_t, BAD_STRING>& either);
+
+  bool parseWord(bool is_private, TOKEN_WORD& word);
+  bool parseWord_idContinue(char32_t& ch, TOKEN_WORD& word);
 };
 }  // namespace Manadrain
