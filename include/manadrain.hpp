@@ -19,7 +19,7 @@ enum class BAD_STRING {
   MALFORMED_SEQ_IN_ESCAPE
 };
 enum class BAD_COMMENT { UNEXPECTED_END };
-using TOKEN_ERROR = std::variant<BAD_STRING, BAD_COMMENT>;
+using TOKEN_ERROR = std::variant<std::monostate, BAD_STRING, BAD_COMMENT>;
 
 struct TOKEN {
   struct TYPE_LET {};

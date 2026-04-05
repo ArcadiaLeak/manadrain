@@ -25,7 +25,7 @@ static std::string_view codepoint_cv(char32_t ch,
     return {};
   return std::string_view{cp_storage.data(), len};
 }
-static bool is_newline(char32_t ch) {
+static bool is_lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
@@ -464,74 +464,72 @@ bool ParseDriver::parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private) {
 bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
   std::array<char32_t, 2> tbuff{};
   while (1) {
-    std::optional ch{peek()};
-    if (not ch) {
+    std::u32string_view tview{take(*this, tbuff)};
+    if (tview.empty()) {
       token.type = TOKEN::TYPE_EOF{};
       return 1;
     }
-
-    if (take(*this, tbuff) == U"\r\n") {
-      drop(2);
-      token.newline_seen = 1;
-      continue;
-    }
-
-    if (is_newline(*ch)) {
-      drop(1);
-      token.newline_seen = 1;
-      continue;
-    }
-
-    if (u_isWhitespace(*ch)) {
-      drop(1);
-      continue;
-    }
-
-    if (take(*this, tbuff) == U"//") {
-      while (1) {
-        ch = peek();
-        if (not ch || is_newline(*ch))
-          break;
+    switch (tview.front()) {
+      case '\r':
+        if (tview == U"\r\n")
+          drop(1);
+        [[fallthrough]];
+      case '\n':
+      case 0x2028:
+      case 0x2029:
         drop(1);
-      }
-      continue;
-    }
-
-    if (take(*this, tbuff) == U"/*") {
-      drop(2);
-      while (1) {
-        std::u32string_view tview{take(*this, tbuff)};
-        if (tview.empty()) {
-          err_token = BAD_COMMENT::UNEXPECTED_END;
-          return 0;
-        }
-        if (tview == U"*/") {
+        token.newline_seen = 1;
+        continue;
+      case '/':
+        if (tview == U"//") {
+          while (1) {
+            std::optional ch = peek();
+            if (not ch || is_lineterm(*ch))
+              break;
+            drop(1);
+          }
+          continue;
+        } else if (tview == U"/*") {
           drop(2);
-          break;
+          while (1) {
+            tview = take(*this, tbuff);
+            if (tview.empty()) {
+              err_token = BAD_COMMENT::UNEXPECTED_END;
+              return 0;
+            }
+            if (tview == U"*/") {
+              drop(2);
+              break;
+            }
+            if (is_lineterm(tview.front()))
+              token.newline_seen = 1;
+            drop(1);
+          }
+          continue;
         }
-        if (is_newline(tview.front()))
-          token.newline_seen = 1;
-        drop(1);
+        break;
+      case '\'':
+      case '"': {
+        BAD_STRING err_string{};
+        if (parseString(token.str, err_string)) {
+          token.type = TOKEN::TYPE_STRING{};
+          return 1;
+        }
+        err_token = err_string;
+        return 0;
       }
-      continue;
+      default:
+        if (u_isWhitespace(tview.front())) {
+          drop(1);
+          continue;
+        } else if (parseIdent(token.ident, 0)) {
+          if (parseKeyword(token.type, token.ident))
+            return 1;
+          token.type = TOKEN::TYPE_IDENT{};
+          return 1;
+        }
+        break;
     }
-
-    if (parseIdent(token.ident, 0)) {
-      if (not parseKeyword(token.type, token.ident))
-        token.type = TOKEN::TYPE_IDENT{};
-      return 1;
-    }
-
-    if (*ch == '\'' || *ch == '"' || *ch == '`') {
-      BAD_STRING err_string{};
-      if (parseString(token.str, err_string)) {
-        token.type = TOKEN::TYPE_STRING{};
-        return 1;
-      }
-      err_token = err_string;
-      return 0;
-    }
-
     return 0;
   }
 }
