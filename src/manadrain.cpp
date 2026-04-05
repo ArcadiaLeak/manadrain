@@ -30,6 +30,22 @@ static bool is_newline(char32_t ch) {
 }
 
 namespace Manadrain {
+template <std::size_t N>
+std::u32string_view take(ParseDriver& driver, std::array<char32_t, N>& tbuff) {
+  const ParseState state_backup{driver.state};
+  tbuff = {};
+  std::uint32_t i{};
+  while (i < N) {
+    std::optional ch{driver.peek()};
+    if (not ch)
+      break;
+    driver.drop(1);
+    tbuff[i++] = *ch;
+  }
+  driver.state = state_backup;
+  return {tbuff.data(), i};
+}
+
 std::optional<char32_t> ParseDriver::peek() {
   if (state.idx >= buffer.size())
     return std::nullopt;
@@ -133,9 +149,9 @@ bool ParseDriver::parseEscape_fixedSeq(
     high_surr = (high_surr << 4) | hex;
   }
 
-  std::array<char32_t, 2> takebuf{};
+  std::array<char32_t, 2> tbuff{};
   if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16 &&
-      take(takebuf) == U"\\u") {
+      take(*this, tbuff) == U"\\u") {
     drop(2);
     char32_t low_surr = 0;
     for (int i = 0; i < 4; i++) {
@@ -378,55 +394,58 @@ bool ParseDriver::parseString(STRICTNESS strictness,
         ch = ch_esc.first;
     }
 
-    std::array<char, 4> cp_storage;
+    std::array<char, 4> cp_storage{};
     token.content.append(codepoint_cv(*ch, cp_storage));
   }
 }
 
-bool ParseDriver::parseIdent_continue(char32_t& ch_esc, TOKEN_IDENT& word) {
+bool ParseDriver::parseIdent_uchar(TOKEN_IDENT& ident, bool beginning) {
   std::optional ch{peek()};
   if (not ch)
     return 0;
   drop(1);
+
   if (*ch == '\\' && peek() == 'u') {
     std::pair<char32_t, BAD_ESCAPE> ret_esc{};
     if (not parseEscape(ESC_RULE::IDENTIFIER, ret_esc))
       return 0;
     ch = ret_esc.first;
-    word.ident_has_escape = true;
+    ident.has_escape = true;
   }
-  if (not u_hasBinaryProperty(*ch, UCHAR_XID_CONTINUE))
+
+  UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
+  if (not u_hasBinaryProperty(*ch, must_be))
     return 0;
-  ch_esc = *ch;
+
+  std::array<char, 4> cp_storage{};
+  ident.content.append(codepoint_cv(*ch, cp_storage));
   return 1;
 }
 
-bool ParseDriver::parseIdent(bool is_private, TOKEN_IDENT& word) {
-  std::optional id_start{peek()};
-  if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
+bool ParseDriver::parseIdent(TOKEN_IDENT& ident, bool is_private) {
+  ParseState state_backup{state};
+
+  char32_t ch{};
+  if (not parseIdent_uchar(ident, 1)) {
+    state = state_backup;
     return 0;
-  drop(1);
-  word.is_private = is_private;
+  }
+
   if (is_private)
-    word.content.push_back('#');
-  std::array<char, 4> cp_storage;
-  word.content.append(codepoint_cv(*id_start, cp_storage));
+    ident.content = '#' + ident.content;
 
   while (true) {
-    const ParseState state_backup{state};
-    char32_t ch{};
-    if (not parseIdent_continue(ch, word)) {
+    state_backup = state;
+    if (not parseIdent_uchar(ident, 0)) {
       state = state_backup;
       return 1;
     }
-    word.content.append(codepoint_cv(ch, cp_storage));
   }
 }
 
 bool ParseDriver::parseToken_dang(TOKEN& token,
                                   std::variant<BAD_TOKEN, BAD_ESCAPE>& err) {
-  std::array<char32_t, 2> takebuf{};
-
+  std::array<char32_t, 2> tbuff{};
   while (true) {
     std::optional ch{peek()};
     if (not ch) {
@@ -434,7 +453,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token,
       return 1;
     }
 
-    if (take(takebuf) == U"\r\n") {
+    if (take(*this, tbuff) == U"\r\n") {
       drop(2);
       token.newline_seen = 1;
       continue;
@@ -451,7 +470,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token,
       continue;
     }
 
-    if (take(takebuf) == U"//") {
+    if (take(*this, tbuff) == U"//") {
       while (true) {
         ch = peek();
         if (not ch || is_newline(*ch))
@@ -461,19 +480,19 @@ bool ParseDriver::parseToken_dang(TOKEN& token,
       continue;
     }
 
-    if (take(takebuf) == U"/*") {
+    if (take(*this, tbuff) == U"/*") {
       drop(2);
       while (true) {
-        std::u32string_view buf_view{take(takebuf)};
-        if (buf_view.empty()) {
+        std::u32string_view tview{take(*this, tbuff)};
+        if (tview.empty()) {
           err = BAD_TOKEN::UNEXPECTED_COMMENT_END;
           return 0;
         }
-        if (buf_view == U"*/") {
+        if (tview == U"*/") {
           drop(2);
           break;
         }
-        if (is_newline(buf_view.front()))
+        if (is_newline(tview.front()))
           token.newline_seen = 1;
         drop(1);
       }

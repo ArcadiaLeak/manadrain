@@ -33,8 +33,7 @@ struct TOKEN_STRING {
 };
 
 struct TOKEN_IDENT {
-  bool ident_has_escape;
-  bool is_private;
+  bool has_escape;
   std::string content;
 };
 
@@ -57,22 +56,6 @@ struct ParseDriver {
   std::optional<char32_t> shift();
   void drop(std::uint32_t count);
 
-  template <std::size_t count>
-  std::u32string_view take(std::array<char32_t, count>& takebuf) {
-    const ParseState state_backup{state};
-    takebuf = {};
-    std::uint32_t i{};
-    while (i < count) {
-      std::optional ch{peek()};
-      if (not ch)
-        break;
-      drop(1);
-      takebuf[i++] = *ch;
-    }
-    state = state_backup;
-    return {takebuf.data(), i};
-  }
-
   bool parseHex_dang(std::uint32_t& digit);
   bool parseHex(std::uint32_t& digit);
 
@@ -94,8 +77,8 @@ struct ParseDriver {
                          char32_t sep,
                          std::pair<char32_t, BAD_STRING>& either);
 
-  bool parseIdent(bool is_private, TOKEN_IDENT& word);
-  bool parseIdent_continue(char32_t& ch, TOKEN_IDENT& word);
+  bool parseIdent(TOKEN_IDENT& ident, bool is_private);
+  bool parseIdent_uchar(TOKEN_IDENT& ident, bool beginning);
 
   bool parseToken_dang(TOKEN& token, std::variant<BAD_TOKEN, BAD_ESCAPE>& err);
 };
