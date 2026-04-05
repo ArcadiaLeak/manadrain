@@ -30,11 +30,12 @@ static bool is_newline(char32_t ch) {
 }
 
 namespace Manadrain {
-bool ParseDriver::parseKeyword(TOKEN_TYPE& tok_type, TOKEN_IDENT& tok_ident) {
-  static const std::unordered_map<std::string_view, TOKEN_TYPE> kw_sloppy{
-      {"var", TOK_VAR{}}, {"const", TOK_CONST{}}};
-  static const std::unordered_map<std::string_view, TOKEN_TYPE> kw_strict{
-      {"let", TOK_LET{}}};
+bool ParseDriver::parseKeyword(TOKEN::TYPE& tok_type,
+                               TOKEN::PAYLOAD_IDENT& tok_ident) {
+  static const std::unordered_map<std::string_view, TOKEN::TYPE> kw_sloppy{
+      {"var", TOKEN::TYPE_VAR{}}, {"const", TOKEN::TYPE_CONST{}}};
+  static const std::unordered_map<std::string_view, TOKEN::TYPE> kw_strict{
+      {"let", TOKEN::TYPE_LET{}}};
 
   auto it = kw_sloppy.find(tok_ident.val);
   if (it != kw_sloppy.end())
@@ -51,7 +52,7 @@ found:
     tok_type = it->second;
   else {
     tok_ident.is_reserved = 1;
-    tok_type = TOK_IDENT{};
+    tok_type = TOKEN::TYPE_IDENT{};
   }
   return 1;
 }
@@ -369,7 +370,7 @@ int ParseDriver::parseString_escSeq(char32_t sep,
   return ok;
 }
 
-bool ParseDriver::parseString(TOKEN_STRING& token, BAD_STRING& err) {
+bool ParseDriver::parseString(TOKEN::PAYLOAD_STR& token, BAD_STRING& err) {
   token.sep = *shift();
   while (1) {
     std::optional ch = peek();
@@ -415,7 +416,8 @@ bool ParseDriver::parseString(TOKEN_STRING& token, BAD_STRING& err) {
   }
 }
 
-bool ParseDriver::parseIdent_uchar(TOKEN_IDENT& ident, bool beginning) {
+bool ParseDriver::parseIdent_uchar(TOKEN::PAYLOAD_IDENT& ident,
+                                   bool beginning) {
   std::optional ch{peek()};
   if (not ch)
     return 0;
@@ -438,7 +440,7 @@ bool ParseDriver::parseIdent_uchar(TOKEN_IDENT& ident, bool beginning) {
   return 1;
 }
 
-bool ParseDriver::parseIdent(TOKEN_IDENT& ident, bool is_private) {
+bool ParseDriver::parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private) {
   ParseState state_backup{state};
 
   char32_t ch{};
@@ -459,12 +461,12 @@ bool ParseDriver::parseIdent(TOKEN_IDENT& ident, bool is_private) {
   }
 }
 
-bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err) {
+bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
   std::array<char32_t, 2> tbuff{};
   while (1) {
     std::optional ch{peek()};
     if (not ch) {
-      token.type = TOK_EOF{};
+      token.type = TOKEN::TYPE_EOF{};
       return 1;
     }
 
@@ -500,8 +502,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err) {
       while (1) {
         std::u32string_view tview{take(*this, tbuff)};
         if (tview.empty()) {
-          err.type = TOKEN_ERROR::TYPE::ERR_GENERAL;
-          err.general = BAD_TOKEN::UNEXPECTED_COMMENT_END;
+          err_token = BAD_COMMENT::UNEXPECTED_END;
           return 0;
         }
         if (tview == U"*/") {
@@ -517,16 +518,17 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err) {
 
     if (parseIdent(token.ident, 0)) {
       if (not parseKeyword(token.type, token.ident))
-        token.type = TOK_IDENT{};
+        token.type = TOKEN::TYPE_IDENT{};
       return 1;
     }
 
     if (*ch == '\'' || *ch == '"' || *ch == '`') {
-      if (parseString(token.str, err.str)) {
-        token.type = TOK_STRING{};
+      BAD_STRING err_string{};
+      if (parseString(token.str, err_string)) {
+        token.type = TOKEN::TYPE_STRING{};
         return 1;
       }
-      err.type = TOKEN_ERROR::TYPE::ERR_STRING;
+      err_token = err_string;
       return 0;
     }
 
@@ -534,9 +536,9 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err) {
   }
 }
 
-bool ParseDriver::parseToken(TOKEN& token, TOKEN_ERROR& err) {
+bool ParseDriver::parseToken(TOKEN& token, TOKEN_ERROR& err_token) {
   const ParseState state_backup{state};
-  int ok = parseToken_dang(token, err);
+  bool ok = parseToken_dang(token, err_token);
   if (not ok)
     state = state_backup;
   return ok;

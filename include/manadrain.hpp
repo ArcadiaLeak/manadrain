@@ -18,39 +18,38 @@ enum class BAD_STRING {
   OCTAL_SEQ_IN_ESCAPE,
   MALFORMED_SEQ_IN_ESCAPE
 };
-enum class BAD_TOKEN { UNEXPECTED_COMMENT_END };
-struct TOKEN_ERROR {
-  enum class TYPE { ERR_GENERAL, ERR_STRING };
-  TYPE type;
-  BAD_TOKEN general;
-  BAD_STRING str;
-};
-
-struct TOK_LET {};
-struct TOK_CONST {};
-struct TOK_VAR {};
-struct TOK_EOF {};
-struct TOK_IDENT {};
-struct TOK_STRING {};
-using TOKEN_TYPE =
-    std::variant<TOK_LET, TOK_CONST, TOK_VAR, TOK_EOF, TOK_IDENT, TOK_STRING>;
-
-struct TOKEN_STRING {
-  char32_t sep;
-  std::string val;
-};
-
-struct TOKEN_IDENT {
-  bool has_escape;
-  bool is_reserved;
-  std::string val;
-};
+enum class BAD_COMMENT { UNEXPECTED_END };
+using TOKEN_ERROR = std::variant<BAD_STRING, BAD_COMMENT>;
 
 struct TOKEN {
+  struct TYPE_LET {};
+  struct TYPE_CONST {};
+  struct TYPE_VAR {};
+  struct TYPE_EOF {};
+  struct TYPE_IDENT {};
+  struct TYPE_STRING {};
+  using TYPE = std::variant<TYPE_LET,
+                            TYPE_CONST,
+                            TYPE_VAR,
+                            TYPE_EOF,
+                            TYPE_IDENT,
+                            TYPE_STRING>;
+
+  struct PAYLOAD_STR {
+    char32_t sep;
+    std::string val;
+  };
+
+  struct PAYLOAD_IDENT {
+    bool has_escape;
+    bool is_reserved;
+    std::string val;
+  };
+
   bool newline_seen;
-  TOKEN_TYPE type;
-  TOKEN_STRING str;
-  TOKEN_IDENT ident;
+  TYPE type;
+  PAYLOAD_STR str;
+  PAYLOAD_IDENT ident;
 };
 
 struct ParseState {
@@ -79,17 +78,17 @@ struct ParseDriver {
   bool parseEscape_fixedSeq(ESC_RULE esc_rule,
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
-  bool parseString(TOKEN_STRING& token, BAD_STRING& err);
+  bool parseString(TOKEN::PAYLOAD_STR& token, BAD_STRING& err);
   int parseString_escSeq_dang(char32_t sep,
                               std::pair<char32_t, BAD_STRING>& either);
   int parseString_escSeq(char32_t sep, std::pair<char32_t, BAD_STRING>& either);
 
-  bool parseIdent(TOKEN_IDENT& ident, bool is_private);
-  bool parseIdent_uchar(TOKEN_IDENT& ident, bool beginning);
+  bool parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private);
+  bool parseIdent_uchar(TOKEN::PAYLOAD_IDENT& ident, bool beginning);
 
   bool parseToken_dang(TOKEN& token, TOKEN_ERROR& err);
   bool parseToken(TOKEN& token, TOKEN_ERROR& err);
 
-  bool parseKeyword(TOKEN_TYPE& tok_type, TOKEN_IDENT& tok_ident);
+  bool parseKeyword(TOKEN::TYPE& tok_type, TOKEN::PAYLOAD_IDENT& tok_ident);
 };
 }  // namespace Manadrain
