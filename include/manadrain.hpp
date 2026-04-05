@@ -25,27 +25,31 @@ struct TOK_LET {};
 struct TOK_CONST {};
 struct TOK_VAR {};
 struct TOK_EOF {};
-using TOKEN_TYPE = std::variant<TOK_LET, TOK_CONST, TOK_VAR, TOK_EOF>;
+struct TOK_IDENT {};
+using TOKEN_TYPE =
+    std::variant<TOK_LET, TOK_CONST, TOK_VAR, TOK_EOF, TOK_IDENT>;
 
 struct TOKEN_STRING {
   char32_t sep;
-  std::string content;
+  std::string val;
 };
 
 struct TOKEN_IDENT {
   bool has_escape;
-  std::string content;
+  bool is_reserved;
+  std::string val;
 };
 
 struct TOKEN {
   bool newline_seen;
   TOKEN_TYPE type;
-  TOKEN_STRING data_string;
-  TOKEN_IDENT data_ident;
+  TOKEN_STRING str;
+  TOKEN_IDENT ident;
 };
 
 struct ParseState {
   std::uint32_t idx;
+  STRICTNESS strictness;
 };
 
 struct ParseDriver {
@@ -81,5 +85,6 @@ struct ParseDriver {
   bool parseIdent_uchar(TOKEN_IDENT& ident, bool beginning);
 
   bool parseToken_dang(TOKEN& token, std::variant<BAD_TOKEN, BAD_ESCAPE>& err);
+  bool parseKeyword(TOKEN& token);
 };
 }  // namespace Manadrain
