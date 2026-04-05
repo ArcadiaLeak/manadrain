@@ -50,21 +50,6 @@ std::optional<char32_t> ParseDriver::shift() {
   return ch;
 }
 
-std::u32string_view ParseDriver::take(std::uint32_t count,
-                                      std::u32string& storage) {
-  storage.clear();
-  const ParseState state_backup{state};
-  for (std::uint32_t i = 0; i < count; i++) {
-    std::optional ch{peek()};
-    if (not ch)
-      break;
-    drop(1);
-    storage.push_back(*ch);
-  }
-  state = state_backup;
-  return storage;
-}
-
 void ParseDriver::drop(std::uint32_t count) {
   U8_FWD_N(buffer.data(), state.idx, buffer.size(), count);
 }
@@ -148,9 +133,9 @@ bool ParseDriver::parseEscape_fixedSeq(
     high_surr = (high_surr << 4) | hex;
   }
 
-  std::u32string take_buf{};
+  std::array<char32_t, 2> takebuf{};
   if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16 &&
-      take(2, take_buf) == U"\\u") {
+      take(takebuf) == U"\\u") {
     drop(2);
     char32_t low_surr = 0;
     for (int i = 0; i < 4; i++) {
@@ -398,7 +383,7 @@ bool ParseDriver::parseString(STRICTNESS strictness,
   }
 }
 
-bool ParseDriver::parseWord_idContinue(char32_t& ch_esc, TOKEN_WORD& word) {
+bool ParseDriver::parseIdent_continue(char32_t& ch_esc, TOKEN_IDENT& word) {
   std::optional ch{peek()};
   if (not ch)
     return 0;
@@ -416,7 +401,7 @@ bool ParseDriver::parseWord_idContinue(char32_t& ch_esc, TOKEN_WORD& word) {
   return 1;
 }
 
-bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
+bool ParseDriver::parseIdent(bool is_private, TOKEN_IDENT& word) {
   std::optional id_start{peek()};
   if (not id_start || not u_hasBinaryProperty(*id_start, UCHAR_XID_START))
     return 0;
@@ -430,7 +415,7 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
   while (true) {
     const ParseState state_backup{state};
     char32_t ch{};
-    if (not parseWord_idContinue(ch, word)) {
+    if (not parseIdent_continue(ch, word)) {
       state = state_backup;
       return 1;
     }
@@ -439,8 +424,8 @@ bool ParseDriver::parseWord(bool is_private, TOKEN_WORD& word) {
 }
 
 bool ParseDriver::parseToken_dang(TOKEN& token,
-                             std::variant<BAD_TOKEN, BAD_ESCAPE>& err) {
-  std::u32string take_buf{};
+                                  std::variant<BAD_TOKEN, BAD_ESCAPE>& err) {
+  std::array<char32_t, 2> takebuf{};
 
   while (true) {
     std::optional ch{peek()};
@@ -449,7 +434,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token,
       return 1;
     }
 
-    if (take(2, take_buf) == U"\r\n") {
+    if (take(takebuf) == U"\r\n") {
       drop(2);
       token.newline_seen = 1;
       continue;
@@ -466,7 +451,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token,
       continue;
     }
 
-    if (take(2, take_buf) == U"//") {
+    if (take(takebuf) == U"//") {
       while (true) {
         ch = peek();
         if (not ch || is_newline(*ch))
@@ -476,34 +461,24 @@ bool ParseDriver::parseToken_dang(TOKEN& token,
       continue;
     }
 
-    if (take(2, take_buf) == U"/*") {
+    if (take(takebuf) == U"/*") {
       drop(2);
       while (true) {
-        take(2, take_buf);
-        if (take_buf.empty()) {
+        std::u32string_view buf_view{take(takebuf)};
+        if (buf_view.empty()) {
           err = BAD_TOKEN::UNEXPECTED_COMMENT_END;
           return 0;
         }
-        if (take_buf == U"*/") {
+        if (buf_view == U"*/") {
           drop(2);
           break;
         }
-        if (is_newline(take_buf.front()))
+        if (is_newline(buf_view.front()))
           token.newline_seen = 1;
         drop(1);
       }
       continue;
     }
-
-    // if (take(2, take_buf) == U"\\u") {
-    //   drop(1);
-    //   std::pair<char32_t, BAD_ESCAPE> either;
-    //   if (not parseEscape(ESC_RULE::IDENTIFIER, either)) {
-    //     err = either.second;
-    //     return 0;
-    //   }
-    //   ch = either.first;
-    // }
 
     return 0;
   }

@@ -21,15 +21,18 @@ enum class BAD_STRING {
 };
 enum BAD_TOKEN { UNEXPECTED_COMMENT_END };
 
+struct TOK_LET {};
+struct TOK_CONST {};
+struct TOK_VAR {};
 struct TOK_EOF {};
-using TOKEN_TYPE = std::variant<TOK_EOF>;
+using TOKEN_TYPE = std::variant<TOK_LET, TOK_CONST, TOK_VAR, TOK_EOF>;
 
 struct TOKEN_STRING {
   char32_t sep;
   std::string content;
 };
 
-struct TOKEN_WORD {
+struct TOKEN_IDENT {
   bool ident_has_escape;
   bool is_private;
   std::string content;
@@ -38,17 +41,8 @@ struct TOKEN_WORD {
 struct TOKEN {
   bool newline_seen;
   TOKEN_TYPE type;
-};
-
-struct STMT_VARDECL {
-  struct KIND_LET {};
-  struct KIND_CONST {};
-  struct KIND_VAR {};
-  using KIND = std::variant<KIND_LET, KIND_CONST, KIND_VAR>;
-
-  KIND kind;
-  TOKEN_WORD name;
-  TOKEN_STRING init;
+  TOKEN_STRING data_string;
+  TOKEN_IDENT data_ident;
 };
 
 struct ParseState {
@@ -61,8 +55,23 @@ struct ParseDriver {
 
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
-  std::u32string_view take(std::uint32_t count, std::u32string& buf);
   void drop(std::uint32_t count);
+
+  template <std::size_t count>
+  std::u32string_view take(std::array<char32_t, count>& takebuf) {
+    const ParseState state_backup{state};
+    takebuf = {};
+    std::uint32_t i{};
+    while (i < count) {
+      std::optional ch{peek()};
+      if (not ch)
+        break;
+      drop(1);
+      takebuf[i++] = *ch;
+    }
+    state = state_backup;
+    return {takebuf.data(), i};
+  }
 
   bool parseHex_dang(std::uint32_t& digit);
   bool parseHex(std::uint32_t& digit);
@@ -85,8 +94,8 @@ struct ParseDriver {
                          char32_t sep,
                          std::pair<char32_t, BAD_STRING>& either);
 
-  bool parseWord(bool is_private, TOKEN_WORD& word);
-  bool parseWord_idContinue(char32_t& ch, TOKEN_WORD& word);
+  bool parseIdent(bool is_private, TOKEN_IDENT& word);
+  bool parseIdent_continue(char32_t& ch, TOKEN_IDENT& word);
 
   bool parseToken_dang(TOKEN& token, std::variant<BAD_TOKEN, BAD_ESCAPE>& err);
 };
