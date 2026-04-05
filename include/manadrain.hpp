@@ -16,18 +16,24 @@ enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
 enum class BAD_STRING {
   UNEXPECTED_END,
   OCTAL_SEQ_IN_ESCAPE,
-  MALFORMED_SEQ_IN_ESCAPE,
-  MISMATCH
+  MALFORMED_SEQ_IN_ESCAPE
 };
-enum BAD_TOKEN { UNEXPECTED_COMMENT_END };
+enum class BAD_TOKEN { UNEXPECTED_COMMENT_END };
+struct TOKEN_ERROR {
+  enum class TYPE { ERR_GENERAL, ERR_STRING };
+  TYPE type;
+  BAD_TOKEN general;
+  BAD_STRING str;
+};
 
 struct TOK_LET {};
 struct TOK_CONST {};
 struct TOK_VAR {};
 struct TOK_EOF {};
 struct TOK_IDENT {};
+struct TOK_STRING {};
 using TOKEN_TYPE =
-    std::variant<TOK_LET, TOK_CONST, TOK_VAR, TOK_EOF, TOK_IDENT>;
+    std::variant<TOK_LET, TOK_CONST, TOK_VAR, TOK_EOF, TOK_IDENT, TOK_STRING>;
 
 struct TOKEN_STRING {
   char32_t sep;
@@ -73,18 +79,17 @@ struct ParseDriver {
   bool parseEscape_fixedSeq(ESC_RULE esc_rule,
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
-  bool parseString(STRICTNESS strictness, TOKEN_STRING& token, BAD_STRING& err);
-  int parseString_escSeq_dang(STRICTNESS strictness,
-                              char32_t sep,
+  bool parseString(TOKEN_STRING& token, BAD_STRING& err);
+  int parseString_escSeq_dang(char32_t sep,
                               std::pair<char32_t, BAD_STRING>& either);
-  int parseString_escSeq(STRICTNESS strictness,
-                         char32_t sep,
-                         std::pair<char32_t, BAD_STRING>& either);
+  int parseString_escSeq(char32_t sep, std::pair<char32_t, BAD_STRING>& either);
 
   bool parseIdent(TOKEN_IDENT& ident, bool is_private);
   bool parseIdent_uchar(TOKEN_IDENT& ident, bool beginning);
 
-  bool parseToken_dang(TOKEN& token, std::variant<BAD_TOKEN, BAD_ESCAPE>& err);
-  bool parseKeyword(TOKEN& token);
+  bool parseToken_dang(TOKEN& token, TOKEN_ERROR& err);
+  bool parseToken(TOKEN& token, TOKEN_ERROR& err);
+
+  bool parseKeyword(TOKEN_TYPE& tok_type, TOKEN_IDENT& tok_ident);
 };
 }  // namespace Manadrain
