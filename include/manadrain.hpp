@@ -64,12 +64,12 @@ struct ParseDriver {
   std::u32string_view take(std::uint32_t count, std::u32string& buf);
   void drop(std::uint32_t count);
 
+  bool parseHex_dang(std::uint32_t& digit);
   bool parseHex(std::uint32_t& digit);
-  bool parseHex_b(std::uint32_t& digit);
 
+  bool parseEscape_dang(ESC_RULE esc_rule,
+                        std::pair<char32_t, BAD_ESCAPE>& either);
   bool parseEscape(ESC_RULE esc_rule, std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscape_b(ESC_RULE esc_rule,
-                     std::pair<char32_t, BAD_ESCAPE>& either);
   bool parseEscape_hex(std::pair<char32_t, BAD_ESCAPE>& either);
   bool parseEscape_uni(ESC_RULE esc_rule,
                        std::pair<char32_t, BAD_ESCAPE>& either);
@@ -78,16 +78,16 @@ struct ParseDriver {
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
   bool parseString(STRICTNESS strictness, TOKEN_STRING& token, BAD_STRING& err);
-  int parseString_escape(STRICTNESS strictness,
+  int parseString_escSeq_dang(STRICTNESS strictness,
+                              char32_t sep,
+                              std::pair<char32_t, BAD_STRING>& either);
+  int parseString_escSeq(STRICTNESS strictness,
                          char32_t sep,
                          std::pair<char32_t, BAD_STRING>& either);
-  int parseString_escape_b(STRICTNESS strictness,
-                           char32_t sep,
-                           std::pair<char32_t, BAD_STRING>& either);
 
   bool parseWord(bool is_private, TOKEN_WORD& word);
   bool parseWord_idContinue(char32_t& ch, TOKEN_WORD& word);
 
-  bool parseToken(TOKEN& token, BAD_TOKEN& err);
+  bool parseToken_dang(TOKEN& token, std::variant<BAD_TOKEN, BAD_ESCAPE>& err);
 };
 }  // namespace Manadrain
