@@ -22,7 +22,7 @@ enum class BAD_STRING {
 };
 enum class BAD_COMMENT { UNEXPECTED_END };
 
-enum class STATIC_ATOM { A_LET, A_CONST, A_VAR };
+enum class STATIC_ATOM { A_LET };
 enum class TOKEN_TYPE {
   T_LET,
   T_CONST,
@@ -30,7 +30,8 @@ enum class TOKEN_TYPE {
   T_EOF,
   T_IDENT,
   T_STRING,
-  T_ERROR
+  T_ERROR,
+  T_UCHAR
 };
 enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
 
@@ -46,8 +47,9 @@ struct Token {
   };
   using PAYLOAD_ERR = std::variant<std::monostate, BAD_STRING, BAD_COMMENT>;
 
-  bool newline_seen;
   TOKEN_TYPE type;
+  bool newline_seen;
+  char32_t uchar;
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
   PAYLOAD_ERR err;
@@ -70,11 +72,11 @@ struct ParseDriver {
   const std::basic_string<std::uint8_t> buffer;
   ParseState state;
 
+  std::string ch_temp;
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
-
-  std::string ch_temp;
-
+  void makeAtom(std::string_view repr);
+  
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
   void drop(std::uint32_t count);
@@ -102,6 +104,11 @@ struct ParseDriver {
 
   bool parseToken_dang(Token& token);
   bool parseToken(Token& token);
-  bool tryCv_reserved(Token& token);
+
+  bool tryReserved_ident(Token& token);
+  bool tryReserved_string(Token& token);
+
+  bool parseVardecl(STMT_VARDECL& vardecl);
+  bool parseStatement();
 };
 }  // namespace Manadrain

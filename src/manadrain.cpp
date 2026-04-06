@@ -29,26 +29,38 @@ static bool is_lineterm(char32_t ch) {
 }
 
 namespace Manadrain {
-static const std::array reserved_arr = std::to_array<
-    std::tuple<std::string_view, STATIC_ATOM, TOKEN_TYPE, STRICTNESS>>(
-    {{"var", STATIC_ATOM::A_VAR, TOKEN_TYPE::T_VAR, STRICTNESS::SLOPPY},
-     {"const", STATIC_ATOM::A_CONST, TOKEN_TYPE::T_CONST, STRICTNESS::SLOPPY},
-     {"let", STATIC_ATOM::A_LET, TOKEN_TYPE::T_LET, STRICTNESS::STRICT}});
+static const std::array reserved_arr =
+    std::to_array<std::tuple<std::string_view,
+                             std::optional<STATIC_ATOM>,
+                             TOKEN_TYPE,
+                             STRICTNESS>>(
+        {{"var", std::nullopt, TOKEN_TYPE::T_VAR, STRICTNESS::SLOPPY},
+         {"const", std::nullopt, TOKEN_TYPE::T_CONST, STRICTNESS::SLOPPY},
+         {"let", STATIC_ATOM::A_LET, TOKEN_TYPE::T_LET, STRICTNESS::STRICT}});
 
-bool ParseDriver::tryCv_reserved(Token& token) {
+bool ParseDriver::tryReserved_ident(Token& token) {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     auto [literal, _, token_type, strictness] = reserved_arr[i];
     if (ch_temp != literal)
       continue;
+    token.ident.pool_idx = i;
     if (state.strictness < strictness)
-      continue;
+      return 1;
     if (token.ident.has_escape) {
-      token.type = TOKEN_TYPE::T_IDENT;
       token.ident.is_reserved = 1;
-      token.ident.pool_idx = i;
       return 1;
     }
     token.type = token_type;
+    return 1;
+  }
+  return 0;
+}
+
+bool ParseDriver::tryReserved_string(Token& token) {
+  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+    if (ch_temp != std::get<0>(reserved_arr[i]))
+      continue;
+    token.ident.pool_idx = i;
     return 1;
   }
   return 0;
@@ -525,6 +537,10 @@ bool ParseDriver::parseToken_dang(Token& token) {
         BAD_STRING err_string{};
         if (parseString(token.str, err_string)) {
           token.type = TOKEN_TYPE::T_STRING;
+          if (tryReserved_string(token))
+            return 1;
+          makeAtom(ch_temp);
+          token.str.pool_idx = atom_umap[ch_temp];
           return 1;
         }
         token.type = TOKEN_TYPE::T_ERROR;
@@ -536,21 +552,28 @@ bool ParseDriver::parseToken_dang(Token& token) {
           drop(1);
           continue;
         } else if (parseIdent(token.ident, 0)) {
-          if (tryCv_reserved(token))
-            return 1;
           token.type = TOKEN_TYPE::T_IDENT;
-          if (not atom_umap.contains(ch_temp)) {
-            atom_deq.push_back(ch_temp);
-            atom_umap[atom_deq.back()] =
-                reserved_arr.size() + atom_deq.size() - 1;
-          }
+          if (tryReserved_ident(token))
+            return 1;
+          makeAtom(ch_temp);
           token.ident.pool_idx = atom_umap[ch_temp];
           return 1;
+        } else {
+          drop(1);
+          token.type = TOKEN_TYPE::T_UCHAR;
+          token.uchar = tview.front();
+          return 1;
         }
-        break;
     }
     return 0;
   }
+}
+
+void ParseDriver::makeAtom(std::string_view repr) {
+  if (atom_umap.contains(ch_temp))
+    return;
+  atom_deq.push_back(ch_temp);
+  atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
 }
 
 bool ParseDriver::parseToken(Token& token) {
@@ -559,5 +582,77 @@ bool ParseDriver::parseToken(Token& token) {
   if (not ok)
     state = state_backup;
   return ok;
+}
+
+bool ParseDriver::parseVardecl(STMT_VARDECL& vardecl) {
+  Token token{};
+  if (not parseToken(token))
+    return 0;
+
+  if (token.is_pseudo_keyword(STATIC_ATOM::A_LET))
+    token.type = TOKEN_TYPE::T_LET;
+  switch (token.type) {
+    case TOKEN_TYPE::T_LET:
+      vardecl.kind = VARDECL_KIND::K_LET;
+      break;
+    case TOKEN_TYPE::T_CONST:
+      vardecl.kind = VARDECL_KIND::K_CONST;
+      break;
+    case TOKEN_TYPE::T_VAR:
+      vardecl.kind = VARDECL_KIND::K_VAR;
+      break;
+    default:
+      return 0;
+  }
+
+  token = {};
+  if (not parseToken(token))
+    return 0;
+  if (token.type != TOKEN_TYPE::T_IDENT)
+    return 0;
+  vardecl.ident = token.ident;
+
+  token = {};
+  if (not parseToken(token))
+    return 0;
+
+  const ParseState state_backup{state};
+  if (token.type == TOKEN_TYPE::T_UCHAR && token.uchar == '=') {
+    token = {};
+    if (not parseToken(token))
+      return 0;
+    switch (token.type) {
+      case TOKEN_TYPE::T_STRING:
+        vardecl.init = token.str;
+        break;
+      default:
+        return 0;
+    }
+  } else {
+    state = state_backup;
+  }
+
+  token = {};
+  if (not parseToken(token))
+    return 1;
+  if (token.type == TOKEN_TYPE::T_UCHAR)
+    if (token.uchar == '}' || token.newline_seen)
+      return 1;
+    else if (token.uchar == ';') {
+      drop(1);
+      return 1;
+    }
+
+  return 0;
+}
+
+bool ParseDriver::parseStatement() {
+  const ParseState state_backup{state};
+  STMT_VARDECL vardecl{};
+  if (not parseVardecl(vardecl)) {
+    state = state_backup;
+    return 0;
+  }
+  return 1;
 }
 }  // namespace Manadrain
