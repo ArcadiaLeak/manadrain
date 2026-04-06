@@ -30,17 +30,14 @@ static bool is_lineterm(char32_t ch) {
 
 namespace Manadrain {
 static const std::array reserved_arr =
-    std::to_array<std::tuple<std::string_view,
-                             std::optional<STATIC_ATOM>,
-                             TOKEN_TYPE,
-                             STRICTNESS>>(
-        {{"var", std::nullopt, TOKEN_TYPE::T_VAR, STRICTNESS::SLOPPY},
-         {"const", std::nullopt, TOKEN_TYPE::T_CONST, STRICTNESS::SLOPPY},
-         {"let", STATIC_ATOM::A_LET, TOKEN_TYPE::T_LET, STRICTNESS::STRICT}});
+    std::to_array<std::tuple<std::string_view, TOKEN_TYPE, STRICTNESS>>(
+        {{"var", TOKEN_TYPE::T_VAR, STRICTNESS::SLOPPY},
+         {"const", TOKEN_TYPE::T_CONST, STRICTNESS::SLOPPY},
+         {"let", TOKEN_TYPE::T_LET, STRICTNESS::STRICT}});
 
 bool ParseDriver::tryReserved_ident(Token& token) {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-    auto [literal, _, token_type, strictness] = reserved_arr[i];
+    auto [literal, token_type, strictness] = reserved_arr[i];
     if (ch_temp != literal)
       continue;
     token.ident.pool_idx = i;
@@ -66,16 +63,16 @@ bool ParseDriver::tryReserved_string(Token& token) {
   return 0;
 }
 
-bool Token::is_pseudo_keyword(STATIC_ATOM s_atom) {
+bool Token::is_pseudo_keyword(TOKEN_TYPE tok_type) {
   if (type != TOKEN_TYPE::T_IDENT)
-    return 0;
-  if (ident.pool_idx >= reserved_arr.size())
-    return 0;
-  if (std::get<1>(reserved_arr[ident.pool_idx]) != s_atom)
     return 0;
   if (ident.has_escape)
     return 0;
-  return 1;
+  if (ident.pool_idx >= reserved_arr.size())
+    return 0;
+  if (std::get<1>(reserved_arr[ident.pool_idx]) == tok_type)
+    return 1;
+  return 0;
 }
 
 template <std::size_t N>
@@ -539,8 +536,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
           token.type = TOKEN_TYPE::T_STRING;
           if (tryReserved_string(token))
             return 1;
-          makeAtom_fromTemp();
-          token.str.pool_idx = atom_umap[ch_temp];
+          token.str.pool_idx = makeAtom_fromTemp();
           return 1;
         }
         token.type = TOKEN_TYPE::T_ERROR;
@@ -555,8 +551,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
           token.type = TOKEN_TYPE::T_IDENT;
           if (tryReserved_ident(token))
             return 1;
-          makeAtom_fromTemp();
-          token.ident.pool_idx = atom_umap[ch_temp];
+          token.ident.pool_idx = makeAtom_fromTemp();
           return 1;
         } else {
           drop(1);
@@ -569,11 +564,12 @@ bool ParseDriver::parseToken_dang(Token& token) {
   }
 }
 
-void ParseDriver::makeAtom_fromTemp() {
-  if (atom_umap.contains(ch_temp))
-    return;
-  atom_deq.push_back(std::move(ch_temp));
-  atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
+std::size_t ParseDriver::makeAtom_fromTemp() {
+  if (not atom_umap.contains(ch_temp)) {
+    atom_deq.push_back(std::move(ch_temp));
+    atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
+  }
+  return atom_umap[atom_deq.back()];
 }
 
 bool ParseDriver::parseToken(Token& token) {
@@ -589,7 +585,7 @@ bool ParseDriver::parseVardecl(STMT_VARDECL& vardecl) {
   if (not parseToken(token))
     return 0;
 
-  if (token.is_pseudo_keyword(STATIC_ATOM::A_LET))
+  if (token.is_pseudo_keyword(TOKEN_TYPE::T_LET))
     token.type = TOKEN_TYPE::T_LET;
   switch (token.type) {
     case TOKEN_TYPE::T_LET:

@@ -22,7 +22,6 @@ enum class BAD_STRING {
 };
 enum class BAD_COMMENT { UNEXPECTED_END };
 
-enum class STATIC_ATOM { A_LET };
 enum class TOKEN_TYPE {
   T_LET,
   T_CONST,
@@ -33,7 +32,6 @@ enum class TOKEN_TYPE {
   T_ERROR,
   T_UCHAR
 };
-enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
 
 struct Token {
   struct PAYLOAD_STR {
@@ -54,9 +52,10 @@ struct Token {
   PAYLOAD_IDENT ident;
   PAYLOAD_ERR err;
 
-  bool is_pseudo_keyword(STATIC_ATOM s_atom);
+  bool is_pseudo_keyword(TOKEN_TYPE tok_type);
 };
 
+enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
 struct STMT_VARDECL {
   VARDECL_KIND kind;
   Token::PAYLOAD_IDENT ident;
@@ -76,7 +75,7 @@ struct ParseDriver {
   std::deque<std::string> atom_deq;
 
   std::string ch_temp;
-  void makeAtom_fromTemp();
+  std::size_t makeAtom_fromTemp();
 
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
