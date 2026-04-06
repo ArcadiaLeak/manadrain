@@ -3,7 +3,6 @@
 
 #include <format>
 #include <optional>
-#include <unordered_map>
 
 #include "manadrain.hpp"
 
@@ -30,31 +29,33 @@ static bool is_lineterm(char32_t ch) {
 }
 
 namespace Manadrain {
+static const std::array atom_stat = std::to_array<ATOM_STAT>(
+    {{.lit_view = "var",
+      .category = ATOM_STAT::RESERVED{TOKEN::TYPE_VAR{}, STRICTNESS::SLOPPY}},
+     {.lit_view = "const",
+      .category = ATOM_STAT::RESERVED{TOKEN::TYPE_CONST{}, STRICTNESS::SLOPPY}},
+     {.lit_view = "let",
+      .category = ATOM_STAT::RESERVED{TOKEN::TYPE_LET{}, STRICTNESS::STRICT}}});
+
 bool ParseDriver::parseKeyword(TOKEN::TYPE& tok_type,
                                TOKEN::PAYLOAD_IDENT& tok_ident) {
-  static const std::unordered_map<std::string_view, TOKEN::TYPE> kw_sloppy{
-      {"var", TOKEN::TYPE_VAR{}}, {"const", TOKEN::TYPE_CONST{}}};
-  static const std::unordered_map<std::string_view, TOKEN::TYPE> kw_strict{
-      {"let", TOKEN::TYPE_LET{}}};
-
-  auto it = kw_sloppy.find(tok_ident.val);
-  if (it != kw_sloppy.end())
-    goto found;
-  if (state.strictness == STRICTNESS::STRICT) {
-    it = kw_strict.find(tok_ident.val);
-    if (it != kw_strict.end())
-      goto found;
+  for (std::size_t i = 0; i < atom_stat.size(); i++) {
+    const ATOM_STAT::RESERVED* category_ptr =
+        std::get_if<ATOM_STAT::RESERVED>(&atom_stat[i].category);
+    if (not category_ptr)
+      continue;
+    if (state.strictness < category_ptr->strictness)
+      continue;
+    if (tok_ident.has_escape) {
+      tok_type = TOKEN::TYPE_IDENT{};
+      tok_ident.is_reserved = 1;
+      tok_ident.pool_idx = i;
+      return 1;
+    }
+    tok_type = category_ptr->token_type;
+    return 1;
   }
   return 0;
-
-found:
-  if (not tok_ident.has_escape)
-    tok_type = it->second;
-  else {
-    tok_ident.is_reserved = 1;
-    tok_type = TOKEN::TYPE_IDENT{};
-  }
-  return 1;
 }
 
 template <std::size_t N>
@@ -372,6 +373,8 @@ int ParseDriver::parseString_escSeq(char32_t sep,
 
 bool ParseDriver::parseString(TOKEN::PAYLOAD_STR& token, BAD_STRING& err) {
   token.sep = *shift();
+  ch_temp.clear();
+
   while (1) {
     std::optional ch = peek();
     if (not ch) {
@@ -412,7 +415,7 @@ bool ParseDriver::parseString(TOKEN::PAYLOAD_STR& token, BAD_STRING& err) {
     }
 
     std::array<char, 4> cp_storage{};
-    token.val.append(codepoint_cv(*ch, cp_storage));
+    ch_temp.append(codepoint_cv(*ch, cp_storage));
   }
 }
 
@@ -436,21 +439,21 @@ bool ParseDriver::parseIdent_uchar(TOKEN::PAYLOAD_IDENT& ident,
     return 0;
 
   std::array<char, 4> cp_storage{};
-  ident.val.append(codepoint_cv(*ch, cp_storage));
+  ch_temp.append(codepoint_cv(*ch, cp_storage));
   return 1;
 }
 
 bool ParseDriver::parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private) {
   ParseState state_backup{state};
+  ch_temp.clear();
 
-  char32_t ch{};
   if (not parseIdent_uchar(ident, 1)) {
     state = state_backup;
     return 0;
   }
 
   if (is_private)
-    ident.val = '#' + ident.val;
+    ch_temp.insert(ch_temp.begin(), '#');
 
   while (1) {
     state_backup = state;
@@ -526,6 +529,11 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
           if (parseKeyword(token.type, token.ident))
             return 1;
           token.type = TOKEN::TYPE_IDENT{};
+          if (not atom_umap.contains(ch_temp)) {
+            atom_deq.push_back(ch_temp);
+            atom_umap[atom_deq.back()] = atom_deq.size() - 1;
+          }
+          token.ident.pool_idx = atom_umap[ch_temp];
           return 1;
         }
         break;

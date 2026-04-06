@@ -1,4 +1,6 @@
+#include <deque>
 #include <string>
+#include <unordered_map>
 #include <variant>
 
 namespace Manadrain {
@@ -37,19 +39,31 @@ struct TOKEN {
 
   struct PAYLOAD_STR {
     char32_t sep;
-    std::string val;
+    std::size_t pool_idx;
   };
 
   struct PAYLOAD_IDENT {
     bool has_escape;
     bool is_reserved;
-    std::string val;
+    std::size_t pool_idx;
   };
 
   bool newline_seen;
   TYPE type;
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
+};
+
+struct ATOM_STAT {
+  struct RESERVED {
+    TOKEN::TYPE token_type;
+    STRICTNESS strictness;
+  };
+  struct INTRINSIC {};
+  using CATEGORY = std::variant<RESERVED, INTRINSIC>;
+
+  std::string_view lit_view;
+  CATEGORY category;
 };
 
 struct ParseState {
@@ -60,6 +74,11 @@ struct ParseState {
 struct ParseDriver {
   const std::basic_string<std::uint8_t> buffer;
   ParseState state;
+
+  std::unordered_map<std::string_view, std::size_t> atom_umap;
+  std::deque<std::string> atom_deq;
+
+  std::string ch_temp;
 
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
