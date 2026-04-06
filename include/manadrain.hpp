@@ -72,11 +72,12 @@ struct ParseDriver {
   const std::basic_string<std::uint8_t> buffer;
   ParseState state;
 
-  std::string ch_temp;
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
-  void makeAtom(std::string_view repr);
-  
+
+  std::string ch_temp;
+  void makeAtom_fromTemp();
+
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
   void drop(std::uint32_t count);

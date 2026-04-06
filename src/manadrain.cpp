@@ -539,7 +539,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
           token.type = TOKEN_TYPE::T_STRING;
           if (tryReserved_string(token))
             return 1;
-          makeAtom(ch_temp);
+          makeAtom_fromTemp();
           token.str.pool_idx = atom_umap[ch_temp];
           return 1;
         }
@@ -555,7 +555,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
           token.type = TOKEN_TYPE::T_IDENT;
           if (tryReserved_ident(token))
             return 1;
-          makeAtom(ch_temp);
+          makeAtom_fromTemp();
           token.ident.pool_idx = atom_umap[ch_temp];
           return 1;
         } else {
@@ -569,10 +569,10 @@ bool ParseDriver::parseToken_dang(Token& token) {
   }
 }
 
-void ParseDriver::makeAtom(std::string_view repr) {
+void ParseDriver::makeAtom_fromTemp() {
   if (atom_umap.contains(ch_temp))
     return;
-  atom_deq.push_back(ch_temp);
+  atom_deq.push_back(std::move(ch_temp));
   atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
 }
 
