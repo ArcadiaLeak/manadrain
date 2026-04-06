@@ -21,7 +21,6 @@ enum class BAD_STRING {
   MALFORMED_SEQ_IN_ESCAPE
 };
 enum class BAD_COMMENT { UNEXPECTED_END };
-using TOKEN_ERROR = std::variant<std::monostate, BAD_STRING, BAD_COMMENT>;
 
 struct TOKEN {
   struct TYPE_LET {};
@@ -30,12 +29,14 @@ struct TOKEN {
   struct TYPE_EOF {};
   struct TYPE_IDENT {};
   struct TYPE_STRING {};
+  struct TYPE_ERROR {};
   using TYPE = std::variant<TYPE_LET,
                             TYPE_CONST,
                             TYPE_VAR,
                             TYPE_EOF,
                             TYPE_IDENT,
-                            TYPE_STRING>;
+                            TYPE_STRING,
+                            TYPE_ERROR>;
 
   struct PAYLOAD_STR {
     char32_t sep;
@@ -48,10 +49,13 @@ struct TOKEN {
     std::size_t pool_idx;
   };
 
+  using PAYLOAD_ERR = std::variant<std::monostate, BAD_STRING, BAD_COMMENT>;
+
   bool newline_seen;
   TYPE type;
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
+  PAYLOAD_ERR err;
 };
 
 struct ATOM_STAT {
@@ -105,9 +109,9 @@ struct ParseDriver {
   bool parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private);
   bool parseIdent_uchar(TOKEN::PAYLOAD_IDENT& ident, bool beginning);
 
-  bool parseToken_dang(TOKEN& token, TOKEN_ERROR& err);
-  bool parseToken(TOKEN& token, TOKEN_ERROR& err);
-
-  bool parseKeyword(TOKEN::TYPE& tok_type, TOKEN::PAYLOAD_IDENT& tok_ident);
+  bool parseToken_dang(TOKEN& token);
+  bool parseToken(TOKEN& token);
+  bool tryCv_reserved(TOKEN& token);
+  bool tryCv_intrinsic(TOKEN& token);
 };
 }  // namespace Manadrain

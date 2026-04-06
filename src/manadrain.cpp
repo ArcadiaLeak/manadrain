@@ -37,8 +37,7 @@ static const std::array atom_stat = std::to_array<ATOM_STAT>(
      {.lit_view = "let",
       .category = ATOM_STAT::RESERVED{TOKEN::TYPE_LET{}, STRICTNESS::STRICT}}});
 
-bool ParseDriver::parseKeyword(TOKEN::TYPE& tok_type,
-                               TOKEN::PAYLOAD_IDENT& tok_ident) {
+bool ParseDriver::tryCv_reserved(TOKEN& token) {
   for (std::size_t i = 0; i < atom_stat.size(); i++) {
     const ATOM_STAT::RESERVED* category_ptr =
         std::get_if<ATOM_STAT::RESERVED>(&atom_stat[i].category);
@@ -46,13 +45,13 @@ bool ParseDriver::parseKeyword(TOKEN::TYPE& tok_type,
       continue;
     if (state.strictness < category_ptr->strictness)
       continue;
-    if (tok_ident.has_escape) {
-      tok_type = TOKEN::TYPE_IDENT{};
-      tok_ident.is_reserved = 1;
-      tok_ident.pool_idx = i;
+    if (token.ident.has_escape) {
+      token.type = TOKEN::TYPE_IDENT{};
+      token.ident.is_reserved = 1;
+      token.ident.pool_idx = i;
       return 1;
     }
-    tok_type = category_ptr->token_type;
+    token.type = category_ptr->token_type;
     return 1;
   }
   return 0;
@@ -464,7 +463,7 @@ bool ParseDriver::parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private) {
   }
 }
 
-bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
+bool ParseDriver::parseToken_dang(TOKEN& token) {
   std::array<char32_t, 2> tbuff{};
   while (1) {
     std::u32string_view tview{take(*this, tbuff)};
@@ -497,7 +496,8 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
           while (1) {
             tview = take(*this, tbuff);
             if (tview.empty()) {
-              err_token = BAD_COMMENT::UNEXPECTED_END;
+              token.type = TOKEN::TYPE_ERROR{};
+              token.err = BAD_COMMENT::UNEXPECTED_END;
               return 0;
             }
             if (tview == U"*/") {
@@ -518,7 +518,8 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
           token.type = TOKEN::TYPE_STRING{};
           return 1;
         }
-        err_token = err_string;
+        token.type = TOKEN::TYPE_ERROR{};
+        token.err = err_string;
         return 0;
       }
       default:
@@ -526,12 +527,12 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
           drop(1);
           continue;
         } else if (parseIdent(token.ident, 0)) {
-          if (parseKeyword(token.type, token.ident))
+          if (tryCv_reserved(token))
             return 1;
           token.type = TOKEN::TYPE_IDENT{};
           if (not atom_umap.contains(ch_temp)) {
             atom_deq.push_back(ch_temp);
-            atom_umap[atom_deq.back()] = atom_deq.size() - 1;
+            atom_umap[atom_deq.back()] = atom_stat.size() + atom_deq.size() - 1;
           }
           token.ident.pool_idx = atom_umap[ch_temp];
           return 1;
@@ -542,9 +543,9 @@ bool ParseDriver::parseToken_dang(TOKEN& token, TOKEN_ERROR& err_token) {
   }
 }
 
-bool ParseDriver::parseToken(TOKEN& token, TOKEN_ERROR& err_token) {
+bool ParseDriver::parseToken(TOKEN& token) {
   const ParseState state_backup{state};
-  bool ok = parseToken_dang(token, err_token);
+  bool ok = parseToken_dang(token);
   if (not ok)
     state = state_backup;
   return ok;
