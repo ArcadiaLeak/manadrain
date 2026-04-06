@@ -29,29 +29,26 @@ static bool is_lineterm(char32_t ch) {
 }
 
 namespace Manadrain {
-static const std::array atom_stat = std::to_array<ATOM_STAT>(
-    {{.lit_view = "var",
-      .category = ATOM_STAT::RESERVED{TOKEN::TYPE_VAR{}, STRICTNESS::SLOPPY}},
-     {.lit_view = "const",
-      .category = ATOM_STAT::RESERVED{TOKEN::TYPE_CONST{}, STRICTNESS::SLOPPY}},
-     {.lit_view = "let",
-      .category = ATOM_STAT::RESERVED{TOKEN::TYPE_LET{}, STRICTNESS::STRICT}}});
+static const std::array reserved_arr = std::to_array<
+    std::tuple<std::string_view, STATIC_ATOM, TOKEN_TYPE, STRICTNESS>>(
+    {{"var", STATIC_ATOM::A_VAR, TOKEN_TYPE::T_VAR, STRICTNESS::SLOPPY},
+     {"const", STATIC_ATOM::A_CONST, TOKEN_TYPE::T_CONST, STRICTNESS::SLOPPY},
+     {"let", STATIC_ATOM::A_LET, TOKEN_TYPE::T_LET, STRICTNESS::STRICT}});
 
 bool ParseDriver::tryCv_reserved(TOKEN& token) {
-  for (std::size_t i = 0; i < atom_stat.size(); i++) {
-    const ATOM_STAT::RESERVED* category_ptr =
-        std::get_if<ATOM_STAT::RESERVED>(&atom_stat[i].category);
-    if (not category_ptr)
+  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+    auto [literal, _, token_type, strictness] = reserved_arr[i];
+    if (ch_temp != literal)
       continue;
-    if (state.strictness < category_ptr->strictness)
+    if (state.strictness < strictness)
       continue;
     if (token.ident.has_escape) {
-      token.type = TOKEN::TYPE_IDENT{};
+      token.type = TOKEN_TYPE::T_IDENT;
       token.ident.is_reserved = 1;
       token.ident.pool_idx = i;
       return 1;
     }
-    token.type = category_ptr->token_type;
+    token.type = token_type;
     return 1;
   }
   return 0;
@@ -468,7 +465,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token) {
   while (1) {
     std::u32string_view tview{take(*this, tbuff)};
     if (tview.empty()) {
-      token.type = TOKEN::TYPE_EOF{};
+      token.type = TOKEN_TYPE::T_EOF;
       return 1;
     }
     switch (tview.front()) {
@@ -496,7 +493,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token) {
           while (1) {
             tview = take(*this, tbuff);
             if (tview.empty()) {
-              token.type = TOKEN::TYPE_ERROR{};
+              token.type = TOKEN_TYPE::T_ERROR;
               token.err = BAD_COMMENT::UNEXPECTED_END;
               return 0;
             }
@@ -515,10 +512,10 @@ bool ParseDriver::parseToken_dang(TOKEN& token) {
       case '"': {
         BAD_STRING err_string{};
         if (parseString(token.str, err_string)) {
-          token.type = TOKEN::TYPE_STRING{};
+          token.type = TOKEN_TYPE::T_STRING;
           return 1;
         }
-        token.type = TOKEN::TYPE_ERROR{};
+        token.type = TOKEN_TYPE::T_ERROR;
         token.err = err_string;
         return 0;
       }
@@ -529,10 +526,11 @@ bool ParseDriver::parseToken_dang(TOKEN& token) {
         } else if (parseIdent(token.ident, 0)) {
           if (tryCv_reserved(token))
             return 1;
-          token.type = TOKEN::TYPE_IDENT{};
+          token.type = TOKEN_TYPE::T_IDENT;
           if (not atom_umap.contains(ch_temp)) {
             atom_deq.push_back(ch_temp);
-            atom_umap[atom_deq.back()] = atom_stat.size() + atom_deq.size() - 1;
+            atom_umap[atom_deq.back()] =
+                reserved_arr.size() + atom_deq.size() - 1;
           }
           token.ident.pool_idx = atom_umap[ch_temp];
           return 1;

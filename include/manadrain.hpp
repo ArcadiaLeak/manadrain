@@ -22,52 +22,42 @@ enum class BAD_STRING {
 };
 enum class BAD_COMMENT { UNEXPECTED_END };
 
-struct TOKEN {
-  struct TYPE_LET {};
-  struct TYPE_CONST {};
-  struct TYPE_VAR {};
-  struct TYPE_EOF {};
-  struct TYPE_IDENT {};
-  struct TYPE_STRING {};
-  struct TYPE_ERROR {};
-  using TYPE = std::variant<TYPE_LET,
-                            TYPE_CONST,
-                            TYPE_VAR,
-                            TYPE_EOF,
-                            TYPE_IDENT,
-                            TYPE_STRING,
-                            TYPE_ERROR>;
+enum class TOKEN_TYPE {
+  T_LET,
+  T_CONST,
+  T_VAR,
+  T_EOF,
+  T_IDENT,
+  T_STRING,
+  T_ERROR
+};
 
+struct TOKEN {
   struct PAYLOAD_STR {
     char32_t sep;
     std::size_t pool_idx;
   };
-
   struct PAYLOAD_IDENT {
     bool has_escape;
     bool is_reserved;
     std::size_t pool_idx;
   };
-
   using PAYLOAD_ERR = std::variant<std::monostate, BAD_STRING, BAD_COMMENT>;
 
   bool newline_seen;
-  TYPE type;
+  TOKEN_TYPE type;
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
   PAYLOAD_ERR err;
 };
 
-struct ATOM_STAT {
-  struct RESERVED {
-    TOKEN::TYPE token_type;
-    STRICTNESS strictness;
-  };
-  struct INTRINSIC {};
-  using CATEGORY = std::variant<RESERVED, INTRINSIC>;
+enum class STATIC_ATOM { A_LET, A_CONST, A_VAR };
 
-  std::string_view lit_view;
-  CATEGORY category;
+enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
+struct STMT_VARDECL {
+  VARDECL_KIND kind;
+  TOKEN::PAYLOAD_IDENT ident;
+  TOKEN::PAYLOAD_STR init;
 };
 
 struct ParseState {
@@ -112,6 +102,5 @@ struct ParseDriver {
   bool parseToken_dang(TOKEN& token);
   bool parseToken(TOKEN& token);
   bool tryCv_reserved(TOKEN& token);
-  bool tryCv_intrinsic(TOKEN& token);
 };
 }  // namespace Manadrain
