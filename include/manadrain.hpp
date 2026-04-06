@@ -22,6 +22,7 @@ enum class BAD_STRING {
 };
 enum class BAD_COMMENT { UNEXPECTED_END };
 
+enum class STATIC_ATOM { A_LET, A_CONST, A_VAR };
 enum class TOKEN_TYPE {
   T_LET,
   T_CONST,
@@ -31,8 +32,9 @@ enum class TOKEN_TYPE {
   T_STRING,
   T_ERROR
 };
+enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
 
-struct TOKEN {
+struct Token {
   struct PAYLOAD_STR {
     char32_t sep;
     std::size_t pool_idx;
@@ -49,15 +51,14 @@ struct TOKEN {
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
   PAYLOAD_ERR err;
+
+  bool is_pseudo_keyword(STATIC_ATOM s_atom);
 };
 
-enum class STATIC_ATOM { A_LET, A_CONST, A_VAR };
-
-enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
 struct STMT_VARDECL {
   VARDECL_KIND kind;
-  TOKEN::PAYLOAD_IDENT ident;
-  TOKEN::PAYLOAD_STR init;
+  Token::PAYLOAD_IDENT ident;
+  Token::PAYLOAD_STR init;
 };
 
 struct ParseState {
@@ -91,16 +92,16 @@ struct ParseDriver {
   bool parseEscape_fixedSeq(ESC_RULE esc_rule,
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
-  bool parseString(TOKEN::PAYLOAD_STR& token, BAD_STRING& err);
+  bool parseString(Token::PAYLOAD_STR& token, BAD_STRING& err);
   int parseString_escSeq_dang(char32_t sep,
                               std::pair<char32_t, BAD_STRING>& either);
   int parseString_escSeq(char32_t sep, std::pair<char32_t, BAD_STRING>& either);
 
-  bool parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private);
-  bool parseIdent_uchar(TOKEN::PAYLOAD_IDENT& ident, bool beginning);
+  bool parseIdent(Token::PAYLOAD_IDENT& ident, bool is_private);
+  bool parseIdent_uchar(Token::PAYLOAD_IDENT& ident, bool beginning);
 
-  bool parseToken_dang(TOKEN& token);
-  bool parseToken(TOKEN& token);
-  bool tryCv_reserved(TOKEN& token);
+  bool parseToken_dang(Token& token);
+  bool parseToken(Token& token);
+  bool tryCv_reserved(Token& token);
 };
 }  // namespace Manadrain

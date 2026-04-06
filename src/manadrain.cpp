@@ -35,7 +35,7 @@ static const std::array reserved_arr = std::to_array<
      {"const", STATIC_ATOM::A_CONST, TOKEN_TYPE::T_CONST, STRICTNESS::SLOPPY},
      {"let", STATIC_ATOM::A_LET, TOKEN_TYPE::T_LET, STRICTNESS::STRICT}});
 
-bool ParseDriver::tryCv_reserved(TOKEN& token) {
+bool ParseDriver::tryCv_reserved(Token& token) {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     auto [literal, _, token_type, strictness] = reserved_arr[i];
     if (ch_temp != literal)
@@ -52,6 +52,18 @@ bool ParseDriver::tryCv_reserved(TOKEN& token) {
     return 1;
   }
   return 0;
+}
+
+bool Token::is_pseudo_keyword(STATIC_ATOM s_atom) {
+  if (type != TOKEN_TYPE::T_IDENT)
+    return 0;
+  if (ident.pool_idx >= reserved_arr.size())
+    return 0;
+  if (std::get<1>(reserved_arr[ident.pool_idx]) != s_atom)
+    return 0;
+  if (ident.has_escape)
+    return 0;
+  return 1;
 }
 
 template <std::size_t N>
@@ -367,7 +379,7 @@ int ParseDriver::parseString_escSeq(char32_t sep,
   return ok;
 }
 
-bool ParseDriver::parseString(TOKEN::PAYLOAD_STR& token, BAD_STRING& err) {
+bool ParseDriver::parseString(Token::PAYLOAD_STR& token, BAD_STRING& err) {
   token.sep = *shift();
   ch_temp.clear();
 
@@ -415,7 +427,7 @@ bool ParseDriver::parseString(TOKEN::PAYLOAD_STR& token, BAD_STRING& err) {
   }
 }
 
-bool ParseDriver::parseIdent_uchar(TOKEN::PAYLOAD_IDENT& ident,
+bool ParseDriver::parseIdent_uchar(Token::PAYLOAD_IDENT& ident,
                                    bool beginning) {
   std::optional ch{peek()};
   if (not ch)
@@ -439,7 +451,7 @@ bool ParseDriver::parseIdent_uchar(TOKEN::PAYLOAD_IDENT& ident,
   return 1;
 }
 
-bool ParseDriver::parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private) {
+bool ParseDriver::parseIdent(Token::PAYLOAD_IDENT& ident, bool is_private) {
   ParseState state_backup{state};
   ch_temp.clear();
 
@@ -460,7 +472,7 @@ bool ParseDriver::parseIdent(TOKEN::PAYLOAD_IDENT& ident, bool is_private) {
   }
 }
 
-bool ParseDriver::parseToken_dang(TOKEN& token) {
+bool ParseDriver::parseToken_dang(Token& token) {
   std::array<char32_t, 2> tbuff{};
   while (1) {
     std::u32string_view tview{take(*this, tbuff)};
@@ -541,7 +553,7 @@ bool ParseDriver::parseToken_dang(TOKEN& token) {
   }
 }
 
-bool ParseDriver::parseToken(TOKEN& token) {
+bool ParseDriver::parseToken(Token& token) {
   const ParseState state_backup{state};
   bool ok = parseToken_dang(token);
   if (not ok)
