@@ -25,7 +25,7 @@ enum class TOKEN_TYPE {
   T_UCHAR
 };
 
-struct Token {
+struct TOKEN {
   struct PAYLOAD_STR {
     char32_t sep;
     std::size_t atom_idx;
@@ -54,15 +54,10 @@ using EXPRESSION = std::variant<EXPR_IDENT>;
 enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
 struct STMT_VARDECL {
   VARDECL_KIND kind;
-  Token::PAYLOAD_IDENT ident;
-  Token::PAYLOAD_STR init;
+  TOKEN::PAYLOAD_IDENT ident;
+  TOKEN::PAYLOAD_STR init;
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
-
-struct PARSE_STATE {
-  std::uint32_t idx;
-  STRICTNESS strictness;
-};
 
 enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
 enum class BAD_STRING {
@@ -75,46 +70,33 @@ using PARSE_ERROR =
     std::variant<std::monostate, BAD_ESCAPE, BAD_STRING, BAD_COMMENT>;
 
 struct ParseDriver {
-  const std::basic_string<std::uint8_t> buffer;
+  std::basic_string<std::uint8_t> buffer;
+  std::uint32_t buffer_idx;
 
-  PARSE_STATE state;
+  STRICTNESS strictness;
   PARSE_ERROR known_err;
+  TOKEN token;
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
   std::deque<STATEMENT> program;
 
   std::string ch_temp;
-  std::size_t makeAtom_fromTemp();
+  std::size_t obtain_atom();
 
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
   void drop(std::uint32_t count);
 
-  bool parseHex_dang(std::uint32_t& digit);
-  bool parseHex(std::uint32_t& digit);
+  template <typename T>
+  bool exec_command(T& command) {
+    std::uint32_t idx_before{buffer_idx};
+    bool failed = command.exec(*this);
+    if (failed)
+      buffer_idx = idx_before;
+    return failed;
+  }
 
-  bool parseEscape_dang(ESC_RULE esc_rule, char32_t& ch_esc);
-  bool parseEscape(ESC_RULE esc_rule, char32_t& ch_esc);
-  bool parseEscape_hex(char32_t& ch_esc);
-  bool parseEscape_uni(ESC_RULE esc_rule, char32_t& ch_esc);
-  bool parseEscape_braceSeq(char32_t& ch_esc);
-  bool parseEscape_fixedSeq(ESC_RULE esc_rule, char32_t& ch_esc);
-
-  bool parseString(Token::PAYLOAD_STR& token);
-
-  bool parseIdent(Token::PAYLOAD_IDENT& ident, bool is_private);
-  bool parseIdent_uchar(Token::PAYLOAD_IDENT& ident, bool beginning);
-
-  bool parseToken_dang(Token& token);
-  bool parseToken(Token& token);
-
-  bool tryReserved_ident(Token& token);
-  bool tryReserved_string(Token& token);
-
-  bool parseVardecl(Token& token, STMT_VARDECL& vardecl);
-
-  bool parseExpr(EXPRESSION& expr);
-  bool parseStmt();
+  bool parse();
 };
 }  // namespace Manadrain
