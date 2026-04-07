@@ -77,7 +77,7 @@ bool Token::is_pseudo_keyword(TOKEN_TYPE tok_type) {
 
 template <std::size_t N>
 std::u32string_view take(ParseDriver& driver, std::array<char32_t, N>& tbuff) {
-  const ParseState state_backup{driver.state};
+  const PARSE_STATE state_backup{driver.state};
   tbuff = {};
   std::uint32_t i{};
   while (i < N) {
@@ -135,60 +135,57 @@ bool ParseDriver::parseHex_dang(std::uint32_t& digit) {
 }
 
 bool ParseDriver::parseHex(std::uint32_t& digit) {
-  const ParseState state_backup{state};
+  const PARSE_STATE state_backup{state};
   bool ok = parseHex_dang(digit);
   if (not ok)
     state = state_backup;
   return ok;
 }
 
-bool ParseDriver::parseEscape_hex(std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_hex(char32_t& ch_esc) {
   std::uint32_t hex0{};
   if (not parseHex(hex0)) {
-    either.second = BAD_ESCAPE::MALFORMED;
+    known_err = BAD_ESCAPE::MALFORMED;
     return 0;
   }
   std::uint32_t hex1{};
   if (not parseHex(hex1)) {
-    either.second = BAD_ESCAPE::MALFORMED;
+    known_err = BAD_ESCAPE::MALFORMED;
     return 0;
   }
-  either.first = (hex0 << 4) | hex1;
+  ch_esc = (hex0 << 4) | hex1;
   return 1;
 }
 
-bool ParseDriver::parseEscape_braceSeq(
-    std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_braceSeq(char32_t& ch_esc) {
   char32_t utf16_char = 0;
   while (1) {
     std::uint32_t hex{};
     if (not parseHex(hex)) {
       std::optional close_or_uchar{shift()};
       if (not close_or_uchar) {
-        either.second = BAD_ESCAPE::MALFORMED;
+        known_err = BAD_ESCAPE::MALFORMED;
         return 0;
       }
       if (close_or_uchar == '}') {
-        either.first = utf16_char;
+        ch_esc = utf16_char;
         return 1;
       }
     }
     utf16_char = (utf16_char << 4) | hex;
     if (utf16_char > 0x10FFFF) {
-      either.second = BAD_ESCAPE::MALFORMED;
+      known_err = BAD_ESCAPE::MALFORMED;
       return 0;
     }
   }
 }
 
-bool ParseDriver::parseEscape_fixedSeq(
-    ESC_RULE esc_rule,
-    std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_fixedSeq(ESC_RULE esc_rule, char32_t& ch_esc) {
   char32_t high_surr = 0;
   for (int i = 0; i < 4; i++) {
     std::uint32_t hex{};
     if (not parseHex(hex)) {
-      either.second = BAD_ESCAPE::MALFORMED;
+      known_err = BAD_ESCAPE::MALFORMED;
       return 0;
     }
     high_surr = (high_surr << 4) | hex;
@@ -202,68 +199,66 @@ bool ParseDriver::parseEscape_fixedSeq(
     for (int i = 0; i < 4; i++) {
       std::uint32_t hex{};
       if (not parseHex(hex)) {
-        either.first = high_surr;
+        ch_esc = high_surr;
         return 1;
       }
       low_surr = (low_surr << 4) | hex;
     }
     if (is_lo_surrogate(low_surr)) {
-      either.first = from_surrogate(high_surr, low_surr);
+      ch_esc = from_surrogate(high_surr, low_surr);
       return 1;
     }
   }
 
-  either.first = high_surr;
+  ch_esc = high_surr;
   return 1;
 }
 
-bool ParseDriver::parseEscape_uni(ESC_RULE esc_rule,
-                                  std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_uni(ESC_RULE esc_rule, char32_t& ch_esc) {
   std::optional open_or_uchar{shift()};
   if (not open_or_uchar) {
-    either.second = BAD_ESCAPE::MALFORMED;
+    known_err = BAD_ESCAPE::MALFORMED;
     return 0;
   }
   return open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII
-             ? parseEscape_braceSeq(either)
-             : parseEscape_fixedSeq(esc_rule, either);
+             ? parseEscape_braceSeq(ch_esc)
+             : parseEscape_fixedSeq(esc_rule, ch_esc);
 }
 
-bool ParseDriver::parseEscape_dang(ESC_RULE esc_rule,
-                                   std::pair<char32_t, BAD_ESCAPE>& either) {
+bool ParseDriver::parseEscape_dang(ESC_RULE esc_rule, char32_t& ch_esc) {
   std::optional head{shift()};
   if (not head) {
-    either.second = BAD_ESCAPE::PER_SE_BACKSLASH;
+    known_err = BAD_ESCAPE::PER_SE_BACKSLASH;
     return 0;
   }
   switch (*head) {
     case 'b':
-      either.first = '\b';
+      ch_esc = '\b';
       return 1;
     case 'f':
-      either.first = '\f';
+      ch_esc = '\f';
       return 1;
     case 'n':
-      either.first = '\n';
+      ch_esc = '\n';
       return 1;
     case 'r':
-      either.first = '\r';
+      ch_esc = '\r';
       return 1;
     case 't':
-      either.first = '\t';
+      ch_esc = '\t';
       return 1;
     case 'v':
-      either.first = '\v';
+      ch_esc = '\v';
       return 1;
     case 'x':
-      return parseEscape_hex(either);
+      return parseEscape_hex(ch_esc);
     case 'u':
-      return parseEscape_uni(esc_rule, either);
+      return parseEscape_uni(esc_rule, ch_esc);
     case '0': {
       std::optional ahead{peek()};
       if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
                   .value_or(false)) {
-        either.first = 0;
+        ch_esc = 0;
         return 1;
       }
     }
@@ -277,25 +272,25 @@ bool ParseDriver::parseEscape_dang(ESC_RULE esc_rule,
     case '7':
       switch (esc_rule) {
         case ESC_RULE::STRING_IN_STRICT_MODE:
-          either.second = BAD_ESCAPE::OCTAL_SEQ;
+          known_err = BAD_ESCAPE::OCTAL_SEQ;
           return 0;
 
         case ESC_RULE::STRING_IN_TEMPLATE:
         case ESC_RULE::REGEXP_UTF16:
-          either.second = BAD_ESCAPE::MALFORMED;
+          known_err = BAD_ESCAPE::MALFORMED;
           return 0;
 
         default:
-          either.first = *head - '0';
+          ch_esc = *head - '0';
           std::optional<char32_t> ahead;
           ahead = peek().transform(
               [](char32_t ahead_digit) { return ahead_digit - '0'; });
           if (not ahead || *ahead > 7)
             return 1;
           drop(1);
-          either.first = (either.first << 3) | *ahead;
+          ch_esc = (ch_esc << 3) | *ahead;
 
-          if (either.first >= 32)
+          if (ch_esc >= 32)
             return 1;
 
           ahead = peek().transform(
@@ -303,38 +298,37 @@ bool ParseDriver::parseEscape_dang(ESC_RULE esc_rule,
           if (not ahead || *ahead > 7)
             return 1;
           drop(1);
-          either.first = (either.first << 3) | *ahead;
+          ch_esc = (ch_esc << 3) | *ahead;
           return 1;
       }
     case '8':
     case '9':
       if (esc_rule == ESC_RULE::STRING_IN_STRICT_MODE ||
           esc_rule == ESC_RULE::STRING_IN_TEMPLATE) {
-        either.second = BAD_ESCAPE::MALFORMED;
+        known_err = BAD_ESCAPE::MALFORMED;
         return 0;
       }
       [[fallthrough]];
     default:
-      either.second = BAD_ESCAPE::PER_SE_BACKSLASH;
+      known_err = BAD_ESCAPE::PER_SE_BACKSLASH;
       return 0;
   }
 }
 
-bool ParseDriver::parseEscape(ESC_RULE esc_rule,
-                              std::pair<char32_t, BAD_ESCAPE>& either) {
-  const ParseState state_backup{state};
-  bool ok = parseEscape_dang(esc_rule, either);
+bool ParseDriver::parseEscape(ESC_RULE esc_rule, char32_t& ch_esc) {
+  const PARSE_STATE state_backup{state};
+  bool ok = parseEscape_dang(esc_rule, ch_esc);
   if (not ok)
     state = state_backup;
   return ok;
 }
 
-int parseString_escSeq_dang(ParseDriver& driver,
+int parseString_escSeq_dang(ParseDriver& drv,
                             char32_t sep,
-                            std::pair<char32_t, BAD_STRING>& either) {
-  std::optional ch{driver.peek()};
+                            char32_t& parsed_seq) {
+  std::optional ch{drv.peek()};
   if (not ch) {
-    either.second = BAD_STRING::UNEXPECTED_END;
+    drv.known_err = BAD_STRING::UNEXPECTED_END;
     return 0;
   }
   switch (*ch) {
@@ -342,61 +336,61 @@ int parseString_escSeq_dang(ParseDriver& driver,
     case '\"':
     case '\0':
     case '\\':
-      driver.drop(1);
-      either.first = *ch;
+      drv.drop(1);
+      parsed_seq = *ch;
       return 1;
     case '\r':
-      if (driver.peek() == '\n')
-        driver.drop(1);
+      if (drv.peek() == '\n')
+        drv.drop(1);
       [[fallthrough]];
     case '\n':
     case 0x2028:
     case 0x2029:
       /* ignore escaped newline sequence */
-      driver.drop(1);
-      either.first = *ch;
+      drv.drop(1);
+      parsed_seq = *ch;
       return 2;
     default:
       ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-      if (driver.state.strictness == STRICTNESS::STRICT)
+      if (drv.state.strictness == STRICTNESS::STRICT)
         esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
       else if (sep == '`')
         esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-      std::pair<char32_t, BAD_ESCAPE> ch_esc{};
-      if (driver.parseEscape(esc_rule, ch_esc))
-        ch = ch_esc.first;
-      else if (ch_esc.second == BAD_ESCAPE::MALFORMED) {
-        either.second = BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
+      char32_t ch_esc{};
+      if (drv.parseEscape(esc_rule, ch_esc))
+        ch = ch_esc;
+      else if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::MALFORMED}) {
+        drv.known_err = BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
         return 0;
-      } else if (ch_esc.second == BAD_ESCAPE::OCTAL_SEQ) {
-        either.second = BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
+      } else if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::OCTAL_SEQ}) {
+        drv.known_err = BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
         return 0;
-      } else if (ch_esc.second == BAD_ESCAPE::PER_SE_BACKSLASH)
+      } else if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::PER_SE_BACKSLASH})
         /* ignore the '\' (could output a warning) */
-        driver.drop(1);
-      either.first = *ch;
+        drv.drop(1);
+      parsed_seq = *ch;
       return 1;
   }
 }
 
 int parseString_escSeq(ParseDriver& driver,
                        char32_t sep,
-                       std::pair<char32_t, BAD_STRING>& either) {
-  const ParseState state_backup{driver.state};
-  int ok = parseString_escSeq_dang(driver, sep, either);
+                       char32_t& parsed_seq) {
+  const PARSE_STATE state_backup{driver.state};
+  int ok = parseString_escSeq_dang(driver, sep, parsed_seq);
   if (not ok)
     driver.state = state_backup;
   return ok;
 }
 
-bool ParseDriver::parseString(Token::PAYLOAD_STR& token, BAD_STRING& err) {
+bool ParseDriver::parseString(Token::PAYLOAD_STR& token) {
   token.sep = *shift();
   ch_temp.clear();
 
   while (1) {
     std::optional ch = peek();
     if (not ch) {
-      err = BAD_STRING::UNEXPECTED_END;
+      known_err = BAD_STRING::UNEXPECTED_END;
       return 0;
     }
 
@@ -407,7 +401,7 @@ bool ParseDriver::parseString(Token::PAYLOAD_STR& token, BAD_STRING& err) {
         ch = '\n';
       }
     } else if (*ch == '\r' || *ch == '\n') {
-      err = BAD_STRING::UNEXPECTED_END;
+      known_err = BAD_STRING::UNEXPECTED_END;
       return 0;
     }
 
@@ -421,15 +415,14 @@ bool ParseDriver::parseString(Token::PAYLOAD_STR& token, BAD_STRING& err) {
     }
 
     if (*ch == '\\') {
-      std::pair<char32_t, BAD_STRING> ch_esc{};
+      char32_t ch_esc{};
       int ok = parseString_escSeq(*this, token.sep, ch_esc);
-      if (not ok) {
-        err = ch_esc.second;
+      if (not ok)
         return 0;
-      } else if (ok == 2)
+      else if (ok == 2)
         continue;
       else
-        ch = ch_esc.first;
+        ch = ch_esc;
     }
 
     std::array<char, 4> cp_storage{};
@@ -445,10 +438,10 @@ bool ParseDriver::parseIdent_uchar(Token::PAYLOAD_IDENT& ident,
   drop(1);
 
   if (*ch == '\\' && peek() == 'u') {
-    std::pair<char32_t, BAD_ESCAPE> ret_esc{};
+    char32_t ret_esc{};
     if (not parseEscape(ESC_RULE::IDENTIFIER, ret_esc))
       return 0;
-    ch = ret_esc.first;
+    ch = ret_esc;
     ident.has_escape = true;
   }
 
@@ -462,7 +455,7 @@ bool ParseDriver::parseIdent_uchar(Token::PAYLOAD_IDENT& ident,
 }
 
 bool ParseDriver::parseIdent(Token::PAYLOAD_IDENT& ident, bool is_private) {
-  ParseState state_backup{state};
+  PARSE_STATE state_backup{state};
   ch_temp.clear();
 
   if (not parseIdent_uchar(ident, 1)) {
@@ -516,7 +509,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
             tview = take(*this, tbuff);
             if (tview.empty()) {
               token.type = TOKEN_TYPE::T_ERROR;
-              token.err = BAD_COMMENT::UNEXPECTED_END;
+              known_err = BAD_COMMENT::UNEXPECTED_END;
               return 0;
             }
             if (tview == U"*/") {
@@ -532,8 +525,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
         break;
       case '\'':
       case '"': {
-        BAD_STRING err_string{};
-        if (parseString(token.str, err_string)) {
+        if (parseString(token.str)) {
           token.type = TOKEN_TYPE::T_STRING;
           if (tryReserved_string(token))
             return 1;
@@ -541,7 +533,6 @@ bool ParseDriver::parseToken_dang(Token& token) {
           return 1;
         }
         token.type = TOKEN_TYPE::T_ERROR;
-        token.err = err_string;
         return 0;
       }
       default:
@@ -574,7 +565,7 @@ std::size_t ParseDriver::makeAtom_fromTemp() {
 }
 
 bool ParseDriver::parseToken(Token& token) {
-  const ParseState state_backup{state};
+  const PARSE_STATE state_backup{state};
   bool ok = parseToken_dang(token);
   if (not ok)
     state = state_backup;
@@ -613,7 +604,7 @@ bool ParseDriver::parseVardecl(STMT_VARDECL& vardecl) {
   if (not parseToken(token))
     return 0;
 
-  const ParseState state_backup{state};
+  const PARSE_STATE state_backup{state};
   if (token.type == TOKEN_TYPE::T_UCHAR && token.uchar == '=') {
     token = {};
     if (not parseToken(token))
@@ -643,9 +634,18 @@ bool ParseDriver::parseVardecl(STMT_VARDECL& vardecl) {
   return 0;
 }
 
+template <int N>
+bool parseExpression_binary() {
+  if constexpr (N == 0)
+    return 0;
+  else
+    return parseExpression_binary<N - 1>();
+}
+
 bool ParseDriver::parseStatement() {
-  const ParseState state_backup{state};
+  const PARSE_STATE state_backup{state};
   STMT_VARDECL vardecl{};
+  parseExpression_binary<8>();
   if (not parseVardecl(vardecl)) {
     state = state_backup;
     return 0;

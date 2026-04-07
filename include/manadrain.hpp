@@ -14,14 +14,6 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
-enum class BAD_STRING {
-  UNEXPECTED_END,
-  OCTAL_SEQ_IN_ESCAPE,
-  MALFORMED_SEQ_IN_ESCAPE
-};
-enum class BAD_COMMENT { UNEXPECTED_END };
-
 enum class TOKEN_TYPE {
   T_LET,
   T_CONST,
@@ -43,14 +35,12 @@ struct Token {
     bool is_reserved;
     std::size_t pool_idx;
   };
-  using PAYLOAD_ERR = std::variant<std::monostate, BAD_STRING, BAD_COMMENT>;
 
   TOKEN_TYPE type;
   bool newline_seen;
   char32_t uchar;
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
-  PAYLOAD_ERR err;
 
   bool is_pseudo_keyword(TOKEN_TYPE tok_type);
 };
@@ -62,14 +52,26 @@ struct STMT_VARDECL {
   Token::PAYLOAD_STR init;
 };
 
-struct ParseState {
+struct PARSE_STATE {
   std::uint32_t idx;
   STRICTNESS strictness;
 };
 
+enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
+enum class BAD_STRING {
+  UNEXPECTED_END,
+  OCTAL_SEQ_IN_ESCAPE,
+  MALFORMED_SEQ_IN_ESCAPE
+};
+enum class BAD_COMMENT { UNEXPECTED_END };
+using PARSE_ERROR =
+    std::variant<std::monostate, BAD_ESCAPE, BAD_STRING, BAD_COMMENT>;
+
 struct ParseDriver {
   const std::basic_string<std::uint8_t> buffer;
-  ParseState state;
+
+  PARSE_STATE state;
+  PARSE_ERROR known_err;
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
@@ -84,17 +86,14 @@ struct ParseDriver {
   bool parseHex_dang(std::uint32_t& digit);
   bool parseHex(std::uint32_t& digit);
 
-  bool parseEscape_dang(ESC_RULE esc_rule,
-                        std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscape(ESC_RULE esc_rule, std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscape_hex(std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscape_uni(ESC_RULE esc_rule,
-                       std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscape_braceSeq(std::pair<char32_t, BAD_ESCAPE>& either);
-  bool parseEscape_fixedSeq(ESC_RULE esc_rule,
-                            std::pair<char32_t, BAD_ESCAPE>& either);
+  bool parseEscape_dang(ESC_RULE esc_rule, char32_t& ch_esc);
+  bool parseEscape(ESC_RULE esc_rule, char32_t& ch_esc);
+  bool parseEscape_hex(char32_t& ch_esc);
+  bool parseEscape_uni(ESC_RULE esc_rule, char32_t& ch_esc);
+  bool parseEscape_braceSeq(char32_t& ch_esc);
+  bool parseEscape_fixedSeq(ESC_RULE esc_rule, char32_t& ch_esc);
 
-  bool parseString(Token::PAYLOAD_STR& token, BAD_STRING& err);
+  bool parseString(Token::PAYLOAD_STR& token);
 
   bool parseIdent(Token::PAYLOAD_IDENT& ident, bool is_private);
   bool parseIdent_uchar(Token::PAYLOAD_IDENT& ident, bool beginning);
