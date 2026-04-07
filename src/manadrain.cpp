@@ -460,6 +460,120 @@ struct PARSE_IDENT {
   }
 };
 
+struct PARSE_TOKEN {
+  bool tryReserved_ident(ParseDriver& drv) {
+    for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+      auto [literal, token_type, strictness] = reserved_arr[i];
+      if (drv.ch_temp != literal)
+        continue;
+      drv.token.ident.atom_idx = i;
+      if (drv.strictness < strictness)
+        return 1;
+      if (drv.token.ident.has_escape) {
+        drv.token.ident.is_reserved = 1;
+        return 1;
+      }
+      drv.token.type = token_type;
+      return 1;
+    }
+    return 0;
+  }
+
+  bool tryReserved_string(ParseDriver& drv) {
+    for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+      if (drv.ch_temp != std::get<0>(reserved_arr[i]))
+        continue;
+      drv.token.ident.atom_idx = i;
+      return 1;
+    }
+    return 0;
+  }
+
+  bool exec(ParseDriver& drv) {
+    TAKE<2> tcmd{};
+    while (1) {
+      drv.exec_command(tcmd);
+      if (tcmd.sv().empty()) {
+        drv.token.type = TOKEN_TYPE::T_EOF;
+        return 0;
+      }
+      switch (tcmd.sv().front()) {
+        case '\r':
+          if (tcmd.sv() == U"\r\n")
+            drv.drop(1);
+          [[fallthrough]];
+        case '\n':
+        case 0x2028:
+        case 0x2029:
+          drv.drop(1);
+          drv.token.newline_seen = 1;
+          continue;
+        case '/':
+          if (tcmd.sv() == U"//") {
+            while (1) {
+              std::optional ch = drv.peek();
+              if (not ch || is_lineterm(*ch))
+                break;
+              drv.drop(1);
+            }
+            continue;
+          } else if (tcmd.sv() == U"/*") {
+            drv.drop(2);
+            while (1) {
+              drv.exec_command(tcmd);
+              if (tcmd.sv().empty()) {
+                drv.token.type = TOKEN_TYPE::T_ERROR;
+                drv.known_err = BAD_COMMENT::UNEXPECTED_END;
+                return 1;
+              }
+              if (tcmd.sv() == U"*/") {
+                drv.drop(2);
+                break;
+              }
+              if (is_lineterm(tcmd.sv().front()))
+                drv.token.newline_seen = 1;
+              drv.drop(1);
+            }
+            continue;
+          }
+          break;
+        case '\'':
+        case '"': {
+          PARSE_STRING string_cmd{};
+          if (not drv.exec_command(string_cmd)) {
+            drv.token.type = TOKEN_TYPE::T_STRING;
+            if (tryReserved_string(drv))
+              return 0;
+            drv.token.str.atom_idx = drv.obtain_atom();
+            return 0;
+          }
+          drv.token.type = TOKEN_TYPE::T_ERROR;
+          return 1;
+        }
+        default:
+          if (u_isWhitespace(tcmd.sv().front())) {
+            drv.drop(1);
+            continue;
+          } else {
+            PARSE_IDENT ident_cmd{};
+            if (not drv.exec_command(ident_cmd)) {
+              drv.token.type = TOKEN_TYPE::T_IDENT;
+              if (tryReserved_ident(drv))
+                return 0;
+              drv.token.ident.atom_idx = drv.obtain_atom();
+              return 0;
+            }
+            drv.drop(1);
+            drv.token.type = TOKEN_TYPE::T_UCHAR;
+            drv.token.uchar = tcmd.sv().front();
+            return 0;
+          }
+      }
+      return 1;
+    }
+  }
+};
+
 std::size_t ParseDriver::obtain_atom() {
   if (not atom_umap.contains(ch_temp)) {
     atom_deq.push_back(std::move(ch_temp));
