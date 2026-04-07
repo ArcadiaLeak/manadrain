@@ -316,103 +316,149 @@ struct PARSE_ESCAPE {
   }
 };
 
-struct PARSE_STRING {
-  bool exec(ParseDriver& drv);
-  struct ESCSEQ {
-    char32_t ch_ret;
-    bool must_continue;
-    bool exec(ParseDriver& drv);
-  };
-};
+struct PARSE_STRING_ESCSEQ {
+  char32_t ch_ret;
+  bool must_continue;
 
-bool PARSE_STRING::ESCSEQ::exec(ParseDriver& drv) {
-  std::optional ch{drv.peek()};
-  if (not ch) {
-    drv.known_err = BAD_STRING::UNEXPECTED_END;
-    return 1;
-  }
-  switch (*ch) {
-    case '\'':
-    case '\"':
-    case '\0':
-    case '\\':
-      drv.drop(1);
-      ch_ret = *ch;
-      return 0;
-    case '\r':
-      if (drv.peek() == '\n')
-        drv.drop(1);
-      [[fallthrough]];
-    case '\n':
-    case 0x2028:
-    case 0x2029:
-      /* ignore escaped newline sequence */
-      drv.drop(1);
-      must_continue = 1;
-      return 0;
-    default:
-      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-      if (drv.strictness == STRICTNESS::STRICT)
-        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-      else if (drv.token.str.sep == '`')
-        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-      PARSE_ESCAPE parse_cmd{esc_rule};
-      if (drv.exec_command(parse_cmd)) {
-        if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::MALFORMED}) {
-          drv.known_err = BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
-          return 1;
-        } else if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::OCTAL_SEQ}) {
-          drv.known_err = BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
-          return 1;
-        } else if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::PER_SE_BACKSLASH})
-          /* ignore the '\' (could output a warning) */
-          drv.drop(1);
-      } else
-        ch = parse_cmd.ch_esc;
-      ch_ret = *ch;
-      return 0;
-  }
-}
-
-bool PARSE_STRING::exec(ParseDriver& drv) {
-  drv.token.str.sep = *drv.shift();
-  drv.ch_temp.clear();
-  while (1) {
-    std::optional ch = drv.peek();
+  bool exec(ParseDriver& drv) {
+    std::optional ch{drv.peek()};
     if (not ch) {
       drv.known_err = BAD_STRING::UNEXPECTED_END;
       return 1;
     }
-    if (drv.token.str.sep == '`') {
-      if (*ch == '\r') {
+    switch (*ch) {
+      case '\'':
+      case '\"':
+      case '\0':
+      case '\\':
+        drv.drop(1);
+        ch_ret = *ch;
+        return 0;
+      case '\r':
         if (drv.peek() == '\n')
           drv.drop(1);
-        ch = '\n';
-      }
-    } else if (*ch == '\r' || *ch == '\n') {
-      drv.known_err = BAD_STRING::UNEXPECTED_END;
-      return 1;
+        [[fallthrough]];
+      case '\n':
+      case 0x2028:
+      case 0x2029:
+        /* ignore escaped newline sequence */
+        drv.drop(1);
+        must_continue = 1;
+        return 0;
+      default:
+        ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+        if (drv.strictness == STRICTNESS::STRICT)
+          esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+        else if (drv.token.str.sep == '`')
+          esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+        PARSE_ESCAPE parse_cmd{esc_rule};
+        if (drv.exec_command(parse_cmd)) {
+          if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::MALFORMED}) {
+            drv.known_err = BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
+            return 1;
+          } else if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::OCTAL_SEQ}) {
+            drv.known_err = BAD_STRING::OCTAL_SEQ_IN_ESCAPE;
+            return 1;
+          } else if (drv.known_err == PARSE_ERROR{BAD_ESCAPE::PER_SE_BACKSLASH})
+            /* ignore the '\' (could output a warning) */
+            drv.drop(1);
+        } else
+          ch = parse_cmd.ch_esc;
+        ch_ret = *ch;
+        return 0;
     }
-    drv.drop(1);
-    if (*ch == drv.token.str.sep)
-      return 0;
-    if (*ch == '$' && drv.peek() == '{' && drv.token.str.sep == '`') {
-      drv.drop(1);
-      return 0;
-    }
-    if (*ch == '\\') {
-      ESCSEQ escseq{};
-      if (drv.exec_command(escseq))
+  }
+};
+
+struct PARSE_STRING {
+  bool exec(ParseDriver& drv) {
+    drv.token.str.sep = *drv.shift();
+    drv.ch_temp.clear();
+    while (1) {
+      std::optional ch = drv.peek();
+      if (not ch) {
+        drv.known_err = BAD_STRING::UNEXPECTED_END;
         return 1;
-      else if (escseq.must_continue)
-        continue;
-      else
-        ch = escseq.ch_ret;
+      }
+      if (drv.token.str.sep == '`') {
+        if (*ch == '\r') {
+          if (drv.peek() == '\n')
+            drv.drop(1);
+          ch = '\n';
+        }
+      } else if (*ch == '\r' || *ch == '\n') {
+        drv.known_err = BAD_STRING::UNEXPECTED_END;
+        return 1;
+      }
+      drv.drop(1);
+      if (*ch == drv.token.str.sep)
+        return 0;
+      if (*ch == '$' && drv.peek() == '{' && drv.token.str.sep == '`') {
+        drv.drop(1);
+        return 0;
+      }
+      if (*ch == '\\') {
+        PARSE_STRING_ESCSEQ escseq{};
+        if (drv.exec_command(escseq))
+          return 1;
+        else if (escseq.must_continue)
+          continue;
+        else
+          ch = escseq.ch_ret;
+      }
+      std::array<char, 4> cp_storage{};
+      drv.ch_temp.append(codepoint_cv(*ch, cp_storage));
     }
+  }
+};
+
+struct PARSE_IDENT_UCHAR {
+  bool beginning;
+
+  bool exec(ParseDriver& drv) {
+    std::optional ch{drv.peek()};
+    if (not ch)
+      return 1;
+    drv.drop(1);
+
+    if (*ch == '\\' && drv.peek() == 'u') {
+      PARSE_ESCAPE parse_cmd{ESC_RULE::IDENTIFIER};
+      if (drv.exec_command(parse_cmd))
+        return 1;
+      ch = parse_cmd.ch_esc;
+      drv.token.ident.has_escape = true;
+    }
+
+    UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
+    if (not u_hasBinaryProperty(*ch, must_be))
+      return 1;
+
     std::array<char, 4> cp_storage{};
     drv.ch_temp.append(codepoint_cv(*ch, cp_storage));
+    return 0;
   }
-}
+};
+
+struct PARSE_IDENT {
+  bool is_private;
+
+  bool exec(ParseDriver& drv) {
+    drv.ch_temp.clear();
+
+    PARSE_IDENT_UCHAR parse_start{.beginning = 1};
+    if (drv.exec_command(parse_start))
+      return 1;
+
+    if (is_private)
+      drv.ch_temp.insert(drv.ch_temp.begin(), '#');
+
+    while (1) {
+      PARSE_IDENT_UCHAR parse_continue{};
+      if (drv.exec_command(parse_continue))
+        return 0;
+    }
+  }
+};
 
 std::size_t ParseDriver::obtain_atom() {
   if (not atom_umap.contains(ch_temp)) {
