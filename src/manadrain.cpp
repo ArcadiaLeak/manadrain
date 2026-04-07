@@ -460,35 +460,35 @@ struct PARSE_IDENT {
   }
 };
 
+bool ParseDriver::tryReserved_ident() {
+  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+    auto [literal, token_type, r_strict] = reserved_arr[i];
+    if (ch_temp != literal)
+      continue;
+    token.ident.atom_idx = i;
+    if (strictness < r_strict)
+      return 1;
+    if (token.ident.has_escape) {
+      token.ident.is_reserved = 1;
+      return 1;
+    }
+    token.type = token_type;
+    return 1;
+  }
+  return 0;
+}
+
+bool ParseDriver::tryReserved_string() {
+  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+    if (ch_temp != std::get<0>(reserved_arr[i]))
+      continue;
+    token.ident.atom_idx = i;
+    return 1;
+  }
+  return 0;
+}
+
 struct PARSE_TOKEN {
-  bool tryReserved_ident(ParseDriver& drv) {
-    for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-      auto [literal, token_type, strictness] = reserved_arr[i];
-      if (drv.ch_temp != literal)
-        continue;
-      drv.token.ident.atom_idx = i;
-      if (drv.strictness < strictness)
-        return 1;
-      if (drv.token.ident.has_escape) {
-        drv.token.ident.is_reserved = 1;
-        return 1;
-      }
-      drv.token.type = token_type;
-      return 1;
-    }
-    return 0;
-  }
-
-  bool tryReserved_string(ParseDriver& drv) {
-    for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-      if (drv.ch_temp != std::get<0>(reserved_arr[i]))
-        continue;
-      drv.token.ident.atom_idx = i;
-      return 1;
-    }
-    return 0;
-  }
-
   bool exec(ParseDriver& drv) {
     TAKE<2> tcmd{};
     while (1) {
@@ -542,7 +542,7 @@ struct PARSE_TOKEN {
           PARSE_STRING string_cmd{};
           if (not drv.exec_command(string_cmd)) {
             drv.token.type = TOKEN_TYPE::T_STRING;
-            if (tryReserved_string(drv))
+            if (drv.tryReserved_string())
               return 0;
             drv.token.str.atom_idx = drv.obtain_atom();
             return 0;
@@ -558,7 +558,7 @@ struct PARSE_TOKEN {
             PARSE_IDENT ident_cmd{};
             if (not drv.exec_command(ident_cmd)) {
               drv.token.type = TOKEN_TYPE::T_IDENT;
-              if (tryReserved_ident(drv))
+              if (drv.tryReserved_ident())
                 return 0;
               drv.token.ident.atom_idx = drv.obtain_atom();
               return 0;

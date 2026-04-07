@@ -88,6 +88,9 @@ struct ParseDriver {
     return backtrack;
   }
 
+  bool tryReserved_ident();
+  bool tryReserved_string();
+
   bool parse();
 };
 }  // namespace Manadrain
