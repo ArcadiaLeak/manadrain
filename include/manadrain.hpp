@@ -91,10 +91,10 @@ struct ParseDriver {
   template <typename T>
   bool exec_command(T& command) {
     std::uint32_t idx_before{buffer_idx};
-    bool failed = command.exec(*this);
-    if (failed)
+    bool backtrack = command.exec(*this);
+    if (backtrack)
       buffer_idx = idx_before;
-    return failed;
+    return backtrack;
   }
 
   bool parse();

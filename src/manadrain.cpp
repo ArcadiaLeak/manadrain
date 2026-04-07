@@ -86,6 +86,26 @@ void ParseDriver::drop(std::uint32_t count) {
   U8_FWD_N(buffer.data(), buffer_idx, buffer.size(), count);
 }
 
+template <std::size_t N>
+struct TAKE {
+  std::array<char32_t, N> ch_arr;
+  std::uint32_t len;
+
+  std::u32string_view sv() { return {ch_arr.data(), len}; }
+
+  bool exec(ParseDriver& driver) {
+    *this = {};
+    while (len < N) {
+      std::optional ch{driver.peek()};
+      if (not ch)
+        break;
+      driver.drop(1);
+      ch_arr[len++] = *ch;
+    }
+    return 1;
+  }
+};
+
 std::size_t ParseDriver::obtain_atom() {
   if (not atom_umap.contains(ch_temp)) {
     atom_deq.push_back(std::move(ch_temp));
