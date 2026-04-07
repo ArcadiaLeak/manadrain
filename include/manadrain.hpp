@@ -5,15 +5,6 @@
 
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
-enum class ESC_RULE {
-  IDENTIFIER,
-  REGEXP_ASCII,
-  REGEXP_UTF16,
-  STRING_IN_SLOPPY_MODE,
-  STRING_IN_STRICT_MODE,
-  STRING_IN_TEMPLATE
-};
-
 enum class TOKEN_TYPE {
   T_LET,
   T_CONST,
