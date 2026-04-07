@@ -329,10 +329,10 @@ bool ParseDriver::parseEscape(ESC_RULE esc_rule,
   return ok;
 }
 
-int ParseDriver::parseString_escSeq_dang(
-    char32_t sep,
-    std::pair<char32_t, BAD_STRING>& either) {
-  std::optional ch{peek()};
+int parseString_escSeq_dang(ParseDriver& driver,
+                            char32_t sep,
+                            std::pair<char32_t, BAD_STRING>& either) {
+  std::optional ch{driver.peek()};
   if (not ch) {
     either.second = BAD_STRING::UNEXPECTED_END;
     return 0;
@@ -342,28 +342,28 @@ int ParseDriver::parseString_escSeq_dang(
     case '\"':
     case '\0':
     case '\\':
-      drop(1);
+      driver.drop(1);
       either.first = *ch;
       return 1;
     case '\r':
-      if (peek() == '\n')
-        drop(1);
+      if (driver.peek() == '\n')
+        driver.drop(1);
       [[fallthrough]];
     case '\n':
     case 0x2028:
     case 0x2029:
       /* ignore escaped newline sequence */
-      drop(1);
+      driver.drop(1);
       either.first = *ch;
       return 2;
     default:
       ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-      if (state.strictness == STRICTNESS::STRICT)
+      if (driver.state.strictness == STRICTNESS::STRICT)
         esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
       else if (sep == '`')
         esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
       std::pair<char32_t, BAD_ESCAPE> ch_esc{};
-      if (parseEscape(esc_rule, ch_esc))
+      if (driver.parseEscape(esc_rule, ch_esc))
         ch = ch_esc.first;
       else if (ch_esc.second == BAD_ESCAPE::MALFORMED) {
         either.second = BAD_STRING::MALFORMED_SEQ_IN_ESCAPE;
@@ -373,18 +373,19 @@ int ParseDriver::parseString_escSeq_dang(
         return 0;
       } else if (ch_esc.second == BAD_ESCAPE::PER_SE_BACKSLASH)
         /* ignore the '\' (could output a warning) */
-        drop(1);
+        driver.drop(1);
       either.first = *ch;
       return 1;
   }
 }
 
-int ParseDriver::parseString_escSeq(char32_t sep,
-                                    std::pair<char32_t, BAD_STRING>& either) {
-  const ParseState state_backup{state};
-  int ok = parseString_escSeq_dang(sep, either);
+int parseString_escSeq(ParseDriver& driver,
+                       char32_t sep,
+                       std::pair<char32_t, BAD_STRING>& either) {
+  const ParseState state_backup{driver.state};
+  int ok = parseString_escSeq_dang(driver, sep, either);
   if (not ok)
-    state = state_backup;
+    driver.state = state_backup;
   return ok;
 }
 
@@ -421,7 +422,7 @@ bool ParseDriver::parseString(Token::PAYLOAD_STR& token, BAD_STRING& err) {
 
     if (*ch == '\\') {
       std::pair<char32_t, BAD_STRING> ch_esc{};
-      int ok = parseString_escSeq(token.sep, ch_esc);
+      int ok = parseString_escSeq(*this, token.sep, ch_esc);
       if (not ok) {
         err = ch_esc.second;
         return 0;

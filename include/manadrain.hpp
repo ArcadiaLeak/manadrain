@@ -95,9 +95,6 @@ struct ParseDriver {
                             std::pair<char32_t, BAD_ESCAPE>& either);
 
   bool parseString(Token::PAYLOAD_STR& token, BAD_STRING& err);
-  int parseString_escSeq_dang(char32_t sep,
-                              std::pair<char32_t, BAD_STRING>& either);
-  int parseString_escSeq(char32_t sep, std::pair<char32_t, BAD_STRING>& either);
 
   bool parseIdent(Token::PAYLOAD_IDENT& ident, bool is_private);
   bool parseIdent_uchar(Token::PAYLOAD_IDENT& ident, bool beginning);
