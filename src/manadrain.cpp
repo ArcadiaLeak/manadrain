@@ -572,13 +572,7 @@ bool ParseDriver::parseToken(Token& token) {
   return ok;
 }
 
-bool ParseDriver::parseVardecl(STMT_VARDECL& vardecl) {
-  Token token{};
-  if (not parseToken(token))
-    return 0;
-
-  if (token.is_pseudo_keyword(TOKEN_TYPE::T_LET))
-    token.type = TOKEN_TYPE::T_LET;
+bool ParseDriver::parseVardecl(Token& token, STMT_VARDECL& vardecl) {
   switch (token.type) {
     case TOKEN_TYPE::T_LET:
       vardecl.kind = VARDECL_KIND::K_LET;
@@ -643,13 +637,27 @@ bool parseExpression_binary() {
 }
 
 bool ParseDriver::parseStatement() {
-  const PARSE_STATE state_backup{state};
-  STMT_VARDECL vardecl{};
-  parseExpression_binary<8>();
-  if (not parseVardecl(vardecl)) {
-    state = state_backup;
+  Token token{};
+  if (not parseToken(token))
+    return 0;
+
+  while (1) {
+    switch (token.type) {
+      case TOKEN_TYPE::T_IDENT:
+        if (token.is_pseudo_keyword(TOKEN_TYPE::T_LET)) {
+          token.type = TOKEN_TYPE::T_LET;
+          continue;
+        }
+        break;
+      case TOKEN_TYPE::T_CONST:
+      case TOKEN_TYPE::T_LET:
+      case TOKEN_TYPE::T_VAR:
+        STMT_VARDECL vardecl{};
+        if (not parseVardecl(token, vardecl))
+          break;
+        return 1;
+    }
     return 0;
   }
-  return 1;
 }
 }  // namespace Manadrain

@@ -104,7 +104,7 @@ struct ParseDriver {
   bool tryReserved_ident(Token& token);
   bool tryReserved_string(Token& token);
 
-  bool parseVardecl(STMT_VARDECL& vardecl);
+  bool parseVardecl(Token& token, STMT_VARDECL& vardecl);
   bool parseStatement();
 };
 }  // namespace Manadrain
