@@ -28,12 +28,12 @@ enum class TOKEN_TYPE {
 struct Token {
   struct PAYLOAD_STR {
     char32_t sep;
-    std::size_t pool_idx;
+    std::size_t atom_idx;
   };
   struct PAYLOAD_IDENT {
     bool has_escape;
     bool is_reserved;
-    std::size_t pool_idx;
+    std::size_t atom_idx;
   };
 
   TOKEN_TYPE type;
@@ -43,7 +43,13 @@ struct Token {
   PAYLOAD_IDENT ident;
 
   bool is_pseudo_keyword(TOKEN_TYPE tok_type);
+  bool is_vardecl_intro();
 };
+
+struct EXPR_IDENT {
+  std::size_t atom_idx;
+};
+using EXPRESSION = std::variant<EXPR_IDENT>;
 
 enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
 struct STMT_VARDECL {
@@ -51,6 +57,7 @@ struct STMT_VARDECL {
   Token::PAYLOAD_IDENT ident;
   Token::PAYLOAD_STR init;
 };
+using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
 struct PARSE_STATE {
   std::uint32_t idx;
@@ -75,6 +82,7 @@ struct ParseDriver {
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
+  std::deque<STATEMENT> program;
 
   std::string ch_temp;
   std::size_t makeAtom_fromTemp();
@@ -105,6 +113,8 @@ struct ParseDriver {
   bool tryReserved_string(Token& token);
 
   bool parseVardecl(Token& token, STMT_VARDECL& vardecl);
-  bool parseStatement();
+
+  bool parseExpr(EXPRESSION& expr);
+  bool parseStmt();
 };
 }  // namespace Manadrain

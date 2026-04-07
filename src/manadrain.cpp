@@ -40,7 +40,7 @@ bool ParseDriver::tryReserved_ident(Token& token) {
     auto [literal, token_type, strictness] = reserved_arr[i];
     if (ch_temp != literal)
       continue;
-    token.ident.pool_idx = i;
+    token.ident.atom_idx = i;
     if (state.strictness < strictness)
       return 1;
     if (token.ident.has_escape) {
@@ -57,22 +57,37 @@ bool ParseDriver::tryReserved_string(Token& token) {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     if (ch_temp != std::get<0>(reserved_arr[i]))
       continue;
-    token.ident.pool_idx = i;
+    token.ident.atom_idx = i;
     return 1;
   }
   return 0;
 }
 
 bool Token::is_pseudo_keyword(TOKEN_TYPE tok_type) {
-  if (type != TOKEN_TYPE::T_IDENT)
-    return 0;
   if (ident.has_escape)
     return 0;
-  if (ident.pool_idx >= reserved_arr.size())
+  if (ident.atom_idx >= reserved_arr.size())
     return 0;
-  if (std::get<1>(reserved_arr[ident.pool_idx]) == tok_type)
+  if (std::get<1>(reserved_arr[ident.atom_idx]) == tok_type)
     return 1;
   return 0;
+}
+
+bool Token::is_vardecl_intro() {
+  switch (type) {
+    case TOKEN_TYPE::T_IDENT:
+      if (is_pseudo_keyword(TOKEN_TYPE::T_LET)) {
+        type = TOKEN_TYPE::T_LET;
+        return 1;
+      }
+      return 0;
+    case TOKEN_TYPE::T_CONST:
+    case TOKEN_TYPE::T_LET:
+    case TOKEN_TYPE::T_VAR:
+      return 1;
+    default:
+      return 0;
+  }
 }
 
 template <std::size_t N>
@@ -529,7 +544,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
           token.type = TOKEN_TYPE::T_STRING;
           if (tryReserved_string(token))
             return 1;
-          token.str.pool_idx = makeAtom_fromTemp();
+          token.str.atom_idx = makeAtom_fromTemp();
           return 1;
         }
         token.type = TOKEN_TYPE::T_ERROR;
@@ -543,7 +558,7 @@ bool ParseDriver::parseToken_dang(Token& token) {
           token.type = TOKEN_TYPE::T_IDENT;
           if (tryReserved_ident(token))
             return 1;
-          token.ident.pool_idx = makeAtom_fromTemp();
+          token.ident.atom_idx = makeAtom_fromTemp();
           return 1;
         } else {
           drop(1);
@@ -628,35 +643,31 @@ bool ParseDriver::parseVardecl(Token& token, STMT_VARDECL& vardecl) {
   return 0;
 }
 
-template <int N>
-bool parseExpression_binary() {
-  if constexpr (N == 0)
-    return 0;
-  else
-    return parseExpression_binary<N - 1>();
+bool ParseDriver::parseExpr(EXPRESSION& expr) {
+  return 0;
 }
 
-bool ParseDriver::parseStatement() {
-  Token token{};
-  if (not parseToken(token))
-    return 0;
-
+bool ParseDriver::parseStmt() {
   while (1) {
-    switch (token.type) {
-      case TOKEN_TYPE::T_IDENT:
-        if (token.is_pseudo_keyword(TOKEN_TYPE::T_LET)) {
-          token.type = TOKEN_TYPE::T_LET;
-          continue;
-        }
-        break;
-      case TOKEN_TYPE::T_CONST:
-      case TOKEN_TYPE::T_LET:
-      case TOKEN_TYPE::T_VAR:
-        STMT_VARDECL vardecl{};
-        if (not parseVardecl(token, vardecl))
-          break;
-        return 1;
+    Token token{};
+    if (not parseToken(token))
+      return 0;
+
+    if (token.is_vardecl_intro()) {
+      STMT_VARDECL& vardecl =
+          std::get<STMT_VARDECL>(program.emplace_back(STMT_VARDECL{}));
+      if (parseVardecl(token, vardecl))
+        continue;
     }
+
+    if (token.type == TOKEN_TYPE::T_IDENT) {
+      EXPRESSION& expr =
+          std::get<EXPRESSION>(program.emplace_back(EXPRESSION{}));
+      expr = EXPR_IDENT{token.ident.atom_idx};
+      if (parseExpr(expr))
+        continue;
+    }
+
     return 0;
   }
 }
