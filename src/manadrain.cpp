@@ -1,9 +1,6 @@
 #include <unicode/uchar.h>
 #include <unicode/ustring.h>
 
-#include <format>
-#include <optional>
-
 #include "manadrain.hpp"
 
 static bool is_hi_surrogate(char32_t c) {
@@ -53,72 +50,49 @@ static int var_intro_cv(int tok_kind) {
   return 0;
 }
 
-std::optional<char32_t> ParseDriver::peek() {
+std::expected<char32_t, int> ParseDriver::peek() {
   if (buffer_idx >= buffer.size())
-    return std::nullopt;
+    return std::unexpected{MOVE_BUFFER::UNEXPECTED_END};
   UChar32 ch;
   U8_GET(buffer.data(), 0, buffer_idx, buffer.size(), ch);
   if (ch < 0)
-    return std::nullopt;
+    return std::unexpected{MOVE_BUFFER::ILLEGAL_UTF8};
   return ch;
 }
 
-std::optional<char32_t> ParseDriver::shift() {
-  if (buffer_idx >= buffer.size())
-    return std::nullopt;
-  UChar32 ch;
-  U8_NEXT(buffer.data(), buffer_idx, buffer.size(), ch);
-  if (ch < 0)
-    return std::nullopt;
-  return ch;
+void ParseDriver::backtrack(std::uint32_t count) {
+  std::uint32_t i;
+  for (i = 0; i < count; ++i) {
+    std::uint32_t last_idx{buffer_idx};
+    U8_BACK_N(buffer.data(), 0, buffer_idx, 1);
+    if (buffer_idx == last_idx)
+      break;
+  }
+  fwd_cnt -= i;
 }
 
-void ParseDriver::drop(std::uint32_t count) {
-  U8_FWD_N(buffer.data(), buffer_idx, buffer.size(), count);
+void ParseDriver::forward(std::uint32_t count) {
+  std::uint32_t i;
+  for (i = 0; i < count; ++i) {
+    std::uint32_t last_idx{buffer_idx};
+    U8_FWD_N(buffer.data(), buffer_idx, buffer.size(), 1);
+    if (buffer_idx == last_idx)
+      break;
+  }
+  fwd_cnt += i;
 }
 
-template <std::size_t N>
-struct TAKE {
-  std::array<char32_t, N> ch_arr;
-  std::uint32_t len;
-
-  std::u32string_view sv() { return {ch_arr.data(), len}; }
-
-  CMD_EXIT operator()(ParseDriver& driver) {
-    *this = {};
-    while (len < N) {
-      std::optional ch{driver.peek()};
-      if (not ch)
-        break;
-      driver.drop(1);
-      ch_arr[len++] = *ch;
-    }
-    return PARSE_OK::REVERT;
+std::u32string_view ParseDriver::take() {
+  std::uint32_t len{};
+  while (len < take_buff.size()) {
+    std::expected ch{peek()};
+    if (not ch)
+      break;
+    forward(1);
+    take_buff[len++] = *ch;
   }
-};
-
-struct PARSE_HEX {
-  std::uint32_t digit;
-
-  CMD_EXIT operator()(ParseDriver& driver) {
-    std::optional uchar{driver.shift()};
-    if (not uchar)
-      return PARSE_ERR{};
-    if (*uchar >= '0' && *uchar <= '9') {
-      digit = *uchar - '0';
-      return PARSE_OK::COMMIT;
-    }
-    if (*uchar >= 'A' && *uchar <= 'F') {
-      digit = *uchar - 'A' + 10;
-      return PARSE_OK::COMMIT;
-    }
-    if (*uchar >= 'a' && *uchar <= 'f') {
-      digit = *uchar - 'a' + 10;
-      return PARSE_OK::COMMIT;
-    }
-    return PARSE_ERR{};
-  }
-};
+  return {take_buff.data(), len};
+}
 
 enum class ESC_RULE {
   IDENTIFIER,
@@ -129,439 +103,57 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-struct PARSE_ESCAPE {
-  ESC_RULE esc_rule;
-  char32_t ch_esc;
-
-  CMD_EXIT parse_hex(ParseDriver& driver) {
-    PARSE_HEX hex0{};
-    if (driver.command(hex0))
-      return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-    PARSE_HEX hex1{};
-    if (driver.command(hex1))
-      return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-    ch_esc = (hex0.digit << 4) | hex1.digit;
-    return PARSE_OK::COMMIT;
-  }
-
-  CMD_EXIT parse_uni_braced(ParseDriver& driver) {
-    char32_t utf16_char = 0;
-    while (1) {
-      PARSE_HEX hex{};
-      if (driver.command(hex)) {
-        std::optional close_or_uchar{driver.shift()};
-        if (not close_or_uchar)
-          return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-        if (close_or_uchar == '}') {
-          ch_esc = utf16_char;
-          return PARSE_OK::COMMIT;
-        }
-      }
-      utf16_char = (utf16_char << 4) | hex.digit;
-      if (utf16_char > 0x10FFFF)
-        return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-    }
-  }
-
-  CMD_EXIT parse_uni_fixed(ParseDriver& driver) {
-    char32_t high_surr = 0;
-    for (int i = 0; i < 4; i++) {
-      PARSE_HEX hex{};
-      if (driver.command(hex))
-        return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-      high_surr = (high_surr << 4) | hex.digit;
-    }
-    if (is_hi_surrogate(high_surr) && esc_rule == ESC_RULE::REGEXP_UTF16) {
-      TAKE<2> tcmd{};
-      driver.command(tcmd);
-      if (tcmd.sv() == U"\\u") {
-        driver.drop(2);
-        char32_t low_surr = 0;
-        for (int i = 0; i < 4; i++) {
-          PARSE_HEX hex{};
-          if (driver.command(hex)) {
-            ch_esc = high_surr;
-            return PARSE_OK::COMMIT;
-          }
-          low_surr = (low_surr << 4) | hex.digit;
-        }
-        if (is_lo_surrogate(low_surr)) {
-          ch_esc = from_surrogate(high_surr, low_surr);
-          return PARSE_OK::COMMIT;
-        }
-      }
-    }
-    ch_esc = high_surr;
-    return PARSE_OK::COMMIT;
-  }
-
-  CMD_EXIT parse_uni(ParseDriver& driver) {
-    std::optional open_or_uchar{driver.shift()};
-    if (not open_or_uchar)
-      return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-    return open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII
-               ? parse_uni_braced(driver)
-               : parse_uni_fixed(driver);
-  }
-
-  CMD_EXIT operator()(ParseDriver& driver) {
-    std::optional head{driver.shift()};
-    if (not head)
-      return PARSE_ERR{BAD_ESCAPE::PER_SE_BACKSLASH};
-    switch (*head) {
-      case 'b':
-        ch_esc = '\b';
-        return PARSE_OK::COMMIT;
-      case 'f':
-        ch_esc = '\f';
-        return PARSE_OK::COMMIT;
-      case 'n':
-        ch_esc = '\n';
-        return PARSE_OK::COMMIT;
-      case 'r':
-        ch_esc = '\r';
-        return PARSE_OK::COMMIT;
-      case 't':
-        ch_esc = '\t';
-        return PARSE_OK::COMMIT;
-      case 'v':
-        ch_esc = '\v';
-        return PARSE_OK::COMMIT;
-      case 'x':
-        return parse_hex(driver);
-      case 'u':
-        return parse_uni(driver);
-      case '0': {
-        std::optional ahead{driver.peek()};
-        if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
-                    .value_or(false)) {
-          ch_esc = 0;
-          return PARSE_OK::COMMIT;
-        }
-      }
-        [[fallthrough]];
-      case '1':
-      case '2':
-      case '3':
-      case '4':
-      case '5':
-      case '6':
-      case '7':
-        switch (esc_rule) {
-          case ESC_RULE::STRING_IN_STRICT_MODE:
-            return PARSE_ERR{BAD_ESCAPE::OCTAL_SEQ};
-
-          case ESC_RULE::STRING_IN_TEMPLATE:
-          case ESC_RULE::REGEXP_UTF16:
-            return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-
-          default:
-            ch_esc = *head - '0';
-            std::optional<char32_t> ahead;
-            ahead = driver.peek().transform(
-                [](char32_t ahead_digit) { return ahead_digit - '0'; });
-            if (not ahead || *ahead > 7)
-              return PARSE_OK::COMMIT;
-            driver.drop(1);
-            ch_esc = (ch_esc << 3) | *ahead;
-
-            if (ch_esc >= 32)
-              return PARSE_OK::COMMIT;
-
-            ahead = driver.peek().transform(
-                [](char32_t ahead_digit) { return ahead_digit - '0'; });
-            if (not ahead || *ahead > 7)
-              return PARSE_OK::COMMIT;
-            driver.drop(1);
-            ch_esc = (ch_esc << 3) | *ahead;
-            return PARSE_OK::COMMIT;
-        }
-      case '8':
-      case '9':
-        if (esc_rule == ESC_RULE::STRING_IN_STRICT_MODE ||
-            esc_rule == ESC_RULE::STRING_IN_TEMPLATE)
-          return PARSE_ERR{BAD_ESCAPE::MALFORMED};
-        [[fallthrough]];
-      default:
-        return PARSE_ERR{BAD_ESCAPE::PER_SE_BACKSLASH};
-    }
-  }
-};
-
-struct PARSE_STRING_ESCSEQ {
-  char32_t ch_ret;
-  bool must_continue;
-
-  CMD_EXIT operator()(ParseDriver& driver) {
-    std::optional ch{driver.peek()};
-    if (not ch)
-      return PARSE_ERR{BAD_STRING::UNEXPECTED_END};
-    switch (*ch) {
-      case '\'':
-      case '\"':
-      case '\0':
-      case '\\':
-        driver.drop(1);
-        ch_ret = *ch;
-        return PARSE_OK::COMMIT;
-      case '\r':
-        if (driver.peek() == '\n')
-          driver.drop(1);
-        [[fallthrough]];
-      case '\n':
-      case 0x2028:
-      case 0x2029:
-        /* ignore escaped newline sequence */
-        driver.drop(1);
-        must_continue = 1;
-        return PARSE_OK::COMMIT;
-      default:
-        ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-        if (driver.strictness == STRICTNESS::STRICT)
-          esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-        else if (driver.token.str.sep == '`')
-          esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-        PARSE_ESCAPE parse_cmd{esc_rule};
-        if (driver.command(parse_cmd))
-          switch (std::get<BAD_ESCAPE>(driver.known_err)) {
-            case BAD_ESCAPE::MALFORMED:
-              return PARSE_ERR{BAD_STRING::MALFORMED_SEQ_IN_ESCAPE};
-            case BAD_ESCAPE::OCTAL_SEQ:
-              return PARSE_ERR{BAD_STRING::OCTAL_SEQ_IN_ESCAPE};
-            case BAD_ESCAPE::PER_SE_BACKSLASH:
-              driver.drop(1);
-              break;
-          }
-        else
-          ch = parse_cmd.ch_esc;
-        ch_ret = *ch;
-        return PARSE_OK::COMMIT;
-    }
-  }
-};
-
-struct PARSE_STRING {
-  CMD_EXIT operator()(ParseDriver& driver) {
-    driver.token.str.sep = *driver.shift();
-    driver.ch_temp.clear();
-    while (1) {
-      std::optional ch = driver.peek();
-      if (not ch)
-        return PARSE_ERR{BAD_STRING::UNEXPECTED_END};
-      if (driver.token.str.sep == '`') {
-        if (*ch == '\r') {
-          if (driver.peek() == '\n')
-            driver.drop(1);
-          ch = '\n';
-        }
-      } else if (*ch == '\r' || *ch == '\n')
-        return PARSE_ERR{BAD_STRING::UNEXPECTED_END};
-      driver.drop(1);
-      if (*ch == driver.token.str.sep)
-        return PARSE_OK::COMMIT;
-      if (*ch == '$' && driver.peek() == '{' && driver.token.str.sep == '`') {
-        driver.drop(1);
-        return PARSE_OK::COMMIT;
-      }
-      if (*ch == '\\') {
-        PARSE_STRING_ESCSEQ escseq{};
-        if (driver.command(escseq))
-          return driver.known_err;
-        else if (escseq.must_continue)
-          continue;
-        else
-          ch = escseq.ch_ret;
-      }
-      std::array<char, 4> cp_storage{};
-      driver.ch_temp.append(codepoint_cv(*ch, cp_storage));
-    }
-  }
-};
-
-struct PARSE_IDENT_UCHAR {
-  bool beginning;
-
-  CMD_EXIT operator()(ParseDriver& driver) {
-    std::optional ch{driver.peek()};
-    if (not ch)
-      return PARSE_ERR{};
-    driver.drop(1);
-
-    if (*ch == '\\' && driver.peek() == 'u') {
-      PARSE_ESCAPE parse_cmd{ESC_RULE::IDENTIFIER};
-      if (driver.command(parse_cmd))
-        return PARSE_ERR{};
-      ch = parse_cmd.ch_esc;
-      driver.token.ident.has_escape = true;
-    }
-
-    UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
-    if (not u_hasBinaryProperty(*ch, must_be))
-      return PARSE_ERR{};
-
-    std::array<char, 4> cp_storage{};
-    driver.ch_temp.append(codepoint_cv(*ch, cp_storage));
-    return PARSE_OK::COMMIT;
-  }
-};
-
-struct PARSE_IDENT {
-  bool is_private;
-
-  CMD_EXIT operator()(ParseDriver& driver) {
-    driver.ch_temp.clear();
-
-    PARSE_IDENT_UCHAR parse_start{.beginning = 1};
-    if (driver.command(parse_start))
-      return PARSE_ERR{};
-
-    if (is_private)
-      driver.ch_temp.insert(driver.ch_temp.begin(), '#');
-
-    while (1) {
-      PARSE_IDENT_UCHAR parse_continue{};
-      if (driver.command(parse_continue))
-        return PARSE_OK::COMMIT;
-    }
-  }
-};
-
-bool ParseDriver::find_static_atom(PARSE_IDENT&) {
-  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-    auto [literal, tok_kind, r_strict] = reserved_arr[i];
-    if (ch_temp != literal)
-      continue;
-    token.ident.atom_idx = i;
-    if (strictness < r_strict)
-      return 1;
-    if (token.ident.has_escape) {
-      token.ident.is_reserved = 1;
-      return 1;
-    }
-    token.kind = tok_kind;
-    return 1;
-  }
-  return 0;
+std::expected<std::uint32_t, int> ParseDriver::parse_hex(char32_t uchar) {
+  if (uchar >= '0' && uchar <= '9')
+    return uchar - '0';
+  if (uchar >= 'A' && uchar <= 'F')
+    return uchar - 'A' + 10;
+  if (uchar >= 'a' && uchar <= 'f')
+    return uchar - 'a' + 10;
+  return std::unexpected{PARSE_HEX::ILLEGAL_DIGIT};
 }
 
-bool ParseDriver::find_static_atom(PARSE_STRING&) {
-  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-    if (ch_temp != std::get<0>(reserved_arr[i]))
-      continue;
-    token.str.atom_idx = i;
-    return 1;
-  }
-  return 0;
+std::expected<std::uint32_t, int> ParseDriver::parse_hex() {
+  return peek().and_then([this](char32_t ch) { return parse_hex(ch); });
 }
 
-struct PARSE_TOKEN {
-  TAKE<2> take_cmd;
-  std::optional<PARSE_ERR> nested_err;
+std::expected<char32_t, int> ParseDriver::parse_hex(PARSE_ESCAPE) {
+  std::expected hex0 = parse_hex();
+  if (not hex0)
+    return std::unexpected{hex0.error()};
+  forward(1);
 
-  CMD_EXIT operator()(ParseDriver& driver) {
-    driver.token = {};
-    *this = {};
-    while (driver.parse(*this)) {
-      if (nested_err)
-        return *nested_err;
+  std::expected hex1 = parse_hex();
+  if (not hex1) {
+    backtrack(1);
+    return std::unexpected{hex1.error()};
+  }
+  forward(1);
+
+  return (*hex0 << 4) | *hex1;
+}
+
+std::expected<char32_t, int> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
+  char32_t utf16_char = 0;
+  reset_fwd();
+  while (1) {
+    if (utf16_char > 0x10FFFF)
+      break;
+    std::expected hex = parse_hex();
+    if (hex) {
+      forward(1);
+      utf16_char = (utf16_char << 4) | *hex;
       continue;
     }
-    return PARSE_OK::COMMIT;
+    std::expected closing = peek();
+    if (closing == '}') {
+      forward(1);
+      return utf16_char;
+    }
+    break;
   }
-};
-
-bool ParseDriver::parse_comment_line(PARSE_TOKEN& cmd) {
-  std::optional ch = peek();
-  if (not ch || is_lineterm(*ch))
-    return 0;
-  return 1;
-}
-
-bool ParseDriver::parse_comment_block(PARSE_TOKEN& cmd) {
-  command(cmd.take_cmd);
-  if (cmd.take_cmd.sv().empty()) {
-    token.kind = K_TOKEN_ERROR;
-    cmd.nested_err = BAD_COMMENT::UNEXPECTED_END;
-    return 0;
-  }
-  if (cmd.take_cmd.sv() == U"*/") {
-    drop(2);
-    return 0;
-  }
-  if (is_lineterm(cmd.take_cmd.sv().front()))
-    token.newline_seen = 1;
-  return 1;
-}
-
-void ParseDriver::parse_comment(PARSE_TOKEN& cmd) {
-  if (cmd.take_cmd.sv() == U"//") {
-    while (parse_comment_line(cmd))
-      drop(1);
-  }
-
-  if (cmd.take_cmd.sv() == U"/*") {
-    drop(2);
-    while (parse_comment_block(cmd))
-      drop(1);
-  }
-}
-
-bool ParseDriver::parse(PARSE_TOKEN& cmd) {
-  command(cmd.take_cmd);
-  if (cmd.take_cmd.sv().empty()) {
-    token.kind = K_TOKEN_EOF;
-    return 0;
-  }
-
-  switch (cmd.take_cmd.sv().front()) {
-    case '\r':
-      if (cmd.take_cmd.sv() == U"\r\n")
-        drop(1);
-      [[fallthrough]];
-
-    case '\n':
-    case 0x2028:
-    case 0x2029:
-      drop(1);
-      token.newline_seen = 1;
-      return 1;
-
-    case '/':
-      parse_comment(cmd);
-      return 1;
-
-    case '\'':
-    case '"':
-      PARSE_STRING string_cmd{};
-      if (command(string_cmd)) {
-        token.kind = K_TOKEN_ERROR;
-        cmd.nested_err = known_err;
-        return 1;
-      }
-
-      token.kind = K_TOKEN_STRING;
-      if (not find_static_atom(string_cmd))
-        token.str.atom_idx = get_atom();
-      return 0;
-  }
-
-  if (u_isWhitespace(cmd.take_cmd.sv().front())) {
-    drop(1);
-    return 1;
-  }
-
-  PARSE_IDENT ident_cmd{};
-  if (command(ident_cmd)) {
-    drop(1);
-    token.kind = K_TOKEN_UCHAR;
-    token.uchar = cmd.take_cmd.sv().front();
-    return 0;
-  }
-
-  token.kind = K_TOKEN_IDENT;
-  if (not find_static_atom(ident_cmd))
-    token.ident.atom_idx = get_atom();
-  return 0;
+  backtrack(fwd_cnt);
+  return std::unexpected{PARSE_ESCAPE::MALFORMED};
 }
 
 std::size_t ParseDriver::get_atom() {
@@ -572,68 +164,7 @@ std::size_t ParseDriver::get_atom() {
   return atom_umap[atom_deq.back()];
 }
 
-struct PARSE_VARDECL {
-  STMT_VARDECL stmt;
-  PARSE_TOKEN token_cmd;
-
-  CMD_EXIT operator()(ParseDriver& drv) { return drv.parse(*this); }
-};
-
-CMD_EXIT ParseDriver::parse(PARSE_VARDECL& cmd) {
-  cmd.stmt.intro = var_intro_cv(token.kind);
-
-  if (command(cmd.token_cmd))
-    return known_err;
-
-  if (token.kind == K_TOKEN_IDENT)
-    cmd.stmt.ident = token.ident;
-  else
-    return PARSE_ERR{};
-
-  if (command(cmd.token_cmd))
-    return known_err;
-
-  if (token.kind == K_TOKEN_UCHAR && token.uchar == '=') {
-    if (command(cmd.token_cmd))
-      return known_err;
-
-    if (token.kind == K_TOKEN_STRING)
-      cmd.stmt.init = token.str;
-    else
-      return PARSE_ERR{};
-  }
-
-  if (command(cmd.token_cmd))
-    return PARSE_OK::COMMIT;
-
-  if (token.kind == K_TOKEN_UCHAR) {
-    switch (token.uchar) {
-      case ';':
-        drop(1);
-        [[fallthrough]];
-      case '}':
-        return PARSE_OK::COMMIT;
-    }
-
-    if (token.newline_seen)
-      return PARSE_OK::COMMIT;
-  }
-
-  return PARSE_ERR{};
-}
-
 bool ParseDriver::parse() {
-  PARSE_TOKEN token_cmd{};
-  if (command(token_cmd))
-    return 0;
-
-  if (not var_intro_cv(token.kind))
-    return 0;
-
-  PARSE_VARDECL vardecl_cmd{};
-  if (command(vardecl_cmd))
-    return 0;
-
-  return 1;
+  return 0;
 }
 }  // namespace Manadrain

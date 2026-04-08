@@ -1,4 +1,7 @@
+#include <array>
+#include <cstdint>
 #include <deque>
+#include <expected>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -6,14 +9,14 @@
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
 
+constexpr int K_TOKEN_EOF = 0;
 constexpr int K_TOKEN_LET = 1;
 constexpr int K_TOKEN_CONST = 2;
 constexpr int K_TOKEN_VAR = 3;
-constexpr int K_TOKEN_EOF = 4;
-constexpr int K_TOKEN_IDENT = 5;
-constexpr int K_TOKEN_STRING = 6;
-constexpr int K_TOKEN_ERROR = 7;
-constexpr int K_TOKEN_UCHAR = 8;
+constexpr int K_TOKEN_IDENT = 4;
+constexpr int K_TOKEN_STRING = 5;
+constexpr int K_TOKEN_ERROR = 6;
+constexpr int K_TOKEN_UCHAR = 7;
 
 struct TOKEN {
   struct PAYLOAD_STR {
@@ -47,30 +50,35 @@ struct STMT_VARDECL {
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
-enum class BAD_ESCAPE { MALFORMED, PER_SE_BACKSLASH, OCTAL_SEQ };
-enum class BAD_STRING {
-  UNEXPECTED_END,
-  OCTAL_SEQ_IN_ESCAPE,
-  MALFORMED_SEQ_IN_ESCAPE
+struct MOVE_BUFFER {
+  static constexpr int UNEXPECTED_END = 0;
+  static constexpr int ILLEGAL_UTF8 = 1;
 };
-enum class BAD_COMMENT { UNEXPECTED_END };
-using PARSE_ERR =
-    std::variant<std::monostate, BAD_ESCAPE, BAD_STRING, BAD_COMMENT>;
-
-enum class PARSE_OK { COMMIT, REVERT };
-using CMD_EXIT = std::variant<PARSE_OK, PARSE_ERR>;
-
-struct PARSE_IDENT;
-struct PARSE_STRING;
-struct PARSE_TOKEN;
-struct PARSE_VARDECL;
+struct PARSE_HEX {
+  static constexpr int ILLEGAL_DIGIT = 2;
+};
+struct PARSE_ESCAPE {
+  static constexpr int MALFORMED = 3;
+  static constexpr int OCTAL_SEQ = 4;
+  static constexpr int PER_SE_BACKSLASH = 5;
+};
+struct PARSE_STRING {
+  static constexpr int UNEXPECTED_END = 6;
+  static constexpr int OCTAL_SEQ = 7;
+  static constexpr int MALFORMED_ESC = 8;
+};
+struct PARSE_COMMENT {
+  static constexpr int UNEXPECTED_END = 9;
+};
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::uint32_t buffer_idx;
+  
+  std::uint32_t fwd_cnt;
+  void reset_fwd() { fwd_cnt = 0; }
 
   STRICTNESS strictness;
-  PARSE_ERR known_err;
   TOKEN token;
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
@@ -80,39 +88,18 @@ struct ParseDriver {
   std::string ch_temp;
   std::size_t get_atom();
 
-  std::optional<char32_t> peek();
-  std::optional<char32_t> shift();
-  void drop(std::uint32_t count);
+  std::expected<char32_t, int> peek();
+  void forward(std::uint32_t count);
+  void backtrack(std::uint32_t count);
 
-  template <typename T>
-  bool command(T& cmd_functor) {
-    std::uint32_t idx_before{buffer_idx};
-    CMD_EXIT cmd_exit = cmd_functor(*this);
-    switch (cmd_exit.index()) {
-      case 0:
-        if (std::get<0>(cmd_exit) == PARSE_OK::COMMIT)
-          break;
-        [[fallthrough]];
-      case 1:
-        buffer_idx = idx_before;
-        break;
-    }
-    if (cmd_exit.index() == 1) {
-      known_err = std::get<1>(cmd_exit);
-      return 1;
-    }
-    return 0;
-  }
+  std::array<char32_t, 2> take_buff;
+  std::u32string_view take();
 
-  bool find_static_atom(PARSE_IDENT&);
-  bool find_static_atom(PARSE_STRING&);
+  std::expected<std::uint32_t, int> parse_hex(char32_t uchar);
+  std::expected<std::uint32_t, int> parse_hex();
 
-  bool parse_comment_line(PARSE_TOKEN&);
-  bool parse_comment_block(PARSE_TOKEN&);
-  void parse_comment(PARSE_TOKEN&);
-  bool parse(PARSE_TOKEN&);
-
-  CMD_EXIT parse(PARSE_VARDECL&);
+  std::expected<char32_t, int> parse_hex(PARSE_ESCAPE);
+  std::expected<char32_t, int> parse_uni_braced(PARSE_ESCAPE);
 
   bool parse();
 };
