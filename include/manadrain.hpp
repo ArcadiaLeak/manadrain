@@ -57,15 +57,18 @@ enum class BAD_STRING {
   MALFORMED_SEQ_IN_ESCAPE
 };
 enum class BAD_COMMENT { UNEXPECTED_END };
-using PARSE_ERROR =
+using PARSE_ERR =
     std::variant<std::monostate, BAD_ESCAPE, BAD_STRING, BAD_COMMENT>;
+
+enum class PARSE_OK { COMMIT, REVERT };
+using CMD_EXIT = std::variant<PARSE_OK, PARSE_ERR>;
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::uint32_t buffer_idx;
 
   STRICTNESS strictness;
-  PARSE_ERROR known_err;
+  PARSE_ERR known_err;
   TOKEN token;
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
@@ -80,16 +83,27 @@ struct ParseDriver {
   void drop(std::uint32_t count);
 
   template <typename T>
-  bool exec_command(T& command) {
+  bool call_command(T& command) {
     std::uint32_t idx_before{buffer_idx};
-    bool backtrack = command.exec(*this);
-    if (backtrack)
-      buffer_idx = idx_before;
-    return backtrack;
+    CMD_EXIT cmd_exit = command(*this);
+    switch (cmd_exit.index()) {
+      case 0:
+        if (std::get<0>(cmd_exit) == PARSE_OK::COMMIT)
+          break;
+        [[fallthrough]];
+      case 1:
+        buffer_idx = idx_before;
+        break;
+    }
+    if (cmd_exit.index() == 1) {
+      known_err = std::get<1>(cmd_exit);
+      return 1;
+    }
+    return 0;
   }
 
-  bool tryReserved_ident();
-  bool tryReserved_string();
+  bool lookupStatic_ident();
+  bool lookupStatic_string();
 
   bool parse();
 };
