@@ -12,14 +12,13 @@ static bool is_lo_surrogate(char32_t c) {
 static char32_t from_surrogate(char32_t hi, char32_t lo) {
   return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
 }
-static std::string_view codepoint_cv(char32_t ch,
-                                     std::array<char, 4>& cp_storage) {
-  std::uint32_t len{}, err{};
-  cp_storage = {};
-  U8_APPEND(cp_storage.data(), len, cp_storage.size(), ch, err);
-  if (err)
-    return {};
-  return std::string_view{cp_storage.data(), len};
+static std::string codepoint_cv(char32_t ch) {
+  std::uint16_t length{}, is_error{};
+  std::array<char, 4> buff{};
+  U8_APPEND(buff.data(), length, buff.size(), ch, is_error);
+  if (is_error)
+    length = 0;
+  return std::string{buff.data(), length};
 }
 static bool is_lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
@@ -82,26 +81,18 @@ void ParseDriver::forward(std::uint32_t count) {
   fwd_cnt += i;
 }
 
-std::u32string_view ParseDriver::take() {
-  std::uint32_t len{};
-  while (len < take_buff.size()) {
+std::string_view ParseDriver::take(std::uint32_t N) {
+  ch_temp.clear();
+  while (N) {
     std::expected ch{peek()};
     if (not ch)
       break;
     forward(1);
-    take_buff[len++] = *ch;
+    ch_temp.append(codepoint_cv(*ch));
+    --N;
   }
-  return {take_buff.data(), len};
+  return ch_temp;
 }
-
-enum class ESC_RULE {
-  IDENTIFIER,
-  REGEXP_ASCII,
-  REGEXP_UTF16,
-  STRING_IN_SLOPPY_MODE,
-  STRING_IN_STRICT_MODE,
-  STRING_IN_TEMPLATE
-};
 
 std::expected<std::uint32_t, int> ParseDriver::parse_hex(char32_t uchar) {
   if (uchar >= '0' && uchar <= '9')
@@ -154,6 +145,42 @@ std::expected<char32_t, int> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
   }
   backtrack(fwd_cnt);
   return std::unexpected{PARSE_ESCAPE::MALFORMED};
+}
+
+std::expected<char32_t, int> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
+  char32_t high_surr{}, low_surr{};
+
+  for (int i = 0; i < 4; i++) {
+    std::expected hex = parse_hex();
+    if (not hex) {
+      backtrack(i);
+      return std::unexpected{PARSE_ESCAPE::MALFORMED};
+    }
+    forward(1);
+    high_surr = (high_surr << 4) | *hex;
+  }
+
+  reset_fwd();
+  if (is_hi_surrogate(high_surr) && esc.rule == ESC_RULE::REGEXP_UTF16 &&
+      take(2) == "\\u") {
+    for (int i = 0; i < 4; i++) {
+      std::expected hex = parse_hex();
+      if (not hex)
+        goto return_high;
+      forward(1);
+      low_surr = (low_surr << 4) | *hex;
+    }
+    goto return_low;
+  }
+
+return_high:
+  backtrack(fwd_cnt);
+  return high_surr;
+
+return_low:
+  if (not is_lo_surrogate(low_surr))
+    goto return_high;
+  return from_surrogate(high_surr, low_surr);
 }
 
 std::size_t ParseDriver::get_atom() {

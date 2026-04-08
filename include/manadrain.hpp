@@ -50,6 +50,15 @@ struct STMT_VARDECL {
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
+enum class ESC_RULE {
+  IDENTIFIER,
+  REGEXP_ASCII,
+  REGEXP_UTF16,
+  STRING_IN_SLOPPY_MODE,
+  STRING_IN_STRICT_MODE,
+  STRING_IN_TEMPLATE
+};
+
 struct MOVE_BUFFER {
   static constexpr int UNEXPECTED_END = 0;
   static constexpr int ILLEGAL_UTF8 = 1;
@@ -58,6 +67,7 @@ struct PARSE_HEX {
   static constexpr int ILLEGAL_DIGIT = 2;
 };
 struct PARSE_ESCAPE {
+  ESC_RULE rule;
   static constexpr int MALFORMED = 3;
   static constexpr int OCTAL_SEQ = 4;
   static constexpr int PER_SE_BACKSLASH = 5;
@@ -81,25 +91,24 @@ struct ParseDriver {
   STRICTNESS strictness;
   TOKEN token;
 
+  std::deque<STATEMENT> program;
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
-  std::deque<STATEMENT> program;
+  std::size_t get_atom();
 
   std::string ch_temp;
-  std::size_t get_atom();
+  std::string_view take(std::uint32_t N);
 
   std::expected<char32_t, int> peek();
   void forward(std::uint32_t count);
   void backtrack(std::uint32_t count);
-
-  std::array<char32_t, 2> take_buff;
-  std::u32string_view take();
 
   std::expected<std::uint32_t, int> parse_hex(char32_t uchar);
   std::expected<std::uint32_t, int> parse_hex();
 
   std::expected<char32_t, int> parse_hex(PARSE_ESCAPE);
   std::expected<char32_t, int> parse_uni_braced(PARSE_ESCAPE);
+  std::expected<char32_t, int> parse_uni_fixed(PARSE_ESCAPE);
 
   bool parse();
 };
