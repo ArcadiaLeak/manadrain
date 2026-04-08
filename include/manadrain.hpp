@@ -88,9 +88,9 @@ struct ParseDriver {
   void drop(std::uint32_t count);
 
   template <typename T>
-  bool call_command(T& command) {
+  bool command(T& cmd_functor) {
     std::uint32_t idx_before{buffer_idx};
-    CMD_EXIT cmd_exit = command(*this);
+    CMD_EXIT cmd_exit = cmd_functor(*this);
     switch (cmd_exit.index()) {
       case 0:
         if (std::get<0>(cmd_exit) == PARSE_OK::COMMIT)
