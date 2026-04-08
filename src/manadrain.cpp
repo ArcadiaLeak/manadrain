@@ -142,7 +142,7 @@ struct PARSE_ESCAPE {
   ESC_RULE esc_rule;
   char32_t ch_esc;
 
-  CMD_EXIT parseHexSeq(ParseDriver& driver) {
+  CMD_EXIT parse_hex(ParseDriver& driver) {
     PARSE_HEX hex0{};
     if (driver.call_command(hex0))
       return PARSE_ERR{BAD_ESCAPE::MALFORMED};
@@ -153,7 +153,7 @@ struct PARSE_ESCAPE {
     return PARSE_OK::COMMIT;
   }
 
-  CMD_EXIT parseUniBraced(ParseDriver& driver) {
+  CMD_EXIT parse_uni_braced(ParseDriver& driver) {
     char32_t utf16_char = 0;
     while (1) {
       PARSE_HEX hex{};
@@ -172,7 +172,7 @@ struct PARSE_ESCAPE {
     }
   }
 
-  CMD_EXIT parseUniFixed(ParseDriver& driver) {
+  CMD_EXIT parse_uni_fixed(ParseDriver& driver) {
     char32_t high_surr = 0;
     for (int i = 0; i < 4; i++) {
       PARSE_HEX hex{};
@@ -204,13 +204,13 @@ struct PARSE_ESCAPE {
     return PARSE_OK::COMMIT;
   }
 
-  CMD_EXIT parseUniSeq(ParseDriver& driver) {
+  CMD_EXIT parse_uni(ParseDriver& driver) {
     std::optional open_or_uchar{driver.shift()};
     if (not open_or_uchar)
       return PARSE_ERR{BAD_ESCAPE::MALFORMED};
     return open_or_uchar == '{' && esc_rule != ESC_RULE::REGEXP_ASCII
-               ? parseUniBraced(driver)
-               : parseUniFixed(driver);
+               ? parse_uni_braced(driver)
+               : parse_uni_fixed(driver);
   }
 
   CMD_EXIT operator()(ParseDriver& driver) {
@@ -237,9 +237,9 @@ struct PARSE_ESCAPE {
         ch_esc = '\v';
         return PARSE_OK::COMMIT;
       case 'x':
-        return parseHexSeq(driver);
+        return parse_hex(driver);
       case 'u':
-        return parseUniSeq(driver);
+        return parse_uni(driver);
       case '0': {
         std::optional ahead{driver.peek()};
         if (not ahead.transform([](char32_t uch) { return std::isdigit(uch); })
