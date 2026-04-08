@@ -435,7 +435,7 @@ struct PARSE_IDENT {
   }
 };
 
-bool ParseDriver::lookupStatic_ident() {
+bool ParseDriver::find_static_atom(PARSE_IDENT&) {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     auto [literal, token_type, r_strict] = reserved_arr[i];
     if (ch_temp != literal)
@@ -453,99 +453,101 @@ bool ParseDriver::lookupStatic_ident() {
   return 0;
 }
 
-bool ParseDriver::lookupStatic_string() {
+bool ParseDriver::find_static_atom(PARSE_STRING&) {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     if (ch_temp != std::get<0>(reserved_arr[i]))
       continue;
-    token.ident.atom_idx = i;
+    token.str.atom_idx = i;
     return 1;
   }
   return 0;
 }
 
 struct PARSE_TOKEN {
-  CMD_EXIT operator()(ParseDriver& driver) {
-    TAKE<2> tcmd{};
-    while (1) {
-      driver.call_command(tcmd);
-      if (tcmd.sv().empty()) {
-        driver.token.type = TOKEN_TYPE::T_EOF;
-        return PARSE_OK::COMMIT;
-      }
-      switch (tcmd.sv().front()) {
-        case '\r':
-          if (tcmd.sv() == U"\r\n")
-            driver.drop(1);
-          [[fallthrough]];
-        case '\n':
-        case 0x2028:
-        case 0x2029:
-          driver.drop(1);
-          driver.token.newline_seen = 1;
+  CMD_EXIT operator()(ParseDriver& driver) { return driver.parse_token(); }
+};
+
+CMD_EXIT ParseDriver::parse_token() {
+  TAKE<2> tcmd{};
+  while (1) {
+    call_command(tcmd);
+    if (tcmd.sv().empty()) {
+      token.type = TOKEN_TYPE::T_EOF;
+      return PARSE_OK::COMMIT;
+    }
+    switch (tcmd.sv().front()) {
+      case '\r':
+        if (tcmd.sv() == U"\r\n")
+          drop(1);
+        [[fallthrough]];
+      case '\n':
+      case 0x2028:
+      case 0x2029:
+        drop(1);
+        token.newline_seen = 1;
+        continue;
+      case '/':
+        if (tcmd.sv() == U"//") {
+          while (1) {
+            std::optional ch = peek();
+            if (not ch || is_lineterm(*ch))
+              break;
+            drop(1);
+          }
           continue;
-        case '/':
-          if (tcmd.sv() == U"//") {
-            while (1) {
-              std::optional ch = driver.peek();
-              if (not ch || is_lineterm(*ch))
-                break;
-              driver.drop(1);
+        } else if (tcmd.sv() == U"/*") {
+          drop(2);
+          while (1) {
+            call_command(tcmd);
+            if (tcmd.sv().empty()) {
+              token.type = TOKEN_TYPE::T_ERROR;
+              return PARSE_ERR{BAD_COMMENT::UNEXPECTED_END};
             }
-            continue;
-          } else if (tcmd.sv() == U"/*") {
-            driver.drop(2);
-            while (1) {
-              driver.call_command(tcmd);
-              if (tcmd.sv().empty()) {
-                driver.token.type = TOKEN_TYPE::T_ERROR;
-                return PARSE_ERR{BAD_COMMENT::UNEXPECTED_END};
-              }
-              if (tcmd.sv() == U"*/") {
-                driver.drop(2);
-                break;
-              }
-              if (is_lineterm(tcmd.sv().front()))
-                driver.token.newline_seen = 1;
-              driver.drop(1);
+            if (tcmd.sv() == U"*/") {
+              drop(2);
+              break;
             }
-            continue;
+            if (is_lineterm(tcmd.sv().front()))
+              token.newline_seen = 1;
+            drop(1);
           }
-          break;
-        case '\'':
-        case '"': {
-          PARSE_STRING string_cmd{};
-          if (not driver.call_command(string_cmd)) {
-            driver.token.type = TOKEN_TYPE::T_STRING;
-            if (driver.lookupStatic_string())
-              return PARSE_OK::COMMIT;
-            driver.token.str.atom_idx = driver.obtain_atom();
-            return PARSE_OK::COMMIT;
-          }
-          driver.token.type = TOKEN_TYPE::T_ERROR;
-          return PARSE_ERR{driver.known_err};
+          continue;
         }
-        default:
-          if (u_isWhitespace(tcmd.sv().front())) {
-            driver.drop(1);
-            continue;
-          } else {
-            PARSE_IDENT ident_cmd{};
-            if (not driver.call_command(ident_cmd)) {
-              driver.token.type = TOKEN_TYPE::T_IDENT;
-              if (driver.lookupStatic_ident())
-                return PARSE_OK::COMMIT;
-              driver.token.ident.atom_idx = driver.obtain_atom();
+        break;
+      case '\'':
+      case '"': {
+        PARSE_STRING string_cmd{};
+        if (not call_command(string_cmd)) {
+          token.type = TOKEN_TYPE::T_STRING;
+          if (find_static_atom(string_cmd))
+            return PARSE_OK::COMMIT;
+          token.str.atom_idx = obtain_atom();
+          return PARSE_OK::COMMIT;
+        }
+        token.type = TOKEN_TYPE::T_ERROR;
+        return PARSE_ERR{known_err};
+      }
+      default:
+        if (u_isWhitespace(tcmd.sv().front())) {
+          drop(1);
+          continue;
+        } else {
+          PARSE_IDENT ident_cmd{};
+          if (not call_command(ident_cmd)) {
+            token.type = TOKEN_TYPE::T_IDENT;
+            if (find_static_atom(ident_cmd))
               return PARSE_OK::COMMIT;
-            }
-            driver.drop(1);
-            driver.token.type = TOKEN_TYPE::T_UCHAR;
-            driver.token.uchar = tcmd.sv().front();
+            token.ident.atom_idx = obtain_atom();
             return PARSE_OK::COMMIT;
           }
-      }
+          drop(1);
+          token.type = TOKEN_TYPE::T_UCHAR;
+          token.uchar = tcmd.sv().front();
+          return PARSE_OK::COMMIT;
+        }
     }
   }
-};
+}
 
 std::size_t ParseDriver::obtain_atom() {
   if (not atom_umap.contains(ch_temp)) {

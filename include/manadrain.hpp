@@ -63,6 +63,9 @@ using PARSE_ERR =
 enum class PARSE_OK { COMMIT, REVERT };
 using CMD_EXIT = std::variant<PARSE_OK, PARSE_ERR>;
 
+struct PARSE_IDENT;
+struct PARSE_STRING;
+
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::uint32_t buffer_idx;
@@ -102,8 +105,10 @@ struct ParseDriver {
     return 0;
   }
 
-  bool lookupStatic_ident();
-  bool lookupStatic_string();
+  bool find_static_atom(PARSE_IDENT&);
+  bool find_static_atom(PARSE_STRING&);
+
+  CMD_EXIT parse_token();
 
   bool parse();
 };
