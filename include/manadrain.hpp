@@ -5,16 +5,23 @@
 
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
-enum class TOKEN_TYPE {
-  T_LET,
-  T_CONST,
-  T_VAR,
-  T_EOF,
-  T_IDENT,
-  T_STRING,
-  T_ERROR,
-  T_UCHAR
-};
+
+struct K_TOKEN_LET {};
+struct K_TOKEN_CONST {};
+struct K_TOKEN_VAR {};
+struct K_TOKEN_EOF {};
+struct K_TOKEN_IDENT {};
+struct K_TOKEN_STRING {};
+struct K_TOKEN_ERROR {};
+struct K_TOKEN_UCHAR {};
+using TOKEN_KIND = std::variant<K_TOKEN_LET,
+                                K_TOKEN_CONST,
+                                K_TOKEN_VAR,
+                                K_TOKEN_EOF,
+                                K_TOKEN_IDENT,
+                                K_TOKEN_STRING,
+                                K_TOKEN_ERROR,
+                                K_TOKEN_UCHAR>;
 
 struct TOKEN {
   struct PAYLOAD_STR {
@@ -27,14 +34,18 @@ struct TOKEN {
     std::size_t atom_idx;
   };
 
-  TOKEN_TYPE type;
+  TOKEN_KIND kind;
   bool newline_seen;
   char32_t uchar;
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
 
-  bool is_pseudo_keyword(TOKEN_TYPE tok_type);
-  bool is_vardecl_intro();
+  bool is_pseudo_keyword(TOKEN_KIND tok_kind);
+
+  template <typename T>
+  bool is_kind() {
+    return std::holds_alternative<T>(kind);
+  }
 };
 
 struct EXPR_IDENT {
@@ -42,9 +53,9 @@ struct EXPR_IDENT {
 };
 using EXPRESSION = std::variant<EXPR_IDENT>;
 
-enum class VARDECL_KIND { K_LET, K_CONST, K_VAR };
+using VAR_INTRO = std::variant<K_TOKEN_LET, K_TOKEN_CONST, K_TOKEN_VAR>;
 struct STMT_VARDECL {
-  VARDECL_KIND kind;
+  VAR_INTRO intro;
   TOKEN::PAYLOAD_IDENT ident;
   TOKEN::PAYLOAD_STR init;
 };

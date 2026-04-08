@@ -30,37 +30,39 @@ static bool is_lineterm(char32_t ch) {
 
 namespace Manadrain {
 static const std::array reserved_arr =
-    std::to_array<std::tuple<std::string_view, TOKEN_TYPE, STRICTNESS>>(
-        {{"var", TOKEN_TYPE::T_VAR, STRICTNESS::SLOPPY},
-         {"const", TOKEN_TYPE::T_CONST, STRICTNESS::SLOPPY},
-         {"let", TOKEN_TYPE::T_LET, STRICTNESS::STRICT}});
+    std::to_array<std::tuple<std::string_view, TOKEN_KIND, STRICTNESS>>(
+        {{"var", K_TOKEN_VAR{}, STRICTNESS::SLOPPY},
+         {"const", K_TOKEN_CONST{}, STRICTNESS::SLOPPY},
+         {"let", K_TOKEN_LET{}, STRICTNESS::STRICT}});
 
-bool TOKEN::is_pseudo_keyword(TOKEN_TYPE tok_type) {
+bool TOKEN::is_pseudo_keyword(TOKEN_KIND passed_type) {
   if (ident.has_escape)
     return 0;
   if (ident.atom_idx >= reserved_arr.size())
     return 0;
-  if (std::get<1>(reserved_arr[ident.atom_idx]) == tok_type)
+  TOKEN_KIND reserved_type = std::get<1>(reserved_arr[ident.atom_idx]);
+  if (passed_type.index() == reserved_type.index())
     return 1;
   return 0;
 }
 
-bool TOKEN::is_vardecl_intro() {
-  switch (type) {
-    case TOKEN_TYPE::T_IDENT:
-      if (is_pseudo_keyword(TOKEN_TYPE::T_LET)) {
-        type = TOKEN_TYPE::T_LET;
-        return 1;
-      }
-      return 0;
-    case TOKEN_TYPE::T_CONST:
-    case TOKEN_TYPE::T_LET:
-    case TOKEN_TYPE::T_VAR:
-      return 1;
-    default:
-      return 0;
+template <typename T>
+concept VAR_INTRO_KIND =
+    std::is_same_v<T, K_TOKEN_LET> || std::is_same_v<T, K_TOKEN_CONST> ||
+    std::is_same_v<T, K_TOKEN_VAR>;
+
+struct VAR_INTRO_VIS {
+  template <typename T>
+    requires VAR_INTRO_KIND<std::remove_cvref_t<T>>
+  std::optional<VAR_INTRO> operator()(T tok_kind) {
+    return tok_kind;
   }
-}
+
+  template <typename T>
+  std::optional<VAR_INTRO> operator()(T) {
+    return std::nullopt;
+  }
+};
 
 std::optional<char32_t> ParseDriver::peek() {
   if (buffer_idx >= buffer.size())
@@ -437,7 +439,7 @@ struct PARSE_IDENT {
 
 bool ParseDriver::find_static_atom(PARSE_IDENT&) {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-    auto [literal, token_type, r_strict] = reserved_arr[i];
+    auto [literal, tok_kind, r_strict] = reserved_arr[i];
     if (ch_temp != literal)
       continue;
     token.ident.atom_idx = i;
@@ -447,7 +449,7 @@ bool ParseDriver::find_static_atom(PARSE_IDENT&) {
       token.ident.is_reserved = 1;
       return 1;
     }
-    token.type = token_type;
+    token.kind = tok_kind;
     return 1;
   }
   return 0;
@@ -489,7 +491,7 @@ bool ParseDriver::parse_comment_line(PARSE_TOKEN& cmd) {
 bool ParseDriver::parse_comment_block(PARSE_TOKEN& cmd) {
   command(cmd.take_cmd);
   if (cmd.take_cmd.sv().empty()) {
-    token.type = TOKEN_TYPE::T_ERROR;
+    token.kind = K_TOKEN_ERROR{};
     cmd.nested_err = BAD_COMMENT::UNEXPECTED_END;
     return 0;
   }
@@ -518,7 +520,7 @@ void ParseDriver::parse_comment(PARSE_TOKEN& cmd) {
 bool ParseDriver::parse(PARSE_TOKEN& cmd) {
   command(cmd.take_cmd);
   if (cmd.take_cmd.sv().empty()) {
-    token.type = TOKEN_TYPE::T_EOF;
+    token.kind = K_TOKEN_EOF{};
     return 0;
   }
 
@@ -543,12 +545,12 @@ bool ParseDriver::parse(PARSE_TOKEN& cmd) {
     case '"':
       PARSE_STRING string_cmd{};
       if (command(string_cmd)) {
-        token.type = TOKEN_TYPE::T_ERROR;
+        token.kind = K_TOKEN_ERROR{};
         cmd.nested_err = known_err;
         return 1;
       }
 
-      token.type = TOKEN_TYPE::T_STRING;
+      token.kind = K_TOKEN_STRING{};
       if (not find_static_atom(string_cmd))
         token.str.atom_idx = get_atom();
       return 0;
@@ -562,12 +564,12 @@ bool ParseDriver::parse(PARSE_TOKEN& cmd) {
   PARSE_IDENT ident_cmd{};
   if (command(ident_cmd)) {
     drop(1);
-    token.type = TOKEN_TYPE::T_UCHAR;
+    token.kind = K_TOKEN_UCHAR{};
     token.uchar = cmd.take_cmd.sv().front();
     return 0;
   }
 
-  token.type = TOKEN_TYPE::T_IDENT;
+  token.kind = K_TOKEN_IDENT{};
   if (not find_static_atom(ident_cmd))
     token.ident.atom_idx = get_atom();
   return 0;
@@ -589,24 +591,12 @@ struct PARSE_VARDECL {
 };
 
 CMD_EXIT ParseDriver::parse(PARSE_VARDECL& cmd) {
-  switch (token.type) {
-    case TOKEN_TYPE::T_LET:
-      cmd.stmt.kind = VARDECL_KIND::K_LET;
-      break;
-    case TOKEN_TYPE::T_CONST:
-      cmd.stmt.kind = VARDECL_KIND::K_CONST;
-      break;
-    case TOKEN_TYPE::T_VAR:
-      cmd.stmt.kind = VARDECL_KIND::K_VAR;
-      break;
-    default:
-      return PARSE_ERR{};
-  }
+  cmd.stmt.intro = std::visit(VAR_INTRO_VIS{}, token.kind).value();
 
   if (command(cmd.token_cmd))
     return known_err;
 
-  if (token.type == TOKEN_TYPE::T_IDENT)
+  if (token.is_kind<K_TOKEN_IDENT>())
     cmd.stmt.ident = token.ident;
   else
     return PARSE_ERR{};
@@ -614,11 +604,11 @@ CMD_EXIT ParseDriver::parse(PARSE_VARDECL& cmd) {
   if (command(cmd.token_cmd))
     return known_err;
 
-  if (token.type == TOKEN_TYPE::T_UCHAR && token.uchar == '=') {
+  if (token.is_kind<K_TOKEN_UCHAR>() && token.uchar == '=') {
     if (command(cmd.token_cmd))
       return known_err;
 
-    if (token.type == TOKEN_TYPE::T_STRING)
+    if (token.is_kind<K_TOKEN_STRING>())
       cmd.stmt.init = token.str;
     else
       return PARSE_ERR{};
@@ -627,7 +617,7 @@ CMD_EXIT ParseDriver::parse(PARSE_VARDECL& cmd) {
   if (command(cmd.token_cmd))
     return PARSE_OK::COMMIT;
 
-  if (token.type == TOKEN_TYPE::T_UCHAR) {
+  if (token.is_kind<K_TOKEN_UCHAR>()) {
     switch (token.uchar) {
       case ';':
         drop(1);
@@ -648,7 +638,7 @@ bool ParseDriver::parse() {
   if (command(token_cmd))
     return 0;
 
-  if (not token.is_vardecl_intro())
+  if (not std::visit(VAR_INTRO_VIS{}, token.kind))
     return 0;
 
   PARSE_VARDECL vardecl_cmd{};
