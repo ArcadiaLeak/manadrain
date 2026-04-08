@@ -6,22 +6,14 @@
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
 
-struct K_TOKEN_LET {};
-struct K_TOKEN_CONST {};
-struct K_TOKEN_VAR {};
-struct K_TOKEN_EOF {};
-struct K_TOKEN_IDENT {};
-struct K_TOKEN_STRING {};
-struct K_TOKEN_ERROR {};
-struct K_TOKEN_UCHAR {};
-using TOKEN_KIND = std::variant<K_TOKEN_LET,
-                                K_TOKEN_CONST,
-                                K_TOKEN_VAR,
-                                K_TOKEN_EOF,
-                                K_TOKEN_IDENT,
-                                K_TOKEN_STRING,
-                                K_TOKEN_ERROR,
-                                K_TOKEN_UCHAR>;
+constexpr int K_TOKEN_LET = 1;
+constexpr int K_TOKEN_CONST = 2;
+constexpr int K_TOKEN_VAR = 3;
+constexpr int K_TOKEN_EOF = 4;
+constexpr int K_TOKEN_IDENT = 5;
+constexpr int K_TOKEN_STRING = 6;
+constexpr int K_TOKEN_ERROR = 7;
+constexpr int K_TOKEN_UCHAR = 8;
 
 struct TOKEN {
   struct PAYLOAD_STR {
@@ -34,18 +26,13 @@ struct TOKEN {
     std::size_t atom_idx;
   };
 
-  TOKEN_KIND kind;
+  int kind;
+  bool is_pseudo_kind(int rhs_kind);
+
   bool newline_seen;
   char32_t uchar;
   PAYLOAD_STR str;
   PAYLOAD_IDENT ident;
-
-  bool is_pseudo_keyword(TOKEN_KIND tok_kind);
-
-  template <typename T>
-  bool is_kind() {
-    return std::holds_alternative<T>(kind);
-  }
 };
 
 struct EXPR_IDENT {
@@ -53,9 +40,8 @@ struct EXPR_IDENT {
 };
 using EXPRESSION = std::variant<EXPR_IDENT>;
 
-using VAR_INTRO = std::variant<K_TOKEN_LET, K_TOKEN_CONST, K_TOKEN_VAR>;
 struct STMT_VARDECL {
-  VAR_INTRO intro;
+  int intro;
   TOKEN::PAYLOAD_IDENT ident;
   TOKEN::PAYLOAD_STR init;
 };
