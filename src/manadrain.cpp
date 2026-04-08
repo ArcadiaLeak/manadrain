@@ -581,6 +581,68 @@ std::size_t ParseDriver::get_atom() {
   return atom_umap[atom_deq.back()];
 }
 
+struct PARSE_VARDECL {
+  STMT_VARDECL stmt;
+  PARSE_TOKEN token_cmd;
+
+  CMD_EXIT operator()(ParseDriver& drv) { return drv.parse(*this); }
+};
+
+CMD_EXIT ParseDriver::parse(PARSE_VARDECL& cmd) {
+  switch (token.type) {
+    case TOKEN_TYPE::T_LET:
+      cmd.stmt.kind = VARDECL_KIND::K_LET;
+      break;
+    case TOKEN_TYPE::T_CONST:
+      cmd.stmt.kind = VARDECL_KIND::K_CONST;
+      break;
+    case TOKEN_TYPE::T_VAR:
+      cmd.stmt.kind = VARDECL_KIND::K_VAR;
+      break;
+    default:
+      return PARSE_ERR{};
+  }
+
+  if (call_command(cmd.token_cmd))
+    return known_err;
+
+  if (token.type == TOKEN_TYPE::T_IDENT)
+    cmd.stmt.ident = token.ident;
+  else
+    return PARSE_ERR{};
+
+  if (call_command(cmd.token_cmd))
+    return known_err;
+
+  if (token.type == TOKEN_TYPE::T_UCHAR && token.uchar == '=') {
+    if (call_command(cmd.token_cmd))
+      return known_err;
+
+    if (token.type == TOKEN_TYPE::T_STRING)
+      cmd.stmt.init = token.str;
+    else
+      return PARSE_ERR{};
+  }
+
+  if (call_command(cmd.token_cmd))
+    return PARSE_OK::COMMIT;
+
+  if (token.type == TOKEN_TYPE::T_UCHAR) {
+    switch (token.uchar) {
+      case ';':
+        drop(1);
+        [[fallthrough]];
+      case '}':
+        return PARSE_OK::COMMIT;
+    }
+
+    if (token.newline_seen)
+      return PARSE_OK::COMMIT;
+  }
+
+  return PARSE_ERR{};
+}
+
 bool ParseDriver::parse() {
   return 1;
 }
