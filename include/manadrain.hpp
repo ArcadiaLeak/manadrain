@@ -65,6 +65,7 @@ using CMD_EXIT = std::variant<PARSE_OK, PARSE_ERR>;
 
 struct PARSE_IDENT;
 struct PARSE_STRING;
+struct PARSE_TOKEN;
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
@@ -108,7 +109,10 @@ struct ParseDriver {
   bool find_static_atom(PARSE_IDENT&);
   bool find_static_atom(PARSE_STRING&);
 
-  CMD_EXIT parse_token();
+  bool parse_comment_line(PARSE_TOKEN&);
+  bool parse_comment_block(PARSE_TOKEN&);
+  void parse_comment(PARSE_TOKEN&);
+  CMD_EXIT parse(PARSE_TOKEN&);
 
   bool parse();
 };

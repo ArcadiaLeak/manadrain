@@ -375,7 +375,7 @@ struct PARSE_STRING {
       if (*ch == '\\') {
         PARSE_STRING_ESCSEQ escseq{};
         if (driver.call_command(escseq))
-          return PARSE_ERR{driver.known_err};
+          return driver.known_err;
         else if (escseq.must_continue)
           continue;
         else
@@ -464,20 +464,57 @@ bool ParseDriver::find_static_atom(PARSE_STRING&) {
 }
 
 struct PARSE_TOKEN {
-  CMD_EXIT operator()(ParseDriver& driver) { return driver.parse_token(); }
+  TAKE<2> take_cmd;
+  std::optional<PARSE_ERR> nested_err;
+  CMD_EXIT operator()(ParseDriver& driver) { return driver.parse(*this); }
 };
 
-CMD_EXIT ParseDriver::parse_token() {
-  TAKE<2> tcmd{};
+bool ParseDriver::parse_comment_line(PARSE_TOKEN& cmd) {
+  std::optional ch = peek();
+  if (not ch || is_lineterm(*ch))
+    return 0;
+  return 1;
+}
+
+bool ParseDriver::parse_comment_block(PARSE_TOKEN& cmd) {
+  call_command(cmd.take_cmd);
+  if (cmd.take_cmd.sv().empty()) {
+    token.type = TOKEN_TYPE::T_ERROR;
+    cmd.nested_err = BAD_COMMENT::UNEXPECTED_END;
+    return 0;
+  }
+  if (cmd.take_cmd.sv() == U"*/") {
+    drop(2);
+    return 0;
+  }
+  if (is_lineterm(cmd.take_cmd.sv().front()))
+    token.newline_seen = 1;
+  return 1;
+}
+
+void ParseDriver::parse_comment(PARSE_TOKEN& cmd) {
+  if (cmd.take_cmd.sv() == U"//") {
+    while (parse_comment_line(cmd))
+      drop(1);
+  }
+
+  if (cmd.take_cmd.sv() == U"/*") {
+    drop(2);
+    while (parse_comment_block(cmd))
+      drop(1);
+  }
+}
+
+CMD_EXIT ParseDriver::parse(PARSE_TOKEN& cmd) {
   while (1) {
-    call_command(tcmd);
-    if (tcmd.sv().empty()) {
+    call_command(cmd.take_cmd);
+    if (cmd.take_cmd.sv().empty()) {
       token.type = TOKEN_TYPE::T_EOF;
       return PARSE_OK::COMMIT;
     }
-    switch (tcmd.sv().front()) {
+    switch (cmd.take_cmd.sv().front()) {
       case '\r':
-        if (tcmd.sv() == U"\r\n")
+        if (cmd.take_cmd.sv() == U"\r\n")
           drop(1);
         [[fallthrough]];
       case '\n':
@@ -487,33 +524,10 @@ CMD_EXIT ParseDriver::parse_token() {
         token.newline_seen = 1;
         continue;
       case '/':
-        if (tcmd.sv() == U"//") {
-          while (1) {
-            std::optional ch = peek();
-            if (not ch || is_lineterm(*ch))
-              break;
-            drop(1);
-          }
-          continue;
-        } else if (tcmd.sv() == U"/*") {
-          drop(2);
-          while (1) {
-            call_command(tcmd);
-            if (tcmd.sv().empty()) {
-              token.type = TOKEN_TYPE::T_ERROR;
-              return PARSE_ERR{BAD_COMMENT::UNEXPECTED_END};
-            }
-            if (tcmd.sv() == U"*/") {
-              drop(2);
-              break;
-            }
-            if (is_lineterm(tcmd.sv().front()))
-              token.newline_seen = 1;
-            drop(1);
-          }
-          continue;
-        }
-        break;
+        parse_comment(cmd);
+        if (cmd.nested_err)
+          return *cmd.nested_err;
+        continue;
       case '\'':
       case '"': {
         PARSE_STRING string_cmd{};
@@ -525,26 +539,25 @@ CMD_EXIT ParseDriver::parse_token() {
           return PARSE_OK::COMMIT;
         }
         token.type = TOKEN_TYPE::T_ERROR;
-        return PARSE_ERR{known_err};
+        return known_err;
       }
       default:
-        if (u_isWhitespace(tcmd.sv().front())) {
+        if (u_isWhitespace(cmd.take_cmd.sv().front())) {
           drop(1);
           continue;
-        } else {
-          PARSE_IDENT ident_cmd{};
-          if (not call_command(ident_cmd)) {
-            token.type = TOKEN_TYPE::T_IDENT;
-            if (find_static_atom(ident_cmd))
-              return PARSE_OK::COMMIT;
-            token.ident.atom_idx = obtain_atom();
+        }
+        PARSE_IDENT ident_cmd{};
+        if (not call_command(ident_cmd)) {
+          token.type = TOKEN_TYPE::T_IDENT;
+          if (find_static_atom(ident_cmd))
             return PARSE_OK::COMMIT;
-          }
-          drop(1);
-          token.type = TOKEN_TYPE::T_UCHAR;
-          token.uchar = tcmd.sv().front();
+          token.ident.atom_idx = obtain_atom();
           return PARSE_OK::COMMIT;
         }
+        drop(1);
+        token.type = TOKEN_TYPE::T_UCHAR;
+        token.uchar = cmd.take_cmd.sv().front();
+        return PARSE_OK::COMMIT;
     }
   }
 }
