@@ -80,7 +80,7 @@ struct ParseDriver {
   std::deque<STATEMENT> program;
 
   std::string ch_temp;
-  std::size_t obtain_atom();
+  std::size_t get_atom();
 
   std::optional<char32_t> peek();
   std::optional<char32_t> shift();
@@ -112,7 +112,7 @@ struct ParseDriver {
   bool parse_comment_line(PARSE_TOKEN&);
   bool parse_comment_block(PARSE_TOKEN&);
   void parse_comment(PARSE_TOKEN&);
-  CMD_EXIT parse(PARSE_TOKEN&);
+  bool parse(PARSE_TOKEN&);
 
   bool parse();
 };

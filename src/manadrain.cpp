@@ -466,7 +466,17 @@ bool ParseDriver::find_static_atom(PARSE_STRING&) {
 struct PARSE_TOKEN {
   TAKE<2> take_cmd;
   std::optional<PARSE_ERR> nested_err;
-  CMD_EXIT operator()(ParseDriver& driver) { return driver.parse(*this); }
+
+  CMD_EXIT operator()(ParseDriver& driver) {
+    driver.token = {};
+    *this = {};
+    while (driver.parse(*this)) {
+      if (nested_err)
+        return *nested_err;
+      continue;
+    }
+    return PARSE_OK::COMMIT;
+  }
 };
 
 bool ParseDriver::parse_comment_line(PARSE_TOKEN& cmd) {
@@ -505,64 +515,65 @@ void ParseDriver::parse_comment(PARSE_TOKEN& cmd) {
   }
 }
 
-CMD_EXIT ParseDriver::parse(PARSE_TOKEN& cmd) {
-  while (1) {
-    call_command(cmd.take_cmd);
-    if (cmd.take_cmd.sv().empty()) {
-      token.type = TOKEN_TYPE::T_EOF;
-      return PARSE_OK::COMMIT;
-    }
-    switch (cmd.take_cmd.sv().front()) {
-      case '\r':
-        if (cmd.take_cmd.sv() == U"\r\n")
-          drop(1);
-        [[fallthrough]];
-      case '\n':
-      case 0x2028:
-      case 0x2029:
-        drop(1);
-        token.newline_seen = 1;
-        continue;
-      case '/':
-        parse_comment(cmd);
-        if (cmd.nested_err)
-          return *cmd.nested_err;
-        continue;
-      case '\'':
-      case '"': {
-        PARSE_STRING string_cmd{};
-        if (not call_command(string_cmd)) {
-          token.type = TOKEN_TYPE::T_STRING;
-          if (find_static_atom(string_cmd))
-            return PARSE_OK::COMMIT;
-          token.str.atom_idx = obtain_atom();
-          return PARSE_OK::COMMIT;
-        }
-        token.type = TOKEN_TYPE::T_ERROR;
-        return known_err;
-      }
-      default:
-        if (u_isWhitespace(cmd.take_cmd.sv().front())) {
-          drop(1);
-          continue;
-        }
-        PARSE_IDENT ident_cmd{};
-        if (not call_command(ident_cmd)) {
-          token.type = TOKEN_TYPE::T_IDENT;
-          if (find_static_atom(ident_cmd))
-            return PARSE_OK::COMMIT;
-          token.ident.atom_idx = obtain_atom();
-          return PARSE_OK::COMMIT;
-        }
-        drop(1);
-        token.type = TOKEN_TYPE::T_UCHAR;
-        token.uchar = cmd.take_cmd.sv().front();
-        return PARSE_OK::COMMIT;
-    }
+bool ParseDriver::parse(PARSE_TOKEN& cmd) {
+  call_command(cmd.take_cmd);
+  if (cmd.take_cmd.sv().empty()) {
+    token.type = TOKEN_TYPE::T_EOF;
+    return 0;
   }
+
+  switch (cmd.take_cmd.sv().front()) {
+    case '\r':
+      if (cmd.take_cmd.sv() == U"\r\n")
+        drop(1);
+      [[fallthrough]];
+
+    case '\n':
+    case 0x2028:
+    case 0x2029:
+      drop(1);
+      token.newline_seen = 1;
+      return 1;
+
+    case '/':
+      parse_comment(cmd);
+      return 1;
+
+    case '\'':
+    case '"':
+      PARSE_STRING string_cmd{};
+      if (call_command(string_cmd)) {
+        token.type = TOKEN_TYPE::T_ERROR;
+        cmd.nested_err = known_err;
+        return 1;
+      }
+
+      token.type = TOKEN_TYPE::T_STRING;
+      if (not find_static_atom(string_cmd))
+        token.str.atom_idx = get_atom();
+      return 0;
+  }
+
+  if (u_isWhitespace(cmd.take_cmd.sv().front())) {
+    drop(1);
+    return 1;
+  }
+
+  PARSE_IDENT ident_cmd{};
+  if (call_command(ident_cmd)) {
+    drop(1);
+    token.type = TOKEN_TYPE::T_UCHAR;
+    token.uchar = cmd.take_cmd.sv().front();
+    return 0;
+  }
+
+  token.type = TOKEN_TYPE::T_IDENT;
+  if (not find_static_atom(ident_cmd))
+    token.ident.atom_idx = get_atom();
+  return 0;
 }
 
-std::size_t ParseDriver::obtain_atom() {
+std::size_t ParseDriver::get_atom() {
   if (not atom_umap.contains(ch_temp)) {
     atom_deq.push_back(std::move(ch_temp));
     atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
