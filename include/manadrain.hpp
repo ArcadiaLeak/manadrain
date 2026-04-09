@@ -113,14 +113,16 @@ struct ParseDriver {
   EXPECT<char32_t> prev(int* advance);
   std::string take(int* advance, int N);
   int backtrack(int* advance, int N);
+  void skip_lf();
 
   EXPECT<char32_t> parse_hex(int* advance);
 
   EXPECT<char32_t> parse_hex(PARSE_ESCAPE);
-  EXPECT<char32_t> parse_octal(PARSE_ESCAPE);
+  EXPECT<char32_t> parse_legacy_octal(PARSE_ESCAPE);
   EXPECT<char32_t> parse_uni_braced(PARSE_ESCAPE);
   EXPECT<char32_t> parse_uni_fixed(PARSE_ESCAPE);
   EXPECT<char32_t> parse_uni(PARSE_ESCAPE);
+  bool parse_null(PARSE_ESCAPE);
   EXPECT<char32_t> parse(PARSE_ESCAPE);
 
   EXPECT<char32_t> parse_escape(PARSE_STRING);

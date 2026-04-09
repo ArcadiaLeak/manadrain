@@ -105,6 +105,13 @@ std::string ParseDriver::take(int* advance, int N) {
   return ret;
 }
 
+void ParseDriver::skip_lf() {
+  std::expected ahead = next(nullptr);
+  if (not ahead || ahead == '\n')
+    return;
+  backtrack(nullptr, 1);
+}
+
 EXPECT<char32_t> ParseDriver::parse_hex(int* advance) {
   std::expected uchar{next(advance)};
   if (not uchar)
@@ -201,21 +208,30 @@ EXPECT<char32_t> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
   return parse_uni_fixed(esc);
 }
 
-EXPECT<char32_t> ParseDriver::parse_octal(PARSE_ESCAPE) {
-  int fwd_cnt = 0;
-  std::expected ahead =
-      next(&fwd_cnt).and_then([](char32_t ahead_digit) -> EXPECT<char32_t> {
-        if (ahead_digit > 7)
-          return std::unexpected{PARSE_ESCAPE::NOT_AN_OCTAL_DIGIT};
-        return ahead_digit - '0';
-      });
+EXPECT<char32_t> parse_octal(char32_t ahead_digit) {
+  if (ahead_digit <= 7)
+    return ahead_digit - '0';
+  return std::unexpected{PARSE_ESCAPE::NOT_AN_OCTAL_DIGIT};
+}
+
+EXPECT<char32_t> ParseDriver::parse_legacy_octal(PARSE_ESCAPE) {
+  std::expected ahead = next(nullptr).transform(parse_octal);
   if (not ahead)
-    backtrack(nullptr, fwd_cnt);
-  return ahead;
+    return std::unexpected{ahead.error()};
+  if (not *ahead)
+    backtrack(nullptr, 1);
+  return *ahead;
+}
+
+bool ParseDriver::parse_null(PARSE_ESCAPE) {
+  std::expected ahead = next(nullptr);
+  if (not ahead)
+    return 0;
+  backtrack(nullptr, 1);
+  return std::isdigit(*ahead);
 }
 
 EXPECT<char32_t> ParseDriver::parse(PARSE_ESCAPE esc) {
-  int fwd_cnt = 0;
   std::expected ch{next(nullptr)};
   if (not ch)
     return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
@@ -237,12 +253,8 @@ EXPECT<char32_t> ParseDriver::parse(PARSE_ESCAPE esc) {
     case 'u':
       return parse_uni(esc);
     case '0':
-      if (not next(&fwd_cnt)
-                  .transform([](char32_t uch) { return std::isdigit(uch); })
-                  .value_or(false)) {
-        backtrack(nullptr, fwd_cnt);
+      if (parse_null(esc))
         return 0;
-      }
       [[fallthrough]];
     case '1':
     case '2':
@@ -262,14 +274,14 @@ EXPECT<char32_t> ParseDriver::parse(PARSE_ESCAPE esc) {
         default:
           ch = ch.transform([](char32_t digit) { return digit - '0'; });
           ch = ch.and_then([this](char32_t digit) {
-            return parse_octal(PARSE_ESCAPE{})
+            return parse_legacy_octal(PARSE_ESCAPE{})
                 .transform(
                     [digit](char32_t ahead) { return (digit << 3) | ahead; });
           });
           if (not ch || *ch >= 32)
             return ch;
           ch = ch.and_then([this](char32_t digit) {
-            return parse_octal(PARSE_ESCAPE{})
+            return parse_legacy_octal(PARSE_ESCAPE{})
                 .transform(
                     [digit](char32_t ahead) { return (digit << 3) | ahead; });
           });
@@ -299,11 +311,7 @@ EXPECT<char32_t> ParseDriver::parse_escape(PARSE_STRING) {
     case '\\':
       return ch;
     case '\r':
-      next(nullptr).transform([this](char32_t ahead) {
-        if (ahead != '\n')
-          backtrack(nullptr, 1);
-        return std::monostate{};
-      });
+      skip_lf();
       [[fallthrough]];
     case '\n':
     case 0x2028:
@@ -340,11 +348,7 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
       return std::unexpected{PARSE_STRING::UNEXPECTED_END};
     if (token.str.sep == '`') {
       if (*ch == '\r') {
-        next(nullptr).transform([this](char32_t ahead) {
-          if (ahead != '\n')
-            backtrack(nullptr, 1);
-          return std::monostate{};
-        });
+        skip_lf();
         ch = '\n';
       }
     } else if (*ch == '\r' || *ch == '\n') {
@@ -485,11 +489,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
 
   switch (*ch) {
     case '\r':
-      next(nullptr).transform([this](char32_t ahead) {
-        if (ahead != '\n')
-          backtrack(nullptr, 1);
-        return std::monostate{};
-      });
+      skip_lf();
       [[fallthrough]];
 
     case '\n':
