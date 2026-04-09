@@ -62,13 +62,14 @@ enum class ESC_RULE {
 struct MOVE_BUFIDX {
   enum ERRCODE { OUT_OF_RANGE };
 };
-struct PARSE_DIGIT {
+struct PARSE_HEX {
   enum ERRCODE { NOT_A_DIGIT = MOVE_BUFIDX::OUT_OF_RANGE + 1 };
 };
 struct PARSE_ESCAPE {
   enum ERRCODE {
-    MALFORMED = PARSE_DIGIT::NOT_A_DIGIT + 1,
-    OCTAL_SEQ,
+    MALFORMED = PARSE_HEX::NOT_A_DIGIT + 1,
+    LEGACY_OCTAL_SEQ,
+    NOT_AN_OCTAL_DIGIT,
     PER_SE_BACKSLASH
   };
   ESC_RULE rule;
@@ -76,7 +77,7 @@ struct PARSE_ESCAPE {
 struct PARSE_STRING {
   enum ERRCODE {
     UNEXPECTED_END = PARSE_ESCAPE::PER_SE_BACKSLASH + 1,
-    OCTAL_SEQ,
+    LEGACY_OCTAL_SEQ,
     MALFORMED_ESC,
     MUST_CONTINUE
   };
@@ -117,6 +118,7 @@ struct ParseDriver {
   EXPECT<char32_t> parse(PARSE_ESCAPE);
 
   EXPECT<char32_t> parse_escape(PARSE_STRING);
+  EXPECT<std::monostate> parse(PARSE_STRING);
 
   bool parse();
 };
