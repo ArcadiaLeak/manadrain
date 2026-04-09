@@ -62,12 +62,12 @@ enum class ESC_RULE {
 struct MOVE_BUFIDX {
   enum ERRCODE { OUT_OF_RANGE };
 };
-struct PARSE_HEX {
+struct PARSE_DIGIT {
   enum ERRCODE { NOT_A_DIGIT = MOVE_BUFIDX::OUT_OF_RANGE + 1 };
 };
 struct PARSE_ESCAPE {
   enum ERRCODE {
-    MALFORMED = PARSE_HEX::NOT_A_DIGIT + 1,
+    MALFORMED = PARSE_DIGIT::NOT_A_DIGIT + 1,
     OCTAL_SEQ,
     PER_SE_BACKSLASH
   };
@@ -85,6 +85,9 @@ struct PARSE_COMMENT {
   enum ERRCODE { UNEXPECTED_END = PARSE_STRING::MUST_CONTINUE + 1 };
 };
 
+template <typename T>
+using EXPECT = std::expected<T, int>;
+
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::int32_t buffer_idx;
@@ -99,20 +102,21 @@ struct ParseDriver {
   STRICTNESS strictness;
   std::deque<STATEMENT> program;
 
-  std::expected<char32_t, int> next(int* advance);
-  std::expected<char32_t, int> prev(int* advance);
+  EXPECT<char32_t> next(int* advance);
+  EXPECT<char32_t> prev(int* advance);
   std::string take(int* advance, int N);
   int backtrack(int* advance, int N);
 
-  std::expected<std::uint32_t, int> parse_hex(int* advance);
+  EXPECT<char32_t> parse_hex(int* advance);
 
-  std::expected<char32_t, int> parse_hex(PARSE_ESCAPE);
-  std::expected<char32_t, int> parse_uni_braced(PARSE_ESCAPE);
-  std::expected<char32_t, int> parse_uni_fixed(PARSE_ESCAPE);
-  std::expected<char32_t, int> parse_uni(PARSE_ESCAPE);
-  std::expected<char32_t, int> parse(PARSE_ESCAPE);
+  EXPECT<char32_t> parse_hex(PARSE_ESCAPE);
+  EXPECT<char32_t> parse_octal(PARSE_ESCAPE);
+  EXPECT<char32_t> parse_uni_braced(PARSE_ESCAPE);
+  EXPECT<char32_t> parse_uni_fixed(PARSE_ESCAPE);
+  EXPECT<char32_t> parse_uni(PARSE_ESCAPE);
+  EXPECT<char32_t> parse(PARSE_ESCAPE);
 
-  std::expected<char32_t, int> parse_escape(PARSE_STRING);
+  EXPECT<char32_t> parse_escape(PARSE_STRING);
 
   bool parse();
 };
