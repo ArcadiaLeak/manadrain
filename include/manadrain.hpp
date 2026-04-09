@@ -87,9 +87,7 @@ struct PARSE_TOKEN {
   enum ERRCODE { UNCLOSED_COMMENT = PARSE_STRING::MUST_CONTINUE + 1 };
 };
 struct PARSE_IDENT {
-  enum ERRCODE { MUST_RETURN = PARSE_TOKEN::UNCLOSED_COMMENT + 1 };
   bool is_private;
-  bool beginning;
 };
 
 template <typename T>
@@ -128,7 +126,7 @@ struct ParseDriver {
   EXPECT<char32_t> parse_escape(PARSE_STRING);
   EXPECT<std::monostate> parse(PARSE_STRING);
 
-  EXPECT<std::monostate> parse_uchar(PARSE_IDENT);
+  EXPECT<std::string> parse_uchar(PARSE_IDENT, bool beginning);
   EXPECT<std::monostate> parse(PARSE_IDENT);
 
   EXPECT<std::monostate> parse(PARSE_TOKEN);
