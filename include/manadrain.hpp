@@ -102,7 +102,6 @@ struct ParseDriver {
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
-  std::size_t get_atom();
 
   STRICTNESS strictness;
   std::deque<STATEMENT> program;
@@ -128,6 +127,7 @@ struct ParseDriver {
 
   EXPECT<std::string> parse_uchar(PARSE_IDENT, bool beginning);
   EXPECT<std::monostate> parse(PARSE_IDENT);
+  void update_token_ident();
 
   EXPECT<std::monostate> parse(PARSE_TOKEN);
   EXPECT<bool> parse_comment(PARSE_TOKEN);
@@ -135,8 +135,8 @@ struct ParseDriver {
   EXPECT<bool> parse_comment_block(PARSE_TOKEN);
   EXPECT<bool> parse_iter(PARSE_TOKEN);
 
-  bool find_static_atom(PARSE_STRING);
-  bool find_static_atom(PARSE_IDENT);
+  std::expected<std::size_t, std::monostate> find_static_atom();
+  std::expected<std::size_t, std::monostate> find_dynamic_atom();
 
   bool parse();
 };

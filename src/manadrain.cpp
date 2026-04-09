@@ -49,7 +49,7 @@ static int var_intro_cv(int tok_kind) {
   return 0;
 }
 
-std::size_t ParseDriver::get_atom() {
+std::expected<std::size_t, std::monostate> ParseDriver::find_dynamic_atom() {
   if (not atom_umap.contains(ch_temp)) {
     atom_deq.push_back(std::move(ch_temp));
     atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
@@ -498,8 +498,10 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
         return std::unexpected{str_outcome.error()};
       else {
         token.kind = K_TOKEN_STRING;
-        if (not find_static_atom(PARSE_STRING{}))
-          token.str.atom_idx = get_atom();
+        token.str.atom_idx =
+            find_static_atom()
+                .or_else([this](std::monostate) { return find_dynamic_atom(); })
+                .value();
         return 0;
       }
   }
@@ -513,8 +515,11 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
     return std::unexpected{ident_outcome.error()};
   else {
     token.kind = K_TOKEN_IDENT;
-    if (not find_static_atom(PARSE_IDENT{}))
-      token.ident.atom_idx = get_atom();
+    token.ident.atom_idx =
+        find_static_atom()
+            .or_else([this](std::monostate) { return find_dynamic_atom(); })
+            .value();
+    update_token_ident();
     return 0;
   }
 
@@ -523,32 +528,26 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
   return 0;
 }
 
-bool ParseDriver::find_static_atom(PARSE_IDENT) {
-  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-    auto [literal, tok_kind, tok_strict] = reserved_arr[i];
-    if (ch_temp == literal) {
-      token.ident.atom_idx = i;
-      if (strictness >= tok_strict) {
-        if (token.ident.has_escape)
-          token.ident.is_reserved = 1;
-        else
-          token.kind = tok_kind;
-      }
-      return 1;
-    }
-  }
-  return 0;
+void ParseDriver::update_token_ident() {
+  std::size_t i = token.ident.atom_idx;
+  if (i >= reserved_arr.size())
+    return;
+  auto [literal, tok_kind, tok_strict] = reserved_arr[i];
+  if (strictness < tok_strict)
+    return;
+  if (token.ident.has_escape)
+    token.ident.is_reserved = 1;
+  else
+    token.kind = tok_kind;
 }
 
-bool ParseDriver::find_static_atom(PARSE_STRING) {
+std::expected<std::size_t, std::monostate> ParseDriver::find_static_atom() {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     auto [literal, _, _] = reserved_arr[i];
-    if (ch_temp == literal) {
-      token.str.atom_idx = i;
-      return 1;
-    }
+    if (ch_temp == literal)
+      return i;
   }
-  return 0;
+  return std::unexpected{std::monostate{}};
 }
 
 bool ParseDriver::parse() {
