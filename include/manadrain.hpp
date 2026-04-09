@@ -59,7 +59,7 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-struct MOVE_BUFFER {
+struct MOVE_BUFIDX {
   static constexpr int UNEXPECTED_END = 0;
   static constexpr int ILLEGAL_UTF8 = 1;
 };
@@ -76,15 +76,16 @@ struct PARSE_STRING {
   static constexpr int UNEXPECTED_END = 6;
   static constexpr int OCTAL_SEQ = 7;
   static constexpr int MALFORMED_ESC = 8;
+  static constexpr int MUST_CONTINUE = 9;
 };
 struct PARSE_COMMENT {
-  static constexpr int UNEXPECTED_END = 9;
+  static constexpr int UNEXPECTED_END = 10;
 };
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::uint32_t buffer_idx;
-  
+
   std::uint32_t fwd_cnt;
   void reset_fwd() { fwd_cnt = 0; }
 
@@ -111,6 +112,8 @@ struct ParseDriver {
   std::expected<char32_t, int> parse_uni_fixed(PARSE_ESCAPE);
   std::expected<char32_t, int> parse_uni(PARSE_ESCAPE);
   std::expected<char32_t, int> parse(PARSE_ESCAPE);
+
+  std::expected<char32_t, int> parse_escape(TOKEN::PAYLOAD_STR& payload);
 
   bool parse();
 };

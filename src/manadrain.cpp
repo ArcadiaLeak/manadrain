@@ -51,11 +51,11 @@ static int var_intro_cv(int tok_kind) {
 
 std::expected<char32_t, int> ParseDriver::peek() {
   if (buffer_idx >= buffer.size())
-    return std::unexpected{MOVE_BUFFER::UNEXPECTED_END};
+    return std::unexpected{MOVE_BUFIDX::UNEXPECTED_END};
   UChar32 ch;
   U8_GET(buffer.data(), 0, buffer_idx, buffer.size(), ch);
   if (ch < 0)
-    return std::unexpected{MOVE_BUFFER::ILLEGAL_UTF8};
+    return std::unexpected{MOVE_BUFIDX::ILLEGAL_UTF8};
   return ch;
 }
 
@@ -263,6 +263,52 @@ std::expected<char32_t, int> ParseDriver::parse(PARSE_ESCAPE esc) {
       [[fallthrough]];
     default:
       return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
+  }
+}
+
+std::expected<char32_t, int> ParseDriver::parse_escape(
+    TOKEN::PAYLOAD_STR& payload) {
+  std::expected ch{peek()};
+  if (not ch)
+    return std::unexpected{PARSE_STRING::UNEXPECTED_END};
+  forward(1);
+  switch (*ch) {
+    case '\'':
+    case '\"':
+    case '\0':
+    case '\\':
+      return ch;
+    case '\r':
+      if (peek() == '\n')
+        forward(1);
+      [[fallthrough]];
+    case '\n':
+    case 0x2028:
+    case 0x2029:
+      /* ignore escaped newline sequence */
+      return std::unexpected{PARSE_STRING::MUST_CONTINUE};
+    default:
+      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
+      if (strictness == STRICTNESS::STRICT)
+        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
+      else if (payload.sep == '`')
+        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+      backtrack(1);
+      std::expected esc = parse(PARSE_ESCAPE{esc_rule});
+      if (esc)
+        return esc;
+      else
+        switch (esc.error()) {
+          case PARSE_ESCAPE::MALFORMED:
+            return std::unexpected{PARSE_STRING::MALFORMED_ESC};
+          case PARSE_ESCAPE::OCTAL_SEQ:
+            return std::unexpected{PARSE_STRING::OCTAL_SEQ};
+          case PARSE_ESCAPE::PER_SE_BACKSLASH:
+            forward(1);
+            return ch;
+          default:
+            return std::unexpected{esc.error()};
+        }
   }
 }
 
