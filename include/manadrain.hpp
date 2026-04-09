@@ -107,7 +107,6 @@ struct ParseDriver {
   std::string take(int* actual, int N);
   int backtrack(int N);
 
-  std::expected<std::uint32_t, int> parse_hex(char32_t uchar);
   std::expected<std::uint32_t, int> parse_hex();
 
   std::expected<char32_t, int> parse_hex(PARSE_ESCAPE);

@@ -101,6 +101,99 @@ std::string ParseDriver::take(int* actual, int N) {
   return ret;
 }
 
+std::expected<std::uint32_t, int> ParseDriver::parse_hex() {
+  std::expected uchar{next()};
+  if (not uchar)
+    return std::unexpected{uchar.error()};
+  if (*uchar >= '0' && *uchar <= '9')
+    return *uchar - '0';
+  if (*uchar >= 'A' && *uchar <= 'F')
+    return *uchar - 'A' + 10;
+  if (*uchar >= 'a' && *uchar <= 'f')
+    return *uchar - 'a' + 10;
+  backtrack(1);
+  return std::unexpected{PARSE_HEX::NOT_A_DIGIT};
+}
+
+std::expected<char32_t, int> ParseDriver::parse_hex(PARSE_ESCAPE) {
+  std::expected hex0 = parse_hex();
+  if (not hex0)
+    return std::unexpected{hex0.error()};
+  std::expected hex1 = parse_hex();
+  if (not hex1) {
+    backtrack(1);
+    return std::unexpected{hex1.error()};
+  }
+  return (*hex0 << 4) | *hex1;
+}
+
+std::expected<char32_t, int> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
+  reset_fwd();
+  char32_t utf16_char = 0;
+  while (1) {
+    if (utf16_char > 0x10FFFF)
+      break;
+    std::expected hex = parse_hex();
+    if (hex) {
+      utf16_char = (utf16_char << 4) | *hex;
+      continue;
+    }
+    std::expected closing = next();
+    if (closing == '}')
+      return utf16_char;
+    break;
+  }
+  backtrack(fwd_cnt);
+  return std::unexpected{PARSE_ESCAPE::MALFORMED};
+}
+
+std::expected<char32_t, int> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
+  char32_t high_surr{}, low_surr{};
+
+  for (int i = 0; i < 4; i++) {
+    std::expected hex = parse_hex();
+    if (not hex) {
+      backtrack(i);
+      return std::unexpected{PARSE_ESCAPE::MALFORMED};
+    }
+    high_surr = (high_surr << 4) | *hex;
+  }
+
+  reset_fwd();
+  if (is_hi_surrogate(high_surr) && esc.rule == ESC_RULE::REGEXP_UTF16 &&
+      take(nullptr, 2) == "\\u") {
+    for (int i = 0; i < 4; i++) {
+      std::expected hex = parse_hex();
+      if (not hex)
+        goto return_high;
+      low_surr = (low_surr << 4) | *hex;
+    }
+    goto return_low;
+  }
+
+return_high:
+  backtrack(fwd_cnt);
+  return high_surr;
+
+return_low:
+  if (not is_lo_surrogate(low_surr))
+    goto return_high;
+  return from_surrogate(high_surr, low_surr);
+}
+
+std::expected<char32_t, int> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
+  std::expected open_or_uchar{next()};
+  if (open_or_uchar == '{') {
+    if (esc.rule == ESC_RULE::REGEXP_ASCII) {
+      backtrack(1);
+      return std::unexpected{PARSE_ESCAPE::MALFORMED};
+    } else
+      return parse_uni_braced(esc);
+  }
+  backtrack(1);
+  return parse_uni_fixed(esc);
+}
+
 bool ParseDriver::parse() {
   return 0;
 }
