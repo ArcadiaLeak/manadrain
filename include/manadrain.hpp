@@ -82,6 +82,7 @@ struct PARSE_STRING {
     MALFORMED_ESC,
     MUST_CONTINUE
   };
+  char32_t sep;
 };
 struct PARSE_TOKEN {
   enum ERRCODE { UNCLOSED_COMMENT = PARSE_STRING::MUST_CONTINUE + 1 };
@@ -89,6 +90,7 @@ struct PARSE_TOKEN {
 struct PARSE_IDENT {
   bool is_private;
 };
+struct PARSE_VARDECL {};
 
 template <typename T>
 using EXPECT = std::expected<T, int>;
@@ -98,7 +100,6 @@ struct ParseDriver {
   std::int32_t buffer_idx;
 
   std::string ch_temp;
-  TOKEN token;
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
@@ -125,15 +126,17 @@ struct ParseDriver {
   EXPECT<char32_t> parse_escape(PARSE_STRING);
   EXPECT<std::monostate> parse(PARSE_STRING);
 
-  EXPECT<std::string> parse_uchar(PARSE_IDENT, bool beginning);
-  EXPECT<std::monostate> parse(PARSE_IDENT);
-  void update_token_ident();
+  EXPECT<std::string> parse_uchar(PARSE_IDENT,
+                                  bool beginning,
+                                  bool& has_escape);
+  EXPECT<bool> parse(PARSE_IDENT);
+  void update_ident(TOKEN_KIND& kind, TOKEN::PAYLOAD_IDENT& ident);
 
   EXPECT<std::monostate> parse(PARSE_TOKEN);
-  EXPECT<bool> parse_comment(PARSE_TOKEN);
   bool parse_comment_line(PARSE_TOKEN);
-  EXPECT<bool> parse_comment_block(PARSE_TOKEN);
-  EXPECT<bool> parse_iter(PARSE_TOKEN);
+  EXPECT<bool> parse_comment(PARSE_TOKEN, char32_t ch);
+  EXPECT<bool> parse_comment_block(PARSE_TOKEN, bool& newline_seen);
+  EXPECT<bool> parse_iter(PARSE_TOKEN, TOKEN& token);
 
   std::expected<std::size_t, std::monostate> find_static_atom();
   std::expected<std::size_t, std::monostate> find_dynamic_atom();
