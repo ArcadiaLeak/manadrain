@@ -9,14 +9,15 @@
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
 
-constexpr int K_TOKEN_EOF = 0;
-constexpr int K_TOKEN_LET = 1;
-constexpr int K_TOKEN_CONST = 2;
-constexpr int K_TOKEN_VAR = 3;
-constexpr int K_TOKEN_IDENT = 4;
-constexpr int K_TOKEN_STRING = 5;
-constexpr int K_TOKEN_ERROR = 6;
-constexpr int K_TOKEN_UCHAR = 7;
+enum TOKEN_KIND {
+  K_TOKEN_EOF,
+  K_TOKEN_LET,
+  K_TOKEN_CONST,
+  K_TOKEN_VAR,
+  K_TOKEN_IDENT,
+  K_TOKEN_STRING,
+  K_TOKEN_UCHAR
+};
 
 struct TOKEN {
   struct PAYLOAD_STR {
@@ -29,7 +30,7 @@ struct TOKEN {
     std::size_t atom_idx;
   };
 
-  int kind;
+  TOKEN_KIND kind;
   bool is_pseudo_kind(int rhs_kind);
 
   bool newline_seen;
@@ -82,8 +83,13 @@ struct PARSE_STRING {
     MUST_CONTINUE
   };
 };
-struct PARSE_COMMENT {
-  enum ERRCODE { UNEXPECTED_END = PARSE_STRING::MUST_CONTINUE + 1 };
+struct PARSE_TOKEN {
+  enum ERRCODE { UNCLOSED_COMMENT = PARSE_STRING::MUST_CONTINUE + 1 };
+};
+struct PARSE_IDENT {
+  enum ERRCODE { MUST_RETURN = PARSE_TOKEN::UNCLOSED_COMMENT + 1 };
+  bool is_private;
+  bool beginning;
 };
 
 template <typename T>
@@ -119,6 +125,18 @@ struct ParseDriver {
 
   EXPECT<char32_t> parse_escape(PARSE_STRING);
   EXPECT<std::monostate> parse(PARSE_STRING);
+
+  EXPECT<std::monostate> parse_uchar(PARSE_IDENT);
+  EXPECT<std::monostate> parse(PARSE_IDENT);
+
+  EXPECT<std::monostate> parse(PARSE_TOKEN);
+  EXPECT<bool> parse_comment(PARSE_TOKEN);
+  bool parse_comment_line(PARSE_TOKEN);
+  EXPECT<bool> parse_comment_block(PARSE_TOKEN);
+  EXPECT<bool> parse_iter(PARSE_TOKEN);
+
+  bool find_static_atom(PARSE_STRING);
+  bool find_static_atom(PARSE_IDENT);
 
   bool parse();
 };

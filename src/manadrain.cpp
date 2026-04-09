@@ -26,7 +26,7 @@ static bool is_lineterm(char32_t ch) {
 
 namespace Manadrain {
 static const std::array reserved_arr =
-    std::to_array<std::tuple<std::string_view, int, STRICTNESS>>(
+    std::to_array<std::tuple<std::string_view, TOKEN_KIND, STRICTNESS>>(
         {{"var", K_TOKEN_VAR, STRICTNESS::SLOPPY},
          {"const", K_TOKEN_CONST, STRICTNESS::SLOPPY},
          {"let", K_TOKEN_LET, STRICTNESS::STRICT}});
@@ -186,14 +186,17 @@ return_low:
 }
 
 EXPECT<char32_t> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
-  std::expected open_or_uchar{next(nullptr)};
-  if (open_or_uchar == '{') {
-    if (esc.rule == ESC_RULE::REGEXP_ASCII) {
-      backtrack(nullptr, 1);
+  std::expected ahead = next(nullptr);
+  if (not ahead)
+    return ahead;
+
+  if (ahead == '{') {
+    if (esc.rule == ESC_RULE::REGEXP_ASCII)
       return std::unexpected{PARSE_ESCAPE::MALFORMED};
-    } else
+    else
       return parse_uni_braced(esc);
   }
+
   backtrack(nullptr, 1);
   return parse_uni_fixed(esc);
 }
@@ -296,8 +299,11 @@ EXPECT<char32_t> ParseDriver::parse_escape(PARSE_STRING) {
     case '\\':
       return ch;
     case '\r':
-      if (next(nullptr) != '\n')
-        backtrack(nullptr, 1);
+      next(nullptr).transform([this](char32_t ahead) {
+        if (ahead != '\n')
+          backtrack(nullptr, 1);
+        return std::monostate{};
+      });
       [[fallthrough]];
     case '\n':
     case 0x2028:
@@ -327,7 +333,6 @@ EXPECT<char32_t> ParseDriver::parse_escape(PARSE_STRING) {
 }
 
 EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
-  token.str.sep = *next(nullptr);
   ch_temp.clear();
   while (1) {
     std::expected ch = next(nullptr);
@@ -335,8 +340,11 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
       return std::unexpected{PARSE_STRING::UNEXPECTED_END};
     if (token.str.sep == '`') {
       if (*ch == '\r') {
-        if (next(nullptr) != '\n')
-          backtrack(nullptr, 1);
+        next(nullptr).transform([this](char32_t ahead) {
+          if (ahead != '\n')
+            backtrack(nullptr, 1);
+          return std::monostate{};
+        });
         ch = '\n';
       }
     } else if (*ch == '\r' || *ch == '\n') {
@@ -360,6 +368,199 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
     }
     ch_temp.append(codepoint_cv(*ch));
   }
+}
+
+EXPECT<std::monostate> ParseDriver::parse_uchar(PARSE_IDENT ident) {
+  char32_t ch{next(nullptr).value()};
+  if (ch == '\\') {
+    int fwd_cnt = 0;
+    std::expected esc = next(&fwd_cnt).and_then([this](char32_t ahead) {
+      return ahead == 'u' ? parse(PARSE_ESCAPE{ESC_RULE::IDENTIFIER})
+                          : std::unexpected{PARSE_IDENT::MUST_RETURN};
+    });
+    if (not esc) {
+      backtrack(nullptr, fwd_cnt);
+      return std::unexpected{esc.error()};
+    }
+    ch = *esc;
+    token.ident.has_escape = 1;
+  }
+  UProperty must_be = ident.beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
+  if (u_hasBinaryProperty(ch, must_be)) {
+    ch_temp.append(codepoint_cv(ch));
+    return std::monostate{};
+  }
+  return std::unexpected{PARSE_IDENT::MUST_RETURN};
+}
+
+EXPECT<std::monostate> ParseDriver::parse(PARSE_IDENT ident) {
+  ch_temp.clear();
+  if (ident.is_private)
+    ch_temp.push_back('#');
+
+  ident.beginning = 1;
+  std::expected id_start = parse_uchar(ident);
+  if (not id_start.has_value())
+    return id_start;
+
+  ident.beginning = 0;
+  while (1) {
+    if (not next(nullptr))
+      return std::monostate{};
+    else
+      backtrack(nullptr, 1);
+    std::expected id_continue = parse_uchar(PARSE_IDENT{});
+    if (id_continue.has_value())
+      continue;
+    if (id_continue.error() == PARSE_IDENT::MUST_RETURN)
+      return std::monostate{};
+    return id_continue;
+  }
+}
+
+EXPECT<std::monostate> ParseDriver::parse(PARSE_TOKEN) {
+  while (1) {
+    std::expected result = parse_iter(PARSE_TOKEN{});
+    if (result.has_value()) {
+      if (*result)
+        continue;
+      return std::monostate{};
+    }
+    return std::unexpected{result.error()};
+  }
+}
+
+bool ParseDriver::parse_comment_line(PARSE_TOKEN) {
+  std::expected ch = next(nullptr);
+  if (not ch)
+    return 0;
+  if (is_lineterm(*ch)) {
+    backtrack(nullptr, 1);
+    return 0;
+  }
+  return 1;
+}
+
+EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
+  std::expected ch = next(nullptr).and_then([this](char32_t first) {
+    return next(nullptr).transform(
+        [first](char32_t second) { return std::u32string{first, second}; });
+  });
+  if (not ch)
+    return std::unexpected{PARSE_TOKEN::UNCLOSED_COMMENT};
+  if (*ch == U"*/")
+    return 0;
+  if (is_lineterm(ch->front()))
+    token.newline_seen = 1;
+  backtrack(nullptr, 1);
+  return 1;
+}
+
+EXPECT<bool> ParseDriver::parse_comment(PARSE_TOKEN) {
+  char32_t ch = next(nullptr).value();
+  if (ch == '/')
+    while (1) {
+      if (not parse_comment_line(PARSE_TOKEN{}))
+        break;
+    }
+  else if (ch == '*')
+    while (1) {
+      std::expected comment = parse_comment_block(PARSE_TOKEN{});
+      if (not comment)
+        return std::unexpected{comment.error()};
+      if (not *comment)
+        break;
+    }
+  else
+    backtrack(nullptr, 1);
+  return 1;
+}
+
+EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
+  std::expected ch{next(nullptr)};
+  if (not ch) {
+    token.kind = K_TOKEN_EOF;
+    return 0;
+  }
+
+  switch (*ch) {
+    case '\r':
+      next(nullptr).transform([this](char32_t ahead) {
+        if (ahead != '\n')
+          backtrack(nullptr, 1);
+        return std::monostate{};
+      });
+      [[fallthrough]];
+
+    case '\n':
+    case 0x2028:
+    case 0x2029:
+      token.newline_seen = 1;
+      return 1;
+
+    case '/':
+      return next(nullptr).and_then([this](char32_t) {
+        backtrack(nullptr, 1);
+        return parse_comment(PARSE_TOKEN{});
+      });
+
+    case '\'':
+    case '"':
+      token.str.sep = *ch;
+      return parse(PARSE_STRING{}).transform([this](std::monostate) {
+        token.kind = K_TOKEN_STRING;
+        if (not find_static_atom(PARSE_STRING{}))
+          token.str.atom_idx = get_atom();
+        return false;
+      });
+  }
+
+  if (u_isWhitespace(*ch))
+    return 1;
+
+  backtrack(nullptr, 1);
+  std::expected ident_outcome =
+      parse(PARSE_IDENT{}).transform([this](std::monostate) {
+        token.kind = K_TOKEN_IDENT;
+        if (not find_static_atom(PARSE_IDENT{}))
+          token.ident.atom_idx = get_atom();
+        return false;
+      });
+  if (not ident_outcome)
+    if (ident_outcome.error() != PARSE_IDENT::MUST_RETURN)
+      return std::unexpected{ident_outcome.error()};
+
+  token.kind = K_TOKEN_UCHAR;
+  token.uchar = next(nullptr).value();
+  return 0;
+}
+
+bool ParseDriver::find_static_atom(PARSE_IDENT) {
+  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+    auto [literal, tok_kind, tok_strict] = reserved_arr[i];
+    if (ch_temp == literal) {
+      token.ident.atom_idx = i;
+      if (strictness >= tok_strict) {
+        if (token.ident.has_escape)
+          token.ident.is_reserved = 1;
+        else
+          token.kind = tok_kind;
+      }
+      return 1;
+    }
+  }
+  return 0;
+}
+
+bool ParseDriver::find_static_atom(PARSE_STRING) {
+  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
+    auto [literal, _, _] = reserved_arr[i];
+    if (ch_temp == literal) {
+      token.str.atom_idx = i;
+      return 1;
+    }
+  }
+  return 0;
 }
 
 bool ParseDriver::parse() {
