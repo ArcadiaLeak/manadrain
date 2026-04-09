@@ -60,49 +60,52 @@ enum class ESC_RULE {
 };
 
 struct MOVE_BUFIDX {
-  static constexpr int UNEXPECTED_END = 0;
-  static constexpr int ILLEGAL_UTF8 = 1;
+  enum ERRCODE { OUT_OF_RANGE };
 };
 struct PARSE_HEX {
-  static constexpr int ILLEGAL_DIGIT = 2;
+  enum ERRCODE { NOT_A_DIGIT = MOVE_BUFIDX::OUT_OF_RANGE + 1 };
 };
 struct PARSE_ESCAPE {
+  enum ERRCODE {
+    MALFORMED = PARSE_HEX::NOT_A_DIGIT + 1,
+    OCTAL_SEQ,
+    PER_SE_BACKSLASH
+  };
   ESC_RULE rule;
-  static constexpr int MALFORMED = 3;
-  static constexpr int OCTAL_SEQ = 4;
-  static constexpr int PER_SE_BACKSLASH = 5;
 };
 struct PARSE_STRING {
-  static constexpr int UNEXPECTED_END = 6;
-  static constexpr int OCTAL_SEQ = 7;
-  static constexpr int MALFORMED_ESC = 8;
-  static constexpr int MUST_CONTINUE = 9;
+  enum ERRCODE {
+    UNEXPECTED_END = PARSE_ESCAPE::PER_SE_BACKSLASH + 1,
+    OCTAL_SEQ,
+    MALFORMED_ESC,
+    MUST_CONTINUE
+  };
 };
 struct PARSE_COMMENT {
-  static constexpr int UNEXPECTED_END = 10;
+  enum ERRCODE { UNEXPECTED_END = PARSE_STRING::MUST_CONTINUE + 1 };
 };
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
-  std::uint32_t buffer_idx;
+  std::int32_t buffer_idx;
 
-  std::uint32_t fwd_cnt;
+  int fwd_cnt;
   void reset_fwd() { fwd_cnt = 0; }
 
-  STRICTNESS strictness;
+  std::string ch_temp;
   TOKEN token;
 
-  std::deque<STATEMENT> program;
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
   std::size_t get_atom();
 
-  std::string ch_temp;
-  std::string_view take(std::uint32_t N);
+  STRICTNESS strictness;
+  std::deque<STATEMENT> program;
 
-  std::expected<char32_t, int> peek();
-  void forward(std::uint32_t count);
-  void backtrack(std::uint32_t count);
+  std::expected<char32_t, int> next();
+  std::expected<char32_t, int> prev();
+  std::string take(int* actual, int N);
+  int backtrack(int N);
 
   std::expected<std::uint32_t, int> parse_hex(char32_t uchar);
   std::expected<std::uint32_t, int> parse_hex();
@@ -113,7 +116,7 @@ struct ParseDriver {
   std::expected<char32_t, int> parse_uni(PARSE_ESCAPE);
   std::expected<char32_t, int> parse(PARSE_ESCAPE);
 
-  std::expected<char32_t, int> parse_escape(TOKEN::PAYLOAD_STR& payload);
+  std::expected<char32_t, int> parse_escape(PARSE_STRING);
 
   bool parse();
 };

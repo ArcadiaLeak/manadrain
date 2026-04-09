@@ -49,275 +49,56 @@ static int var_intro_cv(int tok_kind) {
   return 0;
 }
 
-std::expected<char32_t, int> ParseDriver::peek() {
-  if (buffer_idx >= buffer.size())
-    return std::unexpected{MOVE_BUFIDX::UNEXPECTED_END};
-  UChar32 ch;
-  U8_GET(buffer.data(), 0, buffer_idx, buffer.size(), ch);
-  if (ch < 0)
-    return std::unexpected{MOVE_BUFIDX::ILLEGAL_UTF8};
-  return ch;
-}
-
-void ParseDriver::backtrack(std::uint32_t count) {
-  std::uint32_t i;
-  for (i = 0; i < count; ++i) {
-    std::uint32_t last_idx{buffer_idx};
-    U8_BACK_N(buffer.data(), 0, buffer_idx, 1);
-    if (buffer_idx == last_idx)
-      break;
-  }
-  fwd_cnt -= i;
-}
-
-void ParseDriver::forward(std::uint32_t count) {
-  std::uint32_t i;
-  for (i = 0; i < count; ++i) {
-    std::uint32_t last_idx{buffer_idx};
-    U8_FWD_N(buffer.data(), buffer_idx, buffer.size(), 1);
-    if (buffer_idx == last_idx)
-      break;
-  }
-  fwd_cnt += i;
-}
-
-std::string_view ParseDriver::take(std::uint32_t N) {
-  ch_temp.clear();
-  while (N) {
-    std::expected ch{peek()};
-    if (not ch)
-      break;
-    forward(1);
-    ch_temp.append(codepoint_cv(*ch));
-    --N;
-  }
-  return ch_temp;
-}
-
-std::expected<std::uint32_t, int> ParseDriver::parse_hex(char32_t uchar) {
-  if (uchar >= '0' && uchar <= '9')
-    return uchar - '0';
-  if (uchar >= 'A' && uchar <= 'F')
-    return uchar - 'A' + 10;
-  if (uchar >= 'a' && uchar <= 'f')
-    return uchar - 'a' + 10;
-  return std::unexpected{PARSE_HEX::ILLEGAL_DIGIT};
-}
-
-std::expected<std::uint32_t, int> ParseDriver::parse_hex() {
-  return peek().and_then([this](char32_t ch) { return parse_hex(ch); });
-}
-
-std::expected<char32_t, int> ParseDriver::parse_hex(PARSE_ESCAPE) {
-  std::expected hex0 = parse_hex();
-  if (not hex0)
-    return std::unexpected{hex0.error()};
-  forward(1);
-
-  std::expected hex1 = parse_hex();
-  if (not hex1) {
-    backtrack(1);
-    return std::unexpected{hex1.error()};
-  }
-  forward(1);
-
-  return (*hex0 << 4) | *hex1;
-}
-
-std::expected<char32_t, int> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
-  char32_t utf16_char = 0;
-  while (1) {
-    if (utf16_char > 0x10FFFF)
-      break;
-    std::expected hex = parse_hex();
-    if (hex) {
-      forward(1);
-      utf16_char = (utf16_char << 4) | *hex;
-      continue;
-    }
-    std::expected closing = peek();
-    if (closing == '}') {
-      forward(1);
-      return utf16_char;
-    }
-    break;
-  }
-  return std::unexpected{PARSE_ESCAPE::MALFORMED};
-}
-
-std::expected<char32_t, int> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
-  char32_t high_surr{}, low_surr{};
-
-  for (int i = 0; i < 4; i++) {
-    std::expected hex = parse_hex();
-    if (not hex)
-      return std::unexpected{PARSE_ESCAPE::MALFORMED};
-    forward(1);
-    high_surr = (high_surr << 4) | *hex;
-  }
-
-  reset_fwd();
-  if (is_hi_surrogate(high_surr) && esc.rule == ESC_RULE::REGEXP_UTF16 &&
-      take(2) == "\\u") {
-    for (int i = 0; i < 4; i++) {
-      std::expected hex = parse_hex();
-      if (not hex)
-        goto return_high;
-      forward(1);
-      low_surr = (low_surr << 4) | *hex;
-    }
-    goto return_low;
-  }
-
-return_high:
-  backtrack(fwd_cnt);
-  return high_surr;
-
-return_low:
-  if (not is_lo_surrogate(low_surr))
-    goto return_high;
-  return from_surrogate(high_surr, low_surr);
-}
-
-std::expected<char32_t, int> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
-  std::expected open_or_uchar{peek()};
-  if (open_or_uchar == '{') {
-    if (esc.rule == ESC_RULE::REGEXP_ASCII)
-      return std::unexpected{PARSE_ESCAPE::MALFORMED};
-    else {
-      forward(1);
-      return parse_uni_braced(esc);
-    }
-  }
-  return parse_uni_fixed(esc);
-}
-
-std::expected<char32_t, int> ParseDriver::parse(PARSE_ESCAPE esc) {
-  std::expected ch{peek()};
-  if (not ch)
-    return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
-  forward(1);
-  switch (*ch) {
-    case 'b':
-      return '\b';
-    case 'f':
-      return '\f';
-    case 'n':
-      return '\n';
-    case 'r':
-      return '\r';
-    case 't':
-      return '\t';
-    case 'v':
-      return '\v';
-    case 'x':
-      return parse_hex(esc);
-    case 'u':
-      return parse_uni(esc);
-    case '0':
-      if (not peek()
-                  .transform([](char32_t uch) { return std::isdigit(uch); })
-                  .value_or(false))
-        return 0;
-      [[fallthrough]];
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7':
-      switch (esc.rule) {
-        case ESC_RULE::STRING_IN_STRICT_MODE:
-          return std::unexpected{PARSE_ESCAPE::OCTAL_SEQ};
-
-        case ESC_RULE::STRING_IN_TEMPLATE:
-        case ESC_RULE::REGEXP_UTF16:
-          return std::unexpected{PARSE_ESCAPE::MALFORMED};
-
-        default:
-          ch = *ch - '0';
-          std::expected<char32_t, int> ahead;
-          ahead = peek().transform(
-              [](char32_t ahead_digit) { return ahead_digit - '0'; });
-          if (not ahead || *ahead > 7)
-            return ch;
-          forward(1);
-          ch = (*ch << 3) | *ahead;
-
-          if (*ch >= 32)
-            return ch;
-
-          ahead = peek().transform(
-              [](char32_t ahead_digit) { return ahead_digit - '0'; });
-          if (not ahead || *ahead > 7)
-            return ch;
-          forward(1);
-          return (*ch << 3) | *ahead;
-      }
-    case '8':
-    case '9':
-      if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
-          esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
-        return std::unexpected{PARSE_ESCAPE::MALFORMED};
-      [[fallthrough]];
-    default:
-      return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
-  }
-}
-
-std::expected<char32_t, int> ParseDriver::parse_escape(
-    TOKEN::PAYLOAD_STR& payload) {
-  std::expected ch{peek()};
-  if (not ch)
-    return std::unexpected{PARSE_STRING::UNEXPECTED_END};
-  forward(1);
-  switch (*ch) {
-    case '\'':
-    case '\"':
-    case '\0':
-    case '\\':
-      return ch;
-    case '\r':
-      if (peek() == '\n')
-        forward(1);
-      [[fallthrough]];
-    case '\n':
-    case 0x2028:
-    case 0x2029:
-      /* ignore escaped newline sequence */
-      return std::unexpected{PARSE_STRING::MUST_CONTINUE};
-    default:
-      ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-      if (strictness == STRICTNESS::STRICT)
-        esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-      else if (payload.sep == '`')
-        esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
-      backtrack(1);
-      std::expected esc = parse(PARSE_ESCAPE{esc_rule});
-      if (esc)
-        return esc;
-      else
-        switch (esc.error()) {
-          case PARSE_ESCAPE::MALFORMED:
-            return std::unexpected{PARSE_STRING::MALFORMED_ESC};
-          case PARSE_ESCAPE::OCTAL_SEQ:
-            return std::unexpected{PARSE_STRING::OCTAL_SEQ};
-          case PARSE_ESCAPE::PER_SE_BACKSLASH:
-            forward(1);
-            return ch;
-          default:
-            return std::unexpected{esc.error()};
-        }
-  }
-}
-
 std::size_t ParseDriver::get_atom() {
   if (not atom_umap.contains(ch_temp)) {
     atom_deq.push_back(std::move(ch_temp));
     atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
   }
   return atom_umap[atom_deq.back()];
+}
+
+std::expected<char32_t, int> ParseDriver::next() {
+  if (buffer_idx < buffer.size()) {
+    UChar32 ch;
+    U8_NEXT_OR_FFFD(buffer.data(), buffer_idx, buffer.size(), ch);
+    ++fwd_cnt;
+    return ch;
+  }
+  return std::unexpected{MOVE_BUFIDX::OUT_OF_RANGE};
+}
+
+std::expected<char32_t, int> ParseDriver::prev() {
+  if (0 < buffer_idx) {
+    UChar32 ch;
+    U8_PREV_OR_FFFD(buffer.data(), 0, buffer_idx, ch);
+    --fwd_cnt;
+    return ch;
+  }
+  return std::unexpected{MOVE_BUFIDX::OUT_OF_RANGE};
+}
+
+int ParseDriver::backtrack(int N) {
+  int i;
+  for (i = 0; i < N; i++) {
+    std::expected ch{prev()};
+    if (not ch)
+      break;
+  }
+  return i;
+}
+
+std::string ParseDriver::take(int* actual, int N) {
+  std::string ret{};
+  int i;
+  for (i = 0; i < N; i++) {
+    std::expected ch{next()};
+    if (not ch)
+      break;
+    ret.append(codepoint_cv(*ch));
+  }
+  if (actual)
+    *actual = i;
+  return ret;
 }
 
 bool ParseDriver::parse() {
