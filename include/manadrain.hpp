@@ -109,6 +109,8 @@ struct ParseDriver {
   std::expected<char32_t, int> parse_hex(PARSE_ESCAPE);
   std::expected<char32_t, int> parse_uni_braced(PARSE_ESCAPE);
   std::expected<char32_t, int> parse_uni_fixed(PARSE_ESCAPE);
+  std::expected<char32_t, int> parse_uni(PARSE_ESCAPE);
+  std::expected<char32_t, int> parse(PARSE_ESCAPE);
 
   bool parse();
 };

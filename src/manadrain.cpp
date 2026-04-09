@@ -126,7 +126,6 @@ std::expected<char32_t, int> ParseDriver::parse_hex(PARSE_ESCAPE) {
 
 std::expected<char32_t, int> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
   char32_t utf16_char = 0;
-  reset_fwd();
   while (1) {
     if (utf16_char > 0x10FFFF)
       break;
@@ -143,7 +142,6 @@ std::expected<char32_t, int> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
     }
     break;
   }
-  backtrack(fwd_cnt);
   return std::unexpected{PARSE_ESCAPE::MALFORMED};
 }
 
@@ -152,10 +150,8 @@ std::expected<char32_t, int> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
 
   for (int i = 0; i < 4; i++) {
     std::expected hex = parse_hex();
-    if (not hex) {
-      backtrack(i);
+    if (not hex)
       return std::unexpected{PARSE_ESCAPE::MALFORMED};
-    }
     forward(1);
     high_surr = (high_surr << 4) | *hex;
   }
@@ -181,6 +177,93 @@ return_low:
   if (not is_lo_surrogate(low_surr))
     goto return_high;
   return from_surrogate(high_surr, low_surr);
+}
+
+std::expected<char32_t, int> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
+  std::expected open_or_uchar{peek()};
+  if (open_or_uchar == '{') {
+    if (esc.rule == ESC_RULE::REGEXP_ASCII)
+      return std::unexpected{PARSE_ESCAPE::MALFORMED};
+    else {
+      forward(1);
+      return parse_uni_braced(esc);
+    }
+  }
+  return parse_uni_fixed(esc);
+}
+
+std::expected<char32_t, int> ParseDriver::parse(PARSE_ESCAPE esc) {
+  std::expected ch{peek()};
+  if (not ch)
+    return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
+  forward(1);
+  switch (*ch) {
+    case 'b':
+      return '\b';
+    case 'f':
+      return '\f';
+    case 'n':
+      return '\n';
+    case 'r':
+      return '\r';
+    case 't':
+      return '\t';
+    case 'v':
+      return '\v';
+    case 'x':
+      return parse_hex(esc);
+    case 'u':
+      return parse_uni(esc);
+    case '0':
+      if (not peek()
+                  .transform([](char32_t uch) { return std::isdigit(uch); })
+                  .value_or(false))
+        return 0;
+      [[fallthrough]];
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+    case '6':
+    case '7':
+      switch (esc.rule) {
+        case ESC_RULE::STRING_IN_STRICT_MODE:
+          return std::unexpected{PARSE_ESCAPE::OCTAL_SEQ};
+
+        case ESC_RULE::STRING_IN_TEMPLATE:
+        case ESC_RULE::REGEXP_UTF16:
+          return std::unexpected{PARSE_ESCAPE::MALFORMED};
+
+        default:
+          ch = *ch - '0';
+          std::expected<char32_t, int> ahead;
+          ahead = peek().transform(
+              [](char32_t ahead_digit) { return ahead_digit - '0'; });
+          if (not ahead || *ahead > 7)
+            return ch;
+          forward(1);
+          ch = (*ch << 3) | *ahead;
+
+          if (*ch >= 32)
+            return ch;
+
+          ahead = peek().transform(
+              [](char32_t ahead_digit) { return ahead_digit - '0'; });
+          if (not ahead || *ahead > 7)
+            return ch;
+          forward(1);
+          return (*ch << 3) | *ahead;
+      }
+    case '8':
+    case '9':
+      if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
+          esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
+        return std::unexpected{PARSE_ESCAPE::MALFORMED};
+      [[fallthrough]];
+    default:
+      return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
+  }
 }
 
 std::size_t ParseDriver::get_atom() {
