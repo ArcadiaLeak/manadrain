@@ -89,9 +89,6 @@ struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::int32_t buffer_idx;
 
-  int fwd_cnt;
-  void reset_fwd() { fwd_cnt = 0; }
-
   std::string ch_temp;
   TOKEN token;
 
@@ -102,12 +99,12 @@ struct ParseDriver {
   STRICTNESS strictness;
   std::deque<STATEMENT> program;
 
-  std::expected<char32_t, int> next();
-  std::expected<char32_t, int> prev();
-  std::string take(int* actual, int N);
-  int backtrack(int N);
+  std::expected<char32_t, int> next(int* advance);
+  std::expected<char32_t, int> prev(int* advance);
+  std::string take(int* advance, int N);
+  int backtrack(int* advance, int N);
 
-  std::expected<std::uint32_t, int> parse_hex();
+  std::expected<std::uint32_t, int> parse_hex(int* advance);
 
   std::expected<char32_t, int> parse_hex(PARSE_ESCAPE);
   std::expected<char32_t, int> parse_uni_braced(PARSE_ESCAPE);
