@@ -61,38 +61,26 @@ enum class ESC_RULE {
   STRING_IN_TEMPLATE
 };
 
-struct MOVE_BUFIDX {
-  enum ERRCODE { OUT_OF_RANGE };
+enum class PARSE_ERRCODE {
+  OUT_OF_RANGE,
+  HEX__NOT_A_DIGIT,
+  ESCAPE__MALFORMED,
+  ESCAPE__LEGACY_OCTAL_SEQ,
+  STRING__UNEXPECTED_END,
+  UNCLOSED_COMMENT,
+  VARIABLE_NAME_EXPECTED
 };
-struct PARSE_HEX {
-  enum ERRCODE { NOT_A_DIGIT = MOVE_BUFIDX::OUT_OF_RANGE + 1 };
-};
+
 struct PARSE_ESCAPE {
-  enum ERRCODE {
-    MALFORMED = PARSE_HEX::NOT_A_DIGIT + 1,
-    LEGACY_OCTAL_SEQ,
-    PER_SE_BACKSLASH
-  };
   ESC_RULE rule;
 };
-struct PARSE_STRING {
-  enum ERRCODE {
-    UNEXPECTED_END = PARSE_ESCAPE::PER_SE_BACKSLASH + 1,
-    LEGACY_OCTAL_SEQ,
-    MALFORMED_ESC,
-    MUST_CONTINUE
-  };
-};
-struct PARSE_TOKEN {
-  enum ERRCODE { UNCLOSED_COMMENT = PARSE_STRING::MUST_CONTINUE + 1 };
-};
+struct PARSE_STRING {};
+struct PARSE_TOKEN {};
 struct PARSE_IDENT {
   bool is_private;
 };
 struct PARSE_STATEMENT {};
-struct PARSE_VARIABLE_DECLARATION {
-  enum ERRCODE { VARIABLE_NAME_EXPECTED = PARSE_TOKEN::UNCLOSED_COMMENT + 1 };
-};
+struct PARSE_VARIABLE_DECLARATION {};
 
 struct ENCODED_POINT {
   std::array<char, 4> buff;
@@ -101,8 +89,9 @@ struct ENCODED_POINT {
 };
 ENCODED_POINT codepoint_cv(char32_t ch);
 
-template <typename T> using EXPECT = std::expected<T, int>;
-template <typename T> using EXPECT_OPT = std::expected<std::optional<T>, int>;
+template <typename T> using EXPECT = std::expected<T, PARSE_ERRCODE>;
+template <typename T>
+using EXPECT_OPT = std::expected<std::optional<T>, PARSE_ERRCODE>;
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
@@ -131,7 +120,7 @@ struct ParseDriver {
   EXPECT<char32_t> parse_uni_fixed(PARSE_ESCAPE);
   EXPECT<char32_t> parse_uni(PARSE_ESCAPE);
   bool parse_null(PARSE_ESCAPE);
-  EXPECT<char32_t> parse(PARSE_ESCAPE);
+  EXPECT_OPT<char32_t> parse(PARSE_ESCAPE, char32_t ch);
 
   EXPECT_OPT<char32_t> parse_escape(PARSE_STRING, char32_t ch);
   EXPECT_OPT<char32_t> parse_uchar(PARSE_STRING, char32_t ch);
