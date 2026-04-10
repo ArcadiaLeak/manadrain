@@ -42,13 +42,6 @@ bool TOKEN::is_pseudo_kind(int rhs_kind) {
   return 0;
 }
 
-static int var_intro_cv(int tok_kind) {
-  if (tok_kind == K_TOKEN_LET || tok_kind == K_TOKEN_CONST ||
-      tok_kind == K_TOKEN_VAR)
-    return tok_kind;
-  return 0;
-}
-
 std::expected<std::size_t, std::monostate> ParseDriver::find_dynamic_atom() {
   if (not atom_umap.contains(ch_temp)) {
     atom_deq.push_back(std::move(ch_temp));
@@ -374,18 +367,19 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
 EXPECT<std::string> ParseDriver::parse_uchar(PARSE_IDENT ident,
                                              bool beginning) {
   int fwd_cnt = 0;
-  EXPECT<std::string> ahead{take(&fwd_cnt, 2)};
-  if (*ahead != "\\u")
-    backtrack(nullptr, fwd_cnt - 1);
-  else {
-    ahead = parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER})
-                .transform([](char32_t ch) { return codepoint_cv(ch); });
+  std::string ahead{take(&fwd_cnt, 2)};
+  if (ahead == "\\u")
     token.ident.has_escape = 1;
-  }
+  else
+    backtrack(nullptr, fwd_cnt);
   UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
-  return ahead.transform([must_be](std::string str) {
-    char32_t ch = str.at(0);
-    return u_hasBinaryProperty(ch, must_be) ? codepoint_cv(ch) : "";
+  std::expected ch_exp = ahead == "\\u"
+                             ? parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER})
+                             : next(nullptr);
+  return ch_exp.transform([must_be](char32_t ch) -> std::string {
+    if (not u_hasBinaryProperty(ch, must_be))
+      return "";
+    return codepoint_cv(ch);
   });
 }
 
@@ -433,36 +427,41 @@ bool ParseDriver::parse_comment_line(PARSE_TOKEN) {
 }
 
 EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
-  std::expected ch_exp = next(nullptr);
-  if (not ch_exp)
+  if (not next(nullptr))
     return std::unexpected{PARSE_TOKEN::UNCLOSED_COMMENT};
   backtrack(nullptr, 1);
   int fwd_cnt = 0;
   if (take(&fwd_cnt, 2) == "*/")
     return 0;
-  backtrack(nullptr, fwd_cnt - 1);
-  if (ch_exp.transform([](char32_t ch) { return is_lineterm(ch); }))
+  backtrack(nullptr, fwd_cnt);
+  if (next(nullptr)
+          .transform([](char32_t ch) { return is_lineterm(ch); })
+          .value_or(false))
     token.newline_seen = 1;
   return 1;
 }
 
-EXPECT<bool> ParseDriver::parse_comment(PARSE_TOKEN) {
-  char32_t ch = next(nullptr).value();
-  if (ch == '/')
-    while (1) {
-      if (not parse_comment_line(PARSE_TOKEN{}))
-        break;
-    }
-  else if (ch == '*')
-    while (1) {
-      std::expected comment = parse_comment_block(PARSE_TOKEN{});
-      if (not comment)
-        return std::unexpected{comment.error()};
-      if (not *comment)
-        break;
-    }
-  else
-    backtrack(nullptr, 1);
+EXPECT<bool> ParseDriver::parse_comment(PARSE_TOKEN, char32_t ch) {
+  switch (ch) {
+    case '/':
+      while (1) {
+        if (not parse_comment_line(PARSE_TOKEN{}))
+          break;
+      }
+      break;
+    case '*':
+      while (1) {
+        std::expected comment = parse_comment_block(PARSE_TOKEN{});
+        if (not comment)
+          return std::unexpected{comment.error()};
+        if (not *comment)
+          break;
+      }
+      break;
+    default:
+      backtrack(nullptr, 1);
+      break;
+  }
   return 1;
 }
 
@@ -484,11 +483,12 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
       token.newline_seen = 1;
       return 1;
 
-    case '/':
-      return next(nullptr).and_then([this](char32_t) {
-        backtrack(nullptr, 1);
-        return parse_comment(PARSE_TOKEN{});
-      });
+    case '/': {
+      std::expected ahead = next(nullptr);
+      if (not ahead)
+        return 1;
+      return parse_comment(PARSE_TOKEN{}, *ahead);
+    }
 
     case '\'':
     case '"':
@@ -550,7 +550,26 @@ std::expected<std::size_t, std::monostate> ParseDriver::find_static_atom() {
   return std::unexpected{std::monostate{}};
 }
 
+TOKEN_KIND ParseDriver::parse_init(PARSE_STMT) {
+  if (token.is_pseudo_kind(K_TOKEN_LET))
+    return K_TOKEN_LET;
+  return token.kind;
+}
+
 bool ParseDriver::parse() {
+  std::expected intro = parse(PARSE_TOKEN{}).transform([this](std::monostate) {
+    return parse_init(PARSE_STMT{});
+  });
+  if (not intro)
+    return 0;
+
+  switch (*intro) {
+    case K_TOKEN_CONST:
+    case K_TOKEN_LET:
+    case K_TOKEN_VAR:
+      return 1;
+  }
+
   return 0;
 }
 }  // namespace Manadrain

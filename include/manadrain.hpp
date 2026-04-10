@@ -89,6 +89,7 @@ struct PARSE_TOKEN {
 struct PARSE_IDENT {
   bool is_private;
 };
+struct PARSE_STMT {};
 
 template <typename T>
 using EXPECT = std::expected<T, int>;
@@ -130,10 +131,12 @@ struct ParseDriver {
   void update_token_ident();
 
   EXPECT<std::monostate> parse(PARSE_TOKEN);
-  EXPECT<bool> parse_comment(PARSE_TOKEN);
+  EXPECT<bool> parse_comment(PARSE_TOKEN, char32_t ahead);
   bool parse_comment_line(PARSE_TOKEN);
   EXPECT<bool> parse_comment_block(PARSE_TOKEN);
   EXPECT<bool> parse_iter(PARSE_TOKEN);
+
+  TOKEN_KIND parse_init(PARSE_STMT);
 
   std::expected<std::size_t, std::monostate> find_static_atom();
   std::expected<std::size_t, std::monostate> find_dynamic_atom();
