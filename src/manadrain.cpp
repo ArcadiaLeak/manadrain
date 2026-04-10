@@ -51,7 +51,7 @@ std::expected<std::size_t, std::monostate> ParseDriver::find_dynamic_atom() {
   return atom_umap[atom_deq.back()];
 }
 
-EXPECT<char32_t> ParseDriver::next(int* advance) {
+EXPECT<char32_t> ParseDriver::next(int *advance) {
   if (buffer_idx < buffer.size()) {
     UChar32 ch;
     U8_NEXT_OR_FFFD(buffer.data(), buffer_idx, buffer.size(), ch);
@@ -62,7 +62,7 @@ EXPECT<char32_t> ParseDriver::next(int* advance) {
   return std::unexpected{MOVE_BUFIDX::OUT_OF_RANGE};
 }
 
-EXPECT<char32_t> ParseDriver::prev(int* advance) {
+EXPECT<char32_t> ParseDriver::prev(int *advance) {
   if (0 < buffer_idx) {
     UChar32 ch;
     U8_PREV_OR_FFFD(buffer.data(), 0, buffer_idx, ch);
@@ -73,7 +73,7 @@ EXPECT<char32_t> ParseDriver::prev(int* advance) {
   return std::unexpected{MOVE_BUFIDX::OUT_OF_RANGE};
 }
 
-int ParseDriver::backtrack(int* advance, int N) {
+int ParseDriver::backtrack(int *advance, int N) {
   int i = 0;
   while (N + i > 0) {
     std::expected ch{prev(&i)};
@@ -85,7 +85,7 @@ int ParseDriver::backtrack(int* advance, int N) {
   return i;
 }
 
-std::string ParseDriver::take(int* advance, int N) {
+std::string ParseDriver::take(int *advance, int N) {
   std::string ret{};
   int i = 0;
   while (i < N) {
@@ -107,7 +107,7 @@ void ParseDriver::skip_lf() {
   backtrack(nullptr, 1);
 }
 
-EXPECT<char32_t> ParseDriver::parse_hex(int* advance) {
+EXPECT<char32_t> ParseDriver::parse_hex(int *advance) {
   std::expected uchar{next(advance)};
   if (not uchar)
     return uchar;
@@ -202,8 +202,7 @@ EXPECT<char32_t> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
 char32_t ParseDriver::parse_oct_digit(PARSE_ESCAPE, char32_t oct) {
   std::expected ahead =
       next(nullptr).transform([](char32_t ch_ahead) { return ch_ahead - '0'; });
-  if (ahead.transform([](char32_t digit) { return digit > 7; })
-          .value_or(0)) {
+  if (ahead.transform([](char32_t digit) { return digit > 7; }).value_or(0)) {
     backtrack(nullptr, 1);
     return oct;
   }
@@ -224,81 +223,77 @@ EXPECT<char32_t> ParseDriver::parse(PARSE_ESCAPE esc) {
   if (not ch)
     return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
   switch (*ch) {
-    case 'b':
-      return '\b';
-    case 'f':
-      return '\f';
-    case 'n':
-      return '\n';
-    case 'r':
-      return '\r';
-    case 't':
-      return '\t';
-    case 'v':
-      return '\v';
-    case 'x':
-      return parse_hex(esc);
-    case 'u':
-      return parse_uni(esc);
-    case '0':
-      if (parse_null(esc))
-        return 0;
-      [[fallthrough]];
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7':
-      switch (esc.rule) {
-        case ESC_RULE::STRING_IN_STRICT_MODE:
-          return std::unexpected{PARSE_ESCAPE::LEGACY_OCTAL_SEQ};
+  case 'b':
+    return '\b';
+  case 'f':
+    return '\f';
+  case 'n':
+    return '\n';
+  case 'r':
+    return '\r';
+  case 't':
+    return '\t';
+  case 'v':
+    return '\v';
+  case 'x':
+    return parse_hex(esc);
+  case 'u':
+    return parse_uni(esc);
+  case '0':
+    if (parse_null(esc))
+      return 0;
+    [[fallthrough]];
+  case '1':
+  case '2':
+  case '3':
+  case '4':
+  case '5':
+  case '6':
+  case '7':
+    switch (esc.rule) {
+    case ESC_RULE::STRING_IN_STRICT_MODE:
+      return std::unexpected{PARSE_ESCAPE::LEGACY_OCTAL_SEQ};
 
-        case ESC_RULE::STRING_IN_TEMPLATE:
-        case ESC_RULE::REGEXP_UTF16:
-          return std::unexpected{PARSE_ESCAPE::MALFORMED};
+    case ESC_RULE::STRING_IN_TEMPLATE:
+    case ESC_RULE::REGEXP_UTF16:
+      return std::unexpected{PARSE_ESCAPE::MALFORMED};
 
-        default: {
-          char32_t oct = *ch - '0';
-          oct = parse_oct_digit(PARSE_ESCAPE{}, oct);
-          if (oct >= 32)
-            return oct;
-          oct = parse_oct_digit(PARSE_ESCAPE{}, oct);
-          return oct;
-        }
-      }
-    case '8':
-    case '9':
-      if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
-          esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
-        return std::unexpected{PARSE_ESCAPE::MALFORMED};
-      [[fallthrough]];
-    default:
-      backtrack(nullptr, 1);
-      return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
+    default: {
+      char32_t oct = *ch - '0';
+      oct = parse_oct_digit(PARSE_ESCAPE{}, oct);
+      if (oct >= 32)
+        return oct;
+      oct = parse_oct_digit(PARSE_ESCAPE{}, oct);
+      return oct;
+    }
+    }
+  case '8':
+  case '9':
+    if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
+        esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
+      return std::unexpected{PARSE_ESCAPE::MALFORMED};
+    [[fallthrough]];
+  default:
+    backtrack(nullptr, 1);
+    return std::unexpected{PARSE_ESCAPE::PER_SE_BACKSLASH};
   }
 }
 
-EXPECT<char32_t> ParseDriver::parse_escape(PARSE_STRING) {
-  std::expected ch{next(nullptr)};
-  if (not ch)
-    return std::unexpected{PARSE_STRING::UNEXPECTED_END};
-
-  switch (*ch) {
-    case '\'':
-    case '\"':
-    case '\0':
-    case '\\':
-      return ch;
-    case '\r':
-      skip_lf();
-      [[fallthrough]];
-    case '\n':
-    case 0x2028:
-    case 0x2029:
-      /* ignore escaped newline sequence */
-      return std::unexpected{PARSE_STRING::MUST_CONTINUE};
+EXPECT_OPT<char32_t> ParseDriver::parse_escape(PARSE_STRING, char32_t ch) {
+  switch (ch) {
+  case '\'':
+  case '\"':
+  case '\0':
+  case '\\':
+    return ch;
+  case '\r':
+    skip_lf();
+    [[fallthrough]];
+  case '\n':
+  case 0x2028:
+  case 0x2029:
+    /* ignore escaped newline sequence */
+    return std::nullopt;
   }
 
   ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
@@ -311,49 +306,59 @@ EXPECT<char32_t> ParseDriver::parse_escape(PARSE_STRING) {
   std::expected esc = parse(PARSE_ESCAPE{esc_rule});
   if (not esc)
     switch (esc.error()) {
-      case PARSE_ESCAPE::MALFORMED:
-        return std::unexpected{PARSE_STRING::MALFORMED_ESC};
-      case PARSE_ESCAPE::LEGACY_OCTAL_SEQ:
-        return std::unexpected{PARSE_STRING::LEGACY_OCTAL_SEQ};
-      case PARSE_ESCAPE::PER_SE_BACKSLASH:
-        return ch;
+    case PARSE_ESCAPE::MALFORMED:
+      return std::unexpected{PARSE_STRING::MALFORMED_ESC};
+    case PARSE_ESCAPE::LEGACY_OCTAL_SEQ:
+      return std::unexpected{PARSE_STRING::LEGACY_OCTAL_SEQ};
+    case PARSE_ESCAPE::PER_SE_BACKSLASH:
+      return ch;
     }
   return esc;
 }
 
+EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
+  switch (ch) {
+  case '\r':
+    skip_lf();
+    [[fallthrough]];
+  case '\n':
+    if (token.str.sep == '`')
+      return '\n';
+    return std::unexpected{PARSE_STRING::UNEXPECTED_END};
+  case '\\':
+    return next(nullptr)
+        .transform_error(
+            [](int) -> int { return PARSE_STRING::UNEXPECTED_END; })
+        .and_then([this](char32_t next_ch) {
+          return parse_escape(PARSE_STRING{}, next_ch);
+        });
+  default:
+    return ch;
+  }
+}
+
 EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
+  EXPECT<std::monostate> ret{};
   ch_temp.clear();
-  while (1) {
-    std::expected ch = next(nullptr);
-    if (not ch)
-      return std::unexpected{PARSE_STRING::UNEXPECTED_END};
-    if (token.str.sep == '`') {
-      if (*ch == '\r') {
-        skip_lf();
-        ch = '\n';
-      }
-    } else if (*ch == '\r' || *ch == '\n') {
-      backtrack(nullptr, 1);
-      return std::unexpected{PARSE_STRING::UNEXPECTED_END};
-    }
-    if (*ch == token.str.sep)
-      return std::monostate{};
+  while (ret) {
+    std::expected ch_exp = next(nullptr).transform_error(
+        [](int) -> int { return PARSE_STRING::UNEXPECTED_END; });
+    std::expected ch_opt = ch_exp.and_then(
+        [this](char32_t ch) { return parse_uchar(PARSE_STRING{}, ch); });
+    ret = ch_opt.transform([](auto) { return std::monostate{}; });
+    if (not ch_opt.value_or(std::nullopt))
+      continue;
+    char32_t ch = **ch_opt;
+    if (ch == token.str.sep)
+      break;
     int fwd_cnt = 0;
-    if (token.str.sep == '`' && *ch == '$' && next(&fwd_cnt) == '{')
-      return std::monostate{};
+    if (token.str.sep == '`' && ch == '$' && next(&fwd_cnt) == '{')
+      break;
     backtrack(nullptr, fwd_cnt);
-    if (*ch == '\\') {
-      std::expected esc = parse_escape(PARSE_STRING{});
-      if (esc)
-        ch = esc;
-      else if (esc.error() == PARSE_STRING::MUST_CONTINUE)
-        continue;
-      else
-        return std::unexpected{esc.error()};
-    }
-    ENCODED_POINT cp = codepoint_cv(*ch);
+    ENCODED_POINT cp = codepoint_cv(ch);
     ch_temp.append(cp.sv());
   }
+  return ret;
 }
 
 EXPECT<ENCODED_POINT> ParseDriver::parse_uchar(PARSE_IDENT ident,
@@ -437,24 +442,24 @@ EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
 
 EXPECT<bool> ParseDriver::parse_comment(PARSE_TOKEN, char32_t ch) {
   switch (ch) {
-    case '/':
-      while (1) {
-        if (not parse_comment_line(PARSE_TOKEN{}))
-          break;
-      }
-      break;
-    case '*':
-      while (1) {
-        std::expected comment = parse_comment_block(PARSE_TOKEN{});
-        if (not comment)
-          return std::unexpected{comment.error()};
-        if (not *comment)
-          break;
-      }
-      break;
-    default:
-      backtrack(nullptr, 1);
-      break;
+  case '/':
+    while (1) {
+      if (not parse_comment_line(PARSE_TOKEN{}))
+        break;
+    }
+    break;
+  case '*':
+    while (1) {
+      std::expected comment = parse_comment_block(PARSE_TOKEN{});
+      if (not comment)
+        return std::unexpected{comment.error()};
+      if (not *comment)
+        break;
+    }
+    break;
+  default:
+    backtrack(nullptr, 1);
+    break;
   }
   return 1;
 }
@@ -467,34 +472,34 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
   }
 
   switch (*ch) {
-    case '\r':
-      skip_lf();
-      [[fallthrough]];
+  case '\r':
+    skip_lf();
+    [[fallthrough]];
 
-    case '\n':
-    case 0x2028:
-    case 0x2029:
-      token.newline_seen = 1;
+  case '\n':
+  case 0x2028:
+  case 0x2029:
+    token.newline_seen = 1;
+    return 1;
+
+  case '/': {
+    std::expected ahead = next(nullptr);
+    if (not ahead)
       return 1;
+    return parse_comment(PARSE_TOKEN{}, *ahead);
+  }
 
-    case '/': {
-      std::expected ahead = next(nullptr);
-      if (not ahead)
-        return 1;
-      return parse_comment(PARSE_TOKEN{}, *ahead);
-    }
-
-    case '\'':
-    case '"':
-      token.str.sep = *ch;
-      return parse(PARSE_STRING{}).transform([this](std::monostate) {
-        token.kind = K_TOKEN_STRING;
-        token.str.atom_idx =
-            find_static_atom()
-                .or_else([this](std::monostate) { return find_dynamic_atom(); })
-                .value();
-        return 0;
-      });
+  case '\'':
+  case '"':
+    token.str.sep = *ch;
+    return parse(PARSE_STRING{}).transform([this](std::monostate) {
+      token.kind = K_TOKEN_STRING;
+      token.str.atom_idx =
+          find_static_atom()
+              .or_else([this](std::monostate) { return find_dynamic_atom(); })
+              .value();
+      return 0;
+    });
   }
 
   if (u_isWhitespace(*ch))
@@ -578,14 +583,13 @@ bool ParseDriver::parse() {
     return 0;
 
   switch (*intro) {
-    case K_TOKEN_CONST:
-    case K_TOKEN_LET:
-    case K_TOKEN_VAR: {
-      parse(PARSE_VARIABLE_DECLARATION{});
-      return 1;
-    }
+  case K_TOKEN_CONST:
+  case K_TOKEN_LET:
+  case K_TOKEN_VAR:
+    parse(PARSE_VARIABLE_DECLARATION{});
+    return 1;
   }
 
   return 0;
 }
-}  // namespace Manadrain
+} // namespace Manadrain

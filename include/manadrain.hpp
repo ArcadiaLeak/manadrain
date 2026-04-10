@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <deque>
 #include <expected>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -100,8 +101,8 @@ struct ENCODED_POINT {
 };
 ENCODED_POINT codepoint_cv(char32_t ch);
 
-template <typename T>
-using EXPECT = std::expected<T, int>;
+template <typename T> using EXPECT = std::expected<T, int>;
+template <typename T> using EXPECT_OPT = std::expected<std::optional<T>, int>;
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
@@ -116,13 +117,13 @@ struct ParseDriver {
   STRICTNESS strictness;
   std::deque<STATEMENT> program;
 
-  EXPECT<char32_t> next(int* advance);
-  EXPECT<char32_t> prev(int* advance);
-  std::string take(int* advance, int N);
-  int backtrack(int* advance, int N);
+  EXPECT<char32_t> next(int *advance);
+  EXPECT<char32_t> prev(int *advance);
+  std::string take(int *advance, int N);
+  int backtrack(int *advance, int N);
   void skip_lf();
 
-  EXPECT<char32_t> parse_hex(int* advance);
+  EXPECT<char32_t> parse_hex(int *advance);
 
   EXPECT<char32_t> parse_hex(PARSE_ESCAPE);
   char32_t parse_oct_digit(PARSE_ESCAPE, char32_t oct);
@@ -132,7 +133,8 @@ struct ParseDriver {
   bool parse_null(PARSE_ESCAPE);
   EXPECT<char32_t> parse(PARSE_ESCAPE);
 
-  EXPECT<char32_t> parse_escape(PARSE_STRING);
+  EXPECT_OPT<char32_t> parse_escape(PARSE_STRING, char32_t ch);
+  EXPECT_OPT<char32_t> parse_uchar(PARSE_STRING, char32_t ch);
   EXPECT<std::monostate> parse(PARSE_STRING);
 
   EXPECT<ENCODED_POINT> parse_uchar(PARSE_IDENT, bool beginning);
@@ -153,4 +155,4 @@ struct ParseDriver {
 
   bool parse();
 };
-}  // namespace Manadrain
+} // namespace Manadrain
