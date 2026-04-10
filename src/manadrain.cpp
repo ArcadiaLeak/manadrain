@@ -33,11 +33,11 @@ static const std::array reserved_arr =
          {"let", K_TOKEN_LET, STRICTNESS::STRICT}});
 
 bool TOKEN::is_pseudo_kind(int rhs_kind) {
-  if (ident.has_escape)
+  if (ident().has_escape)
     return 0;
-  if (ident.atom_idx >= reserved_arr.size())
+  if (ident().atom_idx >= reserved_arr.size())
     return 0;
-  int lhs_kind = std::get<1>(reserved_arr[ident.atom_idx]);
+  auto [_, lhs_kind, _] = reserved_arr[ident().atom_idx];
   if (lhs_kind == rhs_kind)
     return 1;
   return 0;
@@ -294,7 +294,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse_escape(PARSE_STRING, char32_t ch) {
   ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
   if (strictness == STRICTNESS::STRICT)
     esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-  else if (token.str.sep == '`')
+  else if (token.str().sep == '`')
     esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
   return parse(PARSE_ESCAPE{esc_rule}, ch);
 }
@@ -305,7 +305,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
     skip_lf();
     [[fallthrough]];
   case '\n':
-    if (token.str.sep == '`')
+    if (token.str().sep == '`')
       return '\n';
     return std::unexpected{PARSE_ERRCODE::STRING__UNEXPECTED_END};
   case '\\': {
@@ -336,10 +336,10 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
     if (not ch_exp.value_or(std::nullopt))
       continue;
     char32_t ch = **ch_exp;
-    if (ch == token.str.sep)
+    if (ch == token.str().sep)
       break;
     int fwd_cnt = 0;
-    if (token.str.sep == '`' && ch == '$' && next(&fwd_cnt) == '{')
+    if (token.str().sep == '`' && ch == '$' && next(&fwd_cnt) == '{')
       break;
     backtrack(nullptr, fwd_cnt);
     ENCODED_POINT cp = codepoint_cv(ch);
@@ -353,7 +353,7 @@ EXPECT<ENCODED_POINT> ParseDriver::parse_uchar(PARSE_IDENT ident,
   int fwd_cnt = 0;
   std::string ahead{take(&fwd_cnt, 2)};
   if (ahead == "\\u")
-    token.ident.has_escape = 1;
+    token.ident().has_escape = 1;
   else
     backtrack(nullptr, fwd_cnt);
   UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
@@ -477,10 +477,10 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
 
   case '\'':
   case '"':
-    token.str.sep = *ch;
+    token.data = TOKEN::PAYLOAD_STR{.sep = *ch};
     return parse(PARSE_STRING{}).transform([this](std::monostate) {
       token.kind = K_TOKEN_STRING;
-      token.str.atom_idx =
+      token.str().atom_idx =
           find_static_atom()
               .or_else([this](std::monostate) { return find_dynamic_atom(); })
               .value();
@@ -492,11 +492,12 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
     return 1;
 
   backtrack(nullptr, 1);
+  token.data = TOKEN::PAYLOAD_IDENT{};
   std::expected ident_outcome = parse(PARSE_IDENT{});
   if (ident_outcome.value_or(1))
     return ident_outcome.transform([this](bool) {
       token.kind = K_TOKEN_IDENT;
-      token.ident.atom_idx =
+      token.ident().atom_idx =
           find_static_atom()
               .or_else([this](std::monostate) { return find_dynamic_atom(); })
               .value();
@@ -506,20 +507,20 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
 
   return next(nullptr).transform([this](char32_t ch_tok) {
     token.kind = K_TOKEN_UCHAR;
-    token.uchar = ch_tok;
+    token.data = ch_tok;
     return 0;
   });
 }
 
 void ParseDriver::update_token_ident() {
-  std::size_t i = token.ident.atom_idx;
+  std::size_t i = token.ident().atom_idx;
   if (i >= reserved_arr.size())
     return;
   auto [literal, tok_kind, tok_strict] = reserved_arr[i];
   if (strictness < tok_strict)
     return;
-  if (token.ident.has_escape)
-    token.ident.is_reserved = 1;
+  if (token.ident().has_escape)
+    token.ident().is_reserved = 1;
   else
     token.kind = tok_kind;
 }
@@ -540,23 +541,24 @@ TOKEN_KIND ParseDriver::parse_init(PARSE_STATEMENT) {
 }
 
 EXPECT<std::monostate> ParseDriver::parse(PARSE_VARIABLE_DECLARATION) {
-  std::expected name = parse(PARSE_TOKEN{});
-  bool token_is_ident = name.transform([this](std::monostate) {
+  std::expected tok_expect = parse(PARSE_TOKEN{});
+  bool token_is_ident = tok_expect
+                            .transform([this](std::monostate) {
                               return token.kind == K_TOKEN_IDENT;
                             })
                             .value_or(0);
   if (not token_is_ident)
     return std::unexpected{PARSE_ERRCODE::VARIABLE_NAME_EXPECTED};
-  std::expected assign_or_semi = parse(PARSE_TOKEN{});
+  tok_expect = parse(PARSE_TOKEN{});
   bool has_assign =
-      assign_or_semi
+      tok_expect
           .transform([this](std::monostate) {
-            return token.kind == K_TOKEN_UCHAR && token.uchar == '=';
+            return token.kind == K_TOKEN_UCHAR && token.uchar() == '=';
           })
           .value_or(0);
   if (has_assign) {
-    std::expected init = parse(PARSE_TOKEN{});
-    return init;
+    tok_expect = parse(PARSE_TOKEN{});
+    tok_expect = parse(PARSE_TOKEN{});
   }
   return std::monostate{};
 }

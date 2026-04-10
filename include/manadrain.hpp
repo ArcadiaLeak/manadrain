@@ -30,14 +30,15 @@ struct TOKEN {
     bool is_reserved;
     std::size_t atom_idx;
   };
-
   TOKEN_KIND kind;
   bool is_pseudo_kind(int rhs_kind);
 
   bool newline_seen;
-  char32_t uchar;
-  PAYLOAD_STR str;
-  PAYLOAD_IDENT ident;
+  std::variant<char32_t, PAYLOAD_STR, PAYLOAD_IDENT> data;
+
+  PAYLOAD_STR &str() { return std::get<PAYLOAD_STR>(data); }
+  PAYLOAD_IDENT &ident() { return std::get<PAYLOAD_IDENT>(data); }
+  char32_t &uchar() { return std::get<char32_t>(data); }
 };
 
 struct EXPR_IDENT {
