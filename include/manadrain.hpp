@@ -70,7 +70,6 @@ struct PARSE_ESCAPE {
   enum ERRCODE {
     MALFORMED = PARSE_HEX::NOT_A_DIGIT + 1,
     LEGACY_OCTAL_SEQ,
-    NOT_AN_OCTAL_DIGIT,
     PER_SE_BACKSLASH
   };
   ESC_RULE rule;
@@ -126,7 +125,7 @@ struct ParseDriver {
   EXPECT<char32_t> parse_hex(int* advance);
 
   EXPECT<char32_t> parse_hex(PARSE_ESCAPE);
-  EXPECT<char32_t> parse_legacy_octal(PARSE_ESCAPE);
+  char32_t parse_oct_digit(PARSE_ESCAPE, char32_t oct);
   EXPECT<char32_t> parse_uni_braced(PARSE_ESCAPE);
   EXPECT<char32_t> parse_uni_fixed(PARSE_ESCAPE);
   EXPECT<char32_t> parse_uni(PARSE_ESCAPE);
