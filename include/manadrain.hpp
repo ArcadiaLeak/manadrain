@@ -89,7 +89,17 @@ struct PARSE_TOKEN {
 struct PARSE_IDENT {
   bool is_private;
 };
-struct PARSE_STMT {};
+struct PARSE_STATEMENT {};
+struct PARSE_VARIABLE_DECLARATION {
+  enum ERRCODE { VARIABLE_NAME_EXPECTED = PARSE_TOKEN::UNCLOSED_COMMENT + 1 };
+};
+
+struct ENCODED_POINT {
+  std::array<char, 4> buff;
+  std::uint16_t length;
+  std::string_view sv() const { return {buff.data(), length}; }
+};
+ENCODED_POINT codepoint_cv(char32_t ch);
 
 template <typename T>
 using EXPECT = std::expected<T, int>;
@@ -126,8 +136,8 @@ struct ParseDriver {
   EXPECT<char32_t> parse_escape(PARSE_STRING);
   EXPECT<std::monostate> parse(PARSE_STRING);
 
-  EXPECT<std::string> parse_uchar(PARSE_IDENT, bool beginning);
-  EXPECT<std::monostate> parse(PARSE_IDENT);
+  EXPECT<ENCODED_POINT> parse_uchar(PARSE_IDENT, bool beginning);
+  EXPECT<bool> parse(PARSE_IDENT);
   void update_token_ident();
 
   EXPECT<std::monostate> parse(PARSE_TOKEN);
@@ -136,7 +146,8 @@ struct ParseDriver {
   EXPECT<bool> parse_comment_block(PARSE_TOKEN);
   EXPECT<bool> parse_iter(PARSE_TOKEN);
 
-  TOKEN_KIND parse_init(PARSE_STMT);
+  EXPECT<std::monostate> parse(PARSE_VARIABLE_DECLARATION);
+  TOKEN_KIND parse_init(PARSE_STATEMENT);
 
   std::expected<std::size_t, std::monostate> find_static_atom();
   std::expected<std::size_t, std::monostate> find_dynamic_atom();
