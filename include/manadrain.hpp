@@ -31,7 +31,6 @@ struct TOKEN {
     std::size_t atom_idx;
   };
   TOKEN_KIND kind;
-  bool is_pseudo_kind(int rhs_kind);
   bool newline_seen;
   std::variant<char32_t, PAYLOAD_STR, PAYLOAD_IDENT> data;
 };
@@ -76,6 +75,7 @@ struct PARSE_IDENT {
 };
 struct PARSE_STATEMENT {};
 struct PARSE_VARDECL {};
+struct PARSE_POSTFIX_EXPR {};
 
 struct ENCODED_POINT {
   std::array<char, 4> buff;
@@ -92,7 +92,9 @@ struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::int32_t buffer_idx;
 
-  std::array<std::int32_t, 4> int_temp;
+  int mov_since_mark;
+  int mov_in_take;
+
   std::string str0_temp;
   std::string str1_temp;
 
@@ -107,8 +109,11 @@ struct ParseDriver {
   EXPECT<char32_t> next();
   EXPECT<char32_t> prev();
   std::string_view take(int N);
-  void backtrack(int N);
+  int backtrack(int N);
   void skip_lf();
+
+  std::optional<std::size_t> find_static_atom();
+  std::optional<std::size_t> find_dynamic_atom();
 
   EXPECT<char32_t> parse_hex();
 
@@ -122,23 +127,22 @@ struct ParseDriver {
 
   EXPECT_OPT<char32_t> parse_escape(PARSE_STRING, char32_t ch);
   EXPECT_OPT<char32_t> parse_uchar(PARSE_STRING, char32_t ch);
-  EXPECT<std::monostate> parse(PARSE_STRING);
+  EXPECT<void> parse(PARSE_STRING);
 
   EXPECT<ENCODED_POINT> parse_uchar(PARSE_IDENT, bool beginning);
   EXPECT<bool> parse(PARSE_IDENT);
   void update_token_ident();
 
-  EXPECT<std::monostate> parse(PARSE_TOKEN);
+  EXPECT<void> parse(PARSE_TOKEN);
   EXPECT<bool> parse_comment(PARSE_TOKEN, char32_t ahead);
   bool parse_comment_line(PARSE_TOKEN);
   EXPECT<bool> parse_comment_block(PARSE_TOKEN);
   EXPECT<bool> parse_iter(PARSE_TOKEN);
 
-  EXPECT<std::monostate> parse(PARSE_VARDECL);
-  TOKEN_KIND parse_init(PARSE_STATEMENT);
+  EXPECT<TOKEN_KIND> parse_init(PARSE_STATEMENT);
 
-  std::expected<std::size_t, std::monostate> find_static_atom();
-  std::expected<std::size_t, std::monostate> find_dynamic_atom();
+  EXPECT<void> parse(PARSE_VARDECL);
+  EXPECT<void> parse(PARSE_POSTFIX_EXPR);
 
   bool parse();
 };
