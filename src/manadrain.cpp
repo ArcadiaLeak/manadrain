@@ -115,7 +115,7 @@ EXPECT<char32_t> ParseDriver::parse_hex() {
   if (*uchar >= 'a' && *uchar <= 'f')
     return *uchar - 'a' + 10;
   prev();
-  return std::unexpected{PARSE_ERRCODE::HEX__NOT_A_DIGIT};
+  return std::unexpected{PARSE_ERRCODE::MALFORMED_ESCAPE};
 }
 
 EXPECT<char32_t> ParseDriver::parse_hex(PARSE_ESCAPE) {
@@ -147,7 +147,7 @@ EXPECT<char32_t> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
     break;
   }
   backtrack(std::get<0>(int_temp));
-  return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
+  return std::unexpected{PARSE_ERRCODE::MALFORMED_ESCAPE};
 }
 
 EXPECT<char32_t> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
@@ -157,7 +157,7 @@ EXPECT<char32_t> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
     std::expected hex = parse_hex();
     if (not hex) {
       backtrack(i);
-      return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
+      return std::unexpected{PARSE_ERRCODE::MALFORMED_ESCAPE};
     }
     high_surr = (high_surr << 4) | *hex;
   }
@@ -188,7 +188,7 @@ EXPECT<char32_t> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
   std::expected brace_or_digit = next();
   if (brace_or_digit == '{') {
     if (esc.rule == ESC_RULE::REGEXP_ASCII)
-      return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
+      return std::unexpected{PARSE_ERRCODE::MALFORMED_ESCAPE};
     return parse_uni_braced(esc);
   }
   prev();
@@ -246,11 +246,11 @@ EXPECT_OPT<char32_t> ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   case '7':
     switch (esc.rule) {
     case ESC_RULE::STRING_IN_STRICT_MODE:
-      return std::unexpected{PARSE_ERRCODE::ESCAPE__LEGACY_OCTAL_SEQ};
+      return std::unexpected{PARSE_ERRCODE::LEGACY_OCTAL_SEQ};
 
     case ESC_RULE::STRING_IN_TEMPLATE:
     case ESC_RULE::REGEXP_UTF16:
-      return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
+      return std::unexpected{PARSE_ERRCODE::MALFORMED_ESCAPE};
 
     default: {
       char32_t oct = ch - '0';
@@ -265,7 +265,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   case '9':
     if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
         esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
-      return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
+      return std::unexpected{PARSE_ERRCODE::MALFORMED_ESCAPE};
     [[fallthrough]];
   default:
     return std::nullopt;
@@ -304,7 +304,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
   case '\n':
     if (token.str().sep == '`')
       return '\n';
-    return std::unexpected{PARSE_ERRCODE::STRING__UNEXPECTED_END};
+    return std::unexpected{PARSE_ERRCODE::STRING_UNEXPECTED_END};
   case '\\': {
     std::expected ahead = next();
     if (not ahead)
@@ -324,7 +324,7 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
   while (ret) {
     std::expected ch_exp = next()
                                .transform_error([](PARSE_ERRCODE) {
-                                 return PARSE_ERRCODE::STRING__UNEXPECTED_END;
+                                 return PARSE_ERRCODE::STRING_UNEXPECTED_END;
                                })
                                .and_then([this](char32_t ch) {
                                  return parse_uchar(PARSE_STRING{}, ch);
@@ -409,7 +409,7 @@ bool ParseDriver::parse_comment_line(PARSE_TOKEN) {
 
 EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
   if (not next())
-    return std::unexpected{PARSE_ERRCODE::UNCLOSED_COMMENT};
+    return std::unexpected{PARSE_ERRCODE::COMMENT_UNEXPECTED_END};
   prev();
   std::get<0>(int_temp) = 0;
   if (take(2) == "*/")
