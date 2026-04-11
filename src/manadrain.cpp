@@ -353,12 +353,11 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
 }
 
 EXPECT<ENCODED_POINT> ParseDriver::parse_uchar(PARSE_IDENT, bool beginning) {
-  std::get<0>(int_temp) = 0;
   std::string ahead{take(2)};
   if (ahead == "\\u")
     tok_identifier(token).has_escape = 1;
   else
-    backtrack(std::get<0>(int_temp));
+    backtrack(std::get<1>(int_temp));
   UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
   std::expected ch_exp =
       ahead == "\\u" ? parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER}) : next();
@@ -417,10 +416,9 @@ EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
   if (not next())
     return std::unexpected{PARSE_ERRCODE::COMMENT_UNEXPECTED_END};
   prev();
-  std::get<0>(int_temp) = 0;
   if (take(2) == "*/")
     return 0;
-  backtrack(std::get<0>(int_temp));
+  backtrack(std::get<1>(int_temp));
   if (next().transform([](char32_t ch) { return is_lineterm(ch); }).value_or(0))
     token.newline_seen = 1;
   return 1;
