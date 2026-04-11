@@ -98,7 +98,9 @@ struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::int32_t buffer_idx;
 
-  std::string ch_temp;
+  std::array<std::int32_t, 4> int_temp;
+  std::string str0_temp;
+  std::string str1_temp;
   TOKEN token;
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
@@ -107,13 +109,13 @@ struct ParseDriver {
   STRICTNESS strictness;
   std::deque<STATEMENT> program;
 
-  EXPECT<char32_t> next(int *advance);
-  EXPECT<char32_t> prev(int *advance);
-  std::string take(int *advance, int N);
-  int backtrack(int *advance, int N);
+  EXPECT<char32_t> next();
+  EXPECT<char32_t> prev();
+  std::string_view take(int N);
+  void backtrack(int N);
   void skip_lf();
 
-  EXPECT<char32_t> parse_hex(int *advance);
+  EXPECT<char32_t> parse_hex();
 
   EXPECT<char32_t> parse_hex(PARSE_ESCAPE);
   char32_t parse_oct_digit(PARSE_ESCAPE, char32_t oct);

@@ -44,71 +44,68 @@ bool TOKEN::is_pseudo_kind(int rhs_kind) {
 }
 
 std::expected<std::size_t, std::monostate> ParseDriver::find_dynamic_atom() {
-  if (not atom_umap.contains(ch_temp)) {
-    atom_deq.push_back(std::move(ch_temp));
+  if (not atom_umap.contains(str0_temp)) {
+    atom_deq.push_back(std::move(str0_temp));
     atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
   }
   return atom_umap[atom_deq.back()];
 }
 
-EXPECT<char32_t> ParseDriver::next(int *advance) {
+EXPECT<char32_t> ParseDriver::next() {
   if (buffer_idx < buffer.size()) {
     UChar32 ch;
     U8_NEXT_OR_FFFD(buffer.data(), buffer_idx, buffer.size(), ch);
-    if (advance)
-      ++(*advance);
+    for (int &el_int : int_temp)
+      ++el_int;
     return ch;
   }
   return std::unexpected{PARSE_ERRCODE::OUT_OF_RANGE};
 }
 
-EXPECT<char32_t> ParseDriver::prev(int *advance) {
+EXPECT<char32_t> ParseDriver::prev() {
   if (0 < buffer_idx) {
     UChar32 ch;
     U8_PREV_OR_FFFD(buffer.data(), 0, buffer_idx, ch);
-    if (advance)
-      --(*advance);
+    for (int &el_int : int_temp)
+      --el_int;
     return ch;
   }
   return std::unexpected{PARSE_ERRCODE::OUT_OF_RANGE};
 }
 
-int ParseDriver::backtrack(int *advance, int N) {
-  int i = 0;
+void ParseDriver::backtrack(int N) {
+  int &i = std::get<1>(int_temp);
+  i = 0;
   while (N + i > 0) {
-    std::expected ch{prev(&i)};
+    std::expected ch{prev()};
     if (not ch)
       break;
   }
-  if (advance)
-    *advance += i;
-  return i;
 }
 
-std::string ParseDriver::take(int *advance, int N) {
-  std::string ret{};
-  int i = 0;
+std::string_view ParseDriver::take(int N) {
+  str1_temp.clear();
+  int &i = std::get<1>(int_temp);
+  i = 0;
   while (i < N) {
-    std::expected ch{next(&i)};
+    std::expected ch{next()};
     if (not ch)
       break;
     ENCODED_POINT cp = codepoint_cv(*ch);
-    ret.append(cp.sv());
+    str1_temp.append(cp.sv());
   }
-  if (advance)
-    *advance += i;
-  return ret;
+  return str1_temp;
 }
 
 void ParseDriver::skip_lf() {
-  std::expected ahead = next(nullptr);
+  std::expected ahead = next();
   if (not ahead || ahead == '\n')
     return;
-  backtrack(nullptr, 1);
+  prev();
 }
 
-EXPECT<char32_t> ParseDriver::parse_hex(int *advance) {
-  std::expected uchar{next(advance)};
+EXPECT<char32_t> ParseDriver::parse_hex() {
+  std::expected uchar{next()};
   if (not uchar)
     return uchar;
   if (*uchar >= '0' && *uchar <= '9')
@@ -117,39 +114,39 @@ EXPECT<char32_t> ParseDriver::parse_hex(int *advance) {
     return *uchar - 'A' + 10;
   if (*uchar >= 'a' && *uchar <= 'f')
     return *uchar - 'a' + 10;
-  backtrack(advance, 1);
+  prev();
   return std::unexpected{PARSE_ERRCODE::HEX__NOT_A_DIGIT};
 }
 
 EXPECT<char32_t> ParseDriver::parse_hex(PARSE_ESCAPE) {
-  std::expected hex0 = parse_hex(nullptr);
+  std::expected hex0 = parse_hex();
   if (not hex0)
     return hex0;
-  std::expected hex1 = parse_hex(nullptr);
+  std::expected hex1 = parse_hex();
   if (not hex1) {
-    backtrack(nullptr, 1);
+    prev();
     return hex1;
   }
   return (*hex0 << 4) | *hex1;
 }
 
 EXPECT<char32_t> ParseDriver::parse_uni_braced(PARSE_ESCAPE) {
-  int fwd_cnt = 0;
+  std::get<0>(int_temp) = 0;
   char32_t utf16_char = 0;
   while (1) {
     if (utf16_char > 0x10FFFF)
       break;
-    std::expected hex = parse_hex(&fwd_cnt);
+    std::expected hex = parse_hex();
     if (hex) {
       utf16_char = (utf16_char << 4) | *hex;
       continue;
     }
-    std::expected closing = next(&fwd_cnt);
+    std::expected closing = next();
     if (closing == '}')
       return utf16_char;
     break;
   }
-  backtrack(nullptr, fwd_cnt);
+  backtrack(std::get<0>(int_temp));
   return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
 }
 
@@ -157,19 +154,19 @@ EXPECT<char32_t> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
   char32_t high_surr{}, low_surr{};
 
   for (int i = 0; i < 4; i++) {
-    std::expected hex = parse_hex(nullptr);
+    std::expected hex = parse_hex();
     if (not hex) {
-      backtrack(nullptr, i);
+      backtrack(i);
       return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
     }
     high_surr = (high_surr << 4) | *hex;
   }
 
-  int fwd_cnt = 0;
+  std::get<0>(int_temp) = 0;
   if (is_hi_surrogate(high_surr) && esc.rule == ESC_RULE::REGEXP_UTF16 &&
-      take(&fwd_cnt, 2) == "\\u") {
+      take(2) == "\\u") {
     for (int i = 0; i < 4; i++) {
-      std::expected hex = parse_hex(&fwd_cnt);
+      std::expected hex = parse_hex();
       if (not hex)
         goto return_high;
       low_surr = (low_surr << 4) | *hex;
@@ -178,7 +175,7 @@ EXPECT<char32_t> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
   }
 
 return_high:
-  backtrack(nullptr, fwd_cnt);
+  backtrack(std::get<0>(int_temp));
   return high_surr;
 
 return_low:
@@ -188,22 +185,22 @@ return_low:
 }
 
 EXPECT<char32_t> ParseDriver::parse_uni(PARSE_ESCAPE esc) {
-  std::expected brace_or_digit = next(nullptr);
+  std::expected brace_or_digit = next();
   if (brace_or_digit == '{') {
     if (esc.rule == ESC_RULE::REGEXP_ASCII)
       return std::unexpected{PARSE_ERRCODE::ESCAPE__MALFORMED};
     return parse_uni_braced(esc);
   }
-  backtrack(nullptr, 1);
+  prev();
   return brace_or_digit.and_then(
       [this, esc](char32_t) { return parse_uni_fixed(esc); });
 }
 
 char32_t ParseDriver::parse_oct_digit(PARSE_ESCAPE, char32_t oct) {
   std::expected ahead =
-      next(nullptr).transform([](char32_t ch_ahead) { return ch_ahead - '0'; });
+      next().transform([](char32_t ch_ahead) { return ch_ahead - '0'; });
   if (ahead.transform([](char32_t digit) { return digit > 7; }).value_or(0)) {
-    backtrack(nullptr, 1);
+    prev();
     return oct;
   }
   return ahead.transform([oct](char32_t digit) { return (oct << 3) | digit; })
@@ -211,10 +208,10 @@ char32_t ParseDriver::parse_oct_digit(PARSE_ESCAPE, char32_t oct) {
 }
 
 bool ParseDriver::parse_null(PARSE_ESCAPE) {
-  std::expected ahead = next(nullptr);
+  std::expected ahead = next();
   if (not ahead)
     return 0;
-  backtrack(nullptr, 1);
+  prev();
   return std::isdigit(*ahead);
 }
 
@@ -309,7 +306,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
       return '\n';
     return std::unexpected{PARSE_ERRCODE::STRING__UNEXPECTED_END};
   case '\\': {
-    std::expected ahead = next(nullptr);
+    std::expected ahead = next();
     if (not ahead)
       return std::nullopt;
     return ahead.and_then([this](char32_t next_ch) {
@@ -323,9 +320,9 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
 
 EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
   EXPECT<std::monostate> ret{};
-  ch_temp.clear();
+  str0_temp.clear();
   while (ret) {
-    std::expected ch_exp = next(nullptr)
+    std::expected ch_exp = next()
                                .transform_error([](PARSE_ERRCODE) {
                                  return PARSE_ERRCODE::STRING__UNEXPECTED_END;
                                })
@@ -338,28 +335,27 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_STRING) {
     char32_t ch = **ch_exp;
     if (ch == token.str().sep)
       break;
-    int fwd_cnt = 0;
-    if (token.str().sep == '`' && ch == '$' && next(&fwd_cnt) == '{')
+    std::get<0>(int_temp) = 0;
+    if (token.str().sep == '`' && ch == '$' && next() == '{')
       break;
-    backtrack(nullptr, fwd_cnt);
+    backtrack(std::get<0>(int_temp));
     ENCODED_POINT cp = codepoint_cv(ch);
-    ch_temp.append(cp.sv());
+    str0_temp.append(cp.sv());
   }
   return ret;
 }
 
 EXPECT<ENCODED_POINT> ParseDriver::parse_uchar(PARSE_IDENT ident,
                                                bool beginning) {
-  int fwd_cnt = 0;
-  std::string ahead{take(&fwd_cnt, 2)};
+  std::get<0>(int_temp) = 0;
+  std::string ahead{take(2)};
   if (ahead == "\\u")
     token.ident().has_escape = 1;
   else
-    backtrack(nullptr, fwd_cnt);
+    backtrack(std::get<0>(int_temp));
   UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
-  std::expected ch_exp = ahead == "\\u"
-                             ? parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER})
-                             : next(nullptr);
+  std::expected ch_exp =
+      ahead == "\\u" ? parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER}) : next();
   return ch_exp.transform([must_be](char32_t ch) {
     return u_hasBinaryProperty(ch, must_be) ? codepoint_cv(ch)
                                             : ENCODED_POINT{};
@@ -367,9 +363,9 @@ EXPECT<ENCODED_POINT> ParseDriver::parse_uchar(PARSE_IDENT ident,
 }
 
 EXPECT<bool> ParseDriver::parse(PARSE_IDENT ident) {
-  ch_temp.clear();
+  str0_temp.clear();
   if (ident.is_private)
-    ch_temp.push_back('#');
+    str0_temp.push_back('#');
 
   bool beginning = 1;
   while (1) {
@@ -377,13 +373,13 @@ EXPECT<bool> ParseDriver::parse(PARSE_IDENT ident) {
     if (not conv_ch)
       return std::unexpected{conv_ch.error()};
     if (conv_ch->length == 0) {
-      backtrack(nullptr, 1);
+      prev();
       return !beginning;
     }
-    ch_temp.append(conv_ch->sv());
-    if (not next(nullptr))
+    str0_temp.append(conv_ch->sv());
+    if (not next())
       return 1;
-    backtrack(nullptr, 1);
+    prev();
     beginning = 0;
   }
 }
@@ -401,27 +397,25 @@ EXPECT<std::monostate> ParseDriver::parse(PARSE_TOKEN) {
 }
 
 bool ParseDriver::parse_comment_line(PARSE_TOKEN) {
-  std::expected ch = next(nullptr);
+  std::expected ch = next();
   if (not ch)
     return 0;
   if (is_lineterm(*ch)) {
-    backtrack(nullptr, 1);
+    prev();
     return 0;
   }
   return 1;
 }
 
 EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
-  if (not next(nullptr))
+  if (not next())
     return std::unexpected{PARSE_ERRCODE::UNCLOSED_COMMENT};
-  backtrack(nullptr, 1);
-  int fwd_cnt = 0;
-  if (take(&fwd_cnt, 2) == "*/")
+  prev();
+  std::get<0>(int_temp) = 0;
+  if (take(2) == "*/")
     return 0;
-  backtrack(nullptr, fwd_cnt);
-  if (next(nullptr)
-          .transform([](char32_t ch) { return is_lineterm(ch); })
-          .value_or(0))
+  backtrack(std::get<0>(int_temp));
+  if (next().transform([](char32_t ch) { return is_lineterm(ch); }).value_or(0))
     token.newline_seen = 1;
   return 1;
 }
@@ -444,14 +438,14 @@ EXPECT<bool> ParseDriver::parse_comment(PARSE_TOKEN, char32_t ch) {
     }
     break;
   default:
-    backtrack(nullptr, 1);
+    prev();
     break;
   }
   return 1;
 }
 
 EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
-  std::expected ch{next(nullptr)};
+  std::expected ch{next()};
   if (not ch) {
     token.kind = K_TOKEN_EOF;
     return 0;
@@ -469,7 +463,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
     return 1;
 
   case '/': {
-    std::expected ahead = next(nullptr);
+    std::expected ahead = next();
     if (not ahead)
       return 1;
     return parse_comment(PARSE_TOKEN{}, *ahead);
@@ -491,7 +485,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
   if (u_isWhitespace(*ch))
     return 1;
 
-  backtrack(nullptr, 1);
+  prev();
   token.data = TOKEN::PAYLOAD_IDENT{};
   std::expected ident_outcome = parse(PARSE_IDENT{});
   if (ident_outcome.value_or(1))
@@ -505,7 +499,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
       return 0;
     });
 
-  return next(nullptr).transform([this](char32_t ch_tok) {
+  return next().transform([this](char32_t ch_tok) {
     token.kind = K_TOKEN_UCHAR;
     token.data = ch_tok;
     return 0;
@@ -528,7 +522,7 @@ void ParseDriver::update_token_ident() {
 std::expected<std::size_t, std::monostate> ParseDriver::find_static_atom() {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     auto [literal, _, _] = reserved_arr[i];
-    if (ch_temp == literal)
+    if (str0_temp == literal)
       return i;
   }
   return std::unexpected{std::monostate{}};
