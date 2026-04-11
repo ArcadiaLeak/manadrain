@@ -32,13 +32,8 @@ struct TOKEN {
   };
   TOKEN_KIND kind;
   bool is_pseudo_kind(int rhs_kind);
-
   bool newline_seen;
   std::variant<char32_t, PAYLOAD_STR, PAYLOAD_IDENT> data;
-
-  PAYLOAD_STR &str() { return std::get<PAYLOAD_STR>(data); }
-  PAYLOAD_IDENT &ident() { return std::get<PAYLOAD_IDENT>(data); }
-  char32_t &uchar() { return std::get<char32_t>(data); }
 };
 
 struct EXPR_IDENT {
@@ -47,7 +42,7 @@ struct EXPR_IDENT {
 using EXPRESSION = std::variant<EXPR_IDENT>;
 
 struct STMT_VARDECL {
-  int intro;
+  TOKEN_KIND intro;
   TOKEN::PAYLOAD_IDENT ident;
   TOKEN::PAYLOAD_STR init;
 };
@@ -80,7 +75,7 @@ struct PARSE_IDENT {
   bool is_private;
 };
 struct PARSE_STATEMENT {};
-struct PARSE_VARIABLE_DECLARATION {};
+struct PARSE_VARDECL {};
 
 struct ENCODED_POINT {
   std::array<char, 4> buff;
@@ -100,12 +95,13 @@ struct ParseDriver {
   std::array<std::int32_t, 4> int_temp;
   std::string str0_temp;
   std::string str1_temp;
-  TOKEN token;
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
 
   STRICTNESS strictness;
+  TOKEN token;
+  EXPRESSION expression;
   std::deque<STATEMENT> program;
 
   EXPECT<char32_t> next();
@@ -138,7 +134,7 @@ struct ParseDriver {
   EXPECT<bool> parse_comment_block(PARSE_TOKEN);
   EXPECT<bool> parse_iter(PARSE_TOKEN);
 
-  EXPECT<std::monostate> parse(PARSE_VARIABLE_DECLARATION);
+  EXPECT<std::monostate> parse(PARSE_VARDECL);
   TOKEN_KIND parse_init(PARSE_STATEMENT);
 
   std::expected<std::size_t, std::monostate> find_static_atom();
