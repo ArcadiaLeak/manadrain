@@ -1,3 +1,5 @@
+#include <stdexcept>
+
 #include <unicode/uchar.h>
 #include <unicode/ustring.h>
 
@@ -24,15 +26,6 @@ TOKEN::PAYLOAD_IDENT &tok_identifier(TOKEN &token) {
   return std::get<TOKEN::PAYLOAD_IDENT>(token.data);
 }
 
-ENCODED_POINT codepoint_cv(char32_t ch) {
-  std::uint16_t length{}, is_error{};
-  std::array<char, 4> buff{};
-  U8_APPEND(buff.data(), length, buff.size(), ch, is_error);
-  if (is_error)
-    length = 0;
-  return {buff, length};
-}
-
 static const std::array reserved_arr =
     std::to_array<std::tuple<std::string_view, TOKEN_KIND, STRICTNESS>>(
         {{"var", K_TOKEN_VAR, STRICTNESS::SLOPPY},
@@ -54,9 +47,19 @@ bool token_is_uchar(TOKEN &token, char32_t uchar) {
   return token.kind == K_TOKEN_UCHAR && std::get<char32_t>(token.data) == uchar;
 }
 
+void ParseDriver::codepoint_cv(char32_t cp) {
+  std::array<char, 4> buff{};
+  UBool is_error{};
+  std::uint32_t length{};
+  U8_APPEND(buff.data(), length, buff.size(), cp, is_error);
+  if (is_error)
+    throw std::runtime_error{"codepoint conversion failed!"};
+  str1_temp.append(std::string_view{buff.data(), length});
+}
+
 std::optional<std::size_t> ParseDriver::find_dynamic_atom() {
-  if (not atom_umap.contains(str0_temp)) {
-    atom_deq.push_back(std::move(str0_temp));
+  if (not atom_umap.contains(str1_temp)) {
+    atom_deq.push_back(std::move(str1_temp));
     atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
   }
   return atom_umap[atom_deq.back()];
@@ -82,8 +85,16 @@ EXPECT<char32_t> ParseDriver::prev() {
   return std::unexpected{PARSE_ERRCODE::OUT_OF_RANGE};
 }
 
-int ParseDriver::backtrack(int N) {
-  int i = 0;
+std::optional<char32_t> ParseDriver::peek() {
+  std::expected ahead = next();
+  if (not ahead)
+    return std::nullopt;
+  prev();
+  return *ahead;
+}
+
+std::size_t ParseDriver::backtrack(std::size_t N) {
+  std::size_t i;
   for (i = 0; i < N; ++i) {
     std::expected ch{prev()};
     if (not ch)
@@ -92,16 +103,15 @@ int ParseDriver::backtrack(int N) {
   return i;
 }
 
-std::string_view ParseDriver::take(int N) {
-  str1_temp.clear();
-  for (mov_in_take = 0; mov_in_take < N; ++mov_in_take) {
+std::u32string_view ParseDriver::take(int N) {
+  str4_temp.clear();
+  while (str4_temp.size() < N) {
     std::expected ch{next()};
     if (not ch)
       break;
-    ENCODED_POINT cp = codepoint_cv(*ch);
-    str1_temp.append(cp.sv());
+    str4_temp.push_back(*ch);
   }
-  return str1_temp;
+  return str4_temp;
 }
 
 void ParseDriver::skip_lf() {
@@ -171,7 +181,7 @@ EXPECT<char32_t> ParseDriver::parse_uni_fixed(PARSE_ESCAPE esc) {
 
   mov_since_mark = 0;
   if (is_hi_surrogate(high_surr) && esc.rule == ESC_RULE::REGEXP_UTF16 &&
-      take(2) == "\\u") {
+      take(2) == U"\\u") {
     for (int i = 0; i < 4; i++) {
       std::expected hex = parse_hex();
       if (not hex)
@@ -298,7 +308,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse_escape(PARSE_STRING, char32_t ch) {
   ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
   if (strictness == STRICTNESS::STRICT)
     esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-  else if (tok_string(token).sep == '`')
+  else if (tok_string(token).separator == '`')
     esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
   return parse(PARSE_ESCAPE{esc_rule}, ch);
 }
@@ -309,7 +319,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
     skip_lf();
     [[fallthrough]];
   case '\n':
-    if (tok_string(token).sep == '`')
+    if (tok_string(token).separator == '`')
       return '\n';
     return std::unexpected{PARSE_ERRCODE::STRING_UNEXPECTED_END};
   case '\\': {
@@ -325,67 +335,77 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
   }
 }
 
-EXPECT<void> ParseDriver::parse(PARSE_STRING) {
-  str0_temp.clear();
-  EXPECT_OPT<char32_t> ch_exp{0};
-  while (ch_exp) {
-    ch_exp = next()
-                 .transform_error([](PARSE_ERRCODE) {
-                   return PARSE_ERRCODE::STRING_UNEXPECTED_END;
-                 })
-                 .and_then([this](char32_t ch) {
-                   return parse_uchar(PARSE_STRING{}, ch);
-                 });
-    if (not ch_exp.value_or(std::nullopt))
-      continue;
-    char32_t ch = **ch_exp;
-    if (ch == tok_string(token).sep)
-      break;
-    mov_since_mark = 0;
-    if (tok_string(token).sep == '`' && ch == '$' && next() == '{')
-      break;
-    backtrack(mov_since_mark);
-    ENCODED_POINT cp = codepoint_cv(ch);
-    str0_temp.append(cp.sv());
-  }
-  return ch_exp.transform([](auto) { return; });
+bool ParseDriver::should_append(PARSE_STRING, char32_t ch) {
+  if (ch == tok_string(token).separator)
+    return 0;
+  if (tok_string(token).separator == '`' && ch == '$' && peek() == '{')
+    return 0;
+  return 1;
 }
 
-EXPECT<ENCODED_POINT> ParseDriver::parse_uchar(PARSE_IDENT, bool beginning) {
-  std::string ahead{take(2)};
-  if (ahead == "\\u")
+EXPECT<void> ParseDriver::parse(PARSE_STRING) {
+  str1_temp.clear();
+  EXPECT_OPT<char32_t> uchar_expect_opt{0};
+  while (uchar_expect_opt) {
+    uchar_expect_opt = next()
+                           .transform_error([](PARSE_ERRCODE) {
+                             return PARSE_ERRCODE::STRING_UNEXPECTED_END;
+                           })
+                           .and_then([this](char32_t ch) {
+                             return parse_uchar(PARSE_STRING{}, ch);
+                           });
+    std::optional should_append_opt =
+        uchar_expect_opt.value_or(std::nullopt).transform([this](char32_t ch) {
+          return should_append(PARSE_STRING{}, ch);
+        });
+    if (not should_append_opt)
+      continue;
+    if (not *should_append_opt)
+      break;
+    codepoint_cv(**uchar_expect_opt);
+  }
+  return uchar_expect_opt.transform([](auto) { return; });
+}
+
+bool ParseDriver::is_allowed_uchar(PARSE_IDENT ident, char32_t ch) {
+  UProperty must_be = str1_temp.size() == ident.is_private ? UCHAR_XID_START
+                                                           : UCHAR_XID_CONTINUE;
+  return u_hasBinaryProperty(ch, must_be);
+}
+
+EXPECT<bool> ParseDriver::parse_uchar(PARSE_IDENT ident) {
+  if (take(2) == U"\\u") {
     tok_identifier(token).has_escape = 1;
-  else
-    backtrack(mov_in_take);
-  UProperty must_be = beginning ? UCHAR_XID_START : UCHAR_XID_CONTINUE;
-  std::expected ch_exp =
-      ahead == "\\u" ? parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER}) : next();
-  return ch_exp.transform([must_be](char32_t ch) {
-    return u_hasBinaryProperty(ch, must_be) ? codepoint_cv(ch)
-                                            : ENCODED_POINT{};
-  });
+    return parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER})
+        .transform([this, ident](char32_t ch) {
+          if (not is_allowed_uchar(ident, ch))
+            return 0;
+          codepoint_cv(ch);
+          return 1;
+        });
+  } else {
+    int i;
+    for (i = 0; i < str4_temp.size(); i++) {
+      char32_t ch = str4_temp[i];
+      if (not is_allowed_uchar(ident, ch))
+        break;
+      codepoint_cv(ch);
+    }
+    backtrack(str4_temp.size() - i);
+    return i > 0;
+  }
 }
 
 EXPECT<bool> ParseDriver::parse(PARSE_IDENT ident) {
-  str0_temp.clear();
+  str1_temp.clear();
   if (ident.is_private)
-    str0_temp.push_back('#');
+    str1_temp.push_back('#');
 
-  bool beginning = 1;
-  while (1) {
-    std::expected conv_ch = parse_uchar(PARSE_IDENT{}, beginning);
-    if (not conv_ch)
-      return std::unexpected{conv_ch.error()};
-    if (conv_ch->length == 0) {
-      prev();
-      return !beginning;
-    }
-    str0_temp.append(conv_ch->sv());
-    if (not next())
-      return 1;
-    prev();
-    beginning = 0;
-  }
+  EXPECT<bool> uchar_exp{1};
+  while (uchar_exp.value_or(0))
+    uchar_exp = parse_uchar(ident);
+  return uchar_exp.transform(
+      [this, ident](bool) { return str1_temp.size() > ident.is_private; });
 }
 
 EXPECT<void> ParseDriver::parse(PARSE_TOKEN) {
@@ -407,14 +427,14 @@ bool ParseDriver::parse_comment_line(PARSE_TOKEN) {
 }
 
 EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
-  if (not next())
-    return std::unexpected{PARSE_ERRCODE::COMMENT_UNEXPECTED_END};
-  prev();
-  if (take(2) == "*/")
+  if (take(2) == U"*/")
     return 0;
-  backtrack(mov_in_take);
-  if (next().transform([](char32_t ch) { return is_lineterm(ch); }).value_or(0))
+  if (str4_temp.empty())
+    return std::unexpected{PARSE_ERRCODE::COMMENT_UNEXPECTED_END};
+  if (is_lineterm(str4_temp.front()))
     token.newline_seen = 1;
+  str4_temp.pop_back();
+  backtrack(str4_temp.size());
   return 1;
 }
 
@@ -469,7 +489,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
 
   case '\'':
   case '"':
-    token.data = TOKEN::PAYLOAD_STR{.sep = *ch};
+    token.data = TOKEN::PAYLOAD_STR{.separator = *ch};
     return parse(PARSE_STRING{}).transform([this]() {
       token.kind = K_TOKEN_STRING;
       tok_string(token).atom_idx =
@@ -520,7 +540,7 @@ void ParseDriver::update_token_ident() {
 std::optional<std::size_t> ParseDriver::find_static_atom() {
   for (std::size_t i = 0; i < reserved_arr.size(); i++) {
     auto [literal, _, _] = reserved_arr[i];
-    if (str0_temp == literal)
+    if (str1_temp == literal)
       return i;
   }
   return std::nullopt;

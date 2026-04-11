@@ -22,7 +22,7 @@ enum TOKEN_KIND {
 
 struct TOKEN {
   struct PAYLOAD_STR {
-    char32_t sep;
+    char32_t separator;
     std::size_t atom_idx;
   };
   struct PAYLOAD_IDENT {
@@ -77,13 +77,6 @@ struct PARSE_STATEMENT {};
 struct PARSE_VARDECL {};
 struct PARSE_POSTFIX_EXPR {};
 
-struct ENCODED_POINT {
-  std::array<char, 4> buff;
-  std::uint16_t length;
-  std::string_view sv() const { return {buff.data(), length}; }
-};
-ENCODED_POINT codepoint_cv(char32_t ch);
-
 template <typename T> using EXPECT = std::expected<T, PARSE_ERRCODE>;
 template <typename T>
 using EXPECT_OPT = std::expected<std::optional<T>, PARSE_ERRCODE>;
@@ -93,10 +86,10 @@ struct ParseDriver {
   std::int32_t buffer_idx;
 
   int mov_since_mark;
-  int mov_in_take;
 
-  std::string str0_temp;
   std::string str1_temp;
+  std::u32string str4_temp;
+  void codepoint_cv(char32_t cp);
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
@@ -106,10 +99,11 @@ struct ParseDriver {
   EXPRESSION expression;
   std::deque<STATEMENT> program;
 
+  std::optional<char32_t> peek();
   EXPECT<char32_t> next();
   EXPECT<char32_t> prev();
-  std::string_view take(int N);
-  int backtrack(int N);
+  std::u32string_view take(int N);
+  std::size_t backtrack(std::size_t N);
   void skip_lf();
 
   std::optional<std::size_t> find_static_atom();
@@ -127,9 +121,11 @@ struct ParseDriver {
 
   EXPECT_OPT<char32_t> parse_escape(PARSE_STRING, char32_t ch);
   EXPECT_OPT<char32_t> parse_uchar(PARSE_STRING, char32_t ch);
+  bool should_append(PARSE_STRING, char32_t ch);
   EXPECT<void> parse(PARSE_STRING);
 
-  EXPECT<ENCODED_POINT> parse_uchar(PARSE_IDENT, bool beginning);
+  bool is_allowed_uchar(PARSE_IDENT ident, char32_t ch);
+  EXPECT<bool> parse_uchar(PARSE_IDENT);
   EXPECT<bool> parse(PARSE_IDENT);
   void update_token_ident();
 
