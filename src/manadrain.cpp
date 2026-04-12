@@ -19,13 +19,6 @@ static bool is_lineterm(char32_t ch) {
 }
 
 namespace Manadrain {
-TOKEN::PAYLOAD_STR &tok_string(TOKEN &token) {
-  return std::get<TOKEN::PAYLOAD_STR>(token.data);
-}
-TOKEN::PAYLOAD_IDENT &tok_identifier(TOKEN &token) {
-  return std::get<TOKEN::PAYLOAD_IDENT>(token.data);
-}
-
 static const std::array reserved_arr =
     std::to_array<std::tuple<std::string_view, TOKEN_KIND, STRICTNESS>>(
         {{"var", K_TOKEN_VAR, STRICTNESS::SLOPPY},
@@ -33,11 +26,13 @@ static const std::array reserved_arr =
          {"let", K_TOKEN_LET, STRICTNESS::STRICT}});
 
 bool token_is_pseudo_keyword(TOKEN &token, TOKEN_KIND keyword_kind) {
-  if (tok_identifier(token).has_escape)
+  TOKEN::PAYLOAD_IDENT identifier_ref =
+      std::get<TOKEN::PAYLOAD_IDENT>(token.data);
+  if (identifier_ref.has_escape)
     return 0;
-  if (tok_identifier(token).atom_idx >= reserved_arr.size())
+  if (identifier_ref.atom_idx >= reserved_arr.size())
     return 0;
-  auto [_, pseudo_kind, _] = reserved_arr[tok_identifier(token).atom_idx];
+  auto [_, pseudo_kind, _] = reserved_arr[identifier_ref.atom_idx];
   if (pseudo_kind == keyword_kind)
     return 1;
   return 0;
@@ -83,14 +78,6 @@ EXPECT<char32_t> ParseDriver::prev() {
     return ch;
   }
   return std::unexpected{PARSE_ERRCODE::OUT_OF_RANGE};
-}
-
-std::optional<char32_t> ParseDriver::peek() {
-  std::expected ahead = next();
-  if (not ahead)
-    return std::nullopt;
-  prev();
-  return *ahead;
 }
 
 std::size_t ParseDriver::backtrack(std::size_t N) {
@@ -308,7 +295,7 @@ EXPECT_OPT<char32_t> ParseDriver::parse_escape(PARSE_STRING, char32_t ch) {
   ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
   if (strictness == STRICTNESS::STRICT)
     esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-  else if (tok_string(token).separator == '`')
+  else if (std::get<TOKEN::PAYLOAD_STR>(token.data).separator == '`')
     esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
   return parse(PARSE_ESCAPE{esc_rule}, ch);
 }
@@ -319,9 +306,9 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
     skip_lf();
     [[fallthrough]];
   case '\n':
-    if (tok_string(token).separator == '`')
+    if (std::get<TOKEN::PAYLOAD_STR>(token.data).separator == '`')
       return '\n';
-    return std::unexpected{PARSE_ERRCODE::STRING_UNEXPECTED_END};
+    return std::unexpected{PARSE_ERRCODE::UNEXPECTED_STRING_END};
   case '\\': {
     std::expected ahead = next();
     if (not ahead)
@@ -336,10 +323,14 @@ EXPECT_OPT<char32_t> ParseDriver::parse_uchar(PARSE_STRING, char32_t ch) {
 }
 
 bool ParseDriver::should_append(PARSE_STRING, char32_t ch) {
-  if (ch == tok_string(token).separator)
+  char32_t separator = std::get<TOKEN::PAYLOAD_STR>(token.data).separator;
+  if (ch == separator)
     return 0;
-  if (tok_string(token).separator == '`' && ch == '$' && peek() == '{')
+  std::expected ahead = next();
+  if (separator == '`' && ch == '$' && ahead == '{')
     return 0;
+  if (ahead)
+    prev();
   return 1;
 }
 
@@ -349,7 +340,7 @@ EXPECT<void> ParseDriver::parse(PARSE_STRING) {
   while (uchar_expect_opt) {
     uchar_expect_opt = next()
                            .transform_error([](PARSE_ERRCODE) {
-                             return PARSE_ERRCODE::STRING_UNEXPECTED_END;
+                             return PARSE_ERRCODE::UNEXPECTED_STRING_END;
                            })
                            .and_then([this](char32_t ch) {
                              return parse_uchar(PARSE_STRING{}, ch);
@@ -375,7 +366,7 @@ bool ParseDriver::is_allowed_uchar(PARSE_IDENT ident, char32_t ch) {
 
 EXPECT<bool> ParseDriver::parse_uchar(PARSE_IDENT ident) {
   if (take(2) == U"\\u") {
-    tok_identifier(token).has_escape = 1;
+    std::get<TOKEN::PAYLOAD_IDENT>(token.data).has_escape = 1;
     return parse_uni(PARSE_ESCAPE{ESC_RULE::IDENTIFIER})
         .transform([this, ident](char32_t ch) {
           if (not is_allowed_uchar(ident, ch))
@@ -430,7 +421,7 @@ EXPECT<bool> ParseDriver::parse_comment_block(PARSE_TOKEN) {
   if (take(2) == U"*/")
     return 0;
   if (str4_temp.empty())
-    return std::unexpected{PARSE_ERRCODE::COMMENT_UNEXPECTED_END};
+    return std::unexpected{PARSE_ERRCODE::UNEXPECTED_COMMENT_END};
   if (is_lineterm(str4_temp.front()))
     token.newline_seen = 1;
   str4_temp.pop_back();
@@ -492,7 +483,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
     token.data = TOKEN::PAYLOAD_STR{.separator = *ch};
     return parse(PARSE_STRING{}).transform([this]() {
       token.kind = K_TOKEN_STRING;
-      tok_string(token).atom_idx =
+      std::get<TOKEN::PAYLOAD_STR>(token.data).atom_idx =
           find_static_atom()
               .or_else([this]() { return find_dynamic_atom(); })
               .value();
@@ -509,7 +500,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
   if (ident_outcome.value_or(1))
     return ident_outcome.transform([this](bool) {
       token.kind = K_TOKEN_IDENT;
-      tok_identifier(token).atom_idx =
+      std::get<TOKEN::PAYLOAD_IDENT>(token.data).atom_idx =
           find_static_atom()
               .or_else([this]() { return find_dynamic_atom(); })
               .value();
@@ -525,14 +516,16 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
 }
 
 void ParseDriver::update_token_ident() {
-  std::size_t i = tok_identifier(token).atom_idx;
+  TOKEN::PAYLOAD_IDENT &identifier_ref =
+      std::get<TOKEN::PAYLOAD_IDENT>(token.data);
+  std::size_t i = identifier_ref.atom_idx;
   if (i >= reserved_arr.size())
     return;
   auto [literal, tok_kind, tok_strict] = reserved_arr[i];
   if (strictness < tok_strict)
     return;
-  if (tok_identifier(token).has_escape)
-    tok_identifier(token).is_reserved = 1;
+  if (identifier_ref.has_escape)
+    identifier_ref.is_reserved = 1;
   else
     token.kind = tok_kind;
 }
@@ -556,37 +549,44 @@ EXPECT<TOKEN_KIND> ParseDriver::parse_init(PARSE_STATEMENT) {
 }
 
 EXPECT<void> ParseDriver::parse(PARSE_VARDECL) {
-  STMT_VARDECL &vardecl = std::get<STMT_VARDECL>(program.back());
-
-  return parse(PARSE_TOKEN{})
-      .and_then([this, &vardecl]() {
-        if (token.kind == K_TOKEN_IDENT) {
-          vardecl.ident = tok_identifier(token);
-          return EXPECT<void>{};
-        }
-        return EXPECT<void>{std::unexpect,
-                            PARSE_ERRCODE::VARIABLE_NAME_EXPECTED};
-      })
-      .and_then([this]() { return parse(PARSE_TOKEN{}); })
-      .and_then([this]() {
-        if (token_is_uchar(token, '=')) {
-          return parse(PARSE_POSTFIX_EXPR{}).and_then([this]() {
-            return parse(PARSE_TOKEN{});
+  STMT_VARDECL &declaration_ref = std::get<STMT_VARDECL>(program.back());
+  std::expected identifier_exp = parse(PARSE_TOKEN{}).and_then([this]() {
+    return token.kind == K_TOKEN_IDENT
+               ? EXPECT<void>{}
+               : EXPECT<void>{std::unexpect,
+                              PARSE_ERRCODE::NEEDED_VARIABLE_NAME};
+  });
+  if (identifier_exp)
+    declaration_ref.identifier = std::get<TOKEN::PAYLOAD_IDENT>(token.data);
+  std::expected postfix_exp =
+      identifier_exp.and_then([this]() { return parse(PARSE_TOKEN{}); })
+          .and_then([this]() {
+            return token_is_uchar(token, '=') ? parse(PARSE_POSTFIX_EXPR{})
+                                              : EXPECT<bool>{0};
           });
-        }
-        return EXPECT<void>{};
-      })
-      .and_then([this, &vardecl]() {
-        if (token_is_uchar(token, ';')) {
-          return EXPECT<void>{};
-        }
-        return EXPECT<void>{std::unexpect,
-                            PARSE_ERRCODE::VARIABLE_NAME_EXPECTED};
-      });
+  if (postfix_exp.value_or(0)) {
+    declaration_ref.initializer = expression;
+    postfix_exp = parse(PARSE_TOKEN{}).transform([]() { return 0; });
+  }
+  if (postfix_exp
+          .transform([this](bool) { return !token_is_uchar(token, ';'); })
+          .value_or(0)) {
+    token.data = TOKEN::PAYLOAD_ERR{U';'};
+    return EXPECT<void>{std::unexpect, PARSE_ERRCODE::NEEDED_SPECIFICLY};
+  }
+  return postfix_exp.transform([](bool) { return; });
 }
 
-EXPECT<void> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
-  return parse(PARSE_TOKEN{});
+EXPECT<bool> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
+  return parse(PARSE_TOKEN{}).and_then([this]() {
+    switch (token.kind) {
+    case K_TOKEN_STRING:
+      expression = std::get<TOKEN::PAYLOAD_STR>(token.data);
+      return EXPECT<bool>{1};
+    default:
+      return EXPECT<bool>{std::unexpect, PARSE_ERRCODE::UNEXPECTED_TOKEN};
+    }
+  });
 }
 
 bool ParseDriver::parse() {

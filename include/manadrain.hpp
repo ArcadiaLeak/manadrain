@@ -6,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <variant>
+#include <vector>
 
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
@@ -30,20 +31,18 @@ struct TOKEN {
     bool is_reserved;
     std::size_t atom_idx;
   };
+  using PAYLOAD_ERR = std::variant<char32_t>;
   TOKEN_KIND kind;
   bool newline_seen;
-  std::variant<char32_t, PAYLOAD_STR, PAYLOAD_IDENT> data;
+  std::variant<char32_t, PAYLOAD_STR, PAYLOAD_IDENT, PAYLOAD_ERR> data;
 };
 
-struct EXPR_IDENT {
-  std::size_t atom_idx;
-};
-using EXPRESSION = std::variant<EXPR_IDENT>;
+using EXPRESSION = std::variant<TOKEN::PAYLOAD_IDENT, TOKEN::PAYLOAD_STR>;
 
 struct STMT_VARDECL {
   TOKEN_KIND intro;
-  TOKEN::PAYLOAD_IDENT ident;
-  TOKEN::PAYLOAD_STR init;
+  TOKEN::PAYLOAD_IDENT identifier;
+  EXPRESSION initializer;
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
@@ -60,9 +59,11 @@ enum class PARSE_ERRCODE {
   OUT_OF_RANGE,
   MALFORMED_ESCAPE,
   LEGACY_OCTAL_SEQ,
-  STRING_UNEXPECTED_END,
-  COMMENT_UNEXPECTED_END,
-  VARIABLE_NAME_EXPECTED
+  UNEXPECTED_STRING_END,
+  UNEXPECTED_COMMENT_END,
+  UNEXPECTED_TOKEN,
+  NEEDED_VARIABLE_NAME,
+  NEEDED_SPECIFICLY
 };
 
 struct PARSE_ESCAPE {
@@ -97,9 +98,8 @@ struct ParseDriver {
   STRICTNESS strictness;
   TOKEN token;
   EXPRESSION expression;
-  std::deque<STATEMENT> program;
+  std::vector<STATEMENT> program;
 
-  std::optional<char32_t> peek();
   EXPECT<char32_t> next();
   EXPECT<char32_t> prev();
   std::u32string_view take(int N);
@@ -138,7 +138,7 @@ struct ParseDriver {
   EXPECT<TOKEN_KIND> parse_init(PARSE_STATEMENT);
 
   EXPECT<void> parse(PARSE_VARDECL);
-  EXPECT<void> parse(PARSE_POSTFIX_EXPR);
+  EXPECT<bool> parse(PARSE_POSTFIX_EXPR);
 
   bool parse();
 };
