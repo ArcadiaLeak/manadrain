@@ -26,7 +26,7 @@ static const std::array reserved_arr =
          {"let", K_TOKEN_LET, STRICTNESS::STRICT}});
 
 bool token_is_pseudo_keyword(TOKEN &token, TOKEN_KIND keyword_kind) {
-  TOKEN::PAYLOAD_IDENT identifier_ref =
+  TOKEN::PAYLOAD_IDENT &identifier_ref =
       std::get<TOKEN::PAYLOAD_IDENT>(token.data);
   if (identifier_ref.has_escape)
     return 0;
@@ -560,48 +560,46 @@ EXPECT<void> ParseDriver::parse(PARSE_VARDECL) {
     declaration_ref.identifier = std::get<TOKEN::PAYLOAD_IDENT>(token.data);
   std::expected postfix_exp =
       identifier_exp.and_then([this]() { return parse(PARSE_TOKEN{}); })
-          .and_then([this]() {
-            return token_is_uchar(token, '=') ? parse(PARSE_POSTFIX_EXPR{})
-                                              : EXPECT<bool>{0};
+          .and_then([this, &declaration_ref]() {
+            return token_is_uchar(token, '=')
+                       ? parse(PARSE_POSTFIX_EXPR{},
+                               declaration_ref.initializer)
+                             .and_then(
+                                 [this]() { return parse(PARSE_TOKEN{}); })
+                       : EXPECT<void>{};
           });
-  if (postfix_exp.value_or(0)) {
-    declaration_ref.initializer = expression;
-    postfix_exp = parse(PARSE_TOKEN{}).transform([]() { return 0; });
-  }
-  if (postfix_exp
-          .transform([this](bool) { return !token_is_uchar(token, ';'); })
+  if (postfix_exp.transform([this]() { return !token_is_uchar(token, ';'); })
           .value_or(0)) {
     token.data = TOKEN::PAYLOAD_ERR{U';'};
     return EXPECT<void>{std::unexpect, PARSE_ERRCODE::NEEDED_SPECIFICLY};
   }
-  return postfix_exp.transform([](bool) { return; });
+  return postfix_exp;
 }
 
-EXPECT<bool> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
-  return parse(PARSE_TOKEN{}).and_then([this]() {
+EXPECT<void> ParseDriver::parse(PARSE_POSTFIX_EXPR, EXPRESSION &expression) {
+  return parse(PARSE_TOKEN{}).and_then([this, &expression]() {
     switch (token.kind) {
     case K_TOKEN_STRING:
       expression = std::get<TOKEN::PAYLOAD_STR>(token.data);
-      return EXPECT<bool>{1};
+      return EXPECT<void>{};
     default:
-      return EXPECT<bool>{std::unexpect, PARSE_ERRCODE::UNEXPECTED_TOKEN};
+      return EXPECT<void>{std::unexpect, PARSE_ERRCODE::UNEXPECTED_TOKEN};
     }
   });
 }
 
 bool ParseDriver::parse() {
   return parse_init(PARSE_STATEMENT{})
-      .transform([this](TOKEN_KIND kind) {
+      .and_then([this](TOKEN_KIND kind) {
         switch (kind) {
         case K_TOKEN_CONST:
         case K_TOKEN_LET:
         case K_TOKEN_VAR:
           program.emplace_back(STMT_VARDECL{.intro = kind});
-          parse(PARSE_VARDECL{});
-          return 1;
+          return parse(PARSE_VARDECL{}).transform([]() -> bool { return 1; });
+        default:
+          return EXPECT<bool>{0};
         }
-
-        return 0;
       })
       .value_or(0);
 }

@@ -97,7 +97,6 @@ struct ParseDriver {
 
   STRICTNESS strictness;
   TOKEN token;
-  EXPRESSION expression;
   std::vector<STATEMENT> program;
 
   EXPECT<char32_t> next();
@@ -138,7 +137,7 @@ struct ParseDriver {
   EXPECT<TOKEN_KIND> parse_init(PARSE_STATEMENT);
 
   EXPECT<void> parse(PARSE_VARDECL);
-  EXPECT<bool> parse(PARSE_POSTFIX_EXPR);
+  EXPECT<void> parse(PARSE_POSTFIX_EXPR, EXPRESSION &expression);
 
   bool parse();
 };
