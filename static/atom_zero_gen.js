@@ -19,47 +19,32 @@ for (const lit of atom_literal_arr) {
 
   atom_zero_pos.push({
     offset,
-    length: lit.length
+    length: lit.length,
+    atom_name: lit.toUpperCase()
   });
 
   offset += aligned_length;
 }
 
-const decl_zero_pos = `\
-const std::array<std::pair<std::uint16_t, std::uint16_t>, ${atom_zero_pos.length}>
-    atom_zero_pos\
-`;
-const decl_zero_buf = `\
-const std::array<char, ${atom_zero_buf.length}> atom_zero_buf\
-`;
-
-const hpp_code = `\
+Deno.writeTextFile("include/atom_zero_page.hpp", `\
 #include <array>
 #include <cstdint>
 
 namespace Manadrain {
-extern ${decl_zero_pos};
-extern ${decl_zero_buf};
-}
-`;
+struct S_ATOM {
+  std::uint16_t offset;
+  std::uint16_t length;
+};
 
-const cpp_code = `\
-#include "atom_zero_page.hpp"
+${atom_zero_pos
+    .map(({ offset, length, atom_name }) =>
+      `constexpr S_ATOM S_ATOM_${atom_name}{${offset}, ${length}};`)
+    .join('\n')}
 
-namespace Manadrain {
-${decl_zero_pos}{{
-  ${atom_zero_pos
-    .map(({ offset, length }) => `{ ${offset}, ${length} }`)
-    .join(', ')}
-}};
-
-${decl_zero_buf}{{
+static const std::array<char, ${atom_zero_buf.length}> atom_zero_buf{{
   ${atom_zero_buf
     .map((ch_code) => ch_code.toString())
     .join(', ')}
 }};
 }
-`;
-
-Deno.writeTextFile("include/atom_zero_page.hpp", hpp_code);
-Deno.writeTextFile("src/atom_zero_page.cpp", cpp_code);
+`);
