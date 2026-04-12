@@ -3,6 +3,7 @@
 #include <unicode/uchar.h>
 #include <unicode/ustring.h>
 
+#include "atom_zero_page.hpp"
 #include "manadrain.hpp"
 
 static bool is_hi_surrogate(char32_t c) {
@@ -36,6 +37,16 @@ bool token_is_pseudo_keyword(TOKEN &token, TOKEN_KIND keyword_kind) {
   if (pseudo_kind == keyword_kind)
     return 1;
   return 0;
+}
+
+bool has_run_of_zeros(std::bitset<4096> &bits, int N) {
+  std::bitset inverse = ~bits;
+  for (int i = 0; i < N - 1; ++i) {
+    if (inverse.none())
+      return 0;
+    inverse &= inverse << 1;
+  }
+  return inverse.any();
 }
 
 bool token_is_uchar(TOKEN &token, char32_t uchar) {

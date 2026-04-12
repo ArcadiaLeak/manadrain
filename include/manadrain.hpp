@@ -1,4 +1,5 @@
 #include <array>
+#include <bitset>
 #include <cstdint>
 #include <deque>
 #include <expected>
@@ -94,6 +95,7 @@ struct ParseDriver {
 
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq;
+  // std::deque<std::pair<std::bitset<4096>, std::array<char, 8 * 4096>>> atom_deq;
 
   STRICTNESS strictness;
   TOKEN token;
