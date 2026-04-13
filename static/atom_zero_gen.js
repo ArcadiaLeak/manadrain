@@ -20,7 +20,7 @@ for (const lit of atom_literal_arr) {
   atom_zero_pos.push({
     offset,
     length: lit.length,
-    atom_name: lit.toUpperCase()
+    atom_name: lit
   });
 
   offset += aligned_length;
@@ -31,14 +31,16 @@ Deno.writeTextFile("include/atom_zero_page.hpp", `\
 #include <cstdint>
 
 namespace Manadrain {
-struct S_ATOM {
+struct P_ATOM {
+  std::uint16_t pageid;
   std::uint16_t offset;
   std::uint16_t length;
+  bool operator==(const P_ATOM&) const = default;
 };
 
 ${atom_zero_pos
     .map(({ offset, length, atom_name }) =>
-      `constexpr S_ATOM S_ATOM_${atom_name}{${offset}, ${length}};`)
+      `constexpr P_ATOM S_ATOM_${atom_name}{0, ${offset}, ${length}};`)
     .join('\n')}
 
 static const std::array<char, ${atom_zero_buf.length}> atom_zero_buf{{

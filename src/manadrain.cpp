@@ -1,9 +1,9 @@
+#include <limits>
 #include <stdexcept>
 
 #include <unicode/uchar.h>
 #include <unicode/ustring.h>
 
-#include "atom_zero_page.hpp"
 #include "manadrain.hpp"
 
 static bool is_hi_surrogate(char32_t c) {
@@ -21,32 +21,76 @@ static bool is_lineterm(char32_t ch) {
 
 namespace Manadrain {
 static const std::array reserved_arr =
-    std::to_array<std::tuple<std::string_view, TOKEN_KIND, STRICTNESS>>(
-        {{"var", K_TOKEN_VAR, STRICTNESS::SLOPPY},
-         {"const", K_TOKEN_CONST, STRICTNESS::SLOPPY},
-         {"let", K_TOKEN_LET, STRICTNESS::STRICT}});
+    std::to_array<std::tuple<P_ATOM, TOKEN_KIND, STRICTNESS>>(
+        {{S_ATOM_var, K_TOKEN_VAR, STRICTNESS::SLOPPY},
+         {S_ATOM_const, K_TOKEN_CONST, STRICTNESS::SLOPPY},
+         {S_ATOM_let, K_TOKEN_LET, STRICTNESS::STRICT}});
 
 bool token_is_pseudo_keyword(TOKEN &token, TOKEN_KIND keyword_kind) {
   TOKEN::PAYLOAD_IDENT &identifier_ref =
       std::get<TOKEN::PAYLOAD_IDENT>(token.data);
   if (identifier_ref.has_escape)
     return 0;
-  if (identifier_ref.atom_idx >= reserved_arr.size())
+  if (identifier_ref.p_atom.pageid > 0)
     return 0;
-  auto [_, pseudo_kind, _] = reserved_arr[identifier_ref.atom_idx];
-  if (pseudo_kind == keyword_kind)
-    return 1;
+  for (auto rsv_word : reserved_arr) {
+    auto [p_atom, pseudo_kind, _] = rsv_word;
+    if (identifier_ref.p_atom != p_atom)
+      continue;
+    if (pseudo_kind == keyword_kind)
+      return 1;
+  }
   return 0;
 }
 
-bool has_run_of_zeros(std::bitset<4096> &bits, int N) {
-  std::bitset inverse = ~bits;
-  for (int i = 0; i < N - 1; ++i) {
-    if (inverse.none())
+std::uint16_t block_N(std::size_t len) {
+  std::size_t N = len / ATOM_BLOCK + (len % ATOM_BLOCK != 0);
+  return static_cast<std::uint16_t>(N % ATOM_PAGE);
+}
+
+bool AtomPage::check_for_count(std::uint16_t N) {
+  return ch_bitset.count() >= N;
+}
+
+bool AtomPage::check_for_window(std::uint16_t N) {
+  std::bitset inv_bitset = ~ch_bitset;
+  for (std::uint16_t i = 0; i < N - 1; ++i) {
+    if (inv_bitset.none())
       return 0;
-    inverse &= inverse << 1;
+    inv_bitset &= inv_bitset << 1;
   }
-  return inverse.any();
+  return inv_bitset.any();
+}
+
+std::uint16_t AtomPage::scan_for_window(std::uint16_t N) {
+  std::uint16_t n_zeros = 0;
+  for (std::uint16_t i = 0; i < ch_bitset.size(); ++i) {
+    if (ch_bitset[i])
+      n_zeros = 0;
+    else {
+      n_zeros++;
+      if (n_zeros == N) {
+        std::uint16_t ret = i - N;
+        return ++ret;
+      }
+    }
+  }
+  throw std::runtime_error{"window seeking failed!"};
+}
+
+std::optional<std::uint16_t> AtomPage::try_allocate(std::uint16_t N) {
+  if (not check_for_count(N))
+    return std::nullopt;
+  if (not check_for_window(N))
+    return std::nullopt;
+  std::uint16_t offset = scan_for_window(N);
+  allocate(offset, N);
+  return offset;
+}
+
+void AtomPage::allocate(std::uint16_t offset, std::uint16_t N) {
+  for (std::uint16_t i = offset; i < N; ++i)
+    ch_bitset[i] = 1;
 }
 
 bool token_is_uchar(TOKEN &token, char32_t uchar) {
@@ -61,14 +105,6 @@ void ParseDriver::codepoint_cv(char32_t cp) {
   if (is_error)
     throw std::runtime_error{"codepoint conversion failed!"};
   str1_temp.append(std::string_view{buff.data(), length});
-}
-
-std::optional<std::size_t> ParseDriver::find_dynamic_atom() {
-  if (not atom_umap.contains(str1_temp)) {
-    atom_deq.push_back(std::move(str1_temp));
-    atom_umap[atom_deq.back()] = reserved_arr.size() + atom_deq.size() - 1;
-  }
-  return atom_umap[atom_deq.back()];
 }
 
 EXPECT<char32_t> ParseDriver::next() {
@@ -494,7 +530,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
     token.data = TOKEN::PAYLOAD_STR{.separator = *ch};
     return parse(PARSE_STRING{}).transform([this]() {
       token.kind = K_TOKEN_STRING;
-      std::get<TOKEN::PAYLOAD_STR>(token.data).atom_idx =
+      std::get<TOKEN::PAYLOAD_STR>(token.data).p_atom =
           find_static_atom()
               .or_else([this]() { return find_dynamic_atom(); })
               .value();
@@ -511,7 +547,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
   if (ident_outcome.value_or(1))
     return ident_outcome.transform([this](bool) {
       token.kind = K_TOKEN_IDENT;
-      std::get<TOKEN::PAYLOAD_IDENT>(token.data).atom_idx =
+      std::get<TOKEN::PAYLOAD_IDENT>(token.data).p_atom =
           find_static_atom()
               .or_else([this]() { return find_dynamic_atom(); })
               .value();
@@ -529,25 +565,66 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
 void ParseDriver::update_token_ident() {
   TOKEN::PAYLOAD_IDENT &identifier_ref =
       std::get<TOKEN::PAYLOAD_IDENT>(token.data);
-  std::size_t i = identifier_ref.atom_idx;
-  if (i >= reserved_arr.size())
+  if (identifier_ref.p_atom.pageid > 0)
     return;
-  auto [literal, tok_kind, tok_strict] = reserved_arr[i];
-  if (strictness < tok_strict)
-    return;
-  if (identifier_ref.has_escape)
-    identifier_ref.is_reserved = 1;
-  else
+  for (auto rsv_word : reserved_arr) {
+    auto [p_atom, tok_kind, tok_strict] = rsv_word;
+    if (identifier_ref.p_atom != p_atom)
+      continue;
+    if (strictness < tok_strict)
+      return;
+    if (identifier_ref.has_escape) {
+      identifier_ref.is_reserved = 1;
+      return;
+    }
     token.kind = tok_kind;
+    return;
+  }
 }
 
-std::optional<std::size_t> ParseDriver::find_static_atom() {
-  for (std::size_t i = 0; i < reserved_arr.size(); i++) {
-    auto [literal, _, _] = reserved_arr[i];
-    if (str1_temp == literal)
-      return i;
+std::optional<P_ATOM> ParseDriver::find_static_atom() {
+  for (std::uint16_t i = 0; i < reserved_arr.size(); i++) {
+    auto [p_atom, _, _] = reserved_arr[i];
+    if (str1_temp ==
+        std::string_view{atom_zero_buf.data() + p_atom.offset * ATOM_BLOCK,
+                         p_atom.length})
+      return p_atom;
   }
   return std::nullopt;
+}
+
+std::optional<P_ATOM> ParseDriver::find_dynamic_atom() {
+  if (str1_temp.size() > ATOM_BLOCK * ATOM_PAGE)
+    throw std::runtime_error{"a string literal exceeds limit!"};
+  if (not atom_umap.contains(str1_temp)) {
+    P_ATOM p_atom = alloc_dynamic_atom();
+    char *atom_strbegin =
+        atom_deq[p_atom.pageid - 1].ch_arr.data() + p_atom.offset * ATOM_BLOCK;
+    std::string_view atom_strview{atom_strbegin, p_atom.length};
+    atom_umap[atom_strview] = p_atom;
+  }
+  return atom_umap[str1_temp];
+}
+
+P_ATOM ParseDriver::alloc_dynamic_atom() {
+  std::uint16_t i, offset = 0;
+  for (i = 0; i < atom_deq.size(); ++i) {
+    std::optional offset_opt =
+        atom_deq[i].try_allocate(block_N(str1_temp.size()));
+    if (not offset_opt)
+      continue;
+    offset = *offset_opt;
+    goto copy_and_return;
+  }
+  if (atom_deq.size() == std::numeric_limits<std::uint16_t>::max())
+    throw std::runtime_error{"out of space for an atom!"};
+  ++i;
+  atom_deq.emplace_back();
+  atom_deq[i].allocate(0, block_N(str1_temp.size()));
+
+copy_and_return:
+  std::ranges::copy(str1_temp, atom_deq[i].ch_arr.begin());
+  return P_ATOM{++i, offset, static_cast<std::uint16_t>(str1_temp.size())};
 }
 
 EXPECT<TOKEN_KIND> ParseDriver::parse_init(PARSE_STATEMENT) {

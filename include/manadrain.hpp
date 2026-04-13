@@ -1,6 +1,4 @@
-#include <array>
 #include <bitset>
-#include <cstdint>
 #include <deque>
 #include <expected>
 #include <optional>
@@ -8,6 +6,8 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
+
+#include "atom_zero_page.hpp"
 
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
@@ -25,12 +25,12 @@ enum TOKEN_KIND {
 struct TOKEN {
   struct PAYLOAD_STR {
     char32_t separator;
-    std::size_t atom_idx;
+    P_ATOM p_atom;
   };
   struct PAYLOAD_IDENT {
     bool has_escape;
     bool is_reserved;
-    std::size_t atom_idx;
+    P_ATOM p_atom;
   };
   using PAYLOAD_ERR = std::variant<char32_t>;
   TOKEN_KIND kind;
@@ -83,6 +83,19 @@ template <typename T> using EXPECT = std::expected<T, PARSE_ERRCODE>;
 template <typename T>
 using EXPECT_OPT = std::expected<std::optional<T>, PARSE_ERRCODE>;
 
+constexpr std::uint8_t ATOM_BLOCK = 8;
+constexpr std::uint16_t ATOM_PAGE = 2048;
+
+struct AtomPage {
+  std::bitset<ATOM_PAGE> ch_bitset;
+  std::array<char, ATOM_BLOCK * ATOM_PAGE> ch_arr;
+  bool check_for_count(std::uint16_t N);
+  bool check_for_window(std::uint16_t N);
+  std::uint16_t scan_for_window(std::uint16_t N);
+  std::optional<std::uint16_t> try_allocate(std::uint16_t N);
+  void allocate(std::uint16_t offset, std::uint16_t N);
+};
+
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   std::int32_t buffer_idx;
@@ -93,9 +106,8 @@ struct ParseDriver {
   std::u32string str4_temp;
   void codepoint_cv(char32_t cp);
 
-  std::unordered_map<std::string_view, std::size_t> atom_umap;
-  std::deque<std::string> atom_deq;
-  // std::deque<std::pair<std::bitset<4096>, std::array<char, 8 * 4096>>> atom_deq;
+  std::unordered_map<std::string_view, P_ATOM> atom_umap;
+  std::deque<AtomPage> atom_deq;
 
   STRICTNESS strictness;
   TOKEN token;
@@ -107,8 +119,9 @@ struct ParseDriver {
   std::size_t backtrack(std::size_t N);
   void skip_lf();
 
-  std::optional<std::size_t> find_static_atom();
-  std::optional<std::size_t> find_dynamic_atom();
+  std::optional<P_ATOM> find_static_atom();
+  std::optional<P_ATOM> find_dynamic_atom();
+  P_ATOM alloc_dynamic_atom();
 
   EXPECT<char32_t> parse_hex();
 
