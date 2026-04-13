@@ -32,7 +32,7 @@ Deno.writeTextFile("include/atom_zero_page.hpp", `\
 
 namespace Manadrain {
 struct P_ATOM {
-  std::uint16_t pageid;
+  std::int16_t pageid;
   std::uint16_t offset;
   std::uint16_t length;
   bool operator==(const P_ATOM&) const = default;
@@ -40,7 +40,7 @@ struct P_ATOM {
 
 ${atom_zero_pos
     .map(({ offset, length, atom_name }) =>
-      `constexpr P_ATOM S_ATOM_${atom_name}{0, ${offset}, ${length}};`)
+      `constexpr P_ATOM S_ATOM_${atom_name}{-1, ${offset}, ${length}};`)
     .join('\n')}
 
 static const std::array<char, ${atom_zero_buf.length}> atom_zero_buf{{

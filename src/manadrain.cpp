@@ -31,7 +31,7 @@ bool token_is_pseudo_keyword(TOKEN &token, TOKEN_KIND keyword_kind) {
       std::get<TOKEN::PAYLOAD_IDENT>(token.data);
   if (identifier_ref.has_escape)
     return 0;
-  if (identifier_ref.p_atom.pageid > 0)
+  if (identifier_ref.p_atom.pageid >= 0)
     return 0;
   for (auto rsv_word : reserved_arr) {
     auto [p_atom, pseudo_kind, _] = rsv_word;
@@ -89,7 +89,7 @@ std::optional<std::uint16_t> AtomPage::try_allocate(std::uint16_t N) {
 }
 
 void AtomPage::allocate(std::uint16_t offset, std::uint16_t N) {
-  for (std::uint16_t i = offset; i < N; ++i)
+  for (std::uint16_t i = offset; i < offset + N; ++i)
     ch_bitset[i] = 1;
 }
 
@@ -565,7 +565,7 @@ EXPECT<bool> ParseDriver::parse_iter(PARSE_TOKEN) {
 void ParseDriver::update_token_ident() {
   TOKEN::PAYLOAD_IDENT &identifier_ref =
       std::get<TOKEN::PAYLOAD_IDENT>(token.data);
-  if (identifier_ref.p_atom.pageid > 0)
+  if (identifier_ref.p_atom.pageid >= 0)
     return;
   for (auto rsv_word : reserved_arr) {
     auto [p_atom, tok_kind, tok_strict] = rsv_word;
@@ -599,7 +599,7 @@ std::optional<P_ATOM> ParseDriver::find_dynamic_atom() {
   if (not atom_umap.contains(str1_temp)) {
     P_ATOM p_atom = alloc_dynamic_atom();
     char *atom_strbegin =
-        atom_deq[p_atom.pageid - 1].ch_arr.data() + p_atom.offset * ATOM_BLOCK;
+        atom_deq[p_atom.pageid].ch_arr.data() + p_atom.offset * ATOM_BLOCK;
     std::string_view atom_strview{atom_strbegin, p_atom.length};
     atom_umap[atom_strview] = p_atom;
   }
@@ -607,7 +607,8 @@ std::optional<P_ATOM> ParseDriver::find_dynamic_atom() {
 }
 
 P_ATOM ParseDriver::alloc_dynamic_atom() {
-  std::uint16_t i, offset = 0;
+  std::uint16_t offset = 0;
+  std::int16_t i;
   for (i = 0; i < atom_deq.size(); ++i) {
     std::optional offset_opt =
         atom_deq[i].try_allocate(block_N(str1_temp.size()));
@@ -616,15 +617,15 @@ P_ATOM ParseDriver::alloc_dynamic_atom() {
     offset = *offset_opt;
     goto copy_and_return;
   }
-  if (atom_deq.size() == std::numeric_limits<std::uint16_t>::max())
+  if (atom_deq.size() == std::numeric_limits<std::int16_t>::max())
     throw std::runtime_error{"out of space for an atom!"};
-  ++i;
   atom_deq.emplace_back();
   atom_deq[i].allocate(0, block_N(str1_temp.size()));
 
 copy_and_return:
-  std::ranges::copy(str1_temp, atom_deq[i].ch_arr.begin());
-  return P_ATOM{++i, offset, static_cast<std::uint16_t>(str1_temp.size())};
+  std::ranges::copy(str1_temp,
+                    atom_deq[i].ch_arr.begin() + offset * ATOM_BLOCK);
+  return P_ATOM{i, offset, static_cast<std::uint16_t>(str1_temp.size())};
 }
 
 EXPECT<TOKEN_KIND> ParseDriver::parse_init(PARSE_STATEMENT) {
