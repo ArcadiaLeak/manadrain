@@ -586,7 +586,7 @@ std::optional<P_ATOM> ParseDriver::find_static_atom() {
   for (std::uint16_t i = 0; i < reserved_arr.size(); i++) {
     auto [p_atom, _, _] = reserved_arr[i];
     if (str1_temp ==
-        std::string_view{atom_zero_buf.data() + p_atom.offset * ATOM_BLOCK,
+        std::string_view{neg1_page_buf.data() + p_atom.offset * ATOM_BLOCK,
                          p_atom.length})
       return p_atom;
   }

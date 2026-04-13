@@ -6,8 +6,8 @@ const atom_literal_arr = [
 
 let offset = 0;
 const encoder = new TextEncoder();
-const atom_zero_pos = [];
-const atom_zero_buf = [];
+const neg1_page_pos = [];
+const neg1_page_buf = [];
 
 for (const lit of atom_literal_arr) {
   const ch_arr = Array.from(encoder.encode(lit));
@@ -15,9 +15,9 @@ for (const lit of atom_literal_arr) {
 
   ch_arr.length = aligned_length * 8;
   ch_arr.fill(0, lit.length);
-  atom_zero_buf.push(...ch_arr);
+  neg1_page_buf.push(...ch_arr);
 
-  atom_zero_pos.push({
+  neg1_page_pos.push({
     offset,
     length: lit.length,
     atom_name: lit
@@ -26,7 +26,7 @@ for (const lit of atom_literal_arr) {
   offset += aligned_length;
 }
 
-Deno.writeTextFile("include/atom_zero_page.hpp", `\
+Deno.writeTextFile("include/atom_page_neg1.hpp", `\
 #include <array>
 #include <cstdint>
 
@@ -38,13 +38,13 @@ struct P_ATOM {
   bool operator==(const P_ATOM&) const = default;
 };
 
-${atom_zero_pos
+${neg1_page_pos
     .map(({ offset, length, atom_name }) =>
       `constexpr P_ATOM S_ATOM_${atom_name}{-1, ${offset}, ${length}};`)
     .join('\n')}
 
-static const std::array<char, ${atom_zero_buf.length}> atom_zero_buf{{
-  ${atom_zero_buf
+static const std::array<char, ${neg1_page_buf.length}> neg1_page_buf{{
+  ${neg1_page_buf
     .map((ch_code) => ch_code.toString())
     .join(', ')}
 }};
