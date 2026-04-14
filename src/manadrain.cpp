@@ -21,21 +21,20 @@ static bool is_lineterm(char32_t ch) {
 
 namespace Manadrain {
 static const std::array reserved_arr =
-    std::to_array<std::tuple<P_ATOM, TOKEN_KIND, STRICTNESS>>(
-        {{S_ATOM_var, K_TOKEN_VAR, STRICTNESS::SLOPPY},
-         {S_ATOM_const, K_TOKEN_CONST, STRICTNESS::SLOPPY},
-         {S_ATOM_let, K_TOKEN_LET, STRICTNESS::STRICT}});
+    std::to_array<std::tuple<P_ATOM, KEYWORD_KIND, STRICTNESS>>(
+        {{S_ATOM_var, KEYWORD_KIND::K_VAR, STRICTNESS::SLOPPY},
+         {S_ATOM_const, KEYWORD_KIND::K_CONST, STRICTNESS::SLOPPY},
+         {S_ATOM_let, KEYWORD_KIND::K_LET, STRICTNESS::STRICT}});
 
-int TOK_IDENTI::match_keyword_kind(TOKEN_KIND keyword_kind,
-                                   STRICTNESS strictness) {
+std::optional<KEYWORD_KIND> TOK_IDENTI::match_keyword(STRICTNESS strictness) {
   if (p_atom.pageid >= 0)
-    return 0;
+    return std::nullopt;
   for (auto rsv_word : reserved_arr) {
     auto [tok_atom, tok_kind, tok_strict] = rsv_word;
-    if (p_atom == tok_atom && strictness >= tok_strict)
-      return has_escape + 1;
+    if (p_atom == tok_atom && strictness >= tok_strict && !has_escape)
+      return tok_kind;
   }
-  return 0;
+  return std::nullopt;
 }
 
 bool AtomPage::check_for_count(int N) { return ch_bitset.count() >= N; }
@@ -240,9 +239,9 @@ std::optional<std::monostate> ParseDriver::parse_atom(PARSE_STRING,
       if (ch_exp.error() == 2)
         return std::nullopt;
     }
-    if (*ch_exp == separator)
+    if (ch_exp.value() == separator)
       return std::monostate{};
-    str1_encode(*ch_exp);
+    str1_encode(ch_exp.value());
   }
 }
 
@@ -327,7 +326,7 @@ std::optional<bool> ParseDriver::skip_comment(char32_t ch) {
       std::optional<bool> comment = skip_comment_block();
       if (not comment)
         return std::nullopt;
-      if (not *comment)
+      if (not comment.value())
         return 1;
     }
   default:
@@ -421,9 +420,9 @@ std::optional<P_ATOM> ParseDriver::find_dynamic_atom() {
     throw std::runtime_error{"a string literal exceeds limit!"};
   if (not atom_umap.contains(str1_temp)) {
     P_ATOM p_atom = alloc_dynamic_atom();
-    char *atom_strbegin =
-        atom_deq[p_atom.pageid].ch_arr.data() + p_atom.offset * ATOM_BLOCK;
-    std::string_view atom_strview{atom_strbegin, p_atom.length};
+    int ch_offset = p_atom.offset * ATOM_BLOCK;
+    std::string_view atom_strview{
+        atom_deq[p_atom.pageid].ch_arr.data() + ch_offset, p_atom.length};
     atom_umap[atom_strview] = p_atom;
   }
   return atom_umap[str1_temp];
@@ -437,7 +436,7 @@ P_ATOM ParseDriver::alloc_dynamic_atom() {
     std::optional offset_opt = atom_deq[i].try_allocate(length);
     if (not offset_opt)
       continue;
-    offset = *offset_opt;
+    offset = offset_opt.value();
     goto copy_and_return;
   }
   if (atom_deq.size() == std::numeric_limits<std::int16_t>::max())
@@ -451,5 +450,54 @@ copy_and_return:
   return P_ATOM{i, offset, length};
 }
 
-bool ParseDriver::parse() { return 0; }
+std::optional<KEYWORD_KIND> ParseDriver::parse_init(PARSE_STATEMENT) {
+  TOKEN token;
+  std::optional<KEYWORD_KIND> keyword;
+
+  token = tokenize(PARSE_IDENT::flag);
+  if (not token)
+    goto fail;
+
+  keyword =
+      std::get<TOK_IDENTI>(token.value()).match_keyword(STRICTNESS::STRICT);
+  if (not keyword)
+    goto fail;
+  return keyword.value();
+
+fail:
+  errcode = errcode.value_or(PARSE_ERRCODE::UNEXPECTED_TOKEN);
+  return std::nullopt;
+}
+
+std::optional<std::monostate> ParseDriver::parse(PARSE_VARDECL,
+                                                 std::size_t idx) {
+  TOKEN token;
+
+  token = tokenize(PARSE_IDENT::flag);
+  if (not token)
+    goto no_varname;
+  std::get<STMT_VARDECL>(program[idx]).identifier =
+      std::get<TOK_IDENTI>(token.value());
+
+  return std::monostate{};
+
+no_varname:
+  errcode = errcode.value_or(PARSE_ERRCODE::NEEDED_VARIABLE_NAME);
+  return std::nullopt;
+}
+
+bool ParseDriver::parse() {
+  std::optional<KEYWORD_KIND> tok_init = parse_init(PARSE_STATEMENT{});
+  if (not tok_init)
+    goto fail;
+
+  program.emplace_back(STMT_VARDECL{.category = tok_init.value()});
+  parse(PARSE_VARDECL{}, program.size() - 1);
+  return 1;
+
+fail:
+  if (not errcode)
+    throw std::runtime_error{"parsing failed without an errcode!"};
+  return 0;
+}
 } // namespace Manadrain

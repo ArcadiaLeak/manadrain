@@ -11,37 +11,7 @@
 
 namespace Manadrain {
 enum class STRICTNESS { SLOPPY, STRICT };
-
-enum TOKEN_KIND {
-  K_TOKEN_EOF,
-  K_TOKEN_LET,
-  K_TOKEN_CONST,
-  K_TOKEN_VAR,
-  K_TOKEN_IDENT,
-  K_TOKEN_STRING,
-  K_TOKEN_UCHAR
-};
-
-struct TOK_STRING {
-  char32_t separator;
-  P_ATOM p_atom;
-};
-struct TOK_IDENTI {
-  bool has_escape;
-  P_ATOM p_atom;
-  int match_keyword_kind(TOKEN_KIND, STRICTNESS);
-};
-using TOKEN =
-    std::expected<std::variant<char32_t, TOK_STRING, TOK_IDENTI>, int>;
-using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
-
-struct STMT_VARDECL {
-  TOKEN_KIND intro;
-  TOK_IDENTI identifier;
-  EXPRESSION initializer;
-};
-using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
-
+enum class KEYWORD_KIND { K_LET, K_CONST, K_VAR };
 enum class ESC_RULE {
   IDENTIFIER,
   REGEXP_ASCII,
@@ -50,7 +20,6 @@ enum class ESC_RULE {
   STRING_IN_STRICT_MODE,
   STRING_IN_TEMPLATE
 };
-
 enum class PARSE_ERRCODE {
   MALFORMED_ESCAPE,
   LEGACY_OCTAL_SEQ,
@@ -60,6 +29,26 @@ enum class PARSE_ERRCODE {
   NEEDED_VARIABLE_NAME,
   NEEDED_SPECIFICLY
 };
+
+struct TOK_STRING {
+  char32_t separator;
+  P_ATOM p_atom;
+};
+struct TOK_IDENTI {
+  bool has_escape;
+  P_ATOM p_atom;
+  std::optional<KEYWORD_KIND> match_keyword(STRICTNESS);
+};
+using TOKEN =
+    std::expected<std::variant<char32_t, TOK_STRING, TOK_IDENTI>, int>;
+using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
+
+struct STMT_VARDECL {
+  KEYWORD_KIND category;
+  TOK_IDENTI identifier;
+  EXPRESSION initializer;
+};
+using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
 struct PARSE_ESCAPE {
   ESC_RULE rule;
@@ -97,7 +86,7 @@ struct ParseDriver {
   bool reached_eof() { return buffer_idx >= buffer.size(); }
 
   bool newline_seen;
-  PARSE_ERRCODE errcode;
+  std::optional<PARSE_ERRCODE> errcode;
 
   std::string str1_temp;
   void str1_encode(char32_t cp);
@@ -137,6 +126,8 @@ struct ParseDriver {
   bool parse_atom(PARSE_IDENT ident);
 
   TOKEN tokenize(int flags);
+  std::optional<KEYWORD_KIND> parse_init(PARSE_STATEMENT);
+  std::optional<std::monostate> parse(PARSE_VARDECL, std::size_t idx);
 
   bool parse();
 };
