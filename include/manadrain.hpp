@@ -122,11 +122,13 @@ struct ParseDriver {
   std::optional<std::monostate> parse_atom(PARSE_STRING, char32_t separator);
 
   bool is_allowed_uchar(PARSE_IDENT ident, char32_t ch);
-  bool parse_uchar(PARSE_IDENT ident);
-  bool parse_atom(PARSE_IDENT ident);
+  std::optional<bool> parse_uchar(PARSE_IDENT ident);
+  std::optional<bool> parse_atom(PARSE_IDENT ident);
 
   TOKEN tokenize(int flags);
-  std::optional<KEYWORD_KIND> parse_init(PARSE_STATEMENT);
+  std::optional<EXPRESSION> parse(PARSE_POSTFIX_EXPR);
+  
+  std::optional<KEYWORD_KIND> parse_beginning(PARSE_STATEMENT);
   std::optional<std::monostate> parse(PARSE_VARDECL, std::size_t idx);
 
   bool parse();

@@ -251,7 +251,7 @@ bool ParseDriver::is_allowed_uchar(PARSE_IDENT ident, char32_t ch) {
   return u_hasBinaryProperty(ch, must_be);
 }
 
-bool ParseDriver::parse_uchar(PARSE_IDENT ident) {
+std::optional<bool> ParseDriver::parse_uchar(PARSE_IDENT ident) {
   std::array<char32_t, 2> ch{};
   int i;
   for (i = 0; i < 2; ++i) {
@@ -259,9 +259,15 @@ bool ParseDriver::parse_uchar(PARSE_IDENT ident) {
       break;
     ch[i] = next();
   }
-  if (ch[0] == '\\' && ch[1] == 'u')
-    throw std::runtime_error{"unimplemented!"};
-  else {
+  if (ch[0] == '\\') {
+    if (ch[1] == 'u') {
+      // unimplemented
+      return std::nullopt;
+    } else {
+      errcode = PARSE_ERRCODE::MALFORMED_ESCAPE;
+      return std::nullopt;
+    }
+  } else {
     int j;
     for (j = 0; j < i; j++) {
       if (not is_allowed_uchar(ident, ch[j]))
@@ -273,14 +279,18 @@ bool ParseDriver::parse_uchar(PARSE_IDENT ident) {
   }
 }
 
-bool ParseDriver::parse_atom(PARSE_IDENT ident) {
+std::optional<bool> ParseDriver::parse_atom(PARSE_IDENT ident) {
   str1_temp.clear();
   if (ident.is_private)
     str1_temp.push_back('#');
 
   bool further = 1;
-  while (further)
-    further = parse_uchar(ident);
+  while (further) {
+    std::optional<bool> further_opt = parse_uchar(ident);
+    if (not further_opt)
+      return std::nullopt;
+    further = further_opt.value();
+  }
   return str1_temp.size() > ident.is_private;
 }
 
@@ -391,7 +401,10 @@ TOKEN ParseDriver::tokenize(int flags) {
   }
 
   if (flags & PARSE_IDENT::flag) {
-    if (parse_atom(PARSE_IDENT{}))
+    std::optional<bool> ident_opt = parse_atom(PARSE_IDENT{});
+    if (not ident_opt)
+      return std::unexpected{2};
+    if (ident_opt.value())
       return TOK_IDENTI{
           .p_atom = find_static_atom()
                         .or_else([this]() { return find_dynamic_atom(); })
@@ -450,48 +463,66 @@ copy_and_return:
   return P_ATOM{i, offset, length};
 }
 
-std::optional<KEYWORD_KIND> ParseDriver::parse_init(PARSE_STATEMENT) {
-  TOKEN token;
-  std::optional<KEYWORD_KIND> keyword;
+std::optional<KEYWORD_KIND> ParseDriver::parse_beginning(PARSE_STATEMENT) {
+  TOKEN token{};
+  std::optional<KEYWORD_KIND> keyword{KEYWORD_KIND{}};
 
   token = tokenize(PARSE_IDENT::flag);
   if (not token)
-    goto fail;
+    goto set_errcode;
 
   keyword =
       std::get<TOK_IDENTI>(token.value()).match_keyword(STRICTNESS::STRICT);
   if (not keyword)
-    goto fail;
+    goto set_errcode;
+
   return keyword.value();
 
-fail:
-  errcode = errcode.value_or(PARSE_ERRCODE::UNEXPECTED_TOKEN);
+set_errcode:
+  if (token.error() == 1 || !keyword.has_value())
+    errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
   return std::nullopt;
 }
 
 std::optional<std::monostate> ParseDriver::parse(PARSE_VARDECL,
                                                  std::size_t idx) {
-  TOKEN token;
+  TOKEN token{};
 
   token = tokenize(PARSE_IDENT::flag);
   if (not token)
-    goto no_varname;
+    goto varname_needed;
+
   std::get<STMT_VARDECL>(program[idx]).identifier =
       std::get<TOK_IDENTI>(token.value());
 
   return std::monostate{};
 
-no_varname:
-  errcode = errcode.value_or(PARSE_ERRCODE::NEEDED_VARIABLE_NAME);
+varname_needed:
+  if (token.error() == 1)
+    errcode = PARSE_ERRCODE::NEEDED_VARIABLE_NAME;
+  return std::nullopt;
+}
+
+std::optional<EXPRESSION> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
+  TOKEN token{};
+
+  token = tokenize(PARSE_STRING::flag);
+  if (not token)
+    goto set_errcode;
+  return std::get<TOK_STRING>(token.value());
+
+set_errcode:
+  if (token.error() == 1)
+    errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
   return std::nullopt;
 }
 
 bool ParseDriver::parse() {
-  std::optional<KEYWORD_KIND> tok_init = parse_init(PARSE_STATEMENT{});
-  if (not tok_init)
+  std::optional<KEYWORD_KIND> beginning = parse_beginning(PARSE_STATEMENT{});
+  if (not beginning)
     goto fail;
 
-  program.emplace_back(STMT_VARDECL{.category = tok_init.value()});
+  program.emplace_back(STMT_VARDECL{.category = beginning.value()});
   parse(PARSE_VARDECL{}, program.size() - 1);
   return 1;
 
