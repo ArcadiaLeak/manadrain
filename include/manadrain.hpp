@@ -1,6 +1,5 @@
 #include <bitset>
 #include <deque>
-#include <expected>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -30,18 +29,20 @@ enum class PARSE_ERRCODE {
   NEEDED_SEMICOLON
 };
 
-struct TOK_EOF {};
 struct TOK_STRING {
   char32_t separator;
   P_ATOM p_atom;
+  bool operator==(const TOK_STRING &) const = default;
 };
 struct TOK_IDENTI {
   bool has_escape;
   P_ATOM p_atom;
+  bool operator==(const TOK_IDENTI &) const = default;
   std::optional<KEYWORD_KIND> match_keyword(STRICTNESS);
 };
+enum class TOK_SIGCODE { MISMATCH, REACHED_EOF };
 using TOKEN =
-    std::optional<std::variant<TOK_EOF, char32_t, TOK_STRING, TOK_IDENTI>>;
+    std::variant<TOK_SIGCODE, PARSE_ERRCODE, char32_t, TOK_STRING, TOK_IDENTI>;
 using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
 
 struct STMT_VARDECL {
@@ -90,7 +91,6 @@ struct ParseDriver {
   bool reached_eof() { return buffer_idx >= buffer.size(); }
 
   bool newline_seen;
-  std::optional<PARSE_ERRCODE> errcode;
 
   std::string str1_temp;
   void str1_encode(char32_t cp);
@@ -108,33 +108,34 @@ struct ParseDriver {
   void skip_lf();
 
   bool skip_comment_line();
-  std::optional<bool> skip_comment_block();
-  std::optional<bool> skip_comment(char32_t ch);
-  std::optional<bool> skip_ws_1(char32_t ch);
+  std::variant<bool, PARSE_ERRCODE> skip_comment_block();
+  std::variant<bool, PARSE_ERRCODE> skip_comment(char32_t ch);
+  std::variant<bool, PARSE_ERRCODE> skip_ws_1(char32_t ch);
 
   std::optional<P_ATOM> find_static_atom();
   std::optional<P_ATOM> find_dynamic_atom();
   P_ATOM alloc_dynamic_atom();
 
   char32_t parse_octo(PARSE_ESCAPE, char32_t oct);
-  std::expected<char32_t, int> parse(PARSE_ESCAPE esc, char32_t ch);
+  std::variant<std::monostate, PARSE_ERRCODE, char32_t> parse(PARSE_ESCAPE esc,
+                                                              char32_t ch);
 
-  std::expected<char32_t, int> parse_escape(PARSE_STRING, char32_t separator,
-                                            char32_t ch);
-  std::expected<char32_t, int> parse_uchar(PARSE_STRING, char32_t separator,
-                                           char32_t ch);
-  std::optional<std::monostate> parse_atom(PARSE_STRING, char32_t separator);
+  std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+  parse_escape(PARSE_STRING, char32_t separator, char32_t ch);
+  std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+  parse_uchar(PARSE_STRING, char32_t separator, char32_t ch);
+  std::variant<std::monostate, PARSE_ERRCODE> parse_atom(PARSE_STRING,
+                                                         char32_t separator);
 
   bool is_allowed_uchar(PARSE_IDENT ident, char32_t ch);
-  std::optional<bool> parse_uchar(PARSE_IDENT ident);
-  std::optional<bool> parse_atom(PARSE_IDENT ident);
+  std::variant<bool, PARSE_ERRCODE> parse_uchar(PARSE_IDENT ident);
+  std::variant<bool, PARSE_ERRCODE> parse_atom(PARSE_IDENT ident);
 
-  TOKEN tokenize(int flags,
-                 PARSE_ERRCODE on_mismatch = PARSE_ERRCODE::UNEXPECTED_TOKEN);
+  TOKEN tokenize(int flags);
   std::optional<EXPRESSION> parse(PARSE_POSTFIX_EXPR);
 
-  std::optional<KEYWORD_KIND> parse_beginning(PARSE_STATEMENT);
-  std::optional<std::monostate> parse(PARSE_VARDECL, std::size_t idx);
+  std::variant<std::monostate, PARSE_ERRCODE> parse(PARSE_VARDECL,
+                                                    std::size_t idx);
 
   bool parse();
 };

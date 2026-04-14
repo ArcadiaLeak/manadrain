@@ -122,23 +122,24 @@ char32_t ParseDriver::parse_octo(PARSE_ESCAPE, char32_t octo) {
   return (octo << 3) | ahead;
 }
 
-std::expected<char32_t, int> ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
+std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   switch (ch) {
   case 'b':
-    return '\b';
+    return U'\b';
   case 'f':
-    return '\f';
+    return U'\f';
   case 'n':
-    return '\n';
+    return U'\n';
   case 'r':
-    return '\r';
+    return U'\r';
   case 't':
-    return '\t';
+    return U'\t';
   case 'v':
-    return '\v';
+    return U'\v';
   case '0':
     if (reached_eof() || !std::isdigit(next()))
-      return 0;
+      return U'\0';
     [[fallthrough]];
   case '1':
   case '2':
@@ -149,13 +150,11 @@ std::expected<char32_t, int> ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   case '7':
     switch (esc.rule) {
     case ESC_RULE::STRING_IN_STRICT_MODE:
-      errcode = PARSE_ERRCODE::LEGACY_OCTAL_SEQ;
-      return std::unexpected{2};
+      return PARSE_ERRCODE::LEGACY_OCTAL_SEQ;
 
     case ESC_RULE::STRING_IN_TEMPLATE:
     case ESC_RULE::REGEXP_UTF16:
-      errcode = PARSE_ERRCODE::MALFORMED_ESCAPE;
-      return std::unexpected{2};
+      return PARSE_ERRCODE::MALFORMED_ESCAPE;
 
     default: {
       char32_t oct = ch - '0';
@@ -169,17 +168,15 @@ std::expected<char32_t, int> ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   case '8':
   case '9':
     if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
-        esc.rule == ESC_RULE::STRING_IN_TEMPLATE) {
-      errcode = PARSE_ERRCODE::MALFORMED_ESCAPE;
-      return std::unexpected{2};
-    }
+        esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
+      return PARSE_ERRCODE::MALFORMED_ESCAPE;
     [[fallthrough]];
   default:
-    return std::unexpected{1};
+    return std::monostate{};
   }
 }
 
-std::expected<char32_t, int>
+std::variant<std::monostate, PARSE_ERRCODE, char32_t>
 ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   switch (ch) {
   case '\'':
@@ -194,7 +191,7 @@ ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   case 0x2028:
   case 0x2029:
     /* ignore escaped newline sequence */
-    return std::unexpected{1};
+    return std::monostate{};
   }
   ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
   if (strictness == STRICTNESS::STRICT)
@@ -204,7 +201,7 @@ ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   return parse(PARSE_ESCAPE{esc_rule}, ch);
 }
 
-std::expected<char32_t, int>
+std::variant<std::monostate, PARSE_ERRCODE, char32_t>
 ParseDriver::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
   switch (ch) {
   case '\r':
@@ -212,36 +209,38 @@ ParseDriver::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
     [[fallthrough]];
   case '\n':
     if (separator == '`')
-      return '\n';
-    errcode = PARSE_ERRCODE::UNEXPECTED_STRING_END;
-    return std::unexpected{2};
+      return U'\n';
+    return PARSE_ERRCODE::UNEXPECTED_STRING_END;
   case '\\':
-    return reached_eof() ? std::unexpected{1}
-                         : parse_escape(PARSE_STRING{}, separator, next());
+    if (reached_eof())
+      return std::monostate{};
+    return parse_escape(PARSE_STRING{}, separator, next());
   default:
     return ch;
   }
 }
 
-std::optional<std::monostate> ParseDriver::parse_atom(PARSE_STRING,
-                                                      char32_t separator) {
+std::variant<std::monostate, PARSE_ERRCODE>
+ParseDriver::parse_atom(PARSE_STRING, char32_t separator) {
   str1_temp.clear();
   while (1) {
-    if (reached_eof()) {
-      errcode = PARSE_ERRCODE::UNEXPECTED_STRING_END;
-      return std::nullopt;
+    if (reached_eof())
+      return PARSE_ERRCODE::UNEXPECTED_STRING_END;
+    auto ch_alt = parse_uchar(PARSE_STRING{}, separator, next());
+
+    switch (ch_alt.index()) {
+    case 2: {
+      char32_t ch = std::get<2>(ch_alt);
+      if (ch == separator)
+        return std::monostate{};
+      str1_encode(ch);
+      break;
     }
-    std::expected<char32_t, int> ch_exp =
-        parse_uchar(PARSE_STRING{}, separator, next());
-    if (ch_exp.error_or(0)) {
-      if (ch_exp.error() == 1)
-        continue;
-      if (ch_exp.error() == 2)
-        return std::nullopt;
+    case 1:
+      return std::get<1>(ch_alt);
+    case 0:
+      continue;
     }
-    if (ch_exp.value() == separator)
-      return std::monostate{};
-    str1_encode(ch_exp.value());
   }
 }
 
@@ -251,7 +250,7 @@ bool ParseDriver::is_allowed_uchar(PARSE_IDENT ident, char32_t ch) {
   return u_hasBinaryProperty(ch, must_be);
 }
 
-std::optional<bool> ParseDriver::parse_uchar(PARSE_IDENT ident) {
+std::variant<bool, PARSE_ERRCODE> ParseDriver::parse_uchar(PARSE_IDENT ident) {
   std::array<char32_t, 2> ch{};
   int i;
   for (i = 0; i < 2; ++i) {
@@ -260,13 +259,9 @@ std::optional<bool> ParseDriver::parse_uchar(PARSE_IDENT ident) {
     ch[i] = next();
   }
   if (ch[0] == '\\') {
-    if (ch[1] == 'u') {
-      // unimplemented
-      return std::nullopt;
-    } else {
-      errcode = PARSE_ERRCODE::MALFORMED_ESCAPE;
-      return std::nullopt;
-    }
+    if (ch[1] == 'u')
+      throw std::runtime_error{"unimplemented!"};
+    return PARSE_ERRCODE::MALFORMED_ESCAPE;
   } else {
     int j;
     for (j = 0; j < i; j++) {
@@ -279,17 +274,21 @@ std::optional<bool> ParseDriver::parse_uchar(PARSE_IDENT ident) {
   }
 }
 
-std::optional<bool> ParseDriver::parse_atom(PARSE_IDENT ident) {
+std::variant<bool, PARSE_ERRCODE> ParseDriver::parse_atom(PARSE_IDENT ident) {
   str1_temp.clear();
   if (ident.is_private)
     str1_temp.push_back('#');
 
   bool further = 1;
   while (further) {
-    std::optional<bool> further_opt = parse_uchar(ident);
-    if (not further_opt)
-      return std::nullopt;
-    further = further_opt.value();
+    auto further_alt = parse_uchar(ident);
+    switch (further_alt.index()) {
+    case 0:
+      further = std::get<0>(further_alt);
+      break;
+    case 1:
+      return std::get<1>(further_alt);
+    }
   }
   return str1_temp.size() > ident.is_private;
 }
@@ -304,7 +303,7 @@ bool ParseDriver::skip_comment_line() {
   return 1;
 }
 
-std::optional<bool> ParseDriver::skip_comment_block() {
+std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment_block() {
   std::array<char32_t, 2> ch{};
   int i;
   for (i = 0; i < 2; ++i) {
@@ -312,40 +311,42 @@ std::optional<bool> ParseDriver::skip_comment_block() {
       break;
     ch[i] = next();
   }
-  if (i == 0) {
-    errcode = PARSE_ERRCODE::UNEXPECTED_COMMENT_END;
-    return std::nullopt;
-  }
+  if (i == 0)
+    return PARSE_ERRCODE::UNEXPECTED_COMMENT_END;
   if (ch[0] == '*' && ch[1] == '/')
-    return 0;
+    return false;
   backtrack(--i);
   if (is_lineterm(ch[0]))
     newline_seen = 1;
-  return 1;
+  return true;
 }
 
-std::optional<bool> ParseDriver::skip_comment(char32_t ch) {
+std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment(char32_t ch) {
   switch (ch) {
   case '/':
     while (1) {
       if (not skip_comment_line())
-        return 1;
+        return true;
     }
   case '*':
     while (1) {
-      std::optional<bool> comment = skip_comment_block();
-      if (not comment)
-        return std::nullopt;
-      if (not comment.value())
-        return 1;
+      auto comment = skip_comment_block();
+      switch (comment.index()) {
+      case 0:
+        if (not std::get<0>(comment))
+          return true;
+        continue;
+      case 1:
+        return std::get<1>(comment);
+      }
     }
   default:
     prev();
-    return 0;
+    return false;
   }
 }
 
-std::optional<bool> ParseDriver::skip_ws_1(char32_t ch) {
+std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
   switch (ch) {
   case '\r':
     skip_lf();
@@ -355,50 +356,60 @@ std::optional<bool> ParseDriver::skip_ws_1(char32_t ch) {
   case 0x2028:
   case 0x2029:
     newline_seen = 1;
-    return 1;
+    return true;
 
-  case '/':
+  case '/': {
     if (reached_eof())
-      return 1;
-    if (skip_comment(next()))
-      return 1;
-    prev();
-    return 0;
+      return true;
+    auto comment_alt = skip_comment(next());
+    if (comment_alt.index() == 0 && !std::get<0>(comment_alt))
+      prev();
+    return comment_alt;
+  }
 
-  default:
-    if (u_isWhitespace(ch))
-      return 1;
-    prev();
-    return 0;
+  default: {
+    bool ws = u_isWhitespace(ch);
+    if (not ws)
+      prev();
+    return ws;
+  }
   }
 }
 
-TOKEN ParseDriver::tokenize(int flags, PARSE_ERRCODE on_mismatch) {
-  while (1) {
+TOKEN ParseDriver::tokenize(int flags) {
+  bool go_on{1};
+  while (go_on) {
     if (reached_eof())
-      goto return_eof;
-
-    std::optional<bool> no_ws_ahead = skip_ws_1(next());
-
-    if (not no_ws_ahead)
-      return std::nullopt;
-
-    if (not no_ws_ahead.value())
+      return flags & PARSE_EOF::flag ? TOK_SIGCODE::REACHED_EOF
+                                     : TOK_SIGCODE::MISMATCH;
+    auto ws_alt = skip_ws_1(next());
+    switch (ws_alt.index()) {
+    case 0:
+      go_on = std::get<0>(ws_alt);
       break;
+    case 1:
+      return std::get<1>(ws_alt);
+    }
   }
 
   if (flags & PARSE_STRING::flag) {
     char32_t ch{next()};
     switch (ch) {
     case '\'':
-    case '"':
-      if (not parse_atom(PARSE_STRING{}, ch))
-        return std::nullopt;
-      return TOK_STRING{
-          .separator = ch,
-          .p_atom = find_static_atom()
-                        .or_else([this]() { return find_dynamic_atom(); })
-                        .value()};
+    case '"': {
+      auto atom_alt = parse_atom(PARSE_STRING{}, ch);
+      switch (atom_alt.index()) {
+      case 0: {
+        P_ATOM pos_atom = find_static_atom()
+                              .or_else([this]() { return find_dynamic_atom(); })
+                              .value();
+        return TOK_STRING{.separator = ch, .p_atom = pos_atom};
+      }
+      case 1:
+        return std::get<1>(atom_alt);
+      }
+      throw std::runtime_error{"unreachable!"};
+    }
     default:
       prev();
       break;
@@ -406,28 +417,27 @@ TOKEN ParseDriver::tokenize(int flags, PARSE_ERRCODE on_mismatch) {
   }
 
   if (flags & PARSE_IDENT::flag) {
-    std::optional<bool> ident_opt = parse_atom(PARSE_IDENT{});
-    if (not ident_opt)
-      return std::nullopt;
-    if (ident_opt.value())
-      return TOK_IDENTI{
-          .p_atom = find_static_atom()
-                        .or_else([this]() { return find_dynamic_atom(); })
-                        .value()};
+    auto atom_alt = parse_atom(PARSE_IDENT{});
+    bool have_ident{};
+    switch (atom_alt.index()) {
+    case 0:
+      have_ident = std::get<0>(atom_alt);
+      break;
+    case 1:
+      return std::get<1>(atom_alt);
+    }
+    if (have_ident) {
+      P_ATOM pos_atom = find_static_atom()
+                            .or_else([this]() { return find_dynamic_atom(); })
+                            .value();
+      return TOK_IDENTI{.p_atom = pos_atom};
+    }
   }
 
   if (flags & PARSE_PUNCT::flag)
     return next();
 
-mismatch:
-  errcode = on_mismatch;
-  return std::nullopt;
-
-return_eof:
-  if (flags & PARSE_EOF::flag)
-    return TOK_EOF{};
-  else
-    goto mismatch;
+  return TOK_SIGCODE::MISMATCH;
 }
 
 std::optional<P_ATOM> ParseDriver::find_static_atom() {
@@ -481,89 +491,74 @@ copy_and_return:
   return P_ATOM{i, offset, length};
 }
 
-std::optional<KEYWORD_KIND> ParseDriver::parse_beginning(PARSE_STATEMENT) {
-  TOKEN token{};
-  std::optional<KEYWORD_KIND> keyword{KEYWORD_KIND{}};
-
-  token = tokenize(PARSE_IDENT::flag & PARSE_EOF::flag);
-  if (not token)
-    return std::nullopt;
-
-  switch (token->index()) {
-  case 0:
-    return std::nullopt;
-  case 3:
-    keyword = std::get<3>(token.value()).match_keyword(STRICTNESS::STRICT);
-    if (keyword)
-      return keyword.value();
-    [[fallthrough]];
-  default:
-    errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
-    return std::nullopt;
-  }
-}
-
-std::optional<std::monostate> ParseDriver::parse(PARSE_VARDECL,
-                                                 std::size_t idx) {
+std::variant<std::monostate, PARSE_ERRCODE>
+ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
+  bool cheked_initializer{};
   TOKEN token{};
 
-  token = tokenize(PARSE_IDENT::flag, PARSE_ERRCODE::NEEDED_VARIABLE_NAME);
-  if (not token)
-    return std::nullopt;
+  token = tokenize(PARSE_IDENT::flag);
+  if (token == TOKEN{})
+    return PARSE_ERRCODE::NEEDED_VARIABLE_NAME;
 
-  std::get<STMT_VARDECL>(program[idx]).identifier =
-      std::get<TOK_IDENTI>(token.value());
+  std::get<STMT_VARDECL>(program[idx]).identifier = std::get<TOK_IDENTI>(token);
 
-  token = tokenize(PARSE_PUNCT::flag & PARSE_EOF::flag);
-  if (not token)
-    return std::nullopt;
+expect_semi:
+  token = tokenize(PARSE_PUNCT::flag | PARSE_EOF::flag);
+  if (token == TOKEN{})
+    return PARSE_ERRCODE::UNEXPECTED_TOKEN;
+  if (cheked_initializer && token != TOKEN{TOK_SIGCODE::REACHED_EOF} &&
+      token != TOKEN{U';'})
+    return PARSE_ERRCODE::NEEDED_SEMICOLON;
 
-  if (std::get<char32_t>(token.value()) == '=') {
-    std::get<STMT_VARDECL>(program[idx]).initializer =
-        parse(PARSE_POSTFIX_EXPR{});
-
-    token = tokenize(PARSE_PUNCT::flag & PARSE_EOF::flag);
-    if (not token)
-      return std::nullopt;
-  }
-
-  if (std::get<char32_t>(token.value()) != ';') {
-    errcode = PARSE_ERRCODE::NEEDED_SEMICOLON;
-    return std::nullopt;
+  if (not cheked_initializer) {
+    if (token == TOKEN{U'='}) {
+      std::get<STMT_VARDECL>(program[idx]).initializer =
+          parse(PARSE_POSTFIX_EXPR{});
+    }
+    cheked_initializer = 1;
+    goto expect_semi;
   }
 
   return std::monostate{};
 }
 
 std::optional<EXPRESSION> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
-  TOKEN token{};
-
-  token = tokenize(PARSE_STRING::flag);
-  if (not token)
+  TOKEN token = tokenize(PARSE_STRING::flag);
+  if (token.index() == 0)
     return std::nullopt;
-  return std::get<TOK_STRING>(token.value());
+  return std::get<TOK_STRING>(token);
 }
 
 bool ParseDriver::parse() {
-  std::optional<KEYWORD_KIND> beginning{};
-  std::optional<std::monostate> declaration{};
-
   while (1) {
-    beginning = parse_beginning(PARSE_STATEMENT{});
-    if (not beginning)
-      goto fail;
+    TOKEN token = tokenize(PARSE_IDENT::flag | PARSE_EOF::flag);
+    std::optional<KEYWORD_KIND> keyword{};
+    PARSE_ERRCODE errcode{};
 
-    program.emplace_back(STMT_VARDECL{.category = beginning.value()});
-    declaration = parse(PARSE_VARDECL{}, program.size() - 1);
-    if (not declaration)
-      goto fail;
+    switch (token.index()) {
+    case 0:
+      if (std::get<0>(token) == TOK_SIGCODE::REACHED_EOF)
+        return 1;
+      break;
+    case 1:
+      errcode = std::get<1>(token);
+      return 0;
+    case 4:
+      keyword = std::get<4>(token).match_keyword(STRICTNESS::STRICT);
+      break;
+    }
+
+    if (keyword) {
+      program.emplace_back(STMT_VARDECL{.category = keyword.value()});
+      auto declaration = parse(PARSE_VARDECL{}, program.size() - 1);
+      if (declaration.index() == 0)
+        return 1;
+      errcode = std::get<1>(declaration);
+      return 0;
+    }
+
+    errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
+    return 0;
   }
-
-  return 1;
-
-fail:
-  if (not errcode)
-    throw std::runtime_error{"parsing failed without an errcode!"};
-  return 0;
 }
 } // namespace Manadrain
