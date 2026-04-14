@@ -22,27 +22,22 @@ enum TOKEN_KIND {
   K_TOKEN_UCHAR
 };
 
-struct TOKEN {
-  struct PAYLOAD_STR {
-    char32_t separator;
-    P_ATOM p_atom;
-  };
-  struct PAYLOAD_IDENT {
-    bool has_escape;
-    bool is_reserved;
-    P_ATOM p_atom;
-  };
-  using PAYLOAD_ERR = std::variant<char32_t>;
-  TOKEN_KIND kind;
-  bool newline_seen;
-  std::variant<char32_t, PAYLOAD_STR, PAYLOAD_IDENT, PAYLOAD_ERR> data;
+struct TOK_STRING {
+  char32_t separator;
+  P_ATOM p_atom;
 };
-
-using EXPRESSION = std::variant<TOKEN::PAYLOAD_IDENT, TOKEN::PAYLOAD_STR>;
+struct TOK_IDENTI {
+  bool has_escape;
+  P_ATOM p_atom;
+  int match_keyword_kind(TOKEN_KIND, STRICTNESS);
+};
+using TOKEN =
+    std::expected<std::variant<char32_t, TOK_STRING, TOK_IDENTI>, int>;
+using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
 
 struct STMT_VARDECL {
   TOKEN_KIND intro;
-  TOKEN::PAYLOAD_IDENT identifier;
+  TOK_IDENTI identifier;
   EXPRESSION initializer;
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
@@ -57,7 +52,6 @@ enum class ESC_RULE {
 };
 
 enum class PARSE_ERRCODE {
-  OUT_OF_RANGE,
   MALFORMED_ESCAPE,
   LEGACY_OCTAL_SEQ,
   UNEXPECTED_STRING_END,
@@ -70,18 +64,19 @@ enum class PARSE_ERRCODE {
 struct PARSE_ESCAPE {
   ESC_RULE rule;
 };
-struct PARSE_STRING {};
-struct PARSE_TOKEN {};
+struct PARSE_STRING {
+  static constexpr int flag = 1;
+};
 struct PARSE_IDENT {
+  static constexpr int flag = 2;
   bool is_private;
+};
+struct PARSE_PUNCT {
+  static constexpr int flag = 4;
 };
 struct PARSE_STATEMENT {};
 struct PARSE_VARDECL {};
 struct PARSE_POSTFIX_EXPR {};
-
-template <typename T> using EXPECT = std::expected<T, PARSE_ERRCODE>;
-template <typename T>
-using EXPECT_OPT = std::expected<std::optional<T>, PARSE_ERRCODE>;
 
 constexpr std::uint8_t ATOM_BLOCK = 8;
 constexpr std::uint16_t ATOM_PAGE = 2048;
@@ -89,70 +84,59 @@ constexpr std::uint16_t ATOM_PAGE = 2048;
 struct AtomPage {
   std::bitset<ATOM_PAGE> ch_bitset;
   std::array<char, ATOM_BLOCK * ATOM_PAGE> ch_arr;
-  bool check_for_count(std::uint16_t N);
-  bool check_for_window(std::uint16_t N);
-  std::uint16_t scan_for_window(std::uint16_t N);
-  std::optional<std::uint16_t> try_allocate(std::uint16_t N);
-  void allocate(std::uint16_t offset, std::uint16_t N);
+  bool check_for_count(int N);
+  bool check_for_window(int N);
+  int scan_for_window(int N);
+  std::optional<std::uint16_t> try_allocate(int N);
+  void allocate(int offset, int N);
 };
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
-  std::int32_t buffer_idx;
+  int buffer_idx;
+  bool reached_eof() { return buffer_idx >= buffer.size(); }
 
-  int mov_since_mark;
+  bool newline_seen;
+  PARSE_ERRCODE errcode;
 
   std::string str1_temp;
-  std::u32string str4_temp;
-  void codepoint_cv(char32_t cp);
+  void str1_encode(char32_t cp);
 
   std::unordered_map<std::string_view, P_ATOM> atom_umap;
   std::deque<AtomPage> atom_deq;
 
   STRICTNESS strictness;
-  TOKEN token;
   std::vector<STATEMENT> program;
 
-  EXPECT<char32_t> next();
-  EXPECT<char32_t> prev();
-  std::u32string_view take(int N);
-  std::size_t backtrack(std::size_t N);
+  char32_t next();
+  void prev();
+  void backtrack(std::size_t N);
+
   void skip_lf();
+
+  bool skip_comment_line();
+  std::optional<bool> skip_comment_block();
+  std::optional<bool> skip_comment(char32_t ch);
+  std::optional<bool> skip_ws_1(char32_t ch);
 
   std::optional<P_ATOM> find_static_atom();
   std::optional<P_ATOM> find_dynamic_atom();
   P_ATOM alloc_dynamic_atom();
 
-  EXPECT<char32_t> parse_hex();
+  char32_t parse_octo(PARSE_ESCAPE, char32_t oct);
+  std::expected<char32_t, int> parse(PARSE_ESCAPE esc, char32_t ch);
 
-  EXPECT<char32_t> parse_hex(PARSE_ESCAPE);
-  char32_t parse_oct_digit(PARSE_ESCAPE, char32_t oct);
-  EXPECT<char32_t> parse_uni_braced(PARSE_ESCAPE);
-  EXPECT<char32_t> parse_uni_fixed(PARSE_ESCAPE);
-  EXPECT<char32_t> parse_uni(PARSE_ESCAPE);
-  bool parse_null(PARSE_ESCAPE);
-  EXPECT_OPT<char32_t> parse(PARSE_ESCAPE, char32_t ch);
-
-  EXPECT_OPT<char32_t> parse_escape(PARSE_STRING, char32_t ch);
-  EXPECT_OPT<char32_t> parse_uchar(PARSE_STRING, char32_t ch);
-  bool should_append(PARSE_STRING, char32_t ch);
-  EXPECT<void> parse(PARSE_STRING);
+  std::expected<char32_t, int> parse_escape(PARSE_STRING, char32_t separator,
+                                            char32_t ch);
+  std::expected<char32_t, int> parse_uchar(PARSE_STRING, char32_t separator,
+                                           char32_t ch);
+  std::optional<std::monostate> parse_atom(PARSE_STRING, char32_t separator);
 
   bool is_allowed_uchar(PARSE_IDENT ident, char32_t ch);
-  EXPECT<bool> parse_uchar(PARSE_IDENT);
-  EXPECT<bool> parse(PARSE_IDENT);
-  void update_token_ident();
+  bool parse_uchar(PARSE_IDENT ident);
+  bool parse_atom(PARSE_IDENT ident);
 
-  EXPECT<void> parse(PARSE_TOKEN);
-  EXPECT<bool> parse_comment(PARSE_TOKEN, char32_t ahead);
-  bool parse_comment_line(PARSE_TOKEN);
-  EXPECT<bool> parse_comment_block(PARSE_TOKEN);
-  EXPECT<bool> parse_iter(PARSE_TOKEN);
-
-  EXPECT<TOKEN_KIND> parse_init(PARSE_STATEMENT);
-
-  EXPECT<void> parse(PARSE_VARDECL);
-  EXPECT<void> parse(PARSE_POSTFIX_EXPR, EXPRESSION &expression);
+  TOKEN tokenize(int flags);
 
   bool parse();
 };
