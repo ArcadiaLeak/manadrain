@@ -391,6 +391,7 @@ TOKEN ParseDriver::tokenize(int flags) {
       if (not parse_atom(PARSE_STRING{}, ch))
         return std::unexpected{2};
       return TOK_STRING{
+          .separator = ch,
           .p_atom = find_static_atom()
                         .or_else([this]() { return find_dynamic_atom(); })
                         .value()};
@@ -428,6 +429,11 @@ std::optional<P_ATOM> ParseDriver::find_static_atom() {
   return std::nullopt;
 }
 
+std::uint16_t block_N(std::size_t len) {
+  std::size_t N = len / ATOM_BLOCK + (len % ATOM_BLOCK != 0);
+  return static_cast<std::uint16_t>(N % ATOM_PAGE);
+}
+
 std::optional<P_ATOM> ParseDriver::find_dynamic_atom() {
   if (str1_temp.size() > ATOM_BLOCK * ATOM_PAGE)
     throw std::runtime_error{"a string literal exceeds limit!"};
@@ -446,16 +452,16 @@ P_ATOM ParseDriver::alloc_dynamic_atom() {
                 length = static_cast<std::uint16_t>(str1_temp.size());
   std::int16_t i;
   for (i = 0; i < atom_deq.size(); ++i) {
-    std::optional offset_opt = atom_deq[i].try_allocate(length);
+    std::optional offset_opt = atom_deq[i].try_allocate(block_N(length));
     if (not offset_opt)
       continue;
-    offset = offset_opt.value();
+    offset = *offset_opt;
     goto copy_and_return;
   }
   if (atom_deq.size() == std::numeric_limits<std::int16_t>::max())
     throw std::runtime_error{"out of space for an atom!"};
   atom_deq.emplace_back();
-  atom_deq[i].allocate(0, length);
+  atom_deq[i].allocate(0, block_N(length));
 
 copy_and_return:
   std::ranges::copy(str1_temp,
@@ -495,11 +501,32 @@ std::optional<std::monostate> ParseDriver::parse(PARSE_VARDECL,
   std::get<STMT_VARDECL>(program[idx]).identifier =
       std::get<TOK_IDENTI>(token.value());
 
+  token = tokenize(PARSE_PUNCT::flag);
+  if (not token)
+    goto semicolon_needed;
+
+  if (std::get<char32_t>(token.value()) == '=') {
+    std::optional<EXPRESSION> expr_opt = parse(PARSE_POSTFIX_EXPR{});
+    if (not expr_opt)
+      return std::nullopt;
+
+    std::get<STMT_VARDECL>(program[idx]).initializer = expr_opt.value();
+    token = tokenize(PARSE_PUNCT::flag);
+  }
+
+  if (std::get<char32_t>(token.value()) != ';')
+    goto semicolon_needed;
+
   return std::monostate{};
 
 varname_needed:
   if (token.error() == 1)
     errcode = PARSE_ERRCODE::NEEDED_VARIABLE_NAME;
+  return std::nullopt;
+
+semicolon_needed:
+  if (token.error() == 1)
+    errcode = PARSE_ERRCODE::NEEDED_SEMICOLON;
   return std::nullopt;
 }
 
@@ -518,12 +545,17 @@ set_errcode:
 }
 
 bool ParseDriver::parse() {
-  std::optional<KEYWORD_KIND> beginning = parse_beginning(PARSE_STATEMENT{});
+  std::optional<KEYWORD_KIND> beginning{};
+  std::optional<std::monostate> declaration{};
+
+  beginning = parse_beginning(PARSE_STATEMENT{});
   if (not beginning)
     goto fail;
 
   program.emplace_back(STMT_VARDECL{.category = beginning.value()});
-  parse(PARSE_VARDECL{}, program.size() - 1);
+  declaration = parse(PARSE_VARDECL{}, program.size() - 1);
+  if (not declaration)
+    goto fail;
   return 1;
 
 fail:
