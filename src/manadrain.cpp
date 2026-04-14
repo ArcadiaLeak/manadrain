@@ -6,19 +6,6 @@
 
 #include "manadrain.hpp"
 
-static bool is_hi_surrogate(char32_t c) {
-  return (c >> 10) == (0xD800 >> 10); /* 0xD800-0xDBFF */
-}
-static bool is_lo_surrogate(char32_t c) {
-  return (c >> 10) == (0xDC00 >> 10); /* 0xDC00-0xDFFF */
-}
-static char32_t from_surrogate(char32_t hi, char32_t lo) {
-  return 0x10000 + 0x400 * (hi - 0xD800) + (lo - 0xDC00);
-}
-static bool is_lineterm(char32_t ch) {
-  return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
-}
-
 namespace Manadrain {
 static const std::array reserved_arr =
     std::to_array<std::tuple<P_ATOM, KEYWORD_KIND, STRICTNESS>>(
@@ -35,6 +22,10 @@ std::optional<KEYWORD_KIND> TOK_IDENTI::match_keyword(STRICTNESS strictness) {
       return tok_kind;
   }
   return std::nullopt;
+}
+
+static bool lineterm(char32_t ch) {
+  return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
 bool AtomPage::check_for_count(int N) { return ch_bitset.count() >= N; }
@@ -296,7 +287,7 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::parse_atom(PARSE_IDENT ident) {
 bool ParseDriver::skip_comment_line() {
   if (reached_eof())
     return 0;
-  if (is_lineterm(next())) {
+  if (lineterm(next())) {
     prev();
     return 0;
   }
@@ -316,7 +307,7 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment_block() {
   if (ch[0] == '*' && ch[1] == '/')
     return false;
   backtrack(--i);
-  if (is_lineterm(ch[0]))
+  if (lineterm(ch[0]))
     newline_seen = 1;
   return true;
 }
@@ -493,33 +484,33 @@ copy_and_return:
 
 std::variant<std::monostate, PARSE_ERRCODE>
 ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
-  bool cheked_initializer{};
+  bool checked_init{};
   TOKEN token{};
 
   token = tokenize(PARSE_IDENT::flag);
   if (token == TOKEN{})
     return PARSE_ERRCODE::NEEDED_VARIABLE_NAME;
-
   std::get<STMT_VARDECL>(program[idx]).identifier = std::get<TOK_IDENTI>(token);
+  token = tokenize(PARSE_PUNCT::flag | PARSE_EOF::flag);
 
 expect_semi:
-  token = tokenize(PARSE_PUNCT::flag | PARSE_EOF::flag);
   if (token == TOKEN{})
     return PARSE_ERRCODE::UNEXPECTED_TOKEN;
-  if (cheked_initializer && token != TOKEN{TOK_SIGCODE::REACHED_EOF} &&
-      token != TOKEN{U';'})
+  else if (not checked_init)
+    goto check_init;
+  else if (token == TOKEN{TOK_SIGCODE::REACHED_EOF} || token == TOKEN{U';'})
+    return std::monostate{};
+  else
     return PARSE_ERRCODE::NEEDED_SEMICOLON;
 
-  if (not cheked_initializer) {
-    if (token == TOKEN{U'='}) {
-      std::get<STMT_VARDECL>(program[idx]).initializer =
-          parse(PARSE_POSTFIX_EXPR{});
-    }
-    cheked_initializer = 1;
-    goto expect_semi;
+check_init:
+  if (token == TOKEN{U'='}) {
+    std::get<STMT_VARDECL>(program[idx]).initializer =
+        parse(PARSE_POSTFIX_EXPR{});
+    token = tokenize(PARSE_PUNCT::flag | PARSE_EOF::flag);
   }
-
-  return std::monostate{};
+  checked_init = 1;
+  goto expect_semi;
 }
 
 std::optional<EXPRESSION> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
@@ -532,8 +523,8 @@ std::optional<EXPRESSION> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
 bool ParseDriver::parse() {
   while (1) {
     TOKEN token = tokenize(PARSE_IDENT::flag | PARSE_EOF::flag);
-    std::optional<KEYWORD_KIND> keyword{};
-    PARSE_ERRCODE errcode{};
+    std::optional<KEYWORD_KIND> var_intro_opt{};
+    std::optional<PARSE_ERRCODE> errcode{};
 
     switch (token.index()) {
     case 0:
@@ -544,20 +535,21 @@ bool ParseDriver::parse() {
       errcode = std::get<1>(token);
       return 0;
     case 4:
-      keyword = std::get<4>(token).match_keyword(STRICTNESS::STRICT);
+      var_intro_opt = std::get<4>(token).match_keyword(STRICTNESS::STRICT);
       break;
     }
 
-    if (keyword) {
-      program.emplace_back(STMT_VARDECL{.category = keyword.value()});
+    if (var_intro_opt) {
+      program.emplace_back(STMT_VARDECL{.rule = var_intro_opt.value()});
       auto declaration = parse(PARSE_VARDECL{}, program.size() - 1);
       if (declaration.index() == 0)
-        return 1;
+        continue;
       errcode = std::get<1>(declaration);
       return 0;
     }
 
-    errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
+    if (errcode)
+      throw std::runtime_error{"parse error!"};
     return 0;
   }
 }

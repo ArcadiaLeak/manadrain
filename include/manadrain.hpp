@@ -46,7 +46,7 @@ using TOKEN =
 using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
 
 struct STMT_VARDECL {
-  KEYWORD_KIND category;
+  KEYWORD_KIND rule;
   TOK_IDENTI identifier;
   std::optional<EXPRESSION> initializer;
 };
