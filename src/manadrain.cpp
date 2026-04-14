@@ -373,14 +373,18 @@ std::optional<bool> ParseDriver::skip_ws_1(char32_t ch) {
   }
 }
 
-TOKEN ParseDriver::tokenize(int flags) {
-  std::optional<bool> ws_opt{1};
-  while (ws_opt.value()) {
+TOKEN ParseDriver::tokenize(int flags, PARSE_ERRCODE on_mismatch) {
+  while (1) {
     if (reached_eof())
-      return std::unexpected{1};
-    ws_opt = skip_ws_1(next());
-    if (not ws_opt)
-      return std::unexpected{2};
+      goto return_eof;
+
+    std::optional<bool> no_ws_ahead = skip_ws_1(next());
+
+    if (not no_ws_ahead)
+      return std::nullopt;
+
+    if (not no_ws_ahead.value())
+      break;
   }
 
   if (flags & PARSE_STRING::flag) {
@@ -389,7 +393,7 @@ TOKEN ParseDriver::tokenize(int flags) {
     case '\'':
     case '"':
       if (not parse_atom(PARSE_STRING{}, ch))
-        return std::unexpected{2};
+        return std::nullopt;
       return TOK_STRING{
           .separator = ch,
           .p_atom = find_static_atom()
@@ -404,7 +408,7 @@ TOKEN ParseDriver::tokenize(int flags) {
   if (flags & PARSE_IDENT::flag) {
     std::optional<bool> ident_opt = parse_atom(PARSE_IDENT{});
     if (not ident_opt)
-      return std::unexpected{2};
+      return std::nullopt;
     if (ident_opt.value())
       return TOK_IDENTI{
           .p_atom = find_static_atom()
@@ -415,7 +419,15 @@ TOKEN ParseDriver::tokenize(int flags) {
   if (flags & PARSE_PUNCT::flag)
     return next();
 
-  return std::unexpected{1};
+mismatch:
+  errcode = on_mismatch;
+  return std::nullopt;
+
+return_eof:
+  if (flags & PARSE_EOF::flag)
+    return TOK_EOF{};
+  else
+    goto mismatch;
 }
 
 std::optional<P_ATOM> ParseDriver::find_static_atom() {
@@ -473,61 +485,54 @@ std::optional<KEYWORD_KIND> ParseDriver::parse_beginning(PARSE_STATEMENT) {
   TOKEN token{};
   std::optional<KEYWORD_KIND> keyword{KEYWORD_KIND{}};
 
-  token = tokenize(PARSE_IDENT::flag);
+  token = tokenize(PARSE_IDENT::flag & PARSE_EOF::flag);
   if (not token)
-    goto set_errcode;
+    return std::nullopt;
 
-  keyword =
-      std::get<TOK_IDENTI>(token.value()).match_keyword(STRICTNESS::STRICT);
-  if (not keyword)
-    goto set_errcode;
-
-  return keyword.value();
-
-set_errcode:
-  if (token.error() == 1 || !keyword.has_value())
+  switch (token->index()) {
+  case 0:
+    return std::nullopt;
+  case 3:
+    keyword = std::get<3>(token.value()).match_keyword(STRICTNESS::STRICT);
+    if (keyword)
+      return keyword.value();
+    [[fallthrough]];
+  default:
     errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
-  return std::nullopt;
+    return std::nullopt;
+  }
 }
 
 std::optional<std::monostate> ParseDriver::parse(PARSE_VARDECL,
                                                  std::size_t idx) {
   TOKEN token{};
 
-  token = tokenize(PARSE_IDENT::flag);
+  token = tokenize(PARSE_IDENT::flag, PARSE_ERRCODE::NEEDED_VARIABLE_NAME);
   if (not token)
-    goto varname_needed;
+    return std::nullopt;
 
   std::get<STMT_VARDECL>(program[idx]).identifier =
       std::get<TOK_IDENTI>(token.value());
 
-  token = tokenize(PARSE_PUNCT::flag);
+  token = tokenize(PARSE_PUNCT::flag & PARSE_EOF::flag);
   if (not token)
-    goto semicolon_needed;
+    return std::nullopt;
 
   if (std::get<char32_t>(token.value()) == '=') {
-    std::optional<EXPRESSION> expr_opt = parse(PARSE_POSTFIX_EXPR{});
-    if (not expr_opt)
-      return std::nullopt;
+    std::get<STMT_VARDECL>(program[idx]).initializer =
+        parse(PARSE_POSTFIX_EXPR{});
 
-    std::get<STMT_VARDECL>(program[idx]).initializer = expr_opt.value();
-    token = tokenize(PARSE_PUNCT::flag);
+    token = tokenize(PARSE_PUNCT::flag & PARSE_EOF::flag);
+    if (not token)
+      return std::nullopt;
   }
 
-  if (std::get<char32_t>(token.value()) != ';')
-    goto semicolon_needed;
+  if (std::get<char32_t>(token.value()) != ';') {
+    errcode = PARSE_ERRCODE::NEEDED_SEMICOLON;
+    return std::nullopt;
+  }
 
   return std::monostate{};
-
-varname_needed:
-  if (token.error() == 1)
-    errcode = PARSE_ERRCODE::NEEDED_VARIABLE_NAME;
-  return std::nullopt;
-
-semicolon_needed:
-  if (token.error() == 1)
-    errcode = PARSE_ERRCODE::NEEDED_SEMICOLON;
-  return std::nullopt;
 }
 
 std::optional<EXPRESSION> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
@@ -535,27 +540,25 @@ std::optional<EXPRESSION> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
 
   token = tokenize(PARSE_STRING::flag);
   if (not token)
-    goto set_errcode;
+    return std::nullopt;
   return std::get<TOK_STRING>(token.value());
-
-set_errcode:
-  if (token.error() == 1)
-    errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
-  return std::nullopt;
 }
 
 bool ParseDriver::parse() {
   std::optional<KEYWORD_KIND> beginning{};
   std::optional<std::monostate> declaration{};
 
-  beginning = parse_beginning(PARSE_STATEMENT{});
-  if (not beginning)
-    goto fail;
+  while (1) {
+    beginning = parse_beginning(PARSE_STATEMENT{});
+    if (not beginning)
+      goto fail;
 
-  program.emplace_back(STMT_VARDECL{.category = beginning.value()});
-  declaration = parse(PARSE_VARDECL{}, program.size() - 1);
-  if (not declaration)
-    goto fail;
+    program.emplace_back(STMT_VARDECL{.category = beginning.value()});
+    declaration = parse(PARSE_VARDECL{}, program.size() - 1);
+    if (not declaration)
+      goto fail;
+  }
+
   return 1;
 
 fail:

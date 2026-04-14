@@ -30,6 +30,7 @@ enum class PARSE_ERRCODE {
   NEEDED_SEMICOLON
 };
 
+struct TOK_EOF {};
 struct TOK_STRING {
   char32_t separator;
   P_ATOM p_atom;
@@ -40,13 +41,13 @@ struct TOK_IDENTI {
   std::optional<KEYWORD_KIND> match_keyword(STRICTNESS);
 };
 using TOKEN =
-    std::expected<std::variant<char32_t, TOK_STRING, TOK_IDENTI>, int>;
+    std::optional<std::variant<TOK_EOF, char32_t, TOK_STRING, TOK_IDENTI>>;
 using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
 
 struct STMT_VARDECL {
   KEYWORD_KIND category;
   TOK_IDENTI identifier;
-  EXPRESSION initializer;
+  std::optional<EXPRESSION> initializer;
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
@@ -62,6 +63,9 @@ struct PARSE_IDENT {
 };
 struct PARSE_PUNCT {
   static constexpr int flag = 4;
+};
+struct PARSE_EOF {
+  static constexpr int flag = 8;
 };
 struct PARSE_STATEMENT {};
 struct PARSE_VARDECL {};
@@ -125,9 +129,10 @@ struct ParseDriver {
   std::optional<bool> parse_uchar(PARSE_IDENT ident);
   std::optional<bool> parse_atom(PARSE_IDENT ident);
 
-  TOKEN tokenize(int flags);
+  TOKEN tokenize(int flags,
+                 PARSE_ERRCODE on_mismatch = PARSE_ERRCODE::UNEXPECTED_TOKEN);
   std::optional<EXPRESSION> parse(PARSE_POSTFIX_EXPR);
-  
+
   std::optional<KEYWORD_KIND> parse_beginning(PARSE_STATEMENT);
   std::optional<std::monostate> parse(PARSE_VARDECL, std::size_t idx);
 
