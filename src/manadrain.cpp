@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <charconv>
 #include <limits>
 #include <stdexcept>
 
@@ -24,6 +26,7 @@ std::optional<KEYWORD_KIND> TOK_IDENTI::match_keyword(STRICTNESS strictness) {
   return std::nullopt;
 }
 
+static bool is_8_or_9(char digit) { return digit == '8' || digit == '9'; }
 static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
@@ -367,38 +370,88 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
   }
 }
 
-TOKEN ParseDriver::tokenize() {
-  while (1) {
-    if (reached_eof())
-      return std::monostate{};
-    auto ws_alt = skip_ws_1(next());
-    if (ws_alt.index() == 1)
-      return std::get<1>(ws_alt);
-    bool ws_ahead = std::get<0>(ws_alt);
-    if (not ws_ahead)
-      break;
-  }
+std::optional<TOKEN> ParseDriver::tokenize_octal() {
+  int num{};
+  std::from_chars_result res = std::from_chars(
+      buffer_ptr() + buffer_idx - 1, buffer_ptr() + buffer.size(), num, 8);
 
-  char32_t ch = next();
-  if (ch == '\'' || ch == '"') {
-    auto atom_alt = parse_atom(PARSE_STRING{}, ch);
-    switch (atom_alt.index()) {
+  if (res.ec == std::errc::result_out_of_range)
+    return std::nullopt;
+
+  buffer_idx = static_cast<int>(res.ptr - buffer_ptr());
+  return std::nullopt;
+}
+
+std::optional<TOKEN> ParseDriver::tokenize_decimal(char32_t leading) {
+  int num{};
+  std::from_chars_result res = std::from_chars(
+      buffer_ptr() + buffer_idx - 1, buffer_ptr() + buffer.size(), num);
+
+  if (res.ec == std::errc::result_out_of_range)
+    return std::nullopt;
+
+  bool no_decimals =
+      std::none_of(buffer_ptr() + buffer_idx - 1, res.ptr, is_8_or_9);
+  if (leading == '0' && no_decimals)
+    return tokenize_octal();
+
+  buffer_idx = static_cast<int>(res.ptr - buffer_ptr());
+  return std::nullopt;
+}
+
+std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
+  switch (leading) {
+  case '0':
+    switch (next()) {
+    case 'x':
+    case 'X':
+      return std::nullopt;
+    case 'o':
+    case 'O':
+      return std::nullopt;
+    case 'b':
+    case 'B':
+      return std::nullopt;
+    default:
+      prev();
+      break;
+    }
+    [[fallthrough]];
+  case '1':
+  case '2':
+  case '3':
+  case '4':
+  case '5':
+  case '6':
+  case '7':
+  case '8':
+  case '9':
+    return tokenize_decimal(leading);
+  case '\'':
+  case '"': {
+    auto str_alt = parse_atom(PARSE_STRING{}, leading);
+    switch (str_alt.index()) {
     case 0: {
       P_ATOM pos_atom = find_static_atom()
                             .or_else([this]() { return find_dynamic_atom(); })
                             .value();
-      return TOK_STRING{.separator = ch, .p_atom = pos_atom};
+      return TOK_STRING{.separator = leading, .p_atom = pos_atom};
     }
     default:
-      return std::get<1>(atom_alt);
+      return std::get<1>(str_alt);
     }
   }
-  prev();
+  default:
+    prev();
+    return std::nullopt;
+  }
+}
 
-  auto atom_alt = parse_atom(PARSE_IDENT{});
-  switch (atom_alt.index()) {
+std::optional<TOKEN> ParseDriver::tokenize_identi_or_punct() {
+  auto ident_alt = parse_atom(PARSE_IDENT{});
+  switch (ident_alt.index()) {
   case 0:
-    if (std::get<0>(atom_alt)) {
+    if (std::get<0>(ident_alt)) {
       P_ATOM pos_atom = find_static_atom()
                             .or_else([this]() { return find_dynamic_atom(); })
                             .value();
@@ -406,10 +459,25 @@ TOKEN ParseDriver::tokenize() {
     }
     break;
   case 1:
-    return std::get<1>(atom_alt);
+    return std::get<1>(ident_alt);
   }
-
   return next();
+}
+
+TOKEN ParseDriver::tokenize() {
+  while (1) {
+    if (reached_eof())
+      return std::monostate{};
+    auto ws_alt = skip_ws_1(next());
+    if (ws_alt.index() == 0 && std::get<0>(ws_alt))
+      continue;
+    if (ws_alt.index() == 1)
+      return std::get<1>(ws_alt);
+    break;
+  }
+  return tokenize_lookahead(next())
+      .or_else([this]() { return tokenize_identi_or_punct(); })
+      .value();
 }
 
 std::optional<P_ATOM> ParseDriver::find_static_atom() {
@@ -465,7 +533,7 @@ copy_and_return:
 
 std::variant<std::monostate, PARSE_ERRCODE>
 ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
-  bool may_have_init{1};
+  bool try_init{1};
 
   token_curr = tokenize();
   if (token_curr.index() != TOKV_IDENTI)
@@ -475,11 +543,11 @@ ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
   token_curr = tokenize();
 
 identif_end:
-  if (may_have_init)
-    goto check_initializer;
+  if (try_init)
+    goto check_init;
   return std::monostate{};
 
-check_initializer:
+check_init:
   if (token_curr == TOKEN{U'='}) {
     token_curr = tokenize();
     auto postfix_expr = parse(PARSE_POSTFIX_EXPR{});
@@ -488,7 +556,7 @@ check_initializer:
     std::get<STMT_VARDECL>(program[idx]).initializer =
         std::move(std::get<0>(postfix_expr));
   }
-  may_have_init = 0;
+  try_init = 0;
   goto identif_end;
 }
 

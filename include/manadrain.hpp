@@ -100,7 +100,10 @@ struct ParseDriver {
   int buffer_idx;
   bool reached_eof() { return buffer_idx >= buffer.size(); }
 
+  const char *buffer_ptr() { return reinterpret_cast<char *>(buffer.data()); }
+
   bool newline_seen;
+  STRICTNESS strictness;
 
   std::string str1_temp;
   void str1_encode(char32_t cp);
@@ -109,8 +112,6 @@ struct ParseDriver {
   std::deque<AtomPage> atom_deq;
 
   TOKEN token_curr;
-
-  STRICTNESS strictness;
   std::vector<STATEMENT> program;
 
   char32_t next();
@@ -144,6 +145,11 @@ struct ParseDriver {
   std::variant<bool, PARSE_ERRCODE> parse_atom(PARSE_IDENT ident);
 
   TOKEN tokenize();
+  std::optional<TOKEN> tokenize_octal();
+  std::optional<TOKEN> tokenize_decimal(char32_t leading);
+  std::optional<TOKEN> tokenize_lookahead(char32_t leading);
+  std::optional<TOKEN> tokenize_identi_or_punct();
+
   std::variant<EXPRESSION, PARSE_ERRCODE> parse(PARSE_POSTFIX_EXPR);
 
   std::variant<std::monostate, PARSE_ERRCODE> parse(PARSE_VARDECL,
