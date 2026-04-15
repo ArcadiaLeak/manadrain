@@ -46,11 +46,7 @@ enum TOKV_INDEX { TOKV_EOF, TOKV_ERROR, TOKV_PUNCT, TOKV_STRING, TOKV_IDENTI };
 using TOKEN = std::variant<std::monostate, PARSE_ERRCODE, char32_t, TOK_STRING,
                            TOK_IDENTI>;
 
-enum EXPRV_INDEX { EXPRV_STRING, EXPRV_IDENTI, EXPRV_CALL, EXPRV_MEMBER };
-
-struct EXPR_CALL;
-struct EXPR_MEMBER;
-using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI, EXPR_CALL, EXPR_MEMBER>;
+struct EXPRESSION;
 
 struct EXPR_CALL {
   std::unique_ptr<EXPRESSION> callee;
@@ -58,6 +54,11 @@ struct EXPR_CALL {
 struct EXPR_MEMBER {
   std::unique_ptr<EXPRESSION> object;
   TOK_IDENTI property;
+};
+
+enum EXPRV_INDEX { EXPRV_STRING, EXPRV_IDENTI, EXPRV_CALL, EXPRV_MEMBER };
+struct EXPRESSION {
+  std::variant<TOK_STRING, TOK_IDENTI, EXPR_CALL, EXPR_MEMBER> alter;
 };
 
 struct STMT_VARDECL {

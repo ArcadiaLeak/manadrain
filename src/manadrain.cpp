@@ -509,10 +509,10 @@ std::variant<EXPRESSION, PARSE_ERRCODE> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
   EXPRESSION expr{};
   switch (token_curr.index()) {
   case TOKV_STRING:
-    expr = std::get<TOKV_STRING>(token_curr);
+    expr = EXPRESSION{std::get<TOKV_STRING>(token_curr)};
     break;
   case TOKV_IDENTI:
-    expr = std::get<TOKV_IDENTI>(token_curr);
+    expr = EXPRESSION{std::get<TOKV_IDENTI>(token_curr)};
     break;
   default:
     return PARSE_ERRCODE::UNEXPECTED_TOKEN;
@@ -521,14 +521,15 @@ try_postfix: {
   token_curr = tokenize();
   if (token_curr.index() == TOKV_PUNCT) {
     switch (std::get<TOKV_PUNCT>(token_curr)) {
-    case '.':
+    case '.': {
       token_curr = tokenize();
       if (token_curr.index() != TOKV_IDENTI)
         return PARSE_ERRCODE::NEEDED_FIELD_NAME;
-      expr =
-          EXPR_MEMBER{.object = std::make_unique<EXPRESSION>(std::move(expr)),
-                      .property = std::get<TOK_IDENTI>(token_curr)};
+      EXPR_MEMBER member{std::make_unique<EXPRESSION>(std::move(expr.alter)),
+                         std::get<TOK_IDENTI>(token_curr)};
+      expr = EXPRESSION{std::move(member)};
       goto try_postfix;
+    }
     case '(':
       throw std::runtime_error{"unimplemented!"};
     default:
