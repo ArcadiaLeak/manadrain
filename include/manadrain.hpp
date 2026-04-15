@@ -26,8 +26,9 @@ enum class PARSE_ERRCODE {
   UNEXPECTED_STRING_END,
   UNEXPECTED_COMMENT_END,
   UNEXPECTED_TOKEN,
+  NEEDED_SEMICOLON,
   NEEDED_VARIABLE_NAME,
-  NEEDED_SEMICOLON
+  NEEDED_FIELD_NAME
 };
 
 struct TOK_STRING {
@@ -55,7 +56,7 @@ struct EXPR_CALL {
   std::unique_ptr<EXPRESSION> callee;
 };
 struct EXPR_MEMBER {
-  TOK_IDENTI object;
+  std::unique_ptr<EXPRESSION> object;
   TOK_IDENTI property;
 };
 

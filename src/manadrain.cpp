@@ -368,14 +368,14 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
 }
 
 TOKEN ParseDriver::tokenize() {
-whitespace: {
+try_ws: {
   if (reached_eof())
     return std::monostate{};
   auto ws_alt = skip_ws_1(next());
   switch (ws_alt.index()) {
   case 0:
     if (std::get<0>(ws_alt))
-      goto whitespace;
+      goto try_ws;
     break;
   case 1:
     return std::get<1>(ws_alt);
@@ -507,20 +507,35 @@ check_initializer:
 
 std::variant<EXPRESSION, PARSE_ERRCODE> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
   EXPRESSION expr{};
-  while (1) {
-    switch (token_curr.index()) {
-    case TOKV_STRING:
-      expr = std::get<TOKV_STRING>(token_curr);
-      break;
-    case TOKV_IDENTI:
-      expr = std::get<TOKV_IDENTI>(token_curr);
-      break;
-    default:
-      return PARSE_ERRCODE::UNEXPECTED_TOKEN;
-    }
-    token_curr = tokenize();
+  switch (token_curr.index()) {
+  case TOKV_STRING:
+    expr = std::get<TOKV_STRING>(token_curr);
     break;
+  case TOKV_IDENTI:
+    expr = std::get<TOKV_IDENTI>(token_curr);
+    break;
+  default:
+    return PARSE_ERRCODE::UNEXPECTED_TOKEN;
   }
+try_postfix: {
+  token_curr = tokenize();
+  if (token_curr.index() == TOKV_PUNCT) {
+    switch (std::get<TOKV_PUNCT>(token_curr)) {
+    case '.':
+      token_curr = tokenize();
+      if (token_curr.index() != TOKV_IDENTI)
+        return PARSE_ERRCODE::NEEDED_FIELD_NAME;
+      expr =
+          EXPR_MEMBER{.object = std::make_unique<EXPRESSION>(std::move(expr)),
+                      .property = std::get<TOK_IDENTI>(token_curr)};
+      goto try_postfix;
+    case '(':
+      throw std::runtime_error{"unimplemented!"};
+    default:
+      break;
+    }
+  }
+}
   return expr;
 }
 
