@@ -1,5 +1,6 @@
 #include <bitset>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -43,7 +44,20 @@ struct TOK_IDENTI {
 enum TOKV_INDEX { TOKV_EOF, TOKV_ERROR, TOKV_PUNCT, TOKV_STRING, TOKV_IDENTI };
 using TOKEN = std::variant<std::monostate, PARSE_ERRCODE, char32_t, TOK_STRING,
                            TOK_IDENTI>;
-using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
+
+enum EXPRV_INDEX { EXPRV_STRING, EXPRV_IDENTI, EXPRV_CALL, EXPRV_MEMBER };
+
+struct EXPR_CALL;
+struct EXPR_MEMBER;
+using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI, EXPR_CALL, EXPR_MEMBER>;
+
+struct EXPR_CALL {
+  std::unique_ptr<EXPRESSION> callee;
+};
+struct EXPR_MEMBER {
+  TOK_IDENTI object;
+  TOK_IDENTI property;
+};
 
 struct STMT_VARDECL {
   KEYWORD_KIND rule;
@@ -55,19 +69,11 @@ using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 struct PARSE_ESCAPE {
   ESC_RULE rule;
 };
-struct PARSE_STRING {
-  static constexpr int flag = 1;
-};
+struct PARSE_STRING {};
 struct PARSE_IDENT {
-  static constexpr int flag = 2;
   bool is_private;
 };
-struct PARSE_PUNCT {
-  static constexpr int flag = 4;
-};
-struct PARSE_EOF {
-  static constexpr int flag = 8;
-};
+struct PARSE_EOF {};
 struct PARSE_STATEMENT {};
 struct PARSE_VARDECL {};
 struct PARSE_POSTFIX_EXPR {};
@@ -97,6 +103,8 @@ struct ParseDriver {
 
   std::unordered_map<std::string_view, P_ATOM> atom_umap;
   std::deque<AtomPage> atom_deq;
+
+  TOKEN token_curr;
 
   STRICTNESS strictness;
   std::vector<STATEMENT> program;
@@ -131,9 +139,8 @@ struct ParseDriver {
   std::variant<bool, PARSE_ERRCODE> parse_uchar(PARSE_IDENT ident);
   std::variant<bool, PARSE_ERRCODE> parse_atom(PARSE_IDENT ident);
 
-  std::optional<TOKEN> tokenize(int flags);
-  std::variant<EXPRESSION, PARSE_ERRCODE> parse(PARSE_POSTFIX_EXPR,
-                                                std::optional<TOKEN> token);
+  TOKEN tokenize();
+  std::variant<EXPRESSION, PARSE_ERRCODE> parse(PARSE_POSTFIX_EXPR);
 
   std::variant<std::monostate, PARSE_ERRCODE> parse(PARSE_VARDECL,
                                                     std::size_t idx);

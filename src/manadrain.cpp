@@ -367,10 +367,10 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
   }
 }
 
-std::optional<TOKEN> ParseDriver::tokenize(int flags) {
+TOKEN ParseDriver::tokenize() {
 whitespace: {
   if (reached_eof())
-    return flags & PARSE_EOF::flag ? std::make_optional<TOKEN>() : std::nullopt;
+    return std::monostate{};
   auto ws_alt = skip_ws_1(next());
   switch (ws_alt.index()) {
   case 0:
@@ -378,36 +378,30 @@ whitespace: {
       goto whitespace;
     break;
   case 1:
-    return std::make_optional<TOKEN>(std::get<1>(ws_alt));
+    return std::get<1>(ws_alt);
   }
 }
 
-  if (flags & PARSE_STRING::flag) {
+  {
     char32_t ch{next()};
-    switch (ch) {
-    case '\'':
-    case '"': {
+    if (ch == '\'' || ch == '"') {
       auto atom_alt = parse_atom(PARSE_STRING{}, ch);
       switch (atom_alt.index()) {
       case 0: {
         P_ATOM pos_atom = find_static_atom()
                               .or_else([this]() { return find_dynamic_atom(); })
                               .value();
-        return std::make_optional<TOKEN>(
-            TOK_STRING{.separator = ch, .p_atom = pos_atom});
+        return TOK_STRING{.separator = ch, .p_atom = pos_atom};
       }
       case 1:
-        return std::make_optional<TOKEN>(std::get<1>(atom_alt));
+        return std::get<1>(atom_alt);
       }
       throw std::runtime_error{"unreachable!"};
     }
-    default:
-      prev();
-      break;
-    }
+    prev();
   }
 
-  if (flags & PARSE_IDENT::flag) {
+  {
     auto atom_alt = parse_atom(PARSE_IDENT{});
     bool have_ident{};
     switch (atom_alt.index()) {
@@ -415,20 +409,17 @@ whitespace: {
       have_ident = std::get<0>(atom_alt);
       break;
     case 1:
-      return std::make_optional<TOKEN>(std::get<1>(atom_alt));
+      return std::get<1>(atom_alt);
     }
     if (have_ident) {
       P_ATOM pos_atom = find_static_atom()
                             .or_else([this]() { return find_dynamic_atom(); })
                             .value();
-      return std::make_optional<TOKEN>(TOK_IDENTI{.p_atom = pos_atom});
+      return TOK_IDENTI{.p_atom = pos_atom};
     }
   }
 
-  if (flags & PARSE_PUNCT::flag)
-    return std::make_optional<TOKEN>(next());
-
-  return std::nullopt;
+  return next();
 }
 
 std::optional<P_ATOM> ParseDriver::find_static_atom() {
@@ -484,103 +475,98 @@ copy_and_return:
 
 std::variant<std::monostate, PARSE_ERRCODE>
 ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
-  bool checked_init{};
-  std::optional<TOKEN> token{};
+  bool may_have_init{1};
 
-  token = tokenize(PARSE_IDENT::flag);
-  if (not token)
+  token_curr = tokenize();
+  if (token_curr.index() != TOKV_IDENTI)
     return PARSE_ERRCODE::NEEDED_VARIABLE_NAME;
   std::get<STMT_VARDECL>(program[idx]).identifier =
-      std::get<TOK_IDENTI>(*token);
-  token = tokenize(PARSE_PUNCT::flag | PARSE_EOF::flag);
+      std::get<TOK_IDENTI>(token_curr);
+  token_curr = tokenize();
 
 expect_semi:
-  if (not token)
-    return PARSE_ERRCODE::UNEXPECTED_TOKEN;
-  else if (not checked_init)
-    goto check_init;
-  else if (token->index() == 0 || *token == TOKEN{U';'})
+  if (may_have_init)
+    goto check_initializer;
+  else if (token_curr.index() == TOKV_EOF || token_curr == TOKEN{U';'})
     return std::monostate{};
   else
     return PARSE_ERRCODE::NEEDED_SEMICOLON;
 
-check_init:
-  if (*token == TOKEN{U'='}) {
-    token = tokenize(PARSE_STRING::flag);
-    if (not token)
-      return PARSE_ERRCODE::UNEXPECTED_TOKEN;
-    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{}, token);
+check_initializer:
+  if (token_curr == TOKEN{U'='}) {
+    token_curr = tokenize();
+    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{});
     if (postfix_expr.index() == 1)
       return std::get<1>(postfix_expr);
     std::get<STMT_VARDECL>(program[idx]).initializer =
-        std::get<0>(postfix_expr);
-    token = tokenize(PARSE_PUNCT::flag | PARSE_EOF::flag);
+        std::move(std::get<0>(postfix_expr));
   }
-  checked_init = 1;
+  may_have_init = 0;
   goto expect_semi;
 }
 
-std::variant<EXPRESSION, PARSE_ERRCODE>
-ParseDriver::parse(PARSE_POSTFIX_EXPR, std::optional<TOKEN> token) {
-  switch (token->index()) {
-  case TOKV_STRING:
-    return std::get<TOKV_STRING>(*token);
-  case TOKV_IDENTI:
-    return std::get<TOKV_IDENTI>(*token);
-  default:
-    throw std::runtime_error{"unreachable!"};
+std::variant<EXPRESSION, PARSE_ERRCODE> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
+  EXPRESSION expr{};
+  while (1) {
+    switch (token_curr.index()) {
+    case TOKV_STRING:
+      expr = std::get<TOKV_STRING>(token_curr);
+      break;
+    case TOKV_IDENTI:
+      expr = std::get<TOKV_IDENTI>(token_curr);
+      break;
+    default:
+      return PARSE_ERRCODE::UNEXPECTED_TOKEN;
+    }
+    token_curr = tokenize();
+    break;
   }
+  return expr;
 }
 
 bool ParseDriver::parse() {
+  token_curr = tokenize();
   while (1) {
-    std::optional<TOKEN> token = tokenize(PARSE_IDENT::flag | PARSE_EOF::flag);
     std::optional<PARSE_ERRCODE> errcode{};
 
-    if (not token) {
-      errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
-      goto fail;
-    }
-
-    switch (token->index()) {
+    switch (token_curr.index()) {
     case TOKV_EOF:
       return 1;
     case TOKV_ERROR:
-      errcode = std::get<TOKV_ERROR>(*token);
+      errcode = std::get<TOKV_ERROR>(token_curr);
       goto fail;
     case TOKV_IDENTI:
-      goto handle_identi;
+      if (std::get<TOKV_IDENTI>(token_curr).match_keyword(STRICTNESS::STRICT))
+        goto parse_vardecl;
+      [[fallthrough]];
     default:
-      break;
+      goto parse_postfix;
     }
 
   fail:
-    if (errcode)
-      throw std::runtime_error{"parse error!"};
+    if (not errcode)
+      throw std::runtime_error{"parsing failed without an errcode!"};
     return 0;
-
-  handle_identi:
-    if (std::get<TOKV_IDENTI>(*token).match_keyword(STRICTNESS::STRICT))
-      goto parse_vardecl;
-    goto parse_postfix;
 
   parse_vardecl: {
     program.emplace_back(
-        STMT_VARDECL{.rule = std::get<TOKV_IDENTI>(*token)
+        STMT_VARDECL{.rule = std::get<TOKV_IDENTI>(token_curr)
                                  .match_keyword(STRICTNESS::STRICT)
                                  .value()});
     auto declaration = parse(PARSE_VARDECL{}, program.size() - 1);
-    if (declaration.index() == 0)
+    if (declaration.index() == 0) {
+      token_curr = tokenize();
       continue;
+    }
     errcode = std::get<1>(declaration);
     goto fail;
   }
 
   parse_postfix: {
-    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{}, token);
+    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{});
     switch (postfix_expr.index()) {
     case 0:
-      program.emplace_back(std::get<0>(postfix_expr));
+      program.emplace_back(std::move(std::get<0>(postfix_expr)));
       continue;
     case 1:
       errcode = std::get<1>(postfix_expr);
