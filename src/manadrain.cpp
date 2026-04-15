@@ -368,55 +368,45 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
 }
 
 TOKEN ParseDriver::tokenize() {
-try_ws: {
-  if (reached_eof())
-    return std::monostate{};
-  auto ws_alt = skip_ws_1(next());
-  switch (ws_alt.index()) {
-  case 0:
-    if (std::get<0>(ws_alt))
-      goto try_ws;
-    break;
-  case 1:
-    return std::get<1>(ws_alt);
-  }
-}
-
-  {
-    char32_t ch{next()};
-    if (ch == '\'' || ch == '"') {
-      auto atom_alt = parse_atom(PARSE_STRING{}, ch);
-      switch (atom_alt.index()) {
-      case 0: {
-        P_ATOM pos_atom = find_static_atom()
-                              .or_else([this]() { return find_dynamic_atom(); })
-                              .value();
-        return TOK_STRING{.separator = ch, .p_atom = pos_atom};
-      }
-      case 1:
-        return std::get<1>(atom_alt);
-      }
-      throw std::runtime_error{"unreachable!"};
-    }
-    prev();
-  }
-
-  {
-    auto atom_alt = parse_atom(PARSE_IDENT{});
-    bool have_ident{};
-    switch (atom_alt.index()) {
-    case 0:
-      have_ident = std::get<0>(atom_alt);
+  while (1) {
+    if (reached_eof())
+      return std::monostate{};
+    auto ws_alt = skip_ws_1(next());
+    if (ws_alt.index() == 1)
+      return std::get<1>(ws_alt);
+    bool ws_ahead = std::get<0>(ws_alt);
+    if (not ws_ahead)
       break;
-    case 1:
+  }
+
+  char32_t ch = next();
+  if (ch == '\'' || ch == '"') {
+    auto atom_alt = parse_atom(PARSE_STRING{}, ch);
+    switch (atom_alt.index()) {
+    case 0: {
+      P_ATOM pos_atom = find_static_atom()
+                            .or_else([this]() { return find_dynamic_atom(); })
+                            .value();
+      return TOK_STRING{.separator = ch, .p_atom = pos_atom};
+    }
+    default:
       return std::get<1>(atom_alt);
     }
-    if (have_ident) {
+  }
+  prev();
+
+  auto atom_alt = parse_atom(PARSE_IDENT{});
+  switch (atom_alt.index()) {
+  case 0:
+    if (std::get<0>(atom_alt)) {
       P_ATOM pos_atom = find_static_atom()
                             .or_else([this]() { return find_dynamic_atom(); })
                             .value();
       return TOK_IDENTI{.p_atom = pos_atom};
     }
+    break;
+  case 1:
+    return std::get<1>(atom_alt);
   }
 
   return next();
