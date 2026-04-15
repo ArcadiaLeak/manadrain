@@ -484,13 +484,10 @@ ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
       std::get<TOK_IDENTI>(token_curr);
   token_curr = tokenize();
 
-expect_semi:
+identif_end:
   if (may_have_init)
     goto check_initializer;
-  else if (token_curr.index() == TOKV_EOF || token_curr == TOKEN{U';'})
-    return std::monostate{};
-  else
-    return PARSE_ERRCODE::NEEDED_SEMICOLON;
+  return std::monostate{};
 
 check_initializer:
   if (token_curr == TOKEN{U'='}) {
@@ -502,7 +499,7 @@ check_initializer:
         std::move(std::get<0>(postfix_expr));
   }
   may_have_init = 0;
-  goto expect_semi;
+  goto identif_end;
 }
 
 std::variant<EXPRESSION, PARSE_ERRCODE> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
@@ -530,8 +527,30 @@ try_postfix: {
       expr = EXPRESSION{std::move(member)};
       goto try_postfix;
     }
-    case '(':
-      throw std::runtime_error{"unimplemented!"};
+    case '(': {
+      EXPR_CALL call_expr{std::make_unique<EXPRESSION>(std::move(expr.alter))};
+      std::variant<EXPRESSION, PARSE_ERRCODE> arg_alt{};
+    try_arg:
+      token_curr = tokenize();
+      if (token_curr == TOKEN{U')'})
+        goto call_end;
+      arg_alt = parse(PARSE_POSTFIX_EXPR{});
+      switch (arg_alt.index()) {
+      case 0:
+        call_expr.arguments.emplace_back(std::move(std::get<0>(arg_alt)));
+        break;
+      case 1:
+        return std::get<1>(arg_alt);
+      }
+      if (token_curr == TOKEN{U')'})
+        goto call_end;
+      if (token_curr == TOKEN{U','})
+        goto try_arg;
+      return PARSE_ERRCODE::NEEDED_COMMA;
+    call_end:
+      expr = EXPRESSION{std::move(call_expr)};
+      goto try_postfix;
+    }
     default:
       break;
     }
@@ -570,12 +589,13 @@ bool ParseDriver::parse() {
                                  .match_keyword(STRICTNESS::STRICT)
                                  .value()});
     auto declaration = parse(PARSE_VARDECL{}, program.size() - 1);
-    if (declaration.index() == 0) {
-      token_curr = tokenize();
-      continue;
+    switch (declaration.index()) {
+    case 0:
+      goto statement_end;
+    case 1:
+      errcode = std::get<1>(declaration);
+      goto fail;
     }
-    errcode = std::get<1>(declaration);
-    goto fail;
   }
 
   parse_postfix: {
@@ -583,12 +603,22 @@ bool ParseDriver::parse() {
     switch (postfix_expr.index()) {
     case 0:
       program.emplace_back(std::move(std::get<0>(postfix_expr)));
-      continue;
+      goto statement_end;
     case 1:
       errcode = std::get<1>(postfix_expr);
       goto fail;
     }
   }
+
+  statement_end:
+    if (token_curr == TOKEN{U';'}) {
+      token_curr = tokenize();
+      continue;
+    } else if (token_curr.index() == TOKV_EOF || token_curr == TOKEN{U'}'} ||
+               newline_seen)
+      continue;
+    errcode = PARSE_ERRCODE::NEEDED_SEMICOLON;
+    goto fail;
   }
 }
 } // namespace Manadrain
