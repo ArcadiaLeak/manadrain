@@ -1,6 +1,5 @@
 #include <bitset>
 #include <deque>
-#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -41,6 +40,7 @@ struct TOK_IDENTI {
   bool operator==(const TOK_IDENTI &) const = default;
   std::optional<KEYWORD_KIND> match_keyword(STRICTNESS);
 };
+enum TOKV_INDEX { TOKV_EOF, TOKV_ERROR, TOKV_PUNCT, TOKV_STRING, TOKV_IDENTI };
 using TOKEN = std::variant<std::monostate, PARSE_ERRCODE, char32_t, TOK_STRING,
                            TOK_IDENTI>;
 using EXPRESSION = std::variant<TOK_STRING, TOK_IDENTI>;
@@ -131,8 +131,9 @@ struct ParseDriver {
   std::variant<bool, PARSE_ERRCODE> parse_uchar(PARSE_IDENT ident);
   std::variant<bool, PARSE_ERRCODE> parse_atom(PARSE_IDENT ident);
 
-  std::unique_ptr<TOKEN> tokenize(int flags);
-  std::optional<EXPRESSION> parse(PARSE_POSTFIX_EXPR);
+  std::optional<TOKEN> tokenize(int flags);
+  std::variant<EXPRESSION, PARSE_ERRCODE> parse(PARSE_POSTFIX_EXPR,
+                                                std::optional<TOKEN> token);
 
   std::variant<std::monostate, PARSE_ERRCODE> parse(PARSE_VARDECL,
                                                     std::size_t idx);

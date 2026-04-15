@@ -367,20 +367,20 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
   }
 }
 
-std::unique_ptr<TOKEN> ParseDriver::tokenize(int flags) {
-  bool go_on{1};
-  while (go_on) {
-    if (reached_eof())
-      return flags & PARSE_EOF::flag ? std::make_unique<TOKEN>() : nullptr;
-    auto ws_alt = skip_ws_1(next());
-    switch (ws_alt.index()) {
-    case 0:
-      go_on = std::get<0>(ws_alt);
-      break;
-    case 1:
-      return std::make_unique<TOKEN>(std::get<1>(ws_alt));
-    }
+std::optional<TOKEN> ParseDriver::tokenize(int flags) {
+whitespace: {
+  if (reached_eof())
+    return flags & PARSE_EOF::flag ? std::make_optional<TOKEN>() : std::nullopt;
+  auto ws_alt = skip_ws_1(next());
+  switch (ws_alt.index()) {
+  case 0:
+    if (std::get<0>(ws_alt))
+      goto whitespace;
+    break;
+  case 1:
+    return std::make_optional<TOKEN>(std::get<1>(ws_alt));
   }
+}
 
   if (flags & PARSE_STRING::flag) {
     char32_t ch{next()};
@@ -393,11 +393,11 @@ std::unique_ptr<TOKEN> ParseDriver::tokenize(int flags) {
         P_ATOM pos_atom = find_static_atom()
                               .or_else([this]() { return find_dynamic_atom(); })
                               .value();
-        return std::make_unique<TOKEN>(
+        return std::make_optional<TOKEN>(
             TOK_STRING{.separator = ch, .p_atom = pos_atom});
       }
       case 1:
-        return std::make_unique<TOKEN>(std::get<1>(atom_alt));
+        return std::make_optional<TOKEN>(std::get<1>(atom_alt));
       }
       throw std::runtime_error{"unreachable!"};
     }
@@ -415,20 +415,20 @@ std::unique_ptr<TOKEN> ParseDriver::tokenize(int flags) {
       have_ident = std::get<0>(atom_alt);
       break;
     case 1:
-      return std::make_unique<TOKEN>(std::get<1>(atom_alt));
+      return std::make_optional<TOKEN>(std::get<1>(atom_alt));
     }
     if (have_ident) {
       P_ATOM pos_atom = find_static_atom()
                             .or_else([this]() { return find_dynamic_atom(); })
                             .value();
-      return std::make_unique<TOKEN>(TOK_IDENTI{.p_atom = pos_atom});
+      return std::make_optional<TOKEN>(TOK_IDENTI{.p_atom = pos_atom});
     }
   }
 
   if (flags & PARSE_PUNCT::flag)
-    return std::make_unique<TOKEN>(next());
+    return std::make_optional<TOKEN>(next());
 
-  return nullptr;
+  return std::nullopt;
 }
 
 std::optional<P_ATOM> ParseDriver::find_static_atom() {
@@ -485,7 +485,7 @@ copy_and_return:
 std::variant<std::monostate, PARSE_ERRCODE>
 ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
   bool checked_init{};
-  std::unique_ptr<TOKEN> token{};
+  std::optional<TOKEN> token{};
 
   token = tokenize(PARSE_IDENT::flag);
   if (not token)
@@ -506,58 +506,87 @@ expect_semi:
 
 check_init:
   if (*token == TOKEN{U'='}) {
+    token = tokenize(PARSE_STRING::flag);
+    if (not token)
+      return PARSE_ERRCODE::UNEXPECTED_TOKEN;
+    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{}, token);
+    if (postfix_expr.index() == 1)
+      return std::get<1>(postfix_expr);
     std::get<STMT_VARDECL>(program[idx]).initializer =
-        parse(PARSE_POSTFIX_EXPR{});
+        std::get<0>(postfix_expr);
     token = tokenize(PARSE_PUNCT::flag | PARSE_EOF::flag);
   }
   checked_init = 1;
   goto expect_semi;
 }
 
-std::optional<EXPRESSION> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
-  std::unique_ptr<TOKEN> token = tokenize(PARSE_STRING::flag);
-  if (token->index() == 0)
-    return std::nullopt;
-  return std::get<TOK_STRING>(*token);
+std::variant<EXPRESSION, PARSE_ERRCODE>
+ParseDriver::parse(PARSE_POSTFIX_EXPR, std::optional<TOKEN> token) {
+  switch (token->index()) {
+  case TOKV_STRING:
+    return std::get<TOKV_STRING>(*token);
+  case TOKV_IDENTI:
+    return std::get<TOKV_IDENTI>(*token);
+  default:
+    throw std::runtime_error{"unreachable!"};
+  }
 }
 
 bool ParseDriver::parse() {
   while (1) {
-    std::unique_ptr<TOKEN> token =
-        tokenize(PARSE_IDENT::flag | PARSE_EOF::flag);
+    std::optional<TOKEN> token = tokenize(PARSE_IDENT::flag | PARSE_EOF::flag);
     std::optional<PARSE_ERRCODE> errcode{};
 
-    if (not token)
-      goto tok_unexp;
-    switch (token->index()) {
-    case 0:
-      return 1;
-    case 1:
-      errcode = std::get<1>(*token);
+    if (not token) {
+      errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
       goto fail;
-    case 4: {
-      std::optional<KEYWORD_KIND> var_intro_opt =
-          std::get<4>(*token).match_keyword(STRICTNESS::STRICT);
-      if (not var_intro_opt)
-        goto tok_unexp;
-      program.emplace_back(STMT_VARDECL{.rule = var_intro_opt.value()});
-      auto declaration = parse(PARSE_VARDECL{}, program.size() - 1);
-      if (declaration.index() == 1) {
-        errcode = std::get<1>(declaration);
-        goto fail;
-      }
-    } break;
     }
-    continue;
+
+    switch (token->index()) {
+    case TOKV_EOF:
+      return 1;
+    case TOKV_ERROR:
+      errcode = std::get<TOKV_ERROR>(*token);
+      goto fail;
+    case TOKV_IDENTI:
+      goto handle_identi;
+    default:
+      break;
+    }
 
   fail:
     if (errcode)
       throw std::runtime_error{"parse error!"};
     return 0;
 
-  tok_unexp:
-    errcode = PARSE_ERRCODE::UNEXPECTED_TOKEN;
+  handle_identi:
+    if (std::get<TOKV_IDENTI>(*token).match_keyword(STRICTNESS::STRICT))
+      goto parse_vardecl;
+    goto parse_postfix;
+
+  parse_vardecl: {
+    program.emplace_back(
+        STMT_VARDECL{.rule = std::get<TOKV_IDENTI>(*token)
+                                 .match_keyword(STRICTNESS::STRICT)
+                                 .value()});
+    auto declaration = parse(PARSE_VARDECL{}, program.size() - 1);
+    if (declaration.index() == 0)
+      continue;
+    errcode = std::get<1>(declaration);
     goto fail;
+  }
+
+  parse_postfix: {
+    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{}, token);
+    switch (postfix_expr.index()) {
+    case 0:
+      program.emplace_back(std::get<0>(postfix_expr));
+      continue;
+    case 1:
+      errcode = std::get<1>(postfix_expr);
+      goto fail;
+    }
+  }
   }
 }
 } // namespace Manadrain
