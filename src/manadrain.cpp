@@ -382,23 +382,6 @@ std::optional<TOKEN> ParseDriver::tokenize_octal() {
   return std::nullopt;
 }
 
-std::optional<TOKEN> ParseDriver::tokenize_decimal(char32_t leading) {
-  int num{};
-  std::from_chars_result res = std::from_chars(
-      buffer_ptr() + buffer_idx - 1, buffer_ptr() + buffer.size(), num);
-
-  if (res.ec == std::errc::result_out_of_range)
-    return std::nullopt;
-
-  bool no_decimals =
-      std::none_of(buffer_ptr() + buffer_idx - 1, res.ptr, is_8_or_9);
-  if (leading == '0' && no_decimals)
-    return tokenize_octal();
-
-  buffer_idx = static_cast<int>(res.ptr - buffer_ptr());
-  return std::nullopt;
-}
-
 std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   switch (leading) {
   case '0':
@@ -425,8 +408,22 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   case '6':
   case '7':
   case '8':
-  case '9':
-    return tokenize_decimal(leading);
+  case '9': {
+    int num{};
+    std::from_chars_result res = std::from_chars(
+        buffer_ptr() + buffer_idx - 1, buffer_ptr() + buffer.size(), num);
+
+    if (res.ec == std::errc::result_out_of_range)
+      return std::nullopt;
+
+    bool no_decimals =
+        std::none_of(buffer_ptr() + buffer_idx - 1, res.ptr, is_8_or_9);
+    if (leading == '0' && no_decimals)
+      return tokenize_octal();
+
+    buffer_idx = static_cast<int>(res.ptr - buffer_ptr());
+    return std::nullopt;
+  }
   case '\'':
   case '"': {
     auto str_alt = parse_atom(PARSE_STRING{}, leading);

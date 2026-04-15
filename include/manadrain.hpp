@@ -146,7 +146,6 @@ struct ParseDriver {
 
   TOKEN tokenize();
   std::optional<TOKEN> tokenize_octal();
-  std::optional<TOKEN> tokenize_decimal(char32_t leading);
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
   std::optional<TOKEN> tokenize_identi_or_punct();
 
