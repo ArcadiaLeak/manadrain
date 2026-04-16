@@ -114,6 +114,16 @@ char32_t ParseDriver::parse_octo(PARSE_ESCAPE, char32_t octo) {
   return (octo << 3) | ahead;
 }
 
+int hex_conv(char32_t digit) {
+  if (digit >= '0' && digit <= '9')
+    return digit - '0';
+  if (digit >= 'A' && digit <= 'F')
+    return digit - 'A' + 10;
+  if (digit >= 'a' && digit <= 'f')
+    return digit - 'a' + 10;
+  return -1;
+}
+
 std::variant<std::monostate, PARSE_ERRMSG, char32_t>
 ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   switch (ch) {
@@ -236,6 +246,31 @@ ParseDriver::parse_atom(PARSE_STRING, char32_t separator) {
   }
 }
 
+int ParseDriver::parse_uni_fixed(PARSE_IDENT, char32_t leading) {
+  char32_t ch{leading};
+  int i{}, num{};
+  while (1) {
+    int hex = hex_conv(ch);
+    if (hex == -1)
+      return -1;
+    num = (num << 4) | hex;
+    if (reached_eof())
+      return -1;
+    if (++i == 4)
+      return num;
+    ch = next();
+  }
+}
+
+int ParseDriver::parse_uni(PARSE_IDENT) {
+  if (reached_eof())
+    return -1;
+  char32_t leading = next();
+  if (leading == '{')
+    throw std::runtime_error{"unimplemented!"};
+  return parse_uni_fixed(PARSE_IDENT{}, leading);
+}
+
 bool ParseDriver::is_allowed_uchar(PARSE_IDENT ident, char32_t ch) {
   UProperty must_be = str1_temp.size() > ident.is_private ? UCHAR_XID_CONTINUE
                                                           : UCHAR_XID_START;
@@ -251,9 +286,15 @@ std::variant<bool, PARSE_ERRMSG> ParseDriver::parse_uchar(PARSE_IDENT ident) {
     ch[i] = next();
   }
   if (ch[0] == '\\') {
-    if (ch[1] == 'u')
-      throw std::runtime_error{"unimplemented!"};
-    return ESCAPE_ERR::MALFORMED;
+    if (ch[1] != 'u')
+      return ESCAPE_ERR::MALFORMED;
+    int ch_uni = parse_uni(PARSE_IDENT{});
+    if (ch_uni == -1)
+      return ESCAPE_ERR::MALFORMED;
+    bool is_allowed = is_allowed_uchar(PARSE_IDENT{}, ch_uni);
+    if (is_allowed)
+      str1_encode(ch_uni);
+    return is_allowed;
   } else {
     int j;
     for (j = 0; j < i; j++) {
@@ -520,8 +561,8 @@ copy_and_return:
   return P_ATOM{i, offset, length};
 }
 
-std::variant<std::monostate, PARSE_ERRMSG> ParseDriver::parse(PARSE_VARDECL,
-                                                              std::size_t idx) {
+std::variant<std::monostate, PARSE_ERRMSG>
+ParseDriver::parse_variable_decl(std::size_t idx) {
   bool try_init{1};
 
   token_curr = tokenize();
@@ -638,7 +679,7 @@ bool ParseDriver::parse() {
         STMT_VARDECL{.rule = std::get<TOKV_IDENTI>(token_curr)
                                  .match_keyword(STRICTNESS::STRICT)
                                  .value()});
-    auto declaration = parse(PARSE_VARDECL{}, program.size() - 1);
+    auto declaration = parse_variable_decl(program.size() - 1);
     switch (declaration.index()) {
     case 0:
       goto statement_end;

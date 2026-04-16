@@ -79,9 +79,6 @@ struct PARSE_STRING {};
 struct PARSE_IDENT {
   bool is_private;
 };
-struct PARSE_EOF {};
-struct PARSE_STATEMENT {};
-struct PARSE_VARDECL {};
 
 constexpr std::uint8_t ATOM_BLOCK = 8;
 constexpr std::uint16_t ATOM_PAGE = 2048;
@@ -140,6 +137,8 @@ struct ParseDriver {
                                                         char32_t separator);
 
   bool is_allowed_uchar(PARSE_IDENT ident, char32_t ch);
+  int parse_uni_fixed(PARSE_IDENT, char32_t leading);
+  int parse_uni(PARSE_IDENT);
   std::variant<bool, PARSE_ERRMSG> parse_uchar(PARSE_IDENT ident);
   std::variant<bool, PARSE_ERRMSG> parse_atom(PARSE_IDENT ident);
 
@@ -149,8 +148,8 @@ struct ParseDriver {
 
   std::variant<EXPRESSION, PARSE_ERRMSG> parse_postfix_expr();
 
-  std::variant<std::monostate, PARSE_ERRMSG> parse(PARSE_VARDECL,
-                                                   std::size_t idx);
+  std::variant<std::monostate, PARSE_ERRMSG>
+  parse_variable_decl(std::size_t idx);
 
   bool parse();
 };
