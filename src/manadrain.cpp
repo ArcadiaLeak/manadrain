@@ -92,6 +92,14 @@ char32_t ParseDriver::next() {
 
 void ParseDriver::prev() { U8_BACK_1(buffer.data(), 0, buffer_idx); }
 
+std::optional<char32_t> ParseDriver::peek() {
+  if (reached_eof())
+    return std::nullopt;
+  char32_t ahead = next();
+  prev();
+  return ahead;
+}
+
 void ParseDriver::backtrack(std::size_t N) {
   for (int i = 0; i < N; ++i)
     prev();
@@ -140,7 +148,9 @@ ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   case 'v':
     return U'\v';
   case '0':
-    if (reached_eof() || !std::isdigit(next()))
+    if (peek()
+            .transform([](char32_t ahead) { return std::isdigit(ahead); })
+            .value_or(0))
       return U'\0';
     [[fallthrough]];
   case '1':
@@ -254,10 +264,10 @@ int ParseDriver::parse_uni_fixed(PARSE_IDENT, char32_t leading) {
     if (hex == -1)
       return -1;
     num = (num << 4) | hex;
-    if (reached_eof())
-      return -1;
     if (++i == 4)
       return num;
+    if (reached_eof())
+      return -1;
     ch = next();
   }
 }
@@ -271,59 +281,66 @@ int ParseDriver::parse_uni(PARSE_IDENT) {
   return parse_uni_fixed(PARSE_IDENT{}, leading);
 }
 
-bool ParseDriver::is_allowed_uchar(PARSE_IDENT ident, char32_t ch) {
-  UProperty must_be = str1_temp.size() > ident.is_private ? UCHAR_XID_CONTINUE
-                                                          : UCHAR_XID_START;
-  return u_hasBinaryProperty(ch, must_be);
+bool ParseDriver::parse_uchar(PARSE_IDENT, char32_t ch) {
+  bool is_legal = u_hasBinaryProperty(ch, str1_temp.size() ? UCHAR_XID_CONTINUE
+                                                           : UCHAR_XID_START);
+  if (is_legal)
+    str1_encode(ch);
+  return is_legal;
 }
 
-std::variant<bool, PARSE_ERRMSG> ParseDriver::parse_uchar(PARSE_IDENT ident) {
-  std::array<char32_t, 2> ch{};
-  int i;
-  for (i = 0; i < 2; ++i) {
-    if (reached_eof())
-      break;
-    ch[i] = next();
-  }
-  if (ch[0] == '\\') {
-    if (ch[1] != 'u')
+std::variant<int, PARSE_ERRMSG> ParseDriver::parse_escape(PARSE_IDENT,
+                                                          char32_t leading) {
+  bool has_escape{};
+  if (leading == '\\') {
+    if (reached_eof() || !(next() == 'u'))
       return ESCAPE_ERR::MALFORMED;
     int ch_uni = parse_uni(PARSE_IDENT{});
     if (ch_uni == -1)
       return ESCAPE_ERR::MALFORMED;
-    bool is_allowed = is_allowed_uchar(PARSE_IDENT{}, ch_uni);
-    if (is_allowed)
-      str1_encode(ch_uni);
-    return is_allowed;
-  } else {
-    int j;
-    for (j = 0; j < i; j++) {
-      if (not is_allowed_uchar(ident, ch[j]))
-        break;
-      str1_encode(ch[j]);
-    }
-    backtrack(i - j);
-    return j > 0;
+    leading = ch_uni;
+    has_escape = 1;
+  }
+  bool success = parse_uchar(PARSE_IDENT{}, leading);
+  if (has_escape) {
+    if (success)
+      return 2;
+    return ESCAPE_ERR::MALFORMED;
+  }
+  return success;
+}
+
+std::optional<std::variant<TOK_IDENTI, PARSE_ERRMSG>>
+ParseDriver::parse(PARSE_IDENT) {
+  str1_temp = {};
+  bool has_escape = 0;
+
+repeat: {
+  if (reached_eof())
+    goto done;
+  auto esc_alt = parse_escape(PARSE_IDENT{}, next());
+  switch (esc_alt.index()) {
+  case 0:
+    if (std::get<0>(esc_alt) == 2)
+      has_escape = 1;
+    if (std::get<0>(esc_alt))
+      goto repeat;
+    prev();
+    goto done;
+  default:
+    return std::get<1>(esc_alt);
   }
 }
 
-std::variant<bool, PARSE_ERRMSG> ParseDriver::parse_atom(PARSE_IDENT ident) {
-  str1_temp = {};
-  if (ident.is_private)
-    str1_temp.push_back('#');
-
-  bool further = 1;
-  while (further) {
-    auto further_alt = parse_uchar(ident);
-    switch (further_alt.index()) {
-    case 0:
-      further = std::get<0>(further_alt);
-      break;
-    case 1:
-      return std::get<1>(further_alt);
-    }
+done:
+  if (str1_temp.size() == 0)
+    return std::nullopt;
+  else {
+    P_ATOM pos_atom = find_static_atom()
+                          .or_else([this]() { return find_dynamic_atom(); })
+                          .value();
+    return TOK_IDENTI{has_escape, pos_atom};
   }
-  return str1_temp.size() > ident.is_private;
 }
 
 bool ParseDriver::skip_comment_line() {
@@ -439,14 +456,16 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
     str1_temp = static_cast<char>(leading);
     while (std::isdigit(buffer[buffer_idx]))
       str1_temp.push_back(buffer[buffer_idx++]);
-    if (not reached_eof()) {
-      if (u_hasBinaryProperty(next(), UCHAR_XID_CONTINUE))
-        return NUMBER_ERR::INVALID_LITERAL;
-      prev();
-    }
+    if (peek()
+            .transform([](char32_t ch) {
+              return u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE);
+            })
+            .value_or(0))
+      return NUMBER_ERR::INVALID_LITERAL;
     int radix{10};
-    if (std::ranges::none_of(str1_temp,
-                             [](char ch) { return ch == '8' || ch == '9'; }))
+    if (leading == '0' && std::ranges::none_of(str1_temp, [](char ch) {
+          return ch == '8' || ch == '9';
+        }))
       radix = 8;
     std::uint64_t num{};
     std::from_chars_result res = std::from_chars(
@@ -472,25 +491,19 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   }
   default:
     prev();
-    break;
+    return std::nullopt;
   }
-  return std::nullopt;
 }
 
 std::optional<TOKEN> ParseDriver::tokenize_identi_or_punct() {
-  auto ident_alt = parse_atom(PARSE_IDENT{});
-  switch (ident_alt.index()) {
-  case 0:
-    if (std::get<0>(ident_alt)) {
-      P_ATOM pos_atom = find_static_atom()
-                            .or_else([this]() { return find_dynamic_atom(); })
-                            .value();
-      return TOK_IDENTI{.p_atom = pos_atom};
+  std::optional ident_opt = parse(PARSE_IDENT{});
+  if (ident_opt)
+    switch (ident_opt->index()) {
+    case 0:
+      return std::get<0>(ident_opt.value());
+    default:
+      return std::get<1>(ident_opt.value());
     }
-    break;
-  case 1:
-    return std::get<1>(ident_alt);
-  }
   return next();
 }
 

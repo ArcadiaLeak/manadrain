@@ -45,10 +45,12 @@ enum TOKV_INDEX {
   TOKV_PUNCT,
   TOKV_STRING,
   TOKV_IDENTI,
-  TOKV_NUMBER
+  TOKV_NUMBER,
+  TOKV_OP
 };
+enum TOK_OPERATOR { EQ_STRICT, EQ_LOOSE };
 using TOKEN = std::variant<std::monostate, PARSE_ERRMSG, char32_t, TOK_STRING,
-                           TOK_IDENTI, double>;
+                           TOK_IDENTI, double, TOK_OPERATOR>;
 
 struct EXPRESSION;
 
@@ -76,9 +78,7 @@ struct PARSE_ESCAPE {
   ESC_RULE rule;
 };
 struct PARSE_STRING {};
-struct PARSE_IDENT {
-  bool is_private;
-};
+struct PARSE_IDENT {};
 
 constexpr std::uint8_t ATOM_BLOCK = 8;
 constexpr std::uint16_t ATOM_PAGE = 2048;
@@ -111,6 +111,7 @@ struct ParseDriver {
   std::vector<STATEMENT> program;
 
   char32_t next();
+  std::optional<char32_t> peek();
   void prev();
   void backtrack(std::size_t N);
 
@@ -136,11 +137,11 @@ struct ParseDriver {
   std::variant<std::monostate, PARSE_ERRMSG> parse_atom(PARSE_STRING,
                                                         char32_t separator);
 
-  bool is_allowed_uchar(PARSE_IDENT ident, char32_t ch);
   int parse_uni_fixed(PARSE_IDENT, char32_t leading);
   int parse_uni(PARSE_IDENT);
-  std::variant<bool, PARSE_ERRMSG> parse_uchar(PARSE_IDENT ident);
-  std::variant<bool, PARSE_ERRMSG> parse_atom(PARSE_IDENT ident);
+  bool parse_uchar(PARSE_IDENT, char32_t ch);
+  std::variant<int, PARSE_ERRMSG> parse_escape(PARSE_IDENT, char32_t leading);
+  std::optional<std::variant<TOK_IDENTI, PARSE_ERRMSG>> parse(PARSE_IDENT);
 
   TOKEN tokenize();
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
