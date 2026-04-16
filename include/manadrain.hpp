@@ -20,17 +20,13 @@ enum class ESC_RULE {
   STRING_IN_STRICT_MODE,
   STRING_IN_TEMPLATE
 };
-enum class PARSE_ERRCODE {
-  MALFORMED_ESCAPE,
-  LEGACY_OCTAL_SEQ,
-  UNEXPECTED_STRING_END,
-  UNEXPECTED_COMMENT_END,
-  UNEXPECTED_TOKEN,
-  NEEDED_COMMA,
-  NEEDED_SEMICOLON,
-  NEEDED_VARIABLE_NAME,
-  NEEDED_FIELD_NAME
-};
+
+enum class ESCAPE_ERR { MALFORMED, OCTAL_BANNED };
+enum class NUMBER_ERR { INVALID_LITERAL, INTEGER_OVERFLOW };
+enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
+enum class NEEDED_ERR { COMMA, SEMICOLON, VARIABLE_NAME, FIELD_NAME };
+using PARSE_ERRMSG =
+    std::variant<ESCAPE_ERR, NUMBER_ERR, UNEXPECTED_ERR, NEEDED_ERR>;
 
 struct TOK_STRING {
   char32_t separator;
@@ -43,9 +39,16 @@ struct TOK_IDENTI {
   bool operator==(const TOK_IDENTI &) const = default;
   std::optional<KEYWORD_KIND> match_keyword(STRICTNESS);
 };
-enum TOKV_INDEX { TOKV_EOF, TOKV_ERROR, TOKV_PUNCT, TOKV_STRING, TOKV_IDENTI };
-using TOKEN = std::variant<std::monostate, PARSE_ERRCODE, char32_t, TOK_STRING,
-                           TOK_IDENTI>;
+enum TOKV_INDEX {
+  TOKV_EOF,
+  TOKV_ERROR,
+  TOKV_PUNCT,
+  TOKV_STRING,
+  TOKV_IDENTI,
+  TOKV_NUMBER
+};
+using TOKEN = std::variant<std::monostate, PARSE_ERRMSG, char32_t, TOK_STRING,
+                           TOK_IDENTI, double>;
 
 struct EXPRESSION;
 
@@ -59,8 +62,7 @@ struct EXPR_MEMBER {
 };
 
 struct EXPRESSION {
-  enum V_INDEX { V_STRING, V_IDENTI, V_CALL, V_MEMBER };
-  std::variant<TOK_STRING, TOK_IDENTI, EXPR_CALL, EXPR_MEMBER> alter;
+  std::variant<TOK_STRING, TOK_IDENTI, double, EXPR_CALL, EXPR_MEMBER> alter;
 };
 
 struct STMT_VARDECL {
@@ -80,7 +82,6 @@ struct PARSE_IDENT {
 struct PARSE_EOF {};
 struct PARSE_STATEMENT {};
 struct PARSE_VARDECL {};
-struct PARSE_POSTFIX_EXPR {};
 
 constexpr std::uint8_t ATOM_BLOCK = 8;
 constexpr std::uint16_t ATOM_PAGE = 2048;
@@ -99,8 +100,6 @@ struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
   int buffer_idx;
   bool reached_eof() { return buffer_idx >= buffer.size(); }
-
-  const char *buffer_ptr() { return reinterpret_cast<char *>(buffer.data()); }
 
   bool newline_seen;
   STRICTNESS strictness;
@@ -121,38 +120,37 @@ struct ParseDriver {
   void skip_lf();
 
   bool skip_comment_line();
-  std::variant<bool, PARSE_ERRCODE> skip_comment_block();
-  std::variant<bool, PARSE_ERRCODE> skip_comment(char32_t ch);
-  std::variant<bool, PARSE_ERRCODE> skip_ws_1(char32_t ch);
+  std::variant<bool, PARSE_ERRMSG> skip_comment_block();
+  std::variant<bool, PARSE_ERRMSG> skip_comment(char32_t ch);
+  std::variant<bool, PARSE_ERRMSG> skip_ws_1(char32_t ch);
 
   std::optional<P_ATOM> find_static_atom();
   std::optional<P_ATOM> find_dynamic_atom();
   P_ATOM alloc_dynamic_atom();
 
   char32_t parse_octo(PARSE_ESCAPE, char32_t oct);
-  std::variant<std::monostate, PARSE_ERRCODE, char32_t> parse(PARSE_ESCAPE esc,
-                                                              char32_t ch);
+  std::variant<std::monostate, PARSE_ERRMSG, char32_t> parse(PARSE_ESCAPE esc,
+                                                             char32_t ch);
 
-  std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+  std::variant<std::monostate, PARSE_ERRMSG, char32_t>
   parse_escape(PARSE_STRING, char32_t separator, char32_t ch);
-  std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+  std::variant<std::monostate, PARSE_ERRMSG, char32_t>
   parse_uchar(PARSE_STRING, char32_t separator, char32_t ch);
-  std::variant<std::monostate, PARSE_ERRCODE> parse_atom(PARSE_STRING,
-                                                         char32_t separator);
+  std::variant<std::monostate, PARSE_ERRMSG> parse_atom(PARSE_STRING,
+                                                        char32_t separator);
 
   bool is_allowed_uchar(PARSE_IDENT ident, char32_t ch);
-  std::variant<bool, PARSE_ERRCODE> parse_uchar(PARSE_IDENT ident);
-  std::variant<bool, PARSE_ERRCODE> parse_atom(PARSE_IDENT ident);
+  std::variant<bool, PARSE_ERRMSG> parse_uchar(PARSE_IDENT ident);
+  std::variant<bool, PARSE_ERRMSG> parse_atom(PARSE_IDENT ident);
 
   TOKEN tokenize();
-  std::optional<TOKEN> tokenize_octal();
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
   std::optional<TOKEN> tokenize_identi_or_punct();
 
-  std::variant<EXPRESSION, PARSE_ERRCODE> parse(PARSE_POSTFIX_EXPR);
+  std::variant<EXPRESSION, PARSE_ERRMSG> parse_postfix_expr();
 
-  std::variant<std::monostate, PARSE_ERRCODE> parse(PARSE_VARDECL,
-                                                    std::size_t idx);
+  std::variant<std::monostate, PARSE_ERRMSG> parse(PARSE_VARDECL,
+                                                   std::size_t idx);
 
   bool parse();
 };

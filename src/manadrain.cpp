@@ -9,6 +9,9 @@
 #include "manadrain.hpp"
 
 namespace Manadrain {
+static bool lineterm(char32_t ch) {
+  return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
+}
 static const std::array reserved_arr =
     std::to_array<std::tuple<P_ATOM, KEYWORD_KIND, STRICTNESS>>(
         {{S_ATOM_var, KEYWORD_KIND::K_VAR, STRICTNESS::SLOPPY},
@@ -24,11 +27,6 @@ std::optional<KEYWORD_KIND> TOK_IDENTI::match_keyword(STRICTNESS strictness) {
       return tok_kind;
   }
   return std::nullopt;
-}
-
-static bool is_8_or_9(char digit) { return digit == '8' || digit == '9'; }
-static bool lineterm(char32_t ch) {
-  return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
 bool AtomPage::check_for_count(int N) { return ch_bitset.count() >= N; }
@@ -116,7 +114,7 @@ char32_t ParseDriver::parse_octo(PARSE_ESCAPE, char32_t octo) {
   return (octo << 3) | ahead;
 }
 
-std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+std::variant<std::monostate, PARSE_ERRMSG, char32_t>
 ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   switch (ch) {
   case 'b':
@@ -144,11 +142,11 @@ ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   case '7':
     switch (esc.rule) {
     case ESC_RULE::STRING_IN_STRICT_MODE:
-      return PARSE_ERRCODE::LEGACY_OCTAL_SEQ;
+      return ESCAPE_ERR::OCTAL_BANNED;
 
     case ESC_RULE::STRING_IN_TEMPLATE:
     case ESC_RULE::REGEXP_UTF16:
-      return PARSE_ERRCODE::MALFORMED_ESCAPE;
+      return ESCAPE_ERR::MALFORMED;
 
     default: {
       char32_t oct = ch - '0';
@@ -163,14 +161,14 @@ ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
   case '9':
     if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
         esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
-      return PARSE_ERRCODE::MALFORMED_ESCAPE;
+      return ESCAPE_ERR::MALFORMED;
     [[fallthrough]];
   default:
     return std::monostate{};
   }
 }
 
-std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+std::variant<std::monostate, PARSE_ERRMSG, char32_t>
 ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   switch (ch) {
   case '\'':
@@ -195,7 +193,7 @@ ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   return parse(PARSE_ESCAPE{esc_rule}, ch);
 }
 
-std::variant<std::monostate, PARSE_ERRCODE, char32_t>
+std::variant<std::monostate, PARSE_ERRMSG, char32_t>
 ParseDriver::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
   switch (ch) {
   case '\r':
@@ -204,7 +202,7 @@ ParseDriver::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
   case '\n':
     if (separator == '`')
       return U'\n';
-    return PARSE_ERRCODE::UNEXPECTED_STRING_END;
+    return UNEXPECTED_ERR::STRING_END;
   case '\\':
     if (reached_eof())
       return std::monostate{};
@@ -214,12 +212,12 @@ ParseDriver::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
   }
 }
 
-std::variant<std::monostate, PARSE_ERRCODE>
+std::variant<std::monostate, PARSE_ERRMSG>
 ParseDriver::parse_atom(PARSE_STRING, char32_t separator) {
-  str1_temp.clear();
+  str1_temp = {};
   while (1) {
     if (reached_eof())
-      return PARSE_ERRCODE::UNEXPECTED_STRING_END;
+      return UNEXPECTED_ERR::STRING_END;
     auto ch_alt = parse_uchar(PARSE_STRING{}, separator, next());
 
     switch (ch_alt.index()) {
@@ -244,7 +242,7 @@ bool ParseDriver::is_allowed_uchar(PARSE_IDENT ident, char32_t ch) {
   return u_hasBinaryProperty(ch, must_be);
 }
 
-std::variant<bool, PARSE_ERRCODE> ParseDriver::parse_uchar(PARSE_IDENT ident) {
+std::variant<bool, PARSE_ERRMSG> ParseDriver::parse_uchar(PARSE_IDENT ident) {
   std::array<char32_t, 2> ch{};
   int i;
   for (i = 0; i < 2; ++i) {
@@ -255,7 +253,7 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::parse_uchar(PARSE_IDENT ident) {
   if (ch[0] == '\\') {
     if (ch[1] == 'u')
       throw std::runtime_error{"unimplemented!"};
-    return PARSE_ERRCODE::MALFORMED_ESCAPE;
+    return ESCAPE_ERR::MALFORMED;
   } else {
     int j;
     for (j = 0; j < i; j++) {
@@ -268,8 +266,8 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::parse_uchar(PARSE_IDENT ident) {
   }
 }
 
-std::variant<bool, PARSE_ERRCODE> ParseDriver::parse_atom(PARSE_IDENT ident) {
-  str1_temp.clear();
+std::variant<bool, PARSE_ERRMSG> ParseDriver::parse_atom(PARSE_IDENT ident) {
+  str1_temp = {};
   if (ident.is_private)
     str1_temp.push_back('#');
 
@@ -297,7 +295,7 @@ bool ParseDriver::skip_comment_line() {
   return 1;
 }
 
-std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment_block() {
+std::variant<bool, PARSE_ERRMSG> ParseDriver::skip_comment_block() {
   std::array<char32_t, 2> ch{};
   int i;
   for (i = 0; i < 2; ++i) {
@@ -306,7 +304,7 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment_block() {
     ch[i] = next();
   }
   if (i == 0)
-    return PARSE_ERRCODE::UNEXPECTED_COMMENT_END;
+    return UNEXPECTED_ERR::COMMENT_END;
   if (ch[0] == '*' && ch[1] == '/')
     return false;
   backtrack(--i);
@@ -315,7 +313,7 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment_block() {
   return true;
 }
 
-std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment(char32_t ch) {
+std::variant<bool, PARSE_ERRMSG> ParseDriver::skip_comment(char32_t ch) {
   switch (ch) {
   case '/':
     while (1) {
@@ -340,7 +338,7 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_comment(char32_t ch) {
   }
 }
 
-std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
+std::variant<bool, PARSE_ERRMSG> ParseDriver::skip_ws_1(char32_t ch) {
   switch (ch) {
   case '\r':
     skip_lf();
@@ -370,18 +368,6 @@ std::variant<bool, PARSE_ERRCODE> ParseDriver::skip_ws_1(char32_t ch) {
   }
 }
 
-std::optional<TOKEN> ParseDriver::tokenize_octal() {
-  int num{};
-  std::from_chars_result res = std::from_chars(
-      buffer_ptr() + buffer_idx - 1, buffer_ptr() + buffer.size(), num, 8);
-
-  if (res.ec == std::errc::result_out_of_range)
-    return std::nullopt;
-
-  buffer_idx = static_cast<int>(res.ptr - buffer_ptr());
-  return std::nullopt;
-}
-
 std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   switch (leading) {
   case '0':
@@ -409,20 +395,25 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   case '7':
   case '8':
   case '9': {
-    int num{};
+    str1_temp = static_cast<char>(leading);
+    while (std::isdigit(buffer[buffer_idx]))
+      str1_temp.push_back(buffer[buffer_idx++]);
+    if (not reached_eof()) {
+      if (u_hasBinaryProperty(next(), UCHAR_XID_CONTINUE))
+        return NUMBER_ERR::INVALID_LITERAL;
+      prev();
+    }
+    int radix{10};
+    if (std::ranges::none_of(str1_temp,
+                             [](char ch) { return ch == '8' || ch == '9'; }))
+      radix = 8;
+    std::uint64_t num{};
     std::from_chars_result res = std::from_chars(
-        buffer_ptr() + buffer_idx - 1, buffer_ptr() + buffer.size(), num);
-
-    if (res.ec == std::errc::result_out_of_range)
-      return std::nullopt;
-
-    bool no_decimals =
-        std::none_of(buffer_ptr() + buffer_idx - 1, res.ptr, is_8_or_9);
-    if (leading == '0' && no_decimals)
-      return tokenize_octal();
-
-    buffer_idx = static_cast<int>(res.ptr - buffer_ptr());
-    return std::nullopt;
+        str1_temp.data(), str1_temp.data() + str1_temp.size(), num, radix);
+    if (res.ec == std::errc::result_out_of_range ||
+        num >= 1LL << std::numeric_limits<double>::digits)
+      return NUMBER_ERR::INTEGER_OVERFLOW;
+    return static_cast<double>(num);
   }
   case '\'':
   case '"': {
@@ -440,8 +431,9 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   }
   default:
     prev();
-    return std::nullopt;
+    break;
   }
+  return std::nullopt;
 }
 
 std::optional<TOKEN> ParseDriver::tokenize_identi_or_punct() {
@@ -528,13 +520,13 @@ copy_and_return:
   return P_ATOM{i, offset, length};
 }
 
-std::variant<std::monostate, PARSE_ERRCODE>
-ParseDriver::parse(PARSE_VARDECL, std::size_t idx) {
+std::variant<std::monostate, PARSE_ERRMSG> ParseDriver::parse(PARSE_VARDECL,
+                                                              std::size_t idx) {
   bool try_init{1};
 
   token_curr = tokenize();
   if (token_curr.index() != TOKV_IDENTI)
-    return PARSE_ERRCODE::NEEDED_VARIABLE_NAME;
+    return NEEDED_ERR::VARIABLE_NAME;
   std::get<STMT_VARDECL>(program[idx]).identifier =
       std::get<TOK_IDENTI>(token_curr);
   token_curr = tokenize();
@@ -547,7 +539,7 @@ identif_end:
 check_init:
   if (token_curr == TOKEN{U'='}) {
     token_curr = tokenize();
-    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{});
+    auto postfix_expr = parse_postfix_expr();
     if (postfix_expr.index() == 1)
       return std::get<1>(postfix_expr);
     std::get<STMT_VARDECL>(program[idx]).initializer =
@@ -557,7 +549,7 @@ check_init:
   goto identif_end;
 }
 
-std::variant<EXPRESSION, PARSE_ERRCODE> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
+std::variant<EXPRESSION, PARSE_ERRMSG> ParseDriver::parse_postfix_expr() {
   EXPRESSION expr{};
   switch (token_curr.index()) {
   case TOKV_STRING:
@@ -566,8 +558,11 @@ std::variant<EXPRESSION, PARSE_ERRCODE> ParseDriver::parse(PARSE_POSTFIX_EXPR) {
   case TOKV_IDENTI:
     expr = EXPRESSION{std::get<TOKV_IDENTI>(token_curr)};
     break;
+  case TOKV_NUMBER:
+    expr = EXPRESSION{std::get<TOKV_NUMBER>(token_curr)};
+    break;
   default:
-    return PARSE_ERRCODE::UNEXPECTED_TOKEN;
+    return UNEXPECTED_ERR::THIS_TOKEN;
   }
 try_postfix: {
   token_curr = tokenize();
@@ -576,7 +571,7 @@ try_postfix: {
     case '.': {
       token_curr = tokenize();
       if (token_curr.index() != TOKV_IDENTI)
-        return PARSE_ERRCODE::NEEDED_FIELD_NAME;
+        return NEEDED_ERR::FIELD_NAME;
       EXPR_MEMBER member{std::make_unique<EXPRESSION>(std::move(expr.alter)),
                          std::get<TOK_IDENTI>(token_curr)};
       expr = EXPRESSION{std::move(member)};
@@ -584,12 +579,12 @@ try_postfix: {
     }
     case '(': {
       EXPR_CALL call_expr{std::make_unique<EXPRESSION>(std::move(expr.alter))};
-      std::variant<EXPRESSION, PARSE_ERRCODE> arg_alt{};
+      std::variant<EXPRESSION, PARSE_ERRMSG> arg_alt{};
     try_arg:
       token_curr = tokenize();
       if (token_curr == TOKEN{U')'})
         goto call_end;
-      arg_alt = parse(PARSE_POSTFIX_EXPR{});
+      arg_alt = parse_postfix_expr();
       switch (arg_alt.index()) {
       case 0:
         call_expr.arguments.emplace_back(std::move(std::get<0>(arg_alt)));
@@ -601,7 +596,7 @@ try_postfix: {
         goto call_end;
       if (token_curr == TOKEN{U','})
         goto try_arg;
-      return PARSE_ERRCODE::NEEDED_COMMA;
+      return NEEDED_ERR::COMMA;
     call_end:
       expr = EXPRESSION{std::move(call_expr)};
       goto try_postfix;
@@ -617,13 +612,13 @@ try_postfix: {
 bool ParseDriver::parse() {
   token_curr = tokenize();
   while (1) {
-    std::optional<PARSE_ERRCODE> errcode{};
+    std::optional<PARSE_ERRMSG> errmsg{};
 
     switch (token_curr.index()) {
     case TOKV_EOF:
       return 1;
     case TOKV_ERROR:
-      errcode = std::get<TOKV_ERROR>(token_curr);
+      errmsg = std::get<TOKV_ERROR>(token_curr);
       goto fail;
     case TOKV_IDENTI:
       if (std::get<TOKV_IDENTI>(token_curr).match_keyword(STRICTNESS::STRICT))
@@ -634,8 +629,8 @@ bool ParseDriver::parse() {
     }
 
   fail:
-    if (not errcode)
-      throw std::runtime_error{"parsing failed without an errcode!"};
+    if (not errmsg)
+      throw std::runtime_error{"parsing failed without a message!"};
     return 0;
 
   parse_vardecl: {
@@ -648,19 +643,19 @@ bool ParseDriver::parse() {
     case 0:
       goto statement_end;
     case 1:
-      errcode = std::get<1>(declaration);
+      errmsg = std::get<1>(declaration);
       goto fail;
     }
   }
 
   parse_postfix: {
-    auto postfix_expr = parse(PARSE_POSTFIX_EXPR{});
+    auto postfix_expr = parse_postfix_expr();
     switch (postfix_expr.index()) {
     case 0:
       program.emplace_back(std::move(std::get<0>(postfix_expr)));
       goto statement_end;
     case 1:
-      errcode = std::get<1>(postfix_expr);
+      errmsg = std::get<1>(postfix_expr);
       goto fail;
     }
   }
@@ -672,7 +667,7 @@ bool ParseDriver::parse() {
     } else if (token_curr.index() == TOKV_EOF || token_curr == TOKEN{U'}'} ||
                newline_seen)
       continue;
-    errcode = PARSE_ERRCODE::NEEDED_SEMICOLON;
+    errmsg = NEEDED_ERR::SEMICOLON;
     goto fail;
   }
 }
