@@ -49,7 +49,7 @@ enum TOKV_INDEX {
   TOKV_NUMBER,
   TOKV_OP
 };
-enum TOK_OPERATOR { EQ_STRICT, EQ_LOOSE };
+enum TOK_OPERATOR { EQ_STRICT = 1, EQ_LOOSE };
 using TOKEN = std::variant<std::monostate, PARSE_ERRMSG, char32_t, TOK_STRING,
                            TOK_IDENTI, double, TOK_OPERATOR>;
 
@@ -63,9 +63,25 @@ struct EXPR_MEMBER {
   std::unique_ptr<EXPRESSION> object;
   TOK_IDENTI property;
 };
+struct EXPR_BINARY {
+  std::unique_ptr<EXPRESSION> left;
+  std::unique_ptr<EXPRESSION> right;
+  TOK_OPERATOR bin_op;
+};
 
+enum EXPRV_INDEX {
+  EXPRV_ERROR,
+  EXPRV_STRING,
+  EXPRV_IDENTI,
+  EXPRV_NUMBER,
+  EXPRV_CALL,
+  EXPRV_MEMBER,
+  EXPRV_BINARY
+};
 struct EXPRESSION {
-  std::variant<TOK_STRING, TOK_IDENTI, double, EXPR_CALL, EXPR_MEMBER> alter;
+  std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double, EXPR_CALL,
+               EXPR_MEMBER, EXPR_BINARY>
+      alter;
 };
 
 struct STMT_VARDECL {
@@ -148,7 +164,8 @@ struct ParseDriver {
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
   std::optional<TOKEN> tokenize_identi_or_punct();
 
-  std::expected<EXPRESSION, PARSE_ERRMSG> parse_postfix_expr();
+  EXPRESSION parse_binary_expr();
+  EXPRESSION parse_postfix_expr();
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl(std::size_t idx);
 

@@ -490,6 +490,26 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
       return str_exp.error();
     }
   }
+  case '=': {
+    int i;
+    for (i = 0; i < 2; i++) {
+      std::optional ahead = next();
+      if (not ahead.transform([](char32_t ch) { return ch == '='; })
+                  .value_or(0)) {
+        if (ahead)
+          prev();
+        break;
+      }
+    }
+    switch (i) {
+    default:
+      return U'=';
+    case 1:
+      return EQ_LOOSE;
+    case 2:
+      return EQ_STRICT;
+    }
+  }
   default:
     prev();
     return std::nullopt;
@@ -594,17 +614,43 @@ identif_end:
 check_init:
   if (token_curr == TOKEN{U'='}) {
     token_curr = tokenize();
-    std::expected postfix_expr = parse_postfix_expr();
-    if (not postfix_expr.has_value())
-      return std::unexpected{postfix_expr.error()};
-    std::get<STMT_VARDECL>(program[idx]).initializer =
-        std::move(postfix_expr.value());
+    EXPRESSION binary_expr = parse_binary_expr();
+    switch (binary_expr.alter.index()) {
+    case EXPRV_ERROR:
+      return std::unexpected{std::get<EXPRV_ERROR>(binary_expr.alter)};
+    default:
+      std::get<STMT_VARDECL>(program[idx]).initializer = std::move(binary_expr);
+      break;
+    }
   }
   try_init = 0;
   goto identif_end;
 }
 
-std::expected<EXPRESSION, PARSE_ERRMSG> ParseDriver::parse_postfix_expr() {
+EXPRESSION ParseDriver::parse_binary_expr() {
+  EXPRESSION lhs_expression = parse_postfix_expr();
+  switch (token_curr.index() == TOKV_OP ? std::get<TOKV_OP>(token_curr) : 0) {
+  case EQ_LOOSE:
+  case EQ_STRICT:
+    break;
+  default:
+    return lhs_expression;
+  }
+  EXPR_BINARY bin_expr{
+      .left = std::make_unique<EXPRESSION>(std::move(lhs_expression)),
+      .bin_op = std::get<TOKV_OP>(token_curr)};
+  token_curr = tokenize();
+  EXPRESSION rhs_expression = parse_binary_expr();
+  switch (rhs_expression.alter.index()) {
+  case EXPRV_ERROR:
+    return EXPRESSION{std::get<EXPRV_ERROR>(rhs_expression.alter)};
+  default:
+    bin_expr.right = std::make_unique<EXPRESSION>(std::move(rhs_expression));
+    return EXPRESSION{std::move(bin_expr)};
+  }
+}
+
+EXPRESSION ParseDriver::parse_postfix_expr() {
   EXPRESSION expression{};
   switch (token_curr.index()) {
   case TOKV_STRING:
@@ -616,8 +662,10 @@ std::expected<EXPRESSION, PARSE_ERRMSG> ParseDriver::parse_postfix_expr() {
   case TOKV_NUMBER:
     expression = EXPRESSION{std::get<TOKV_NUMBER>(token_curr)};
     break;
+  case TOKV_ERROR:
+    return EXPRESSION{std::get<TOKV_ERROR>(token_curr)};
   default:
-    return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
+    return EXPRESSION{UNEXPECTED_ERR::THIS_TOKEN};
   }
 try_postfix: {
   token_curr = tokenize();
@@ -626,34 +674,32 @@ try_postfix: {
     case '.': {
       token_curr = tokenize();
       if (token_curr.index() != TOKV_IDENTI)
-        return std::unexpected{NEEDED_ERR::FIELD_NAME};
-      EXPR_MEMBER member{
-          std::make_unique<EXPRESSION>(std::move(expression.alter)),
-          std::get<TOK_IDENTI>(token_curr)};
+        return EXPRESSION{NEEDED_ERR::FIELD_NAME};
+      EXPR_MEMBER member{std::make_unique<EXPRESSION>(std::move(expression)),
+                         std::get<TOK_IDENTI>(token_curr)};
       expression = EXPRESSION{std::move(member)};
       goto try_postfix;
     }
     case '(': {
-      EXPR_CALL call_expr{
-          std::make_unique<EXPRESSION>(std::move(expression.alter))};
-      std::expected<EXPRESSION, PARSE_ERRMSG> arg_exp{};
+      EXPR_CALL call_expr{std::make_unique<EXPRESSION>(std::move(expression))};
+      EXPRESSION arg_expr{};
     try_arg:
       token_curr = tokenize();
       if (token_curr == TOKEN{U')'})
         goto call_end;
-      arg_exp = parse_postfix_expr();
-      switch (arg_exp.has_value()) {
-      case 1:
-        call_expr.arguments.emplace_back(std::move(arg_exp.value()));
+      arg_expr = parse_binary_expr();
+      switch (arg_expr.alter.index()) {
+      default:
+        call_expr.arguments.emplace_back(std::move(arg_expr));
         break;
-      case 0:
-        return std::unexpected{arg_exp.error()};
+      case EXPRV_ERROR:
+        return EXPRESSION{std::get<EXPRV_ERROR>(arg_expr.alter)};
       }
       if (token_curr == TOKEN{U')'})
         goto call_end;
       if (token_curr == TOKEN{U','})
         goto try_arg;
-      return std::unexpected{NEEDED_ERR::COMMA};
+      return EXPRESSION{NEEDED_ERR::COMMA};
     call_end:
       expression = EXPRESSION{std::move(call_expr)};
       goto try_postfix;
@@ -706,13 +752,13 @@ bool ParseDriver::parse() {
   }
 
   parse_postfix: {
-    std::expected postfix_expr = parse_postfix_expr();
-    switch (postfix_expr.has_value()) {
-    case 1:
-      program.emplace_back(std::move(postfix_expr.value()));
+    EXPRESSION binary_expr = parse_binary_expr();
+    switch (binary_expr.alter.index()) {
+    default:
+      program.emplace_back(std::move(binary_expr));
       goto statement_end;
-    case 0:
-      errmsg = postfix_expr.error();
+    case EXPRV_ERROR:
+      errmsg = std::get<EXPRV_ERROR>(binary_expr.alter);
       goto fail;
     }
   }

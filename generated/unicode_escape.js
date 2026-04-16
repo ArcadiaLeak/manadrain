@@ -12,8 +12,8 @@ let \u03C0 = Math.PI;                    // π
 console.log(\u03C0 === Math.PI);         // true
 
 // Code point escapes in identifiers (ES6)
-const \u{1F600} = "😀";                  // Grinning face
-console.log(\u{1F600} === "😀");         // true
+const \u{1D400} = "😀";                  // Grinning face
+console.log(\u{1D400} === "😀");         // true
 
 // Mixed escapes
 var \u0068\u0065\u006C\u006C\u006F = "world";
@@ -112,14 +112,5 @@ console.log(obj5.method() === "computed"); // true
 var s10 = "Hello\
 World";
 console.log(s10 === "HelloWorld");         // true
-
-// Escaped Unicode in identifier that corresponds to a reserved word
-// (Allowed as long as it's not a reserved word after interpretation)
-var \u0069\u0066 = "escaped if";           // "if"
-console.log(if === "escaped if");          // true
-
-// Multiple escapes forming a single character
-var \u{1F1FA}\u{1F1F8} = "US flag";        // 🇺🇸
-console.log(\u{1F1FA}\u{1F1F8} === "US flag"); // true
 
 console.log("All escape tests passed (if no errors were thrown).");
