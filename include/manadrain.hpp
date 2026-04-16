@@ -1,5 +1,6 @@
 #include <bitset>
 #include <deque>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <string>
@@ -110,7 +111,7 @@ struct ParseDriver {
   TOKEN token_curr;
   std::vector<STATEMENT> program;
 
-  char32_t next();
+  std::optional<char32_t> next();
   std::optional<char32_t> peek();
   void prev();
   void backtrack(std::size_t N);
@@ -118,39 +119,38 @@ struct ParseDriver {
   void skip_lf();
 
   bool skip_comment_line();
-  std::variant<bool, PARSE_ERRMSG> skip_comment_block();
-  std::variant<bool, PARSE_ERRMSG> skip_comment(char32_t ch);
-  std::variant<bool, PARSE_ERRMSG> skip_ws_1(char32_t ch);
+  std::expected<bool, PARSE_ERRMSG> skip_comment_block();
+  std::expected<bool, PARSE_ERRMSG> skip_comment(char32_t ch);
+  std::expected<bool, PARSE_ERRMSG> skip_ws_1(char32_t ch);
 
   std::optional<P_ATOM> find_static_atom();
   std::optional<P_ATOM> find_dynamic_atom();
   P_ATOM alloc_dynamic_atom();
 
   char32_t parse_octo(PARSE_ESCAPE, char32_t oct);
-  std::variant<std::monostate, PARSE_ERRMSG, char32_t> parse(PARSE_ESCAPE esc,
+  std::optional<std::expected<char32_t, PARSE_ERRMSG>> parse(PARSE_ESCAPE esc,
                                                              char32_t ch);
 
-  std::variant<std::monostate, PARSE_ERRMSG, char32_t>
+  std::optional<std::expected<char32_t, PARSE_ERRMSG>>
   parse_escape(PARSE_STRING, char32_t separator, char32_t ch);
-  std::variant<std::monostate, PARSE_ERRMSG, char32_t>
+  std::optional<std::expected<char32_t, PARSE_ERRMSG>>
   parse_uchar(PARSE_STRING, char32_t separator, char32_t ch);
-  std::variant<std::monostate, PARSE_ERRMSG> parse_atom(PARSE_STRING,
-                                                        char32_t separator);
+  std::expected<void, PARSE_ERRMSG> parse_atom(PARSE_STRING,
+                                               char32_t separator);
 
   int parse_uni_fixed(PARSE_IDENT, char32_t leading);
   int parse_uni(PARSE_IDENT);
   bool parse_uchar(PARSE_IDENT, char32_t ch);
-  std::variant<int, PARSE_ERRMSG> parse_escape(PARSE_IDENT, char32_t leading);
-  std::optional<std::variant<TOK_IDENTI, PARSE_ERRMSG>> parse(PARSE_IDENT);
+  std::expected<int, PARSE_ERRMSG> parse_escape(PARSE_IDENT, char32_t leading);
+  std::optional<std::expected<TOK_IDENTI, PARSE_ERRMSG>> parse(PARSE_IDENT);
 
   TOKEN tokenize();
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
   std::optional<TOKEN> tokenize_identi_or_punct();
 
-  std::variant<EXPRESSION, PARSE_ERRMSG> parse_postfix_expr();
+  std::expected<EXPRESSION, PARSE_ERRMSG> parse_postfix_expr();
 
-  std::variant<std::monostate, PARSE_ERRMSG>
-  parse_variable_decl(std::size_t idx);
+  std::expected<void, PARSE_ERRMSG> parse_variable_decl(std::size_t idx);
 
   bool parse();
 };
