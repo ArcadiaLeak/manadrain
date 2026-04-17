@@ -144,6 +144,7 @@ struct ParseDriver {
   P_ATOM alloc_dynamic_atom();
 
   char32_t parse_octo(PARSE_ESCAPE, char32_t oct);
+  std::expected<char32_t, PARSE_ERRMSG> parse_hex(PARSE_ESCAPE);
   std::optional<std::expected<char32_t, PARSE_ERRMSG>> parse(PARSE_ESCAPE esc,
                                                              char32_t ch);
 
@@ -154,8 +155,9 @@ struct ParseDriver {
   std::expected<void, PARSE_ERRMSG> parse_atom(PARSE_STRING,
                                                char32_t separator);
 
-  int parse_uni_fixed(PARSE_IDENT, char32_t leading);
-  int parse_uni(PARSE_IDENT);
+  std::optional<char32_t> parse_uni_braced(PARSE_IDENT);
+  std::optional<char32_t> parse_uni_fixed(PARSE_IDENT, char32_t leading);
+  std::optional<char32_t> parse_uni(PARSE_IDENT);
   bool parse_uchar(PARSE_IDENT, char32_t ch);
   std::expected<int, PARSE_ERRMSG> parse_escape(PARSE_IDENT, char32_t leading);
   std::optional<std::expected<TOK_IDENTI, PARSE_ERRMSG>> parse(PARSE_IDENT);

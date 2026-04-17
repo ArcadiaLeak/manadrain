@@ -125,14 +125,24 @@ char32_t ParseDriver::parse_octo(PARSE_ESCAPE, char32_t octo) {
   return (octo << 3) | ahead;
 }
 
-int hex_conv(char32_t digit) {
+std::optional<int> hex_conv(char32_t digit) {
   if (digit >= '0' && digit <= '9')
     return digit - '0';
   if (digit >= 'A' && digit <= 'F')
     return digit - 'A' + 10;
   if (digit >= 'a' && digit <= 'f')
     return digit - 'a' + 10;
-  return -1;
+  return std::nullopt;
+}
+
+std::expected<char32_t, PARSE_ERRMSG> ParseDriver::parse_hex(PARSE_ESCAPE) {
+  std::optional<int> hex0 = next().and_then(hex_conv);
+  if (not hex0)
+    return std::unexpected{ESCAPE_ERR::MALFORMED};
+  std::optional<int> hex1 = next().and_then(hex_conv);
+  if (not hex1)
+    return std::unexpected{ESCAPE_ERR::MALFORMED};
+  return (hex0.value() << 4) | hex1.value();
 }
 
 std::optional<std::expected<char32_t, PARSE_ERRMSG>>
@@ -150,6 +160,8 @@ ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
     return U'\t';
   case 'v':
     return U'\v';
+  case 'x':
+    return parse_hex(PARSE_ESCAPE{});
   case '0':
     if (peek()
             .transform([](char32_t ahead) { return std::isdigit(ahead); })
@@ -257,29 +269,45 @@ std::expected<void, PARSE_ERRMSG> ParseDriver::parse_atom(PARSE_STRING,
   }
 }
 
-int ParseDriver::parse_uni_fixed(PARSE_IDENT, char32_t leading) {
-  char32_t ch{leading};
-  int i{}, num{};
-  while (1) {
-    int hex = hex_conv(ch);
-    if (hex == -1)
-      return -1;
-    num = (num << 4) | hex;
-    if (++i == 4)
-      return num;
+std::optional<char32_t> ParseDriver::parse_uni_fixed(PARSE_IDENT,
+                                                     char32_t leading) {
+  char32_t curr{leading}, num{};
+  for (int i = 0; i < 4; ++i) {
+    std::optional hex = hex_conv(curr);
+    if (not hex.has_value())
+      return std::nullopt;
+    num = (num << 4) | hex.value();
     if (reached_eof())
-      return -1;
-    ch = next().value();
+      return std::nullopt;
+    curr = next().value();
   }
+  return num;
 }
 
-int ParseDriver::parse_uni(PARSE_IDENT) {
+std::optional<char32_t> ParseDriver::parse_uni_braced(PARSE_IDENT) {
   if (reached_eof())
-    return -1;
+    return std::nullopt;
+  char32_t num = 0, curr{next().value()};
+  for (int i = 0; i < 6; ++i) {
+    std::optional hex = hex_conv(curr);
+    if (not hex.has_value())
+      break;
+    num = (num << 4) | hex.value();
+    if (num > UCHAR_MAX_VALUE)
+      return std::nullopt;
+    if (reached_eof())
+      return std::nullopt;
+    curr = next().value();
+  }
+  return curr == '}' ? std::make_optional(num) : std::nullopt;
+}
+
+std::optional<char32_t> ParseDriver::parse_uni(PARSE_IDENT) {
+  if (reached_eof())
+    return std::nullopt;
   char32_t leading = next().value();
-  if (leading == '{')
-    throw std::runtime_error{"unimplemented!"};
-  return parse_uni_fixed(PARSE_IDENT{}, leading);
+  return leading == '{' ? parse_uni_braced(PARSE_IDENT{})
+                        : parse_uni_fixed(PARSE_IDENT{}, leading);
 }
 
 bool ParseDriver::parse_uchar(PARSE_IDENT, char32_t ch) {
@@ -296,11 +324,15 @@ std::expected<int, PARSE_ERRMSG> ParseDriver::parse_escape(PARSE_IDENT,
   if (leading == '\\') {
     if (not next().transform([](char32_t ch) { return ch == 'u'; }).value_or(0))
       return std::unexpected{ESCAPE_ERR::MALFORMED};
-    int ch_uni = parse_uni(PARSE_IDENT{});
-    if (ch_uni == -1)
+    std::optional<int> ch_uni = parse_uni(PARSE_IDENT{});
+    switch (ch_uni.has_value()) {
+    case 1:
+      leading = ch_uni.value();
+      has_escape = 1;
+      break;
+    default:
       return std::unexpected{ESCAPE_ERR::MALFORMED};
-    leading = ch_uni;
-    has_escape = 1;
+    }
   }
   bool success = parse_uchar(PARSE_IDENT{}, leading);
   if (has_escape) {
