@@ -25,7 +25,13 @@ enum class ESC_RULE {
 enum class ESCAPE_ERR { MALFORMED, OCTAL_BANNED };
 enum class NUMBER_ERR { INVALID_LITERAL, INTEGER_OVERFLOW };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
-enum class NEEDED_ERR { COMMA, SEMICOLON, VARIABLE_NAME, FIELD_NAME };
+enum class NEEDED_ERR {
+  COMMA,
+  SEMICOLON,
+  CLOSING_BRACE,
+  VARIABLE_NAME,
+  FIELD_NAME
+};
 using PARSE_ERRMSG =
     std::variant<ESCAPE_ERR, NUMBER_ERR, UNEXPECTED_ERR, NEEDED_ERR>;
 
@@ -68,19 +74,12 @@ struct EXPR_BINARY {
   std::unique_ptr<EXPRESSION> right;
   TOK_OPERATOR bin_op;
 };
+struct EXPR_OBJECT {};
 
-enum EXPRV_INDEX {
-  EXPRV_ERROR,
-  EXPRV_STRING,
-  EXPRV_IDENTI,
-  EXPRV_NUMBER,
-  EXPRV_CALL,
-  EXPRV_MEMBER,
-  EXPRV_BINARY
-};
+constexpr int EXPRV_ERROR = 0;
 struct EXPRESSION {
   std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double, EXPR_CALL,
-               EXPR_MEMBER, EXPR_BINARY>
+               EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT>
       alter;
 };
 
@@ -168,6 +167,12 @@ struct ParseDriver {
 
   EXPRESSION parse_binary_expr();
   EXPRESSION parse_postfix_expr();
+  std::pair<bool, EXPRESSION> parse_postfix_expr(EXPRESSION expression);
+  EXPRESSION parse_primary_expr(char32_t punct);
+  EXPRESSION parse_primary_expr();
+  EXPRESSION parse_call_expr(EXPRESSION expression);
+  EXPRESSION parse_member_expr(EXPRESSION expression);
+  std::optional<std::pair<bool, EXPRESSION>> parse_arg_expr();
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl(std::size_t idx);
 
