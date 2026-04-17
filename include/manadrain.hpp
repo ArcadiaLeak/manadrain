@@ -29,6 +29,7 @@ enum class NEEDED_ERR {
   COMMA,
   SEMICOLON,
   CLOSING_BRACE,
+  CLOSING_BRACKET,
   VARIABLE_NAME,
   FIELD_NAME
 };
@@ -75,11 +76,15 @@ struct EXPR_BINARY {
   TOK_OPERATOR bin_op;
 };
 struct EXPR_OBJECT {};
+struct EXPR_ARRACCESS {
+  std::unique_ptr<EXPRESSION> object;
+  std::unique_ptr<EXPRESSION> property;
+};
 
 constexpr int EXPRV_ERROR = 0;
 struct EXPRESSION {
   std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double, EXPR_CALL,
-               EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT>
+               EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT, EXPR_ARRACCESS>
       alter;
 };
 
@@ -173,6 +178,7 @@ struct ParseDriver {
   EXPRESSION parse_call_expr(EXPRESSION expression);
   EXPRESSION parse_member_expr(EXPRESSION expression);
   std::optional<std::pair<bool, EXPRESSION>> parse_arg_expr();
+  EXPRESSION parse_array_access(EXPRESSION expression);
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl(std::size_t idx);
 
