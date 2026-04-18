@@ -650,7 +650,7 @@ identif_end:
 check_init:
   if (token_curr == TOKEN{U'='}) {
     token_curr = tokenize();
-    EXPR_PTR binary_expr = parse_binary_expr();
+    EXPR_PTR binary_expr = parse_assign_expr();
     switch (binary_expr->index()) {
     case EXPRV_ERROR:
       return std::unexpected{std::get<EXPRV_ERROR>(*binary_expr)};
@@ -716,7 +716,7 @@ std::pair<bool, EXPR_PTR> ParseDriver::parse_arg_expr() {
   token_curr = tokenize();
   if (token_curr == TOKEN{U')'})
     return {0, nullptr};
-  EXPR_PTR arg_expr = parse_binary_expr();
+  EXPR_PTR arg_expr = parse_assign_expr();
   if (token_curr == TOKEN{U')'})
     return std::make_pair(0, arg_expr);
   if (token_curr != TOKEN{U','})
@@ -751,13 +751,26 @@ EXPR_PTR ParseDriver::parse_member_expr(EXPR_PTR object) {
 
 EXPR_PTR ParseDriver::parse_array_access(EXPR_PTR object) {
   token_curr = tokenize();
-  EXPR_PTR property_expr = parse_binary_expr();
+  EXPR_PTR property_expr = parse_assign_expr();
   if (property_expr->index() == EXPRV_ERROR)
     return property_expr;
   return token_curr == TOKEN{U']'}
              ? std::make_shared<EXPRESSION>(
                    EXPR_ARRACCESS{object, property_expr})
              : std::make_shared<EXPRESSION>(NEEDED_ERR::CLOSING_BRACKET);
+}
+
+EXPR_PTR ParseDriver::parse_assign_expr() {
+  EXPR_PTR binary_expr = parse_binary_expr();
+  if (binary_expr->index() == EXPRV_ERROR)
+    return binary_expr;
+  if (token_curr != TOKEN{U'='})
+    return binary_expr;
+  token_curr = tokenize();
+  EXPR_PTR rhs_expr = parse_assign_expr();
+  if (rhs_expr->index() == EXPRV_ERROR)
+    return rhs_expr;
+  return std::make_shared<EXPRESSION>(EXPR_ASSIGN{binary_expr, rhs_expr});
 }
 
 std::pair<bool, EXPR_PTR> ParseDriver::parse_postfix_expr(EXPR_PTR expression) {
@@ -815,7 +828,7 @@ bool ParseDriver::parse() {
         goto parse_vardecl;
       [[fallthrough]];
     default:
-      goto parse_binary;
+      goto parse_expression;
     }
 
   fail:
@@ -838,8 +851,8 @@ bool ParseDriver::parse() {
     }
   }
 
-  parse_binary: {
-    EXPR_PTR binary_expr = parse_binary_expr();
+  parse_expression: {
+    EXPR_PTR binary_expr = parse_assign_expr();
     switch (binary_expr->index()) {
     default:
       program.push_back(*binary_expr);

@@ -65,10 +65,11 @@ struct EXPR_MEMBER;
 struct EXPR_BINARY;
 struct EXPR_OBJECT;
 struct EXPR_ARRACCESS;
+struct EXPR_ASSIGN;
 constexpr int EXPRV_ERROR = 0;
-using EXPRESSION =
-    std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double, EXPR_CALL,
-                 EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT, EXPR_ARRACCESS>;
+using EXPRESSION = std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double,
+                                EXPR_CALL, EXPR_MEMBER, EXPR_BINARY,
+                                EXPR_OBJECT, EXPR_ARRACCESS, EXPR_ASSIGN>;
 using EXPR_PTR = std::shared_ptr<EXPRESSION>;
 struct EXPR_CALL {
   EXPR_PTR callee;
@@ -82,6 +83,10 @@ struct EXPR_BINARY {
   EXPR_PTR left;
   EXPR_PTR right;
   TOK_OPERATOR bin_op;
+};
+struct EXPR_ASSIGN {
+  EXPR_PTR left;
+  EXPR_PTR right;
 };
 struct EXPR_OBJECT {};
 struct EXPR_ARRACCESS {
@@ -171,6 +176,7 @@ struct ParseDriver {
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
   std::optional<TOKEN> tokenize_identi_or_punct();
 
+  EXPR_PTR parse_assign_expr();
   EXPR_PTR parse_binary_expr();
   EXPR_PTR parse_postfix_expr();
   std::pair<bool, EXPR_PTR> parse_postfix_expr(EXPR_PTR expression);
