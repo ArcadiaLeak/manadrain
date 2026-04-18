@@ -56,42 +56,43 @@ enum TOKV_INDEX {
   TOKV_NUMBER,
   TOKV_OP
 };
-enum TOK_OPERATOR { EQ_STRICT = 1, EQ_LOOSE };
+enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY };
 using TOKEN = std::variant<std::monostate, PARSE_ERRMSG, char32_t, TOK_STRING,
                            TOK_IDENTI, double, TOK_OPERATOR>;
 
-struct EXPRESSION;
-
+struct EXPR_CALL;
+struct EXPR_MEMBER;
+struct EXPR_BINARY;
+struct EXPR_OBJECT;
+struct EXPR_ARRACCESS;
+constexpr int EXPRV_ERROR = 0;
+using EXPRESSION =
+    std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double, EXPR_CALL,
+                 EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT, EXPR_ARRACCESS>;
+using EXPR_PTR = std::shared_ptr<EXPRESSION>;
 struct EXPR_CALL {
-  std::unique_ptr<EXPRESSION> callee;
-  std::vector<EXPRESSION> arguments;
+  EXPR_PTR callee;
+  std::vector<EXPR_PTR> arguments;
 };
 struct EXPR_MEMBER {
-  std::unique_ptr<EXPRESSION> object;
+  EXPR_PTR object;
   TOK_IDENTI property;
 };
 struct EXPR_BINARY {
-  std::unique_ptr<EXPRESSION> left;
-  std::unique_ptr<EXPRESSION> right;
+  EXPR_PTR left;
+  EXPR_PTR right;
   TOK_OPERATOR bin_op;
 };
 struct EXPR_OBJECT {};
 struct EXPR_ARRACCESS {
-  std::unique_ptr<EXPRESSION> object;
-  std::unique_ptr<EXPRESSION> property;
-};
-
-constexpr int EXPRV_ERROR = 0;
-struct EXPRESSION {
-  std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double, EXPR_CALL,
-               EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT, EXPR_ARRACCESS>
-      alter;
+  EXPR_PTR object;
+  EXPR_PTR property;
 };
 
 struct STMT_VARDECL {
   KEYWORD_KIND rule;
   TOK_IDENTI identifier;
-  std::optional<EXPRESSION> initializer;
+  EXPR_PTR initializer;
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
@@ -170,15 +171,15 @@ struct ParseDriver {
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
   std::optional<TOKEN> tokenize_identi_or_punct();
 
-  EXPRESSION parse_binary_expr();
-  EXPRESSION parse_postfix_expr();
-  std::pair<bool, EXPRESSION> parse_postfix_expr(EXPRESSION expression);
+  EXPR_PTR parse_binary_expr();
+  EXPR_PTR parse_postfix_expr();
+  std::pair<bool, EXPR_PTR> parse_postfix_expr(EXPR_PTR expression);
   EXPRESSION parse_primary_expr(char32_t punct);
   EXPRESSION parse_primary_expr();
-  EXPRESSION parse_call_expr(EXPRESSION expression);
-  EXPRESSION parse_member_expr(EXPRESSION expression);
-  std::optional<std::pair<bool, EXPRESSION>> parse_arg_expr();
-  EXPRESSION parse_array_access(EXPRESSION expression);
+  std::pair<bool, EXPR_PTR> parse_arg_expr();
+  EXPR_PTR parse_call_expr(EXPR_PTR callee);
+  EXPR_PTR parse_member_expr(EXPR_PTR object);
+  EXPR_PTR parse_array_access(EXPR_PTR object);
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl(std::size_t idx);
 

@@ -537,9 +537,9 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
     default:
       return U'=';
     case 1:
-      return EQ_LOOSE;
+      return TOK_OPERATOR::EQ_SLOPPY;
     case 2:
-      return EQ_STRICT;
+      return TOK_OPERATOR::EQ_STRICT;
     }
   }
   default:
@@ -650,12 +650,12 @@ identif_end:
 check_init:
   if (token_curr == TOKEN{U'='}) {
     token_curr = tokenize();
-    EXPRESSION binary_expr = parse_binary_expr();
-    switch (binary_expr.alter.index()) {
+    EXPR_PTR binary_expr = parse_binary_expr();
+    switch (binary_expr->index()) {
     case EXPRV_ERROR:
-      return std::unexpected{std::get<EXPRV_ERROR>(binary_expr.alter)};
+      return std::unexpected{std::get<EXPRV_ERROR>(*binary_expr)};
     default:
-      std::get<STMT_VARDECL>(program[idx]).initializer = std::move(binary_expr);
+      std::get<STMT_VARDECL>(program[idx]).initializer = binary_expr;
       break;
     }
   }
@@ -663,27 +663,25 @@ check_init:
   goto identif_end;
 }
 
-EXPRESSION ParseDriver::parse_binary_expr() {
-  EXPRESSION lhs_expression = parse_postfix_expr();
-  switch (token_curr.index() == TOKV_OP ? std::get<TOKV_OP>(token_curr) : 0) {
-  case EQ_LOOSE:
-  case EQ_STRICT:
+EXPR_PTR ParseDriver::parse_binary_expr() {
+  EXPR_PTR lhs_expression = parse_postfix_expr();
+  if (token_curr.index() != TOKV_OP)
+    return lhs_expression;
+  switch (std::get<TOKV_OP>(token_curr)) {
+  case TOK_OPERATOR::EQ_SLOPPY:
+  case TOK_OPERATOR::EQ_STRICT:
     break;
   default:
     return lhs_expression;
   }
-  EXPR_BINARY bin_expr{
-      .left = std::make_unique<EXPRESSION>(std::move(lhs_expression)),
-      .bin_op = std::get<TOKV_OP>(token_curr)};
+  EXPR_PTR bin_expr = std::make_shared<EXPRESSION>(EXPR_BINARY{
+      .left = lhs_expression, .bin_op = std::get<TOKV_OP>(token_curr)});
   token_curr = tokenize();
-  EXPRESSION rhs_expression = parse_binary_expr();
-  switch (rhs_expression.alter.index()) {
-  case EXPRV_ERROR:
-    return EXPRESSION{std::get<EXPRV_ERROR>(rhs_expression.alter)};
-  default:
-    bin_expr.right = std::make_unique<EXPRESSION>(std::move(rhs_expression));
-    return EXPRESSION{std::move(bin_expr)};
-  }
+  EXPR_PTR rhs_expression = parse_binary_expr();
+  if (rhs_expression->index() == EXPRV_ERROR)
+    return rhs_expression;
+  std::get_if<EXPR_BINARY>(bin_expr.get())->right = rhs_expression;
+  return bin_expr;
 }
 
 EXPRESSION ParseDriver::parse_primary_expr(char32_t punct) {
@@ -693,104 +691,91 @@ EXPRESSION ParseDriver::parse_primary_expr(char32_t punct) {
     return token_curr == TOKEN{U'}'} ? EXPRESSION{EXPR_OBJECT{}}
                                      : EXPRESSION{NEEDED_ERR::CLOSING_BRACE};
   default:
-    return EXPRESSION{UNEXPECTED_ERR::THIS_TOKEN};
+    return UNEXPECTED_ERR::THIS_TOKEN;
   }
 }
 
 EXPRESSION ParseDriver::parse_primary_expr() {
   switch (token_curr.index()) {
-  case TOKV_ERROR:
-    return EXPRESSION{std::get<TOKV_ERROR>(token_curr)};
   case TOKV_STRING:
-    return EXPRESSION{std::get<TOKV_STRING>(token_curr)};
+    return std::get<TOKV_STRING>(token_curr);
   case TOKV_IDENTI:
-    return EXPRESSION{std::get<TOKV_IDENTI>(token_curr)};
+    return std::get<TOKV_IDENTI>(token_curr);
   case TOKV_NUMBER:
-    return EXPRESSION{std::get<TOKV_NUMBER>(token_curr)};
+    return std::get<TOKV_NUMBER>(token_curr);
   case TOKV_PUNCT:
     return parse_primary_expr(std::get<TOKV_PUNCT>(token_curr));
+  case TOKV_ERROR:
+    return std::get<TOKV_ERROR>(token_curr);
   default:
-    return EXPRESSION{UNEXPECTED_ERR::THIS_TOKEN};
+    return UNEXPECTED_ERR::THIS_TOKEN;
   }
 }
 
-std::optional<std::pair<bool, EXPRESSION>> ParseDriver::parse_arg_expr() {
+std::pair<bool, EXPR_PTR> ParseDriver::parse_arg_expr() {
   token_curr = tokenize();
   if (token_curr == TOKEN{U')'})
-    return std::nullopt;
-  EXPRESSION arg_expr = parse_binary_expr();
+    return {0, nullptr};
+  EXPR_PTR arg_expr = parse_binary_expr();
   if (token_curr == TOKEN{U')'})
-    return std::make_pair(0, EXPRESSION{std::move(arg_expr)});
+    return std::make_pair(0, arg_expr);
   if (token_curr != TOKEN{U','})
-    return std::make_pair(0, EXPRESSION{NEEDED_ERR::COMMA});
+    return std::make_pair(0, std::make_shared<EXPRESSION>(NEEDED_ERR::COMMA));
   else
-    return std::make_pair(1, EXPRESSION{std::move(arg_expr)});
+    return std::make_pair(1, arg_expr);
 }
 
-EXPRESSION ParseDriver::parse_call_expr(EXPRESSION expression) {
-  EXPR_CALL call_expr{std::make_unique<EXPRESSION>(std::move(expression))};
+EXPR_PTR ParseDriver::parse_call_expr(EXPR_PTR callee) {
+  EXPR_PTR call_expr = std::make_shared<EXPRESSION>(EXPR_CALL{callee});
   bool go_on{1};
   while (go_on) {
-    auto arg_expr = parse_arg_expr();
-    if (not arg_expr)
+    std::pair<bool, EXPR_PTR> arg_expr = parse_arg_expr();
+    if (not arg_expr.second)
       break;
-    switch (arg_expr.value().second.alter.index()) {
-    case EXPRV_ERROR:
-      return EXPRESSION{std::move(arg_expr->second)};
-    default:
-      go_on = arg_expr->first;
-      call_expr.arguments.push_back(std::move(arg_expr->second));
-      break;
-    }
+    if (arg_expr.second->index() == EXPRV_ERROR)
+      return arg_expr.second;
+    go_on = arg_expr.first;
+    std::get_if<EXPR_CALL>(call_expr.get())
+        ->arguments.push_back(arg_expr.second);
   }
-  return EXPRESSION{std::move(call_expr)};
+  return call_expr;
 }
 
-EXPRESSION ParseDriver::parse_member_expr(EXPRESSION expression) {
+EXPR_PTR ParseDriver::parse_member_expr(EXPR_PTR object) {
   token_curr = tokenize();
-  switch (token_curr.index()) {
-  case TOKV_IDENTI: {
-    EXPR_MEMBER member{std::make_unique<EXPRESSION>(std::move(expression)),
-                       std::get<TOK_IDENTI>(token_curr)};
-    return EXPRESSION{std::move(member)};
-  }
-  default:
-    return EXPRESSION{NEEDED_ERR::FIELD_NAME};
-  }
+  return token_curr.index() == TOKV_IDENTI
+             ? std::make_shared<EXPRESSION>(
+                   EXPR_MEMBER{object, std::get<TOK_IDENTI>(token_curr)})
+             : std::make_shared<EXPRESSION>(NEEDED_ERR::FIELD_NAME);
 }
 
-EXPRESSION ParseDriver::parse_array_access(EXPRESSION expression) {
+EXPR_PTR ParseDriver::parse_array_access(EXPR_PTR object) {
   token_curr = tokenize();
-  EXPRESSION property_expr = parse_binary_expr();
-  switch (property_expr.alter.index()) {
-  case EXPRV_ERROR:
-    return EXPRESSION{std::move(property_expr)};
-  default:
-    return token_curr == TOKEN{U']'}
-               ? EXPRESSION{EXPR_ARRACCESS{
-                     std::make_unique<EXPRESSION>(std::move(expression)),
-                     std::make_unique<EXPRESSION>(std::move(property_expr))}}
-               : EXPRESSION{NEEDED_ERR::CLOSING_BRACKET};
-  }
+  EXPR_PTR property_expr = parse_binary_expr();
+  if (property_expr->index() == EXPRV_ERROR)
+    return property_expr;
+  return token_curr == TOKEN{U']'}
+             ? std::make_shared<EXPRESSION>(
+                   EXPR_ARRACCESS{object, property_expr})
+             : std::make_shared<EXPRESSION>(NEEDED_ERR::CLOSING_BRACKET);
 }
 
-std::pair<bool, EXPRESSION>
-ParseDriver::parse_postfix_expr(EXPRESSION expression) {
+std::pair<bool, EXPR_PTR> ParseDriver::parse_postfix_expr(EXPR_PTR expression) {
   switch (std::get<TOKV_PUNCT>(token_curr)) {
   case '.':
-    return std::make_pair(1, parse_member_expr(std::move(expression)));
+    return std::make_pair(1, parse_member_expr(expression));
   case '(':
-    return std::make_pair(1, parse_call_expr(std::move(expression)));
+    return std::make_pair(1, parse_call_expr(expression));
   case '[':
-    return std::make_pair(1, parse_array_access(std::move(expression)));
+    return std::make_pair(1, parse_array_access(expression));
   default:
-    return std::make_pair(0, EXPRESSION{std::move(expression)});
+    return std::make_pair(0, expression);
   }
 }
 
-EXPRESSION ParseDriver::parse_postfix_expr() {
-  EXPRESSION expression{parse_primary_expr()};
-  switch (expression.alter.index()) {
+EXPR_PTR ParseDriver::parse_postfix_expr() {
+  EXPR_PTR expression = std::make_shared<EXPRESSION>(parse_primary_expr());
+  switch (expression->index()) {
   case EXPRV_ERROR:
     return expression;
   default:
@@ -799,16 +784,16 @@ EXPRESSION ParseDriver::parse_postfix_expr() {
   bool go_on{1};
   while (go_on) {
     token_curr = tokenize();
-    if (token_curr.index() == TOKV_PUNCT) {
-      auto postfix_expr = parse_postfix_expr(std::move(expression));
-      switch (postfix_expr.second.alter.index()) {
-      case EXPRV_ERROR:
-        return EXPRESSION{std::move(postfix_expr.second)};
-      default:
-        go_on = postfix_expr.first;
-        expression = std::move(postfix_expr.second);
-        break;
-      }
+    if (token_curr.index() != TOKV_PUNCT)
+      break;
+    auto postfix_expr = parse_postfix_expr(expression);
+    switch (postfix_expr.second->index()) {
+    case EXPRV_ERROR:
+      return postfix_expr.second;
+    default:
+      go_on = postfix_expr.first;
+      expression = postfix_expr.second;
+      break;
     }
   }
   return expression;
@@ -830,7 +815,7 @@ bool ParseDriver::parse() {
         goto parse_vardecl;
       [[fallthrough]];
     default:
-      goto parse_postfix;
+      goto parse_binary;
     }
 
   fail:
@@ -853,14 +838,14 @@ bool ParseDriver::parse() {
     }
   }
 
-  parse_postfix: {
-    EXPRESSION binary_expr = parse_binary_expr();
-    switch (binary_expr.alter.index()) {
+  parse_binary: {
+    EXPR_PTR binary_expr = parse_binary_expr();
+    switch (binary_expr->index()) {
     default:
-      program.emplace_back(std::move(binary_expr));
+      program.push_back(*binary_expr);
       goto statement_end;
     case EXPRV_ERROR:
-      errmsg = std::get<EXPRV_ERROR>(binary_expr.alter);
+      errmsg = std::get<EXPRV_ERROR>(*binary_expr);
       goto fail;
     }
   }
