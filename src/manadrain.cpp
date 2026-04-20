@@ -55,15 +55,15 @@ void SpaceChewer::chewLF() {
   prev();
 }
 
-char32_t EscapeDecoder::decode_octal(char32_t oct) {
+std::optional<char32_t> EscapeDecoder::decode_octal() {
   if (reached_eof())
-    return oct;
-  char32_t ahead = next().value() - '0';
-  if (ahead > 7) {
+    return std::nullopt;
+  char32_t ahead = next().value();
+  if (ahead > '7') {
     prev();
-    return oct;
+    return std::nullopt;
   }
-  return (oct << 3) | ahead;
+  return ahead - '0';
 }
 
 std::optional<int> hex_conv(char32_t digit) {
@@ -76,17 +76,17 @@ std::optional<int> hex_conv(char32_t digit) {
   return std::nullopt;
 }
 
-std::expected<char32_t, PARSE_ERRMSG> EscapeDecoder::decode_hex() {
+std::optional<char32_t> EscapeDecoder::decode_hex() {
   std::optional<int> hex0 = next().and_then(hex_conv);
   if (not hex0)
-    return std::unexpected{ESCAPE_ERR::MALFORMED};
+    return std::nullopt;
   std::optional<int> hex1 = next().and_then(hex_conv);
   if (not hex1)
-    return std::unexpected{ESCAPE_ERR::MALFORMED};
+    return std::nullopt;
   return (hex0.value() << 4) | hex1.value();
 }
 
-std::optional<std::expected<char32_t, PARSE_ERRMSG>>
+std::variant<std::monostate, char32_t, PARSE_ERRMSG>
 EscapeDecoder::decode(ESC_RULE rule, char32_t ch) {
   switch (ch) {
   case 'b':
@@ -101,8 +101,12 @@ EscapeDecoder::decode(ESC_RULE rule, char32_t ch) {
     return U'\t';
   case 'v':
     return U'\v';
-  case 'x':
-    return decode_hex();
+  case 'x': {
+    std::optional hex = decode_hex();
+    if (not hex)
+      return ESCAPE_ERR::MALFORMED;
+    return hex.value();
+  }
   case '0':
     if (peek()
             .transform([](char32_t ahead) { return std::isdigit(ahead); })
@@ -118,29 +122,36 @@ EscapeDecoder::decode(ESC_RULE rule, char32_t ch) {
   case '7':
     switch (rule) {
     case ESC_RULE::STRING_IN_STRICT_MODE:
-      return std::unexpected{ESCAPE_ERR::OCTAL_BANNED};
+      return ESCAPE_ERR::OCTAL_BANNED;
 
     case ESC_RULE::STRING_IN_TEMPLATE:
     case ESC_RULE::REGEXP_UTF16:
-      return std::unexpected{ESCAPE_ERR::MALFORMED};
+      return ESCAPE_ERR::MALFORMED;
 
     default: {
-      char32_t oct = ch - '0';
-      oct = decode_octal(oct);
-      if (oct >= 32)
-        return oct;
-      oct = decode_octal(oct);
-      return oct;
+      std::optional<char32_t> dec{};
+      char32_t base = ch - '0';
+      dec = decode_octal();
+      if (not dec)
+        return base;
+      base = (base << 3) | dec.value();
+      if (base >= 32)
+        return base;
+      dec = decode_octal();
+      if (not dec)
+        return base;
+      base = (base << 3) | dec.value();
+      return base;
     }
     }
   case '8':
   case '9':
     if (rule == ESC_RULE::STRING_IN_STRICT_MODE ||
         rule == ESC_RULE::STRING_IN_TEMPLATE)
-      return std::unexpected{ESCAPE_ERR::MALFORMED};
+      return ESCAPE_ERR::MALFORMED;
     [[fallthrough]];
   default:
-    return std::nullopt;
+    return std::monostate{};
   }
 }
 
@@ -164,7 +175,15 @@ Tokenizer::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   EscapeDecoder::ESC_RULE esc_rule = separator == '`'
                                          ? EscapeDecoder::STRING_IN_STRICT_MODE
                                          : EscapeDecoder::STRING_IN_TEMPLATE;
-  return decode(esc_rule, ch);
+  std::variant esc = decode(esc_rule, ch);
+  switch (esc.index()) {
+  case 0:
+    return std::nullopt;
+  case 1:
+    return std::get<1>(esc);
+  default:
+    return std::unexpected{std::get<2>(esc)};
+  }
 }
 
 std::optional<std::expected<char32_t, PARSE_ERRMSG>>

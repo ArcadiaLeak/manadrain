@@ -139,12 +139,12 @@ public:
     STRING_IN_STRICT_MODE,
     STRING_IN_TEMPLATE
   };
-  std::optional<std::expected<char32_t, PARSE_ERRMSG>> decode(ESC_RULE rule,
+  std::variant<std::monostate, char32_t, PARSE_ERRMSG> decode(ESC_RULE rule,
                                                               char32_t leading);
 
 private:
-  char32_t decode_octal(char32_t oct);
-  std::expected<char32_t, PARSE_ERRMSG> decode_hex();
+  std::optional<char32_t> decode_octal();
+  std::optional<char32_t> decode_hex();
 };
 
 class Tokenizer : public EscapeDecoder {
