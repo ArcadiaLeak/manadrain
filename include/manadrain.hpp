@@ -11,13 +11,10 @@
 #include "atom_page_neg1.hpp"
 
 namespace Manadrain {
-enum class STRICTNESS { SLOPPY, STRICT };
-enum class KEYWORD_KIND { K_LET, K_CONST, K_VAR };
 enum class ESC_RULE {
   IDENTIFIER,
   REGEXP_ASCII,
   REGEXP_UTF16,
-  STRING_IN_SLOPPY_MODE,
   STRING_IN_STRICT_MODE,
   STRING_IN_TEMPLATE
 };
@@ -45,7 +42,6 @@ struct TOK_IDENTI {
   bool has_escape;
   P_ATOM p_atom;
   bool operator==(const TOK_IDENTI &) const = default;
-  std::optional<KEYWORD_KIND> match_keyword(STRICTNESS);
 };
 enum TOKV_INDEX {
   TOKV_EOF,
@@ -95,7 +91,7 @@ struct EXPR_ARRACCESS {
 };
 
 struct STMT_VARDECL {
-  KEYWORD_KIND rule;
+  P_ATOM kind;
   TOK_IDENTI identifier;
   EXPR_PTR initializer;
 };
@@ -126,7 +122,6 @@ struct ParseDriver {
   bool reached_eof() { return buffer_idx >= buffer.size(); }
 
   bool newline_seen;
-  STRICTNESS strictness;
 
   std::string str1_temp;
   void str1_encode(char32_t cp);
@@ -187,7 +182,10 @@ struct ParseDriver {
   EXPR_PTR parse_member_expr(EXPR_PTR object);
   EXPR_PTR parse_array_access(EXPR_PTR object);
 
-  std::expected<void, PARSE_ERRMSG> parse_variable_decl(std::size_t idx);
+  std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
+  parse_variable_decl();
+  std::expected<void, PARSE_ERRMSG> parse_statement();
+  std::expected<void, PARSE_ERRMSG> expect_statement_end();
 
   bool parse();
 };

@@ -12,22 +12,6 @@ namespace Manadrain {
 static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
-static const std::array reserved_arr =
-    std::to_array<std::tuple<P_ATOM, KEYWORD_KIND, STRICTNESS>>(
-        {{S_ATOM_var, KEYWORD_KIND::K_VAR, STRICTNESS::SLOPPY},
-         {S_ATOM_const, KEYWORD_KIND::K_CONST, STRICTNESS::SLOPPY},
-         {S_ATOM_let, KEYWORD_KIND::K_LET, STRICTNESS::STRICT}});
-
-std::optional<KEYWORD_KIND> TOK_IDENTI::match_keyword(STRICTNESS strictness) {
-  if (p_atom.pageid >= 0)
-    return std::nullopt;
-  for (auto rsv_word : reserved_arr) {
-    auto [tok_atom, tok_kind, tok_strict] = rsv_word;
-    if (p_atom == tok_atom && strictness >= tok_strict && !has_escape)
-      return tok_kind;
-  }
-  return std::nullopt;
-}
 
 bool AtomPage::check_for_count(int N) { return ch_bitset.count() >= N; }
 
@@ -220,11 +204,8 @@ ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
     /* ignore escaped newline sequence */
     return std::nullopt;
   }
-  ESC_RULE esc_rule = ESC_RULE::STRING_IN_SLOPPY_MODE;
-  if (strictness == STRICTNESS::STRICT)
-    esc_rule = ESC_RULE::STRING_IN_STRICT_MODE;
-  else if (separator == '`')
-    esc_rule = ESC_RULE::STRING_IN_TEMPLATE;
+  ESC_RULE esc_rule = separator == '`' ? ESC_RULE::STRING_IN_STRICT_MODE
+                                       : ESC_RULE::STRING_IN_TEMPLATE;
   return parse(PARSE_ESCAPE{esc_rule}, ch);
 }
 
@@ -580,13 +561,14 @@ TOKEN ParseDriver::tokenize() {
       .value();
 }
 
+std::array s_atom_arr =
+    std::to_array<P_ATOM>({S_ATOM_const, S_ATOM_let, S_ATOM_var});
 std::optional<P_ATOM> ParseDriver::find_static_atom() {
-  for (std::uint16_t i = 0; i < reserved_arr.size(); i++) {
-    auto [p_atom, _, _] = reserved_arr[i];
+  for (P_ATOM s_atom : s_atom_arr) {
     if (str1_temp ==
-        std::string_view{neg1_page_buf.data() + p_atom.offset * ATOM_BLOCK,
-                         p_atom.length})
-      return p_atom;
+        std::string_view{neg1_page_buf.data() + s_atom.offset * ATOM_BLOCK,
+                         s_atom.length})
+      return s_atom;
   }
   return std::nullopt;
 }
@@ -631,36 +613,31 @@ copy_and_return:
   return P_ATOM{i, offset, length};
 }
 
-std::expected<void, PARSE_ERRMSG>
-ParseDriver::parse_variable_decl(std::size_t idx) {
-  bool try_init{1};
+std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
+ParseDriver::parse_variable_decl() {
+  STMT_VARDECL declaration{};
 
+  P_ATOM p_atom = std::get<TOKV_IDENTI>(token_curr).p_atom;
+  if (p_atom != S_ATOM_const && p_atom != S_ATOM_let && p_atom != S_ATOM_var)
+    return std::monostate{};
+  declaration.kind = p_atom;
   token_curr = tokenize();
+
   if (token_curr.index() != TOKV_IDENTI)
-    return std::unexpected{NEEDED_ERR::VARIABLE_NAME};
-  std::get<STMT_VARDECL>(program[idx]).identifier =
-      std::get<TOK_IDENTI>(token_curr);
+    return NEEDED_ERR::VARIABLE_NAME;
+  declaration.identifier = std::get<TOK_IDENTI>(token_curr);
   token_curr = tokenize();
 
-identif_end:
-  if (try_init)
-    goto check_init;
-  return {};
+  if (token_curr != TOKEN{U'='})
+    return declaration;
+  token_curr = tokenize();
 
-check_init:
-  if (token_curr == TOKEN{U'='}) {
-    token_curr = tokenize();
-    EXPR_PTR binary_expr = parse_assign_expr();
-    switch (binary_expr->index()) {
-    case EXPRV_ERROR:
-      return std::unexpected{std::get<EXPRV_ERROR>(*binary_expr)};
-    default:
-      std::get<STMT_VARDECL>(program[idx]).initializer = binary_expr;
-      break;
-    }
-  }
-  try_init = 0;
-  goto identif_end;
+  EXPR_PTR initializer = parse_assign_expr();
+  if (initializer->index() == EXPRV_ERROR)
+    return std::get<EXPRV_ERROR>(*initializer);
+  declaration.initializer = initializer;
+
+  return declaration;
 }
 
 EXPR_PTR ParseDriver::parse_binary_expr() {
@@ -812,66 +789,53 @@ EXPR_PTR ParseDriver::parse_postfix_expr() {
   return expression;
 }
 
+std::expected<void, PARSE_ERRMSG> ParseDriver::expect_statement_end() {
+  if (token_curr == TOKEN{U';'}) {
+    token_curr = tokenize();
+    return {};
+  }
+  bool insertion = token_curr.index() == TOKV_EOF ||
+                   token_curr == TOKEN{U'}'} || newline_seen;
+  if (insertion)
+    return {};
+  return std::unexpected{NEEDED_ERR::SEMICOLON};
+}
+
+std::expected<void, PARSE_ERRMSG> ParseDriver::parse_statement() {
+  switch (token_curr.index()) {
+  case TOKV_ERROR:
+    return std::unexpected{std::get<TOKV_ERROR>(token_curr)};
+  case TOKV_IDENTI: {
+    auto declaration = parse_variable_decl();
+    switch (declaration.index()) {
+    case 0:
+      break;
+    case 1:
+      program.push_back(std::get<1>(declaration));
+      return expect_statement_end();
+    case 2:
+      return std::unexpected{std::get<2>(declaration)};
+    }
+    [[fallthrough]];
+  }
+  default: {
+    EXPR_PTR expression = parse_assign_expr();
+    if (expression->index() == EXPRV_ERROR)
+      return std::unexpected{std::get<EXPRV_ERROR>(*expression)};
+    program.push_back(*expression);
+    return expect_statement_end();
+  }
+  }
+}
+
 bool ParseDriver::parse() {
   token_curr = tokenize();
   while (1) {
-    std::optional<PARSE_ERRMSG> errmsg{};
-
-    switch (token_curr.index()) {
-    case TOKV_EOF:
+    if (token_curr.index() == TOKV_EOF)
+      return 0;
+    std::expected<void, PARSE_ERRMSG> status = parse_statement();
+    if (not status)
       return 1;
-    case TOKV_ERROR:
-      errmsg = std::get<TOKV_ERROR>(token_curr);
-      goto fail;
-    case TOKV_IDENTI:
-      if (std::get<TOKV_IDENTI>(token_curr).match_keyword(STRICTNESS::STRICT))
-        goto parse_vardecl;
-      [[fallthrough]];
-    default:
-      goto parse_expression;
-    }
-
-  fail:
-    if (not errmsg)
-      throw std::runtime_error{"parsing failed without a message!"};
-    return 0;
-
-  parse_vardecl: {
-    program.emplace_back(
-        STMT_VARDECL{.rule = std::get<TOKV_IDENTI>(token_curr)
-                                 .match_keyword(STRICTNESS::STRICT)
-                                 .value()});
-    std::expected decl_exp = parse_variable_decl(program.size() - 1);
-    switch (decl_exp.has_value()) {
-    case 1:
-      goto statement_end;
-    case 0:
-      errmsg = decl_exp.error();
-      goto fail;
-    }
-  }
-
-  parse_expression: {
-    EXPR_PTR binary_expr = parse_assign_expr();
-    switch (binary_expr->index()) {
-    default:
-      program.push_back(*binary_expr);
-      goto statement_end;
-    case EXPRV_ERROR:
-      errmsg = std::get<EXPRV_ERROR>(*binary_expr);
-      goto fail;
-    }
-  }
-
-  statement_end:
-    if (token_curr == TOKEN{U';'}) {
-      token_curr = tokenize();
-      continue;
-    } else if (token_curr.index() == TOKV_EOF || token_curr == TOKEN{U'}'} ||
-               newline_seen)
-      continue;
-    errmsg = NEEDED_ERR::SEMICOLON;
-    goto fail;
   }
 }
 } // namespace Manadrain
