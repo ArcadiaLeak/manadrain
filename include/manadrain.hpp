@@ -11,14 +11,6 @@
 #include "atom_page_neg1.hpp"
 
 namespace Manadrain {
-enum class ESC_RULE {
-  IDENTIFIER,
-  REGEXP_ASCII,
-  REGEXP_UTF16,
-  STRING_IN_STRICT_MODE,
-  STRING_IN_TEMPLATE
-};
-
 enum class ESCAPE_ERR { MALFORMED, OCTAL_BANNED };
 enum class NUMBER_ERR { INVALID_LITERAL, INTEGER_OVERFLOW };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
@@ -97,9 +89,6 @@ struct STMT_VARDECL {
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
-struct PARSE_ESCAPE {
-  ESC_RULE rule;
-};
 struct PARSE_STRING {};
 struct PARSE_IDENT {};
 
@@ -141,7 +130,24 @@ private:
   bool chew_comment_line();
 };
 
-class Tokenizer : public SpaceChewer {
+class EscapeDecoder : public SpaceChewer {
+public:
+  enum ESC_RULE {
+    IDENTIFIER,
+    REGEXP_ASCII,
+    REGEXP_UTF16,
+    STRING_IN_STRICT_MODE,
+    STRING_IN_TEMPLATE
+  };
+  std::optional<std::expected<char32_t, PARSE_ERRMSG>> decode(ESC_RULE rule,
+                                                              char32_t leading);
+
+private:
+  char32_t decode_octal(char32_t oct);
+  std::expected<char32_t, PARSE_ERRMSG> decode_hex();
+};
+
+class Tokenizer : public EscapeDecoder {
 public:
   TOKEN tokenize();
 
@@ -154,11 +160,6 @@ private:
 
   std::size_t find_atom();
   std::size_t alloc_atom();
-
-  char32_t parse_octo(PARSE_ESCAPE, char32_t oct);
-  std::expected<char32_t, PARSE_ERRMSG> parse_hex(PARSE_ESCAPE);
-  std::optional<std::expected<char32_t, PARSE_ERRMSG>> parse(PARSE_ESCAPE esc,
-                                                             char32_t ch);
 
   std::optional<std::expected<char32_t, PARSE_ERRMSG>>
   parse_escape(PARSE_STRING, char32_t separator, char32_t ch);

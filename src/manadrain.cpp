@@ -55,15 +55,15 @@ void SpaceChewer::chewLF() {
   prev();
 }
 
-char32_t Tokenizer::parse_octo(PARSE_ESCAPE, char32_t octo) {
+char32_t EscapeDecoder::decode_octal(char32_t oct) {
   if (reached_eof())
-    return octo;
+    return oct;
   char32_t ahead = next().value() - '0';
   if (ahead > 7) {
     prev();
-    return octo;
+    return oct;
   }
-  return (octo << 3) | ahead;
+  return (oct << 3) | ahead;
 }
 
 std::optional<int> hex_conv(char32_t digit) {
@@ -76,7 +76,7 @@ std::optional<int> hex_conv(char32_t digit) {
   return std::nullopt;
 }
 
-std::expected<char32_t, PARSE_ERRMSG> Tokenizer::parse_hex(PARSE_ESCAPE) {
+std::expected<char32_t, PARSE_ERRMSG> EscapeDecoder::decode_hex() {
   std::optional<int> hex0 = next().and_then(hex_conv);
   if (not hex0)
     return std::unexpected{ESCAPE_ERR::MALFORMED};
@@ -87,7 +87,7 @@ std::expected<char32_t, PARSE_ERRMSG> Tokenizer::parse_hex(PARSE_ESCAPE) {
 }
 
 std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-Tokenizer::parse(PARSE_ESCAPE esc, char32_t ch) {
+EscapeDecoder::decode(ESC_RULE rule, char32_t ch) {
   switch (ch) {
   case 'b':
     return U'\b';
@@ -102,7 +102,7 @@ Tokenizer::parse(PARSE_ESCAPE esc, char32_t ch) {
   case 'v':
     return U'\v';
   case 'x':
-    return parse_hex(PARSE_ESCAPE{});
+    return decode_hex();
   case '0':
     if (peek()
             .transform([](char32_t ahead) { return std::isdigit(ahead); })
@@ -116,7 +116,7 @@ Tokenizer::parse(PARSE_ESCAPE esc, char32_t ch) {
   case '5':
   case '6':
   case '7':
-    switch (esc.rule) {
+    switch (rule) {
     case ESC_RULE::STRING_IN_STRICT_MODE:
       return std::unexpected{ESCAPE_ERR::OCTAL_BANNED};
 
@@ -126,17 +126,17 @@ Tokenizer::parse(PARSE_ESCAPE esc, char32_t ch) {
 
     default: {
       char32_t oct = ch - '0';
-      oct = parse_octo(PARSE_ESCAPE{}, oct);
+      oct = decode_octal(oct);
       if (oct >= 32)
         return oct;
-      oct = parse_octo(PARSE_ESCAPE{}, oct);
+      oct = decode_octal(oct);
       return oct;
     }
     }
   case '8':
   case '9':
-    if (esc.rule == ESC_RULE::STRING_IN_STRICT_MODE ||
-        esc.rule == ESC_RULE::STRING_IN_TEMPLATE)
+    if (rule == ESC_RULE::STRING_IN_STRICT_MODE ||
+        rule == ESC_RULE::STRING_IN_TEMPLATE)
       return std::unexpected{ESCAPE_ERR::MALFORMED};
     [[fallthrough]];
   default:
@@ -161,9 +161,10 @@ Tokenizer::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
     /* ignore escaped newline sequence */
     return std::nullopt;
   }
-  ESC_RULE esc_rule = separator == '`' ? ESC_RULE::STRING_IN_STRICT_MODE
-                                       : ESC_RULE::STRING_IN_TEMPLATE;
-  return parse(PARSE_ESCAPE{esc_rule}, ch);
+  EscapeDecoder::ESC_RULE esc_rule = separator == '`'
+                                         ? EscapeDecoder::STRING_IN_STRICT_MODE
+                                         : EscapeDecoder::STRING_IN_TEMPLATE;
+  return decode(esc_rule, ch);
 }
 
 std::optional<std::expected<char32_t, PARSE_ERRMSG>>

@@ -25,10 +25,10 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Parser parse_driver{};
-  parse_driver.setBuffer(std::ranges::istream_view<std::uint8_t>{file} |
-                         std::ranges::to<std::basic_string<std::uint8_t>>());
-  parse_driver.parse();
+  Manadrain::Parser parser{};
+  parser.setBuffer(std::ranges::istream_view<std::uint8_t>{file} |
+                   std::ranges::to<std::basic_string<std::uint8_t>>());
+  parser.parse();
 
   return 0;
 }
