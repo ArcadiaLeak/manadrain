@@ -9,38 +9,42 @@ const encoder = new TextEncoder();
 const neg1_page_pos = [];
 const neg1_page_buf = [];
 
-for (const lit of atom_literal_arr) {
-  const ch_arr = Array.from(encoder.encode(lit));
-  const aligned_length = Math.ceil(lit.length / 8);
+function LE_encode(num) {
+  const buffer = new ArrayBuffer(4);
+  const view = new DataView(buffer);
+  view.setUint32(0, num, true);
+  return new Uint8Array(buffer);
+}
 
-  ch_arr.length = aligned_length * 8;
-  ch_arr.fill(0, lit.length);
-  neg1_page_buf.push(...ch_arr);
+for (const lit of atom_literal_arr) {
+  const lit_length = [
+    0, 0, 0, 0,
+    ...LE_encode(lit.length)
+  ];
+
+  const lit_bytes = Array.from(encoder.encode(lit));
+  lit_bytes.length = Math.ceil(lit.length / 8) * 8;
+  lit_bytes.fill(0, lit.length);
+
+  neg1_page_buf.push(...lit_length);
+  neg1_page_buf.push(...lit_bytes);
 
   neg1_page_pos.push({
     offset,
-    length: lit.length,
     atom_name: lit
   });
 
-  offset += aligned_length;
+  offset += lit_length.length;
+  offset += lit_bytes.length;
 }
 
 Deno.writeTextFile("include/atom_page_neg1.hpp", `\
 #include <array>
-#include <cstdint>
 
 namespace Manadrain {
-struct P_ATOM {
-  std::int16_t pageid;
-  std::uint16_t offset;
-  std::uint16_t length;
-  bool operator==(const P_ATOM&) const = default;
-};
-
 ${neg1_page_pos
-    .map(({ offset, length, atom_name }) =>
-      `constexpr P_ATOM S_ATOM_${atom_name}{-1, ${offset}, ${length}};`)
+    .map(({ offset, atom_name }) =>
+      `constexpr std::size_t S_ATOM_${atom_name}{${offset}};`)
     .join('\n')}
 
 static const std::array<char, ${neg1_page_buf.length}> neg1_page_buf{{

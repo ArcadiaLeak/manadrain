@@ -13,49 +13,6 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-bool AtomPage::check_for_count(int N) { return ch_bitset.count() >= N; }
-
-bool AtomPage::check_for_window(int N) {
-  std::bitset inv_bitset = ~ch_bitset;
-  for (int i = 0; i < N - 1; ++i) {
-    if (inv_bitset.none())
-      return 0;
-    inv_bitset &= inv_bitset << 1;
-  }
-  return inv_bitset.any();
-}
-
-int AtomPage::scan_for_window(int N) {
-  int n_zeros = 0;
-  for (int i = 0; i < ch_bitset.size(); ++i) {
-    if (ch_bitset[i])
-      n_zeros = 0;
-    else {
-      n_zeros++;
-      if (n_zeros == N) {
-        int ret = i - N + 1;
-        return ret;
-      }
-    }
-  }
-  throw std::runtime_error{"window seeking failed!"};
-}
-
-std::optional<std::uint16_t> AtomPage::try_allocate(int N) {
-  if (not check_for_count(N))
-    return std::nullopt;
-  if (not check_for_window(N))
-    return std::nullopt;
-  int offset = scan_for_window(N);
-  allocate(offset, N);
-  return static_cast<std::uint16_t>(offset);
-}
-
-void AtomPage::allocate(int offset, int N) {
-  for (int i = offset; i < offset + N; ++i)
-    ch_bitset[i] = 1;
-}
-
 void ParseDriver::str1_encode(char32_t cp) {
   std::array<char, 4> buff{};
   UBool is_error{};
@@ -349,12 +306,7 @@ repeat: {
 done:
   if (str1_temp.size() == 0)
     return std::nullopt;
-  else {
-    P_ATOM pos_atom = find_static_atom()
-                          .or_else([this]() { return find_dynamic_atom(); })
-                          .value();
-    return TOK_IDENTI{has_escape, pos_atom};
-  }
+  return TOK_IDENTI{has_escape, find_atom()};
 }
 
 bool ParseDriver::skip_comment_line() {
@@ -493,12 +445,8 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   case '"': {
     std::expected str_exp = parse_atom(PARSE_STRING{}, leading);
     switch (str_exp.has_value()) {
-    case 1: {
-      P_ATOM pos_atom = find_static_atom()
-                            .or_else([this]() { return find_dynamic_atom(); })
-                            .value();
-      return TOK_STRING{.separator = leading, .p_atom = pos_atom};
-    }
+    case 1:
+      return TOK_STRING{.separator = leading, .p_atom = find_atom()};
     default:
       return str_exp.error();
     }
@@ -561,67 +509,53 @@ TOKEN ParseDriver::tokenize() {
       .value();
 }
 
-std::array s_atom_arr =
-    std::to_array<P_ATOM>({S_ATOM_const, S_ATOM_let, S_ATOM_var});
-std::optional<P_ATOM> ParseDriver::find_static_atom() {
-  for (P_ATOM s_atom : s_atom_arr) {
-    if (str1_temp ==
-        std::string_view{neg1_page_buf.data() + s_atom.offset * ATOM_BLOCK,
-                         s_atom.length})
-      return s_atom;
-  }
-  return std::nullopt;
+std::size_t aligned_N(std::size_t len) {
+  return len / MEMORY_ALIGNMENT + (len % MEMORY_ALIGNMENT != 0);
 }
 
-std::uint16_t block_N(std::size_t len) {
-  std::size_t N = len / ATOM_BLOCK + (len % ATOM_BLOCK != 0);
-  return static_cast<std::uint16_t>(N % ATOM_PAGE);
-}
-
-std::optional<P_ATOM> ParseDriver::find_dynamic_atom() {
-  if (str1_temp.size() > ATOM_BLOCK * ATOM_PAGE)
-    throw std::runtime_error{"a string literal exceeds limit!"};
-  if (not atom_umap.contains(str1_temp)) {
-    P_ATOM p_atom = alloc_dynamic_atom();
-    int ch_offset = p_atom.offset * ATOM_BLOCK;
-    std::string_view atom_strview{
-        atom_deq[p_atom.pageid].ch_arr.data() + ch_offset, p_atom.length};
-    atom_umap[atom_strview] = p_atom;
-  }
+std::size_t ParseDriver::find_atom() {
+  if (not atom_umap.contains(str1_temp))
+    atom_umap[str1_temp] = alloc_atom();
   return atom_umap[str1_temp];
 }
 
-P_ATOM ParseDriver::alloc_dynamic_atom() {
-  std::uint16_t offset = 0,
-                length = static_cast<std::uint16_t>(str1_temp.size());
-  std::int16_t i;
-  for (i = 0; i < atom_deq.size(); ++i) {
-    std::optional offset_opt = atom_deq[i].try_allocate(block_N(length));
-    if (not offset_opt)
-      continue;
-    offset = offset_opt.value();
-    goto copy_and_return;
-  }
-  if (atom_deq.size() == std::numeric_limits<std::int16_t>::max())
-    throw std::runtime_error{"out of space for an atom!"};
-  atom_deq.emplace_back();
-  atom_deq[i].allocate(0, block_N(length));
+std::array<char, 8> LE_encode(std::size_t N) {
+  std::array<char, 8> bytes;
+  for (int i = 0; i < 8; ++i)
+    bytes[i] = static_cast<char>((N >> (i * 8)) & 0xFF);
+  return bytes;
+}
 
-copy_and_return:
-  std::ranges::copy(str1_temp,
-                    atom_deq[i].ch_arr.begin() + offset * ATOM_BLOCK);
-  return P_ATOM{i, offset, length};
+std::size_t LE_decode(std::span<char, 8> bytes) {
+  std::size_t N = 0;
+  for (std::size_t i = 0; i < 8; ++i)
+    N |= static_cast<std::size_t>(bytes[i]) << (i * 8);
+  return N;
+}
+
+std::size_t ParseDriver::alloc_atom() {
+  std::size_t atom_addr = mach_mem.size();
+  mach_mem.append_range(LE_encode(str1_temp.size()));
+  str1_temp.resize(aligned_N(str1_temp.size()));
+  mach_mem.append_range(str1_temp);
+  return atom_addr;
 }
 
 std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
 ParseDriver::parse_variable_decl() {
   STMT_VARDECL declaration{};
 
-  P_ATOM p_atom = std::get<TOKV_IDENTI>(token_curr).p_atom;
-  if (p_atom != S_ATOM_const && p_atom != S_ATOM_let && p_atom != S_ATOM_var)
+  std::size_t p_atom = std::get<TOKV_IDENTI>(token_curr).p_atom;
+  switch (p_atom) {
+  case S_ATOM_const:
+  case S_ATOM_let:
+  case S_ATOM_var:
+    declaration.p_kind = p_atom;
+    token_curr = tokenize();
+    break;
+  default:
     return std::monostate{};
-  declaration.kind = p_atom;
-  token_curr = tokenize();
+  }
 
   if (token_curr.index() != TOKV_IDENTI)
     return NEEDED_ERR::VARIABLE_NAME;

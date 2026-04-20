@@ -1,8 +1,8 @@
 #include <bitset>
-#include <deque>
 #include <expected>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -35,12 +35,12 @@ using PARSE_ERRMSG =
 
 struct TOK_STRING {
   char32_t separator;
-  P_ATOM p_atom;
+  std::size_t p_atom;
   bool operator==(const TOK_STRING &) const = default;
 };
 struct TOK_IDENTI {
   bool has_escape;
-  P_ATOM p_atom;
+  std::size_t p_atom;
   bool operator==(const TOK_IDENTI &) const = default;
 };
 enum TOKV_INDEX {
@@ -91,7 +91,7 @@ struct EXPR_ARRACCESS {
 };
 
 struct STMT_VARDECL {
-  P_ATOM kind;
+  std::size_t p_kind;
   TOK_IDENTI identifier;
   EXPR_PTR initializer;
 };
@@ -103,18 +103,7 @@ struct PARSE_ESCAPE {
 struct PARSE_STRING {};
 struct PARSE_IDENT {};
 
-constexpr std::uint8_t ATOM_BLOCK = 8;
-constexpr std::uint16_t ATOM_PAGE = 2048;
-
-struct AtomPage {
-  std::bitset<ATOM_PAGE> ch_bitset;
-  std::array<char, ATOM_BLOCK * ATOM_PAGE> ch_arr;
-  bool check_for_count(int N);
-  bool check_for_window(int N);
-  int scan_for_window(int N);
-  std::optional<std::uint16_t> try_allocate(int N);
-  void allocate(int offset, int N);
-};
+constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 
 struct ParseDriver {
   std::basic_string<std::uint8_t> buffer;
@@ -126,8 +115,8 @@ struct ParseDriver {
   std::string str1_temp;
   void str1_encode(char32_t cp);
 
-  std::unordered_map<std::string_view, P_ATOM> atom_umap;
-  std::deque<AtomPage> atom_deq;
+  std::unordered_map<std::string, std::size_t> atom_umap;
+  std::vector<char> mach_mem;
 
   TOKEN token_curr;
   std::vector<STATEMENT> program;
@@ -144,9 +133,8 @@ struct ParseDriver {
   std::expected<bool, PARSE_ERRMSG> skip_comment(char32_t ch);
   std::expected<bool, PARSE_ERRMSG> skip_ws_1(char32_t ch);
 
-  std::optional<P_ATOM> find_static_atom();
-  std::optional<P_ATOM> find_dynamic_atom();
-  P_ATOM alloc_dynamic_atom();
+  std::size_t find_atom();
+  std::size_t alloc_atom();
 
   char32_t parse_octo(PARSE_ESCAPE, char32_t oct);
   std::expected<char32_t, PARSE_ERRMSG> parse_hex(PARSE_ESCAPE);
