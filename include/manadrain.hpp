@@ -89,7 +89,6 @@ struct STMT_VARDECL {
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
-struct PARSE_STRING {};
 struct PARSE_IDENT {};
 
 constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
@@ -130,36 +129,37 @@ private:
   bool chew_comment_line();
 };
 
-class EscapeDecoder : public SpaceChewer {
+class AtomTokenizer : public SpaceChewer {
 public:
-  std::variant<std::monostate, char32_t, PARSE_ERRMSG> decode(char32_t leading);
-
-private:
-  std::optional<char32_t> decode_octal();
-  std::optional<char32_t> decode_hex();
-};
-
-class Tokenizer : public EscapeDecoder {
-public:
-  TOKEN tokenize();
-
-private:
   std::string str1_temp;
   void str1_encode(char32_t cp);
-
-  std::unordered_map<std::string, std::size_t> atom_umap;
-  std::vector<char> atom_arena{std::from_range, atom_prealloc_buf};
 
   std::size_t find_atom();
   std::size_t alloc_atom();
 
-  std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-  parse_escape(PARSE_STRING, char32_t separator, char32_t ch);
-  std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-  parse_uchar(PARSE_STRING, char32_t separator, char32_t ch);
-  std::expected<void, PARSE_ERRMSG> parse_atom(PARSE_STRING,
-                                               char32_t separator);
+private:
+  std::unordered_map<std::string, std::size_t> atom_umap;
+  std::vector<char> atom_arena{std::from_range, atom_prealloc_buf};
+};
 
+class StringTokenizer : public AtomTokenizer {
+public:
+  TOKEN tokenize(char32_t separator);
+
+private:
+  std::optional<char32_t> decode_octal();
+  std::optional<char32_t> decode_hex();
+  std::variant<std::monostate, char32_t, PARSE_ERRMSG>
+  decode_escape(char32_t leading);
+  std::variant<std::monostate, char32_t, PARSE_ERRMSG>
+  decode_special(char32_t separator, char32_t ch);
+};
+
+class Tokenizer : public StringTokenizer {
+public:
+  TOKEN tokenize();
+
+private:
   std::optional<char32_t> parse_uni_braced(PARSE_IDENT);
   std::optional<char32_t> parse_uni_fixed(PARSE_IDENT, char32_t leading);
   std::optional<char32_t> parse_uni(PARSE_IDENT);

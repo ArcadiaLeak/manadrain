@@ -13,7 +13,7 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-void Tokenizer::str1_encode(char32_t cp) {
+void AtomTokenizer::str1_encode(char32_t cp) {
   std::array<char, 4> buff{};
   UBool is_error{};
   std::uint32_t length{};
@@ -55,7 +55,7 @@ void SpaceChewer::chewLF() {
   prev();
 }
 
-std::optional<char32_t> EscapeDecoder::decode_octal() {
+std::optional<char32_t> StringTokenizer::decode_octal() {
   if (reached_eof())
     return std::nullopt;
   char32_t ahead = next().value();
@@ -76,7 +76,7 @@ std::optional<int> hex_conv(char32_t digit) {
   return std::nullopt;
 }
 
-std::optional<char32_t> EscapeDecoder::decode_hex() {
+std::optional<char32_t> StringTokenizer::decode_hex() {
   std::optional<int> hex0 = next().and_then(hex_conv);
   if (not hex0)
     return std::nullopt;
@@ -87,8 +87,21 @@ std::optional<char32_t> EscapeDecoder::decode_hex() {
 }
 
 std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-EscapeDecoder::decode(char32_t ch) {
+StringTokenizer::decode_escape(char32_t ch) {
   switch (ch) {
+  case '\'':
+  case '\"':
+  case '\0':
+  case '\\':
+    return ch;
+  case '\r':
+    chewLF();
+    [[fallthrough]];
+  case '\n':
+  case 0x2028:
+  case 0x2029:
+    /* ignore escaped newline sequence */
+    return std::monostate{};
   case 'b':
     return U'\b';
   case 'f':
@@ -142,36 +155,8 @@ EscapeDecoder::decode(char32_t ch) {
   }
 }
 
-std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-Tokenizer::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
-  switch (ch) {
-  case '\'':
-  case '\"':
-  case '\0':
-  case '\\':
-    return ch;
-  case '\r':
-    chewLF();
-    [[fallthrough]];
-  case '\n':
-  case 0x2028:
-  case 0x2029:
-    /* ignore escaped newline sequence */
-    return std::nullopt;
-  }
-  std::variant esc = decode(ch);
-  switch (esc.index()) {
-  case 0:
-    return std::nullopt;
-  case 1:
-    return std::get<1>(esc);
-  default:
-    return std::unexpected{std::get<2>(esc)};
-  }
-}
-
-std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-Tokenizer::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
+std::variant<std::monostate, char32_t, PARSE_ERRMSG>
+StringTokenizer::decode_special(char32_t separator, char32_t ch) {
   switch (ch) {
   case '\r':
     chewLF();
@@ -179,35 +164,35 @@ Tokenizer::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
   case '\n':
     if (separator == '`')
       return U'\n';
-    return std::unexpected{UNEXPECTED_ERR::STRING_END};
+    return UNEXPECTED_ERR::STRING_END;
   case '\\':
     if (reached_eof())
-      return std::nullopt;
-    return parse_escape(PARSE_STRING{}, separator, next().value());
+      return std::monostate{};
+    return decode_escape(next().value());
   default:
     return ch;
   }
 }
 
-std::expected<void, PARSE_ERRMSG> Tokenizer::parse_atom(PARSE_STRING,
-                                                        char32_t separator) {
+TOKEN StringTokenizer::tokenize(char32_t separator) {
   str1_temp = {};
   while (1) {
     if (reached_eof())
-      return std::unexpected{UNEXPECTED_ERR::STRING_END};
-    std::optional ch_opt =
-        parse_uchar(PARSE_STRING{}, separator, next().value());
-    if (ch_opt)
-      switch (ch_opt->has_value()) {
-      case 1: {
-        if (separator == ch_opt->value())
-          return {};
-        str1_encode(ch_opt->value());
-        continue;
-      }
-      default:
-        return std::unexpected{ch_opt->error()};
-      }
+      return UNEXPECTED_ERR::STRING_END;
+    std::variant ch_alter = decode_special(separator, next().value());
+    switch (ch_alter.index()) {
+    case 0:
+      break;
+    case 1: {
+      char32_t ch = std::get<1>(ch_alter);
+      if (ch == separator)
+        return TOK_STRING{separator, find_atom()};
+      str1_encode(ch);
+      continue;
+    }
+    default:
+      return std::get<2>(ch_alter);
+    }
   }
 }
 
@@ -399,15 +384,8 @@ std::expected<bool, PARSE_ERRMSG> SpaceChewer::chewSpace1(char32_t ch) {
 std::optional<TOKEN> Tokenizer::tokenize_lookahead(char32_t leading) {
   switch (leading) {
   case '\'':
-  case '"': {
-    std::expected str_exp = parse_atom(PARSE_STRING{}, leading);
-    switch (str_exp.has_value()) {
-    case 1:
-      return TOK_STRING{.separator = leading, .p_atom = find_atom()};
-    default:
-      return str_exp.error();
-    }
-  }
+  case '"':
+    return StringTokenizer::tokenize(leading);
   case '=': {
     int i;
     for (i = 0; i < 2; i++) {
@@ -470,7 +448,7 @@ std::size_t aligned_N(std::size_t len) {
   return len / MEMORY_ALIGNMENT + (len % MEMORY_ALIGNMENT != 0);
 }
 
-std::size_t Tokenizer::find_atom() {
+std::size_t AtomTokenizer::find_atom() {
   if (not atom_umap.contains(str1_temp))
     atom_umap[str1_temp] = alloc_atom();
   return atom_umap[str1_temp];
@@ -490,7 +468,7 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
   return N;
 }
 
-std::size_t Tokenizer::alloc_atom() {
+std::size_t AtomTokenizer::alloc_atom() {
   std::size_t atom_addr = atom_arena.size();
   atom_arena.append_range(LE_encode(str1_temp.size()));
   str1_temp.resize(aligned_N(str1_temp.size()));
