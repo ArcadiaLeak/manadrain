@@ -125,24 +125,32 @@ private:
   int buffer_idx;
 };
 
-struct ParseDriver : Scanner {
+class SpaceChewer : public Scanner {
+public:
+  void chewLF();
+  std::expected<bool, PARSE_ERRMSG> chewSpace1(char32_t ch);
+
+  bool newlineSeen() { return newline_seen; }
+  void unseeNewline() { newline_seen = 0; }
+
+private:
   bool newline_seen;
 
+  std::expected<bool, PARSE_ERRMSG> chew_comment(char32_t ch);
+  std::expected<bool, PARSE_ERRMSG> chew_comment_block();
+  bool chew_comment_line();
+};
+
+class Tokenizer : public SpaceChewer {
+public:
+  TOKEN tokenize();
+
+private:
   std::string str1_temp;
   void str1_encode(char32_t cp);
 
   std::unordered_map<std::string, std::size_t> atom_umap;
   std::vector<char> mach_mem;
-
-  TOKEN token_curr;
-  std::vector<STATEMENT> program;
-
-  void skip_lf();
-
-  bool skip_comment_line();
-  std::expected<bool, PARSE_ERRMSG> skip_comment_block();
-  std::expected<bool, PARSE_ERRMSG> skip_comment(char32_t ch);
-  std::expected<bool, PARSE_ERRMSG> skip_ws_1(char32_t ch);
 
   std::size_t find_atom();
   std::size_t alloc_atom();
@@ -166,9 +174,13 @@ struct ParseDriver : Scanner {
   std::expected<int, PARSE_ERRMSG> parse_escape(PARSE_IDENT, char32_t leading);
   std::optional<std::expected<TOK_IDENTI, PARSE_ERRMSG>> parse(PARSE_IDENT);
 
-  TOKEN tokenize();
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
   std::optional<TOKEN> tokenize_identi_or_punct();
+};
+
+struct Parser : Tokenizer {
+  TOKEN token_curr;
+  std::vector<STATEMENT> program;
 
   EXPR_PTR parse_assign_expr();
   EXPR_PTR parse_binary_expr();

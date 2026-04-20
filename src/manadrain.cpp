@@ -13,7 +13,7 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-void ParseDriver::str1_encode(char32_t cp) {
+void Tokenizer::str1_encode(char32_t cp) {
   std::array<char, 4> buff{};
   UBool is_error{};
   std::uint32_t length{};
@@ -49,13 +49,13 @@ void Scanner::backtrack(std::size_t N) {
     prev();
 }
 
-void ParseDriver::skip_lf() {
+void SpaceChewer::chewLF() {
   if (reached_eof() || next().value() == '\n')
     return;
   prev();
 }
 
-char32_t ParseDriver::parse_octo(PARSE_ESCAPE, char32_t octo) {
+char32_t Tokenizer::parse_octo(PARSE_ESCAPE, char32_t octo) {
   if (reached_eof())
     return octo;
   char32_t ahead = next().value() - '0';
@@ -76,7 +76,7 @@ std::optional<int> hex_conv(char32_t digit) {
   return std::nullopt;
 }
 
-std::expected<char32_t, PARSE_ERRMSG> ParseDriver::parse_hex(PARSE_ESCAPE) {
+std::expected<char32_t, PARSE_ERRMSG> Tokenizer::parse_hex(PARSE_ESCAPE) {
   std::optional<int> hex0 = next().and_then(hex_conv);
   if (not hex0)
     return std::unexpected{ESCAPE_ERR::MALFORMED};
@@ -87,7 +87,7 @@ std::expected<char32_t, PARSE_ERRMSG> ParseDriver::parse_hex(PARSE_ESCAPE) {
 }
 
 std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
+Tokenizer::parse(PARSE_ESCAPE esc, char32_t ch) {
   switch (ch) {
   case 'b':
     return U'\b';
@@ -145,7 +145,7 @@ ParseDriver::parse(PARSE_ESCAPE esc, char32_t ch) {
 }
 
 std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
+Tokenizer::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   switch (ch) {
   case '\'':
   case '\"':
@@ -153,7 +153,7 @@ ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
   case '\\':
     return ch;
   case '\r':
-    skip_lf();
+    chewLF();
     [[fallthrough]];
   case '\n':
   case 0x2028:
@@ -167,10 +167,10 @@ ParseDriver::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
 }
 
 std::optional<std::expected<char32_t, PARSE_ERRMSG>>
-ParseDriver::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
+Tokenizer::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
   switch (ch) {
   case '\r':
-    skip_lf();
+    chewLF();
     [[fallthrough]];
   case '\n':
     if (separator == '`')
@@ -185,8 +185,8 @@ ParseDriver::parse_uchar(PARSE_STRING, char32_t separator, char32_t ch) {
   }
 }
 
-std::expected<void, PARSE_ERRMSG> ParseDriver::parse_atom(PARSE_STRING,
-                                                          char32_t separator) {
+std::expected<void, PARSE_ERRMSG> Tokenizer::parse_atom(PARSE_STRING,
+                                                        char32_t separator) {
   str1_temp = {};
   while (1) {
     if (reached_eof())
@@ -207,8 +207,8 @@ std::expected<void, PARSE_ERRMSG> ParseDriver::parse_atom(PARSE_STRING,
   }
 }
 
-std::optional<char32_t> ParseDriver::parse_uni_fixed(PARSE_IDENT,
-                                                     char32_t leading) {
+std::optional<char32_t> Tokenizer::parse_uni_fixed(PARSE_IDENT,
+                                                   char32_t leading) {
   char32_t curr{leading}, num{};
   for (int i = 0; i < 4; ++i) {
     std::optional hex = hex_conv(curr);
@@ -222,7 +222,7 @@ std::optional<char32_t> ParseDriver::parse_uni_fixed(PARSE_IDENT,
   return num;
 }
 
-std::optional<char32_t> ParseDriver::parse_uni_braced(PARSE_IDENT) {
+std::optional<char32_t> Tokenizer::parse_uni_braced(PARSE_IDENT) {
   if (reached_eof())
     return std::nullopt;
   char32_t num = 0, curr{next().value()};
@@ -240,7 +240,7 @@ std::optional<char32_t> ParseDriver::parse_uni_braced(PARSE_IDENT) {
   return curr == '}' ? std::make_optional(num) : std::nullopt;
 }
 
-std::optional<char32_t> ParseDriver::parse_uni(PARSE_IDENT) {
+std::optional<char32_t> Tokenizer::parse_uni(PARSE_IDENT) {
   if (reached_eof())
     return std::nullopt;
   char32_t leading = next().value();
@@ -248,7 +248,7 @@ std::optional<char32_t> ParseDriver::parse_uni(PARSE_IDENT) {
                         : parse_uni_fixed(PARSE_IDENT{}, leading);
 }
 
-bool ParseDriver::parse_uchar(PARSE_IDENT, char32_t ch) {
+bool Tokenizer::parse_uchar(PARSE_IDENT, char32_t ch) {
   bool is_legal = u_hasBinaryProperty(ch, str1_temp.size() ? UCHAR_XID_CONTINUE
                                                            : UCHAR_XID_START);
   if (is_legal)
@@ -256,8 +256,8 @@ bool ParseDriver::parse_uchar(PARSE_IDENT, char32_t ch) {
   return is_legal;
 }
 
-std::expected<int, PARSE_ERRMSG> ParseDriver::parse_escape(PARSE_IDENT,
-                                                           char32_t leading) {
+std::expected<int, PARSE_ERRMSG> Tokenizer::parse_escape(PARSE_IDENT,
+                                                         char32_t leading) {
   bool has_escape{};
   if (leading == '\\') {
     if (not next().transform([](char32_t ch) { return ch == 'u'; }).value_or(0))
@@ -282,7 +282,7 @@ std::expected<int, PARSE_ERRMSG> ParseDriver::parse_escape(PARSE_IDENT,
 }
 
 std::optional<std::expected<TOK_IDENTI, PARSE_ERRMSG>>
-ParseDriver::parse(PARSE_IDENT) {
+Tokenizer::parse(PARSE_IDENT) {
   str1_temp = {};
   bool has_escape = 0;
 
@@ -309,7 +309,7 @@ done:
   return TOK_IDENTI{has_escape, find_atom()};
 }
 
-bool ParseDriver::skip_comment_line() {
+bool SpaceChewer::chew_comment_line() {
   if (reached_eof())
     return 0;
   if (lineterm(next().value())) {
@@ -319,7 +319,7 @@ bool ParseDriver::skip_comment_line() {
   return 1;
 }
 
-std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_comment_block() {
+std::expected<bool, PARSE_ERRMSG> SpaceChewer::chew_comment_block() {
   std::array<char32_t, 2> ch{};
   int i;
   for (i = 0; i < 2; ++i) {
@@ -337,16 +337,16 @@ std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_comment_block() {
   return 1;
 }
 
-std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_comment(char32_t ch) {
+std::expected<bool, PARSE_ERRMSG> SpaceChewer::chew_comment(char32_t ch) {
   switch (ch) {
   case '/':
     while (1) {
-      if (not skip_comment_line())
+      if (not chew_comment_line())
         return 1;
     }
   case '*':
     while (1) {
-      std::expected comment = skip_comment_block();
+      std::expected comment = chew_comment_block();
       switch (comment.has_value()) {
       case 1:
         if (not comment.value())
@@ -362,10 +362,10 @@ std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_comment(char32_t ch) {
   }
 }
 
-std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_ws_1(char32_t ch) {
+std::expected<bool, PARSE_ERRMSG> SpaceChewer::chewSpace1(char32_t ch) {
   switch (ch) {
   case '\r':
-    skip_lf();
+    chewLF();
     [[fallthrough]];
 
   case '\n':
@@ -377,7 +377,7 @@ std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_ws_1(char32_t ch) {
   case '/': {
     if (reached_eof())
       return 1;
-    std::expected comment_exp = skip_comment(next().value());
+    std::expected comment_exp = chew_comment(next().value());
     if (comment_exp.has_value() && !comment_exp.value())
       prev();
     return comment_exp;
@@ -392,7 +392,7 @@ std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_ws_1(char32_t ch) {
   }
 }
 
-std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
+std::optional<TOKEN> Tokenizer::tokenize_lookahead(char32_t leading) {
   switch (leading) {
   case '\'':
   case '"': {
@@ -430,7 +430,7 @@ std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   }
 }
 
-std::optional<TOKEN> ParseDriver::tokenize_identi_or_punct() {
+std::optional<TOKEN> Tokenizer::tokenize_identi_or_punct() {
   std::optional ident_opt = parse(PARSE_IDENT{});
   if (ident_opt)
     switch (ident_opt->has_value()) {
@@ -442,13 +442,13 @@ std::optional<TOKEN> ParseDriver::tokenize_identi_or_punct() {
   return next().value();
 }
 
-TOKEN ParseDriver::tokenize() {
-  newline_seen = 0;
+TOKEN Tokenizer::tokenize() {
+  unseeNewline();
   bool go_on{1};
   while (go_on) {
     if (reached_eof())
       return std::monostate{};
-    std::expected ws_exp = skip_ws_1(next().value());
+    std::expected ws_exp = chewSpace1(next().value());
     switch (ws_exp.has_value()) {
     case 1:
       go_on = ws_exp.value();
@@ -466,7 +466,7 @@ std::size_t aligned_N(std::size_t len) {
   return len / MEMORY_ALIGNMENT + (len % MEMORY_ALIGNMENT != 0);
 }
 
-std::size_t ParseDriver::find_atom() {
+std::size_t Tokenizer::find_atom() {
   if (not atom_umap.contains(str1_temp))
     atom_umap[str1_temp] = alloc_atom();
   return atom_umap[str1_temp];
@@ -486,7 +486,7 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
   return N;
 }
 
-std::size_t ParseDriver::alloc_atom() {
+std::size_t Tokenizer::alloc_atom() {
   std::size_t atom_addr = mach_mem.size();
   mach_mem.append_range(LE_encode(str1_temp.size()));
   str1_temp.resize(aligned_N(str1_temp.size()));
@@ -495,7 +495,7 @@ std::size_t ParseDriver::alloc_atom() {
 }
 
 std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
-ParseDriver::parse_variable_decl() {
+Parser::parse_variable_decl() {
   STMT_VARDECL declaration{};
 
   std::size_t p_atom = std::get<TOKV_IDENTI>(token_curr).p_atom;
@@ -527,7 +527,7 @@ ParseDriver::parse_variable_decl() {
   return declaration;
 }
 
-EXPR_PTR ParseDriver::parse_binary_expr() {
+EXPR_PTR Parser::parse_binary_expr() {
   EXPR_PTR lhs_expression = parse_postfix_expr();
   if (token_curr.index() != TOKV_OP)
     return lhs_expression;
@@ -548,7 +548,7 @@ EXPR_PTR ParseDriver::parse_binary_expr() {
   return bin_expr;
 }
 
-EXPRESSION ParseDriver::parse_primary_expr(char32_t punct) {
+EXPRESSION Parser::parse_primary_expr(char32_t punct) {
   switch (std::get<TOKV_PUNCT>(token_curr)) {
   case '{':
     token_curr = tokenize();
@@ -559,7 +559,7 @@ EXPRESSION ParseDriver::parse_primary_expr(char32_t punct) {
   }
 }
 
-EXPRESSION ParseDriver::parse_primary_expr() {
+EXPRESSION Parser::parse_primary_expr() {
   switch (token_curr.index()) {
   case TOKV_STRING:
     return std::get<TOKV_STRING>(token_curr);
@@ -576,7 +576,7 @@ EXPRESSION ParseDriver::parse_primary_expr() {
   }
 }
 
-std::pair<bool, EXPR_PTR> ParseDriver::parse_arg_expr() {
+std::pair<bool, EXPR_PTR> Parser::parse_arg_expr() {
   token_curr = tokenize();
   if (token_curr == TOKEN{U')'})
     return {0, nullptr};
@@ -589,7 +589,7 @@ std::pair<bool, EXPR_PTR> ParseDriver::parse_arg_expr() {
     return std::make_pair(1, arg_expr);
 }
 
-EXPR_PTR ParseDriver::parse_call_expr(EXPR_PTR callee) {
+EXPR_PTR Parser::parse_call_expr(EXPR_PTR callee) {
   EXPR_PTR call_expr = std::make_shared<EXPRESSION>(EXPR_CALL{callee});
   bool go_on{1};
   while (go_on) {
@@ -605,7 +605,7 @@ EXPR_PTR ParseDriver::parse_call_expr(EXPR_PTR callee) {
   return call_expr;
 }
 
-EXPR_PTR ParseDriver::parse_member_expr(EXPR_PTR object) {
+EXPR_PTR Parser::parse_member_expr(EXPR_PTR object) {
   token_curr = tokenize();
   return token_curr.index() == TOKV_IDENTI
              ? std::make_shared<EXPRESSION>(
@@ -613,7 +613,7 @@ EXPR_PTR ParseDriver::parse_member_expr(EXPR_PTR object) {
              : std::make_shared<EXPRESSION>(NEEDED_ERR::FIELD_NAME);
 }
 
-EXPR_PTR ParseDriver::parse_array_access(EXPR_PTR object) {
+EXPR_PTR Parser::parse_array_access(EXPR_PTR object) {
   token_curr = tokenize();
   EXPR_PTR property_expr = parse_assign_expr();
   if (property_expr->index() == EXPRV_ERROR)
@@ -624,7 +624,7 @@ EXPR_PTR ParseDriver::parse_array_access(EXPR_PTR object) {
              : std::make_shared<EXPRESSION>(NEEDED_ERR::CLOSING_BRACKET);
 }
 
-EXPR_PTR ParseDriver::parse_assign_expr() {
+EXPR_PTR Parser::parse_assign_expr() {
   EXPR_PTR binary_expr = parse_binary_expr();
   if (binary_expr->index() == EXPRV_ERROR)
     return binary_expr;
@@ -637,7 +637,7 @@ EXPR_PTR ParseDriver::parse_assign_expr() {
   return std::make_shared<EXPRESSION>(EXPR_ASSIGN{binary_expr, rhs_expr});
 }
 
-std::pair<bool, EXPR_PTR> ParseDriver::parse_postfix_expr(EXPR_PTR expression) {
+std::pair<bool, EXPR_PTR> Parser::parse_postfix_expr(EXPR_PTR expression) {
   switch (std::get<TOKV_PUNCT>(token_curr)) {
   case '.':
     return std::make_pair(1, parse_member_expr(expression));
@@ -650,7 +650,7 @@ std::pair<bool, EXPR_PTR> ParseDriver::parse_postfix_expr(EXPR_PTR expression) {
   }
 }
 
-EXPR_PTR ParseDriver::parse_postfix_expr() {
+EXPR_PTR Parser::parse_postfix_expr() {
   EXPR_PTR expression = std::make_shared<EXPRESSION>(parse_primary_expr());
   switch (expression->index()) {
   case EXPRV_ERROR:
@@ -676,19 +676,19 @@ EXPR_PTR ParseDriver::parse_postfix_expr() {
   return expression;
 }
 
-std::expected<void, PARSE_ERRMSG> ParseDriver::expect_statement_end() {
+std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
   if (token_curr == TOKEN{U';'}) {
     token_curr = tokenize();
     return {};
   }
   bool insertion = token_curr.index() == TOKV_EOF ||
-                   token_curr == TOKEN{U'}'} || newline_seen;
+                   token_curr == TOKEN{U'}'} || newlineSeen();
   if (insertion)
     return {};
   return std::unexpected{NEEDED_ERR::SEMICOLON};
 }
 
-std::expected<void, PARSE_ERRMSG> ParseDriver::parse_statement() {
+std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
   switch (token_curr.index()) {
   case TOKV_ERROR:
     return std::unexpected{std::get<TOKV_ERROR>(token_curr)};
@@ -715,7 +715,7 @@ std::expected<void, PARSE_ERRMSG> ParseDriver::parse_statement() {
   }
 }
 
-bool ParseDriver::parse() {
+bool Parser::parse() {
   token_curr = tokenize();
   while (1) {
     if (token_curr.index() == TOKV_EOF)

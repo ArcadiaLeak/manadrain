@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::ParseDriver parse_driver{};
+  Manadrain::Parser parse_driver{};
   parse_driver.setBuffer(std::ranges::istream_view<std::uint8_t>{file} |
                          std::ranges::to<std::basic_string<std::uint8_t>>());
   parse_driver.parse();
