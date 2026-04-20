@@ -196,8 +196,8 @@ TOKEN StringTokenizer::tokenize(char32_t separator) {
   }
 }
 
-std::optional<char32_t> Tokenizer::parse_uni_fixed(PARSE_IDENT,
-                                                   char32_t leading) {
+std::optional<char32_t>
+IdentifierTokenizer::decode_uni_fixed(char32_t leading) {
   char32_t curr{leading}, num{};
   for (int i = 0; i < 4; ++i) {
     std::optional hex = hex_conv(curr);
@@ -211,7 +211,7 @@ std::optional<char32_t> Tokenizer::parse_uni_fixed(PARSE_IDENT,
   return num;
 }
 
-std::optional<char32_t> Tokenizer::parse_uni_braced(PARSE_IDENT) {
+std::optional<char32_t> IdentifierTokenizer::decode_uni_braced() {
   if (reached_eof())
     return std::nullopt;
   char32_t num = 0, curr{next().value()};
@@ -229,15 +229,14 @@ std::optional<char32_t> Tokenizer::parse_uni_braced(PARSE_IDENT) {
   return curr == '}' ? std::make_optional(num) : std::nullopt;
 }
 
-std::optional<char32_t> Tokenizer::parse_uni(PARSE_IDENT) {
+std::optional<char32_t> IdentifierTokenizer::decode_uni() {
   if (reached_eof())
     return std::nullopt;
   char32_t leading = next().value();
-  return leading == '{' ? parse_uni_braced(PARSE_IDENT{})
-                        : parse_uni_fixed(PARSE_IDENT{}, leading);
+  return leading == '{' ? decode_uni_braced() : decode_uni_fixed(leading);
 }
 
-bool Tokenizer::parse_uchar(PARSE_IDENT, char32_t ch) {
+bool IdentifierTokenizer::encode_uchar(char32_t ch) {
   bool is_legal = u_hasBinaryProperty(ch, str1_temp.size() ? UCHAR_XID_CONTINUE
                                                            : UCHAR_XID_START);
   if (is_legal)
@@ -245,13 +244,13 @@ bool Tokenizer::parse_uchar(PARSE_IDENT, char32_t ch) {
   return is_legal;
 }
 
-std::expected<int, PARSE_ERRMSG> Tokenizer::parse_escape(PARSE_IDENT,
-                                                         char32_t leading) {
+std::expected<int, PARSE_ERRMSG>
+IdentifierTokenizer::decode_escape(char32_t leading) {
   bool has_escape{};
   if (leading == '\\') {
     if (not next().transform([](char32_t ch) { return ch == 'u'; }).value_or(0))
       return std::unexpected{ESCAPE_ERR::MALFORMED};
-    std::optional<int> ch_uni = parse_uni(PARSE_IDENT{});
+    std::optional<int> ch_uni = decode_uni();
     switch (ch_uni.has_value()) {
     case 1:
       leading = ch_uni.value();
@@ -261,7 +260,7 @@ std::expected<int, PARSE_ERRMSG> Tokenizer::parse_escape(PARSE_IDENT,
       return std::unexpected{ESCAPE_ERR::MALFORMED};
     }
   }
-  bool success = parse_uchar(PARSE_IDENT{}, leading);
+  bool success = encode_uchar(leading);
   if (has_escape) {
     if (success)
       return 2;
@@ -270,15 +269,14 @@ std::expected<int, PARSE_ERRMSG> Tokenizer::parse_escape(PARSE_IDENT,
   return success;
 }
 
-std::optional<std::expected<TOK_IDENTI, PARSE_ERRMSG>>
-Tokenizer::parse(PARSE_IDENT) {
+std::optional<TOKEN> IdentifierTokenizer::tokenize() {
   str1_temp = {};
   bool has_escape = 0;
 
 repeat: {
   if (reached_eof())
     goto done;
-  std::expected esc_exp = parse_escape(PARSE_IDENT{}, next().value());
+  std::expected esc_exp = decode_escape(next().value());
   switch (esc_exp.has_value()) {
   case 1:
     if (esc_exp.value() == 2)
@@ -288,7 +286,7 @@ repeat: {
     prev();
     goto done;
   default:
-    return std::unexpected{esc_exp.error()};
+    return esc_exp.error();
   }
 }
 
@@ -407,21 +405,8 @@ std::optional<TOKEN> Tokenizer::tokenize_lookahead(char32_t leading) {
     }
   }
   default:
-    prev();
     return std::nullopt;
   }
-}
-
-std::optional<TOKEN> Tokenizer::tokenize_identi_or_punct() {
-  std::optional ident_opt = parse(PARSE_IDENT{});
-  if (ident_opt)
-    switch (ident_opt->has_value()) {
-    case 1:
-      return ident_opt->value();
-    default:
-      return ident_opt->error();
-    }
-  return next().value();
 }
 
 TOKEN Tokenizer::tokenize() {
@@ -439,9 +424,15 @@ TOKEN Tokenizer::tokenize() {
       return ws_exp.error();
     }
   }
-  return tokenize_lookahead(next().value())
-      .or_else([this]() { return tokenize_identi_or_punct(); })
-      .value();
+  std::optional<TOKEN> token_opt{};
+  token_opt = tokenize_lookahead(next().value());
+  if (token_opt)
+    return token_opt.value();
+  prev();
+  token_opt = IdentifierTokenizer::tokenize();
+  if (token_opt)
+    return token_opt.value();
+  return next().value();
 }
 
 std::size_t aligned_N(std::size_t len) {

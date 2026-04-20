@@ -89,8 +89,6 @@ struct STMT_VARDECL {
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
-struct PARSE_IDENT {};
-
 constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 
 class Scanner {
@@ -155,20 +153,24 @@ private:
   decode_special(char32_t separator, char32_t ch);
 };
 
-class Tokenizer : public StringTokenizer {
+class IdentifierTokenizer : public StringTokenizer {
+public:
+  std::optional<TOKEN> tokenize();
+
+private:
+  std::optional<char32_t> decode_uni_braced();
+  std::optional<char32_t> decode_uni_fixed(char32_t leading);
+  std::optional<char32_t> decode_uni();
+  std::expected<int, PARSE_ERRMSG> decode_escape(char32_t leading);
+  bool encode_uchar(char32_t ch);
+};
+
+class Tokenizer : public IdentifierTokenizer {
 public:
   TOKEN tokenize();
 
 private:
-  std::optional<char32_t> parse_uni_braced(PARSE_IDENT);
-  std::optional<char32_t> parse_uni_fixed(PARSE_IDENT, char32_t leading);
-  std::optional<char32_t> parse_uni(PARSE_IDENT);
-  bool parse_uchar(PARSE_IDENT, char32_t ch);
-  std::expected<int, PARSE_ERRMSG> parse_escape(PARSE_IDENT, char32_t leading);
-  std::optional<std::expected<TOK_IDENTI, PARSE_ERRMSG>> parse(PARSE_IDENT);
-
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
-  std::optional<TOKEN> tokenize_identi_or_punct();
 };
 
 struct Parser : Tokenizer {
