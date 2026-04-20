@@ -6,8 +6,8 @@ const atom_literal_arr = [
 
 let offset = 0;
 const encoder = new TextEncoder();
-const neg1_page_pos = [];
-const neg1_page_buf = [];
+const atom_prealloc_pos = [];
+const atom_prealloc_buf = [];
 
 function LE_encode(num) {
   const buffer = new ArrayBuffer(4);
@@ -26,10 +26,10 @@ for (const lit of atom_literal_arr) {
   lit_bytes.length = Math.ceil(lit.length / 8) * 8;
   lit_bytes.fill(0, lit.length);
 
-  neg1_page_buf.push(...lit_length);
-  neg1_page_buf.push(...lit_bytes);
+  atom_prealloc_buf.push(...lit_length);
+  atom_prealloc_buf.push(...lit_bytes);
 
-  neg1_page_pos.push({
+  atom_prealloc_pos.push({
     offset,
     atom_name: lit
   });
@@ -38,17 +38,17 @@ for (const lit of atom_literal_arr) {
   offset += lit_bytes.length;
 }
 
-Deno.writeTextFile("include/atom_page_neg1.hpp", `\
+Deno.writeTextFile("include/atom_prealloc.hpp", `\
 #include <array>
 
 namespace Manadrain {
-${neg1_page_pos
+${atom_prealloc_pos
     .map(({ offset, atom_name }) =>
       `constexpr std::size_t S_ATOM_${atom_name}{${offset}};`)
     .join('\n')}
 
-static const std::array<char, ${neg1_page_buf.length}> neg1_page_buf{{
-  ${neg1_page_buf
+constexpr std::array<char, ${atom_prealloc_buf.length}> atom_prealloc_buf{{
+  ${atom_prealloc_buf
     .map((ch_code) => ch_code.toString())
     .join(', ')}
 }};

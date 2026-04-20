@@ -8,7 +8,7 @@
 #include <variant>
 #include <vector>
 
-#include "atom_page_neg1.hpp"
+#include "atom_prealloc.hpp"
 
 namespace Manadrain {
 enum class ESCAPE_ERR { MALFORMED };
@@ -148,7 +148,7 @@ private:
   void str1_encode(char32_t cp);
 
   std::unordered_map<std::string, std::size_t> atom_umap;
-  std::vector<char> atom_arena;
+  std::vector<char> atom_arena{std::from_range, atom_prealloc_buf};
 
   std::size_t find_atom();
   std::size_t alloc_atom();
