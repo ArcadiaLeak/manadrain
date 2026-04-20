@@ -105,11 +105,27 @@ struct PARSE_IDENT {};
 
 constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 
-struct ParseDriver {
+class Scanner {
+public:
+  bool reached_eof() { return buffer_idx >= buffer.size(); }
+  std::optional<char32_t> next();
+  std::optional<char32_t> peek();
+  void prev();
+  void backtrack(std::size_t N);
+
+  void setBuffer(const std::basic_string<std::uint8_t> &buffer_ref) {
+    buffer = buffer_ref;
+  }
+  void setBuffer(std::basic_string<std::uint8_t> &&buffer_ref) {
+    buffer = std::move(buffer_ref);
+  }
+
+private:
   std::basic_string<std::uint8_t> buffer;
   int buffer_idx;
-  bool reached_eof() { return buffer_idx >= buffer.size(); }
+};
 
+struct ParseDriver : Scanner {
   bool newline_seen;
 
   std::string str1_temp;
@@ -120,11 +136,6 @@ struct ParseDriver {
 
   TOKEN token_curr;
   std::vector<STATEMENT> program;
-
-  std::optional<char32_t> next();
-  std::optional<char32_t> peek();
-  void prev();
-  void backtrack(std::size_t N);
 
   void skip_lf();
 

@@ -23,7 +23,7 @@ void ParseDriver::str1_encode(char32_t cp) {
   str1_temp.append(std::string_view{buff.data(), length});
 }
 
-std::optional<char32_t> ParseDriver::next() {
+std::optional<char32_t> Scanner::next() {
   if (reached_eof())
     return std::nullopt;
   UChar32 ch;
@@ -31,9 +31,9 @@ std::optional<char32_t> ParseDriver::next() {
   return ch;
 }
 
-void ParseDriver::prev() { U8_BACK_1(buffer.data(), 0, buffer_idx); }
+void Scanner::prev() { U8_BACK_1(buffer.data(), 0, buffer_idx); }
 
-std::optional<char32_t> ParseDriver::peek() {
+std::optional<char32_t> Scanner::peek() {
   std::optional<char32_t> ahead = next();
   switch (ahead.has_value()) {
   case 0:
@@ -44,7 +44,7 @@ std::optional<char32_t> ParseDriver::peek() {
   }
 }
 
-void ParseDriver::backtrack(std::size_t N) {
+void Scanner::backtrack(std::size_t N) {
   for (int i = 0; i < N; ++i)
     prev();
 }
@@ -394,53 +394,6 @@ std::expected<bool, PARSE_ERRMSG> ParseDriver::skip_ws_1(char32_t ch) {
 
 std::optional<TOKEN> ParseDriver::tokenize_lookahead(char32_t leading) {
   switch (leading) {
-  case '0':
-    switch (next().value()) {
-    case 'x':
-    case 'X':
-      return std::nullopt;
-    case 'o':
-    case 'O':
-      return std::nullopt;
-    case 'b':
-    case 'B':
-      return std::nullopt;
-    default:
-      prev();
-      break;
-    }
-    [[fallthrough]];
-  case '1':
-  case '2':
-  case '3':
-  case '4':
-  case '5':
-  case '6':
-  case '7':
-  case '8':
-  case '9': {
-    str1_temp = static_cast<char>(leading);
-    while (std::isdigit(buffer[buffer_idx]))
-      str1_temp.push_back(buffer[buffer_idx++]);
-    if (peek()
-            .transform([](char32_t ch) {
-              return u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE);
-            })
-            .value_or(0))
-      return NUMBER_ERR::INVALID_LITERAL;
-    int radix{10};
-    if (leading == '0' && std::ranges::none_of(str1_temp, [](char ch) {
-          return ch == '8' || ch == '9';
-        }))
-      radix = 8;
-    std::uint64_t num{};
-    std::from_chars_result res = std::from_chars(
-        str1_temp.data(), str1_temp.data() + str1_temp.size(), num, radix);
-    if (res.ec == std::errc::result_out_of_range ||
-        num >= 1LL << std::numeric_limits<double>::digits)
-      return NUMBER_ERR::INTEGER_OVERFLOW;
-    return static_cast<double>(num);
-  }
   case '\'':
   case '"': {
     std::expected str_exp = parse_atom(PARSE_STRING{}, leading);

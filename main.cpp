@@ -6,7 +6,7 @@
 
 #include "manadrain.hpp"
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   if (argc != 2) {
     std::println(std::cerr, "Usage: {} <filepath>", argv[0]);
     return 1;
@@ -25,9 +25,9 @@ int main(int argc, char* argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::ParseDriver parse_driver{
-      .buffer = std::ranges::istream_view<std::uint8_t>{file} |
-                std::ranges::to<std::basic_string<std::uint8_t>>()};
+  Manadrain::ParseDriver parse_driver{};
+  parse_driver.setBuffer(std::ranges::istream_view<std::uint8_t>{file} |
+                         std::ranges::to<std::basic_string<std::uint8_t>>());
   parse_driver.parse();
 
   return 0;
