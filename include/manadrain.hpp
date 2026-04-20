@@ -11,7 +11,7 @@
 #include "atom_page_neg1.hpp"
 
 namespace Manadrain {
-enum class ESCAPE_ERR { MALFORMED, OCTAL_BANNED };
+enum class ESCAPE_ERR { MALFORMED };
 enum class NUMBER_ERR { INVALID_LITERAL, INTEGER_OVERFLOW };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
 enum class NEEDED_ERR {
@@ -132,15 +132,7 @@ private:
 
 class EscapeDecoder : public SpaceChewer {
 public:
-  enum ESC_RULE {
-    IDENTIFIER,
-    REGEXP_ASCII,
-    REGEXP_UTF16,
-    STRING_IN_STRICT_MODE,
-    STRING_IN_TEMPLATE
-  };
-  std::variant<std::monostate, char32_t, PARSE_ERRMSG> decode(ESC_RULE rule,
-                                                              char32_t leading);
+  std::variant<std::monostate, char32_t, PARSE_ERRMSG> decode(char32_t leading);
 
 private:
   std::optional<char32_t> decode_octal();
@@ -156,7 +148,7 @@ private:
   void str1_encode(char32_t cp);
 
   std::unordered_map<std::string, std::size_t> atom_umap;
-  std::vector<char> mach_mem;
+  std::vector<char> atom_arena;
 
   std::size_t find_atom();
   std::size_t alloc_atom();

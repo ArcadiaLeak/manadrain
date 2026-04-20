@@ -87,7 +87,7 @@ std::optional<char32_t> EscapeDecoder::decode_hex() {
 }
 
 std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-EscapeDecoder::decode(ESC_RULE rule, char32_t ch) {
+EscapeDecoder::decode(char32_t ch) {
   switch (ch) {
   case 'b':
     return U'\b';
@@ -119,37 +119,24 @@ EscapeDecoder::decode(ESC_RULE rule, char32_t ch) {
   case '4':
   case '5':
   case '6':
-  case '7':
-    switch (rule) {
-    case ESC_RULE::STRING_IN_STRICT_MODE:
-      return ESCAPE_ERR::OCTAL_BANNED;
-
-    case ESC_RULE::STRING_IN_TEMPLATE:
-    case ESC_RULE::REGEXP_UTF16:
-      return ESCAPE_ERR::MALFORMED;
-
-    default: {
-      std::optional<char32_t> dec{};
-      char32_t base = ch - '0';
-      dec = decode_octal();
-      if (not dec)
-        return base;
-      base = (base << 3) | dec.value();
-      if (base >= 32)
-        return base;
-      dec = decode_octal();
-      if (not dec)
-        return base;
-      base = (base << 3) | dec.value();
+  case '7': {
+    std::optional<char32_t> dec{};
+    char32_t base = ch - '0';
+    dec = decode_octal();
+    if (not dec)
       return base;
-    }
-    }
+    base = (base << 3) | dec.value();
+    if (base >= 32)
+      return base;
+    dec = decode_octal();
+    if (not dec)
+      return base;
+    base = (base << 3) | dec.value();
+    return base;
+  }
   case '8':
   case '9':
-    if (rule == ESC_RULE::STRING_IN_STRICT_MODE ||
-        rule == ESC_RULE::STRING_IN_TEMPLATE)
-      return ESCAPE_ERR::MALFORMED;
-    [[fallthrough]];
+    return ESCAPE_ERR::MALFORMED;
   default:
     return std::monostate{};
   }
@@ -172,10 +159,7 @@ Tokenizer::parse_escape(PARSE_STRING, char32_t separator, char32_t ch) {
     /* ignore escaped newline sequence */
     return std::nullopt;
   }
-  EscapeDecoder::ESC_RULE esc_rule = separator == '`'
-                                         ? EscapeDecoder::STRING_IN_STRICT_MODE
-                                         : EscapeDecoder::STRING_IN_TEMPLATE;
-  std::variant esc = decode(esc_rule, ch);
+  std::variant esc = decode(ch);
   switch (esc.index()) {
   case 0:
     return std::nullopt;
@@ -507,10 +491,10 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
 }
 
 std::size_t Tokenizer::alloc_atom() {
-  std::size_t atom_addr = mach_mem.size();
-  mach_mem.append_range(LE_encode(str1_temp.size()));
+  std::size_t atom_addr = atom_arena.size();
+  atom_arena.append_range(LE_encode(str1_temp.size()));
   str1_temp.resize(aligned_N(str1_temp.size()));
-  mach_mem.append_range(str1_temp);
+  atom_arena.append_range(str1_temp);
   return atom_addr;
 }
 
