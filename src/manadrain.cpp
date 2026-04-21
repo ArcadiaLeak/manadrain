@@ -482,13 +482,54 @@ std::size_t AtomTokenizer::alloc_atom() {
   return atom_addr;
 }
 
+static int to_digit(char32_t ch) {
+  if (ch >= '0' && ch <= '9')
+    return ch - '0';
+  else if (ch >= 'A' && ch <= 'Z')
+    return ch - 'A' + 10;
+  else if (ch >= 'a' && ch <= 'z')
+    return ch - 'a' + 10;
+  else
+    return 36;
+}
+
 std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
-  if (leading == '0') {
-    if (reached_eof())
-      return double{0};
-    leading = next().value();
-    return char32_t{leading};
-  }
+  if (not std::isdigit(leading))
+    return std::nullopt;
+  int radix{10};
+  bool has_legacy_octal{};
+  std::optional<char32_t> separator{'_'};
+  do {
+    if (leading != '0')
+      break;
+    std::optional ahead{next()};
+    if (not ahead.transform([](char32_t ch) { return std::isdigit(ch); })
+                .value_or(0))
+      break;
+    has_legacy_octal = 1;
+    separator = std::nullopt;
+    int i{};
+    while (1) {
+      bool has_octal =
+          ahead.transform([](char32_t ch) { return ch >= '0' && ch <= '7'; })
+              .value_or(0);
+      if (not has_octal)
+        break;
+      ahead = next();
+      ++i;
+    }
+    backtrack(i);
+    if (not ahead.transform([](char32_t ch) { return ch == '8' || ch == '9'; })
+                .value_or(0))
+      radix = 8;
+    else {
+      prev();
+      break;
+    }
+    if (to_digit(peek().value()) < radix)
+      break;
+    return NUMBER_ERR::INVALID_LITERAL;
+  } while (0);
   return std::nullopt;
 }
 
