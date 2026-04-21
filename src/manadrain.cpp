@@ -503,161 +503,170 @@ Parser::parse_variable_decl() {
     return declaration;
   my_token = tokenize();
 
-  EXPR_PTR initializer = parse_assign_expr();
-  if (initializer->index() == EXPRV_ERROR)
-    return std::get<EXPRV_ERROR>(*initializer);
-  declaration.initializer = initializer;
+  std::expected parse_ok = parse_assign_expr();
+  if (not parse_ok)
+    return parse_ok.error();
+  declaration.initializer = std::move(my_expression);
 
   return declaration;
 }
 
-EXPR_PTR Parser::parse_binary_expr() {
-  EXPR_PTR lhs_expression = parse_postfix_expr();
-  if (my_token.index() != TOKV_OP)
-    return lhs_expression;
+std::expected<void, PARSE_ERRMSG> Parser::parse_binary_expr() {
+  std::expected<void, PARSE_ERRMSG> parse_ok{};
+  parse_ok = parse_postfix_expr();
+  if (not parse_ok)
+    return parse_ok;
   switch (std::get<TOKV_OP>(my_token)) {
   case TOK_OPERATOR::EQ_SLOPPY:
   case TOK_OPERATOR::EQ_STRICT:
     break;
   default:
-    return lhs_expression;
+    return {};
   }
-  EXPR_PTR bin_expr = std::make_shared<EXPRESSION>(EXPR_BINARY{
-      .left = lhs_expression, .bin_op = std::get<TOKV_OP>(my_token)});
+  EXPRESSION expr_left = std::move(my_expression);
+  TOK_OPERATOR bin_op = std::get<TOKV_OP>(my_token);
   my_token = tokenize();
-  EXPR_PTR rhs_expression = parse_binary_expr();
-  if (rhs_expression->index() == EXPRV_ERROR)
-    return rhs_expression;
-  std::get_if<EXPR_BINARY>(bin_expr.get())->right = rhs_expression;
-  return bin_expr;
+  parse_ok = parse_binary_expr();
+  if (not parse_ok)
+    return parse_ok;
+  my_expression = std::make_unique<EXPR_BINARY>(
+      std::move(expr_left), std::move(my_expression), bin_op);
+  return {};
 }
 
-EXPRESSION Parser::parse_primary_expr(char32_t punct) {
-  switch (std::get<TOKV_PUNCT>(my_token)) {
-  case '{':
-    my_token = tokenize();
-    return my_token == TOKEN{U'}'} ? EXPRESSION{EXPR_OBJECT{}}
-                                   : EXPRESSION{NEEDED_ERR::CLOSING_BRACE};
-  default:
-    return UNEXPECTED_ERR::THIS_TOKEN;
-  }
-}
-
-EXPRESSION Parser::parse_primary_expr() {
+std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   switch (my_token.index()) {
   case TOKV_STRING:
-    return std::get<TOKV_STRING>(my_token);
+    my_expression = std::get<TOKV_STRING>(my_token);
+    return {};
   case TOKV_IDENTI:
-    return std::get<TOKV_IDENTI>(my_token);
+    my_expression = std::get<TOKV_IDENTI>(my_token);
+    return {};
   case TOKV_NUMBER:
-    return std::get<TOKV_NUMBER>(my_token);
+    my_expression = std::get<TOKV_NUMBER>(my_token);
+    return {};
   case TOKV_PUNCT:
-    return parse_primary_expr(std::get<TOKV_PUNCT>(my_token));
-  case TOKV_ERROR:
-    return std::get<TOKV_ERROR>(my_token);
-  default:
-    return UNEXPECTED_ERR::THIS_TOKEN;
-  }
-}
-
-std::pair<bool, EXPR_PTR> Parser::parse_arg_expr() {
-  my_token = tokenize();
-  if (my_token == TOKEN{U')'})
-    return {0, nullptr};
-  EXPR_PTR arg_expr = parse_assign_expr();
-  if (my_token == TOKEN{U')'})
-    return std::make_pair(0, arg_expr);
-  if (my_token != TOKEN{U','})
-    return std::make_pair(0, std::make_shared<EXPRESSION>(NEEDED_ERR::COMMA));
-  else
-    return std::make_pair(1, arg_expr);
-}
-
-EXPR_PTR Parser::parse_call_expr(EXPR_PTR callee) {
-  EXPR_PTR call_expr = std::make_shared<EXPRESSION>(EXPR_CALL{callee});
-  bool go_on{1};
-  while (go_on) {
-    std::pair<bool, EXPR_PTR> arg_expr = parse_arg_expr();
-    if (not arg_expr.second)
-      break;
-    if (arg_expr.second->index() == EXPRV_ERROR)
-      return arg_expr.second;
-    go_on = arg_expr.first;
-    std::get_if<EXPR_CALL>(call_expr.get())
-        ->arguments.push_back(arg_expr.second);
-  }
-  return call_expr;
-}
-
-EXPR_PTR Parser::parse_member_expr(EXPR_PTR object) {
-  my_token = tokenize();
-  return my_token.index() == TOKV_IDENTI
-             ? std::make_shared<EXPRESSION>(
-                   EXPR_MEMBER{object, std::get<TOK_IDENTI>(my_token)})
-             : std::make_shared<EXPRESSION>(NEEDED_ERR::FIELD_NAME);
-}
-
-EXPR_PTR Parser::parse_array_access(EXPR_PTR object) {
-  my_token = tokenize();
-  EXPR_PTR property_expr = parse_assign_expr();
-  if (property_expr->index() == EXPRV_ERROR)
-    return property_expr;
-  return my_token == TOKEN{U']'}
-             ? std::make_shared<EXPRESSION>(
-                   EXPR_ARRACCESS{object, property_expr})
-             : std::make_shared<EXPRESSION>(NEEDED_ERR::CLOSING_BRACKET);
-}
-
-EXPR_PTR Parser::parse_assign_expr() {
-  EXPR_PTR binary_expr = parse_binary_expr();
-  if (binary_expr->index() == EXPRV_ERROR)
-    return binary_expr;
-  if (my_token != TOKEN{U'='})
-    return binary_expr;
-  my_token = tokenize();
-  EXPR_PTR rhs_expr = parse_assign_expr();
-  if (rhs_expr->index() == EXPRV_ERROR)
-    return rhs_expr;
-  return std::make_shared<EXPRESSION>(EXPR_ASSIGN{binary_expr, rhs_expr});
-}
-
-std::pair<bool, EXPR_PTR> Parser::parse_postfix_expr(EXPR_PTR expression) {
-  switch (std::get<TOKV_PUNCT>(my_token)) {
-  case '.':
-    return std::make_pair(1, parse_member_expr(expression));
-  case '(':
-    return std::make_pair(1, parse_call_expr(expression));
-  case '[':
-    return std::make_pair(1, parse_array_access(expression));
-  default:
-    return std::make_pair(0, expression);
-  }
-}
-
-EXPR_PTR Parser::parse_postfix_expr() {
-  EXPR_PTR expression = std::make_shared<EXPRESSION>(parse_primary_expr());
-  switch (expression->index()) {
-  case EXPRV_ERROR:
-    return expression;
-  default:
     break;
+  case TOKV_ERROR:
+    return std::unexpected{std::get<TOKV_ERROR>(my_token)};
+  default:
+    return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
   }
-  bool go_on{1};
-  while (go_on) {
+  switch (std::get<TOKV_PUNCT>(my_token)) {
+  case '{':
+    break;
+  default:
+    return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
+  }
+  my_token = tokenize();
+  if (my_token == TOKEN{U'}'}) {
+    my_expression = std::make_unique<EXPR_OBJECT>();
+    return {};
+  }
+  return std::unexpected{NEEDED_ERR::CLOSING_BRACE};
+}
+
+std::expected<bool, PARSE_ERRMSG> Parser::parse_arg_expr() {
+  my_token = tokenize();
+  if (my_token == TOKEN{U')'})
+    return 0;
+  std::expected parse_ok = parse_assign_expr();
+  if (not parse_ok)
+    return std::unexpected{parse_ok.error()};
+  if (my_token == TOKEN{U')'})
+    return 0;
+  if (my_token != TOKEN{U','})
+    return std::unexpected{NEEDED_ERR::COMMA};
+  else
+    return 1;
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
+  EXPRESSION callee_expr = std::move(my_expression);
+  std::vector<EXPRESSION> arguments{};
+  while (1) {
+    std::expected parse_ok = parse_arg_expr();
+    if (not parse_ok)
+      return std::unexpected{parse_ok.error()};
+    arguments.push_back(std::move(my_expression));
+    if (not parse_ok.value())
+      break;
+  }
+  my_expression =
+      std::make_unique<EXPR_CALL>(std::move(callee_expr), std::move(arguments));
+  return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_member_expr() {
+  my_token = tokenize();
+  if (my_token.index() == TOKV_IDENTI) {
+    my_expression = std::make_unique<EXPR_MEMBER>(
+        std::move(my_expression), std::get<TOK_IDENTI>(my_token));
+    return {};
+  }
+  return std::unexpected{NEEDED_ERR::FIELD_NAME};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_access_expr() {
+  my_token = tokenize();
+  EXPRESSION object_expr = std::move(my_expression);
+  std::expected parse_ok = parse_assign_expr();
+  if (not parse_ok)
+    return parse_ok;
+  if (my_token != TOKEN{U']'})
+    return std::unexpected{NEEDED_ERR::CLOSING_BRACKET};
+  my_expression = std::make_unique<EXPR_ACCESS>(std::move(object_expr),
+                                                std::move(my_expression));
+  return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
+  std::expected<void, PARSE_ERRMSG> parse_ok{};
+  parse_ok = parse_binary_expr();
+  if (not parse_ok)
+    return parse_ok;
+  if (my_token != TOKEN{U'='})
+    return {};
+  my_token = tokenize();
+  EXPRESSION lhs_expr = std::move(my_expression);
+  parse_ok = parse_assign_expr();
+  if (not parse_ok)
+    return parse_ok;
+  my_expression = std::make_unique<EXPR_ASSIGN>(std::move(lhs_expr),
+                                                std::move(my_expression));
+  return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_postfix_expr() {
+  std::expected<void, PARSE_ERRMSG> parse_ok{};
+  parse_ok = parse_primary_expr();
+  if (not parse_ok)
+    return parse_ok;
+  while (1) {
+    bool go_on{};
     my_token = tokenize();
     if (my_token.index() != TOKV_PUNCT)
       break;
-    auto postfix_expr = parse_postfix_expr(expression);
-    switch (postfix_expr.second->index()) {
-    case EXPRV_ERROR:
-      return postfix_expr.second;
-    default:
-      go_on = postfix_expr.first;
-      expression = postfix_expr.second;
+    switch (std::get<TOKV_PUNCT>(my_token)) {
+    case '.':
+      parse_ok = parse_member_expr();
+      go_on = 1;
+      break;
+    case '(':
+      parse_ok = parse_call_expr();
+      go_on = 1;
+      break;
+    case '[':
+      parse_ok = parse_access_expr();
+      go_on = 1;
       break;
     }
+    if (not parse_ok)
+      return parse_ok;
+    if (not go_on)
+      break;
   }
-  return expression;
+  return {};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
@@ -682,7 +691,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
     case 0:
       break;
     case 1:
-      program.push_back(std::get<1>(declaration));
+      program.push_back(std::move(std::get<1>(declaration)));
       return expect_statement_end();
     case 2:
       return std::unexpected{std::get<2>(declaration)};
@@ -690,10 +699,10 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
     [[fallthrough]];
   }
   default: {
-    EXPR_PTR expression = parse_assign_expr();
-    if (expression->index() == EXPRV_ERROR)
-      return std::unexpected{std::get<EXPRV_ERROR>(*expression)};
-    program.push_back(*expression);
+    std::expected parse_ok = parse_assign_expr();
+    if (not parse_ok)
+      return parse_ok;
+    program.push_back(std::move(my_expression));
     return expect_statement_end();
   }
   }

@@ -52,40 +52,40 @@ struct EXPR_CALL;
 struct EXPR_MEMBER;
 struct EXPR_BINARY;
 struct EXPR_OBJECT;
-struct EXPR_ARRACCESS;
+struct EXPR_ACCESS;
 struct EXPR_ASSIGN;
-constexpr int EXPRV_ERROR = 0;
-using EXPRESSION = std::variant<PARSE_ERRMSG, TOK_STRING, TOK_IDENTI, double,
-                                EXPR_CALL, EXPR_MEMBER, EXPR_BINARY,
-                                EXPR_OBJECT, EXPR_ARRACCESS, EXPR_ASSIGN>;
-using EXPR_PTR = std::shared_ptr<EXPRESSION>;
+using EXPRESSION =
+    std::variant<std::monostate, TOK_STRING, TOK_IDENTI, double,
+                 std::unique_ptr<EXPR_CALL>, std::unique_ptr<EXPR_MEMBER>,
+                 std::unique_ptr<EXPR_BINARY>, std::unique_ptr<EXPR_OBJECT>,
+                 std::unique_ptr<EXPR_ACCESS>, std::unique_ptr<EXPR_ASSIGN>>;
 struct EXPR_CALL {
-  EXPR_PTR callee;
-  std::vector<EXPR_PTR> arguments;
+  EXPRESSION callee;
+  std::vector<EXPRESSION> arguments;
 };
 struct EXPR_MEMBER {
-  EXPR_PTR object;
+  EXPRESSION object;
   TOK_IDENTI property;
 };
 struct EXPR_BINARY {
-  EXPR_PTR left;
-  EXPR_PTR right;
+  EXPRESSION left;
+  EXPRESSION right;
   TOK_OPERATOR bin_op;
 };
 struct EXPR_ASSIGN {
-  EXPR_PTR left;
-  EXPR_PTR right;
+  EXPRESSION left;
+  EXPRESSION right;
 };
 struct EXPR_OBJECT {};
-struct EXPR_ARRACCESS {
-  EXPR_PTR object;
-  EXPR_PTR property;
+struct EXPR_ACCESS {
+  EXPRESSION object;
+  EXPRESSION property;
 };
 
 struct STMT_VARDECL {
   std::size_t p_kind;
   TOK_IDENTI identifier;
-  EXPR_PTR initializer;
+  EXPRESSION initializer;
 };
 using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
 
@@ -185,17 +185,16 @@ public:
 
 private:
   TOKEN my_token;
+  EXPRESSION my_expression;
 
-  EXPR_PTR parse_assign_expr();
-  EXPR_PTR parse_binary_expr();
-  EXPR_PTR parse_postfix_expr();
-  std::pair<bool, EXPR_PTR> parse_postfix_expr(EXPR_PTR expression);
-  EXPRESSION parse_primary_expr(char32_t punct);
-  EXPRESSION parse_primary_expr();
-  std::pair<bool, EXPR_PTR> parse_arg_expr();
-  EXPR_PTR parse_call_expr(EXPR_PTR callee);
-  EXPR_PTR parse_member_expr(EXPR_PTR object);
-  EXPR_PTR parse_array_access(EXPR_PTR object);
+  std::expected<void, PARSE_ERRMSG> parse_assign_expr();
+  std::expected<void, PARSE_ERRMSG> parse_binary_expr();
+  std::expected<void, PARSE_ERRMSG> parse_postfix_expr();
+  std::expected<void, PARSE_ERRMSG> parse_primary_expr();
+  std::expected<bool, PARSE_ERRMSG> parse_arg_expr();
+  std::expected<void, PARSE_ERRMSG> parse_call_expr();
+  std::expected<void, PARSE_ERRMSG> parse_member_expr();
+  std::expected<void, PARSE_ERRMSG> parse_access_expr();
 
   std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
   parse_variable_decl();
