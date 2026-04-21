@@ -175,7 +175,6 @@ StringTokenizer::decode_special(char32_t separator, char32_t ch) {
 }
 
 TOKEN StringTokenizer::tokenize(char32_t separator) {
-  str1_temp = {};
   while (1) {
     if (reached_eof())
       return UNEXPECTED_ERR::STRING_END;
@@ -269,28 +268,24 @@ IdentifierTokenizer::decode_escape(char32_t leading) {
   return success;
 }
 
-std::optional<TOKEN> IdentifierTokenizer::tokenize() {
-  str1_temp = {};
+std::optional<TOKEN> IdentifierTokenizer::tokenize(char32_t leading) {
   bool has_escape = 0;
-
-repeat: {
-  if (reached_eof())
-    goto done;
-  std::expected esc_exp = decode_escape(next().value());
-  switch (esc_exp.has_value()) {
-  case 1:
-    if (esc_exp.value() == 2)
+  while (1) {
+    std::expected esc_exp = decode_escape(leading);
+    if (not esc_exp)
+      return esc_exp.error();
+    switch (esc_exp.value()) {
+    case 2:
       has_escape = 1;
-    if (esc_exp.value())
-      goto repeat;
-    prev();
-    goto done;
-  default:
-    return esc_exp.error();
+      [[fallthrough]];
+    case 1:
+      if (reached_eof())
+        break;
+      leading = next().value();
+      continue;
+    }
+    break;
   }
-}
-
-done:
   if (str1_temp.size() == 0)
     return std::nullopt;
   return TOK_IDENTI{has_escape, find_atom()};
@@ -382,8 +377,11 @@ std::expected<bool, PARSE_ERRMSG> SpaceChewer::chewSpace1(char32_t ch) {
 std::optional<TOKEN> Tokenizer::tokenize_lookahead(char32_t leading) {
   switch (leading) {
   case '\'':
-  case '"':
-    return StringTokenizer::tokenize(leading);
+  case '"': {
+    TOKEN str_token = StringTokenizer::tokenize(leading);
+    str1_temp = {};
+    return str_token;
+  }
   case '=': {
     int i;
     for (i = 0; i < 2; i++) {
@@ -424,15 +422,18 @@ TOKEN Tokenizer::tokenize() {
       return ws_exp.error();
     }
   }
-  std::optional<TOKEN> token_opt{};
-  token_opt = tokenize_lookahead(next().value());
+  char32_t leading = next().value();
+  std::optional<TOKEN> token_opt = tokenize_lookahead(leading);
   if (token_opt)
     return token_opt.value();
-  prev();
-  token_opt = IdentifierTokenizer::tokenize();
+  token_opt = NumberTokenizer::tokenize(leading);
   if (token_opt)
     return token_opt.value();
-  return next().value();
+  token_opt = IdentifierTokenizer::tokenize(leading);
+  str1_temp = {};
+  if (token_opt)
+    return token_opt.value();
+  return leading;
 }
 
 std::size_t aligned_N(std::size_t len) {
@@ -465,6 +466,10 @@ std::size_t AtomTokenizer::alloc_atom() {
   str1_temp.resize(aligned_N(str1_temp.size()));
   atom_arena.append_range(str1_temp);
   return atom_addr;
+}
+
+std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
+  return std::nullopt;
 }
 
 std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>

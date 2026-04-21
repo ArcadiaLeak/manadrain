@@ -127,7 +127,12 @@ private:
   bool chew_comment_line();
 };
 
-class AtomTokenizer : public SpaceChewer {
+class NumberTokenizer : public SpaceChewer {
+public:
+  std::optional<TOKEN> tokenize(char32_t leading);
+};
+
+class AtomTokenizer : public NumberTokenizer {
 public:
   std::string str1_temp;
   void str1_encode(char32_t cp);
@@ -155,7 +160,7 @@ private:
 
 class IdentifierTokenizer : public StringTokenizer {
 public:
-  std::optional<TOKEN> tokenize();
+  std::optional<TOKEN> tokenize(char32_t leading);
 
 private:
   std::optional<char32_t> decode_uni_braced();
@@ -173,9 +178,13 @@ private:
   std::optional<TOKEN> tokenize_lookahead(char32_t leading);
 };
 
-struct Parser : Tokenizer {
-  TOKEN token_curr;
+class Parser : public Tokenizer {
+public:
   std::vector<STATEMENT> program;
+  bool parse();
+
+private:
+  TOKEN token_curr;
 
   EXPR_PTR parse_assign_expr();
   EXPR_PTR parse_binary_expr();
@@ -192,7 +201,5 @@ struct Parser : Tokenizer {
   parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_statement();
   std::expected<void, PARSE_ERRMSG> expect_statement_end();
-
-  bool parse();
 };
 } // namespace Manadrain
