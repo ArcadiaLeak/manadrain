@@ -13,14 +13,14 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-void AtomTokenizer::str1_encode(char32_t cp) {
+void AtomTokenizer::encode_string_atom(char32_t cp) {
   std::array<char, 4> buff{};
   UBool is_error{};
   std::uint32_t length{};
   U8_APPEND(buff.data(), length, buff.size(), cp, is_error);
   if (is_error)
     throw std::runtime_error{"codepoint conversion failed!"};
-  my_str1.append(std::string_view{buff.data(), length});
+  my_string_atom.append(std::string_view{buff.data(), length});
 }
 
 std::optional<char32_t> Scanner::next() {
@@ -186,7 +186,7 @@ TOKEN StringTokenizer::tokenize(char32_t separator) {
       char32_t ch = std::get<1>(ch_alter);
       if (ch == separator)
         return TOK_STRING{separator, find_atom()};
-      str1_encode(ch);
+      encode_string_atom(ch);
       continue;
     }
     default:
@@ -236,10 +236,10 @@ std::optional<char32_t> IdentifierTokenizer::decode_uni() {
 }
 
 bool IdentifierTokenizer::encode_uchar(char32_t ch) {
-  bool is_legal = u_hasBinaryProperty(ch, my_str1.size() ? UCHAR_XID_CONTINUE
-                                                         : UCHAR_XID_START);
+  bool is_legal = u_hasBinaryProperty(
+      ch, my_string_atom.size() ? UCHAR_XID_CONTINUE : UCHAR_XID_START);
   if (is_legal)
-    str1_encode(ch);
+    encode_string_atom(ch);
   return is_legal;
 }
 
@@ -286,8 +286,9 @@ std::optional<TOKEN> IdentifierTokenizer::tokenize(char32_t leading) {
     }
     break;
   }
-  if (my_str1.size() == 0)
+  if (my_string_atom.size() == 0)
     return std::nullopt;
+  prev();
   return TOK_IDENTI{has_escape, find_atom()};
 }
 
@@ -377,11 +378,8 @@ std::expected<bool, PARSE_ERRMSG> SpaceChewer::chewSpace1(char32_t ch) {
 std::optional<TOKEN> Tokenizer::tokenize_lookahead(char32_t leading) {
   switch (leading) {
   case '\'':
-  case '"': {
-    TOKEN str_token = StringTokenizer::tokenize(leading);
-    my_str1 = {};
-    return str_token;
-  }
+  case '"':
+    return StringTokenizer::tokenize(leading);
   case '=': {
     int i;
     for (i = 0; i < 2; i++) {
@@ -430,7 +428,6 @@ TOKEN Tokenizer::tokenize() {
   if (token_opt)
     return token_opt.value();
   token_opt = IdentifierTokenizer::tokenize(leading);
-  my_str1 = {};
   if (token_opt)
     return token_opt.value();
   return leading;
@@ -455,23 +452,33 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
 }
 
 std::size_t AtomTokenizer::find_atom() {
+  std::optional<std::size_t> pos_opt{};
   for (std::size_t p_atom : atom_prealloc_pos) {
     std::size_t len =
         LE_decode(std::span{atom_arena}.subspan(p_atom).first<8>());
     std::string_view str_atom{atom_arena.data() + p_atom + 8, len};
-    if (my_str1 == str_atom)
-      return p_atom;
+    if (my_string_atom == str_atom) {
+      pos_opt = p_atom;
+      break;
+    }
   }
-  if (not atom_umap.contains(my_str1))
-    atom_umap[my_str1] = alloc_atom();
-  return atom_umap[my_str1];
+  if (not pos_opt) {
+    if (not atom_umap.contains(my_string_atom))
+      atom_umap[my_string_atom] = alloc_atom();
+    pos_opt = atom_umap[my_string_atom];
+  }
+  my_string_atom = {};
+  return pos_opt.value();
 }
 
 std::size_t AtomTokenizer::alloc_atom() {
   std::size_t atom_addr = atom_arena.size();
-  atom_arena.append_range(LE_encode(my_str1.size()));
-  my_str1.resize(aligned_N(my_str1.size()));
-  atom_arena.append_range(my_str1);
+  std::size_t aligned_size = aligned_N(my_string_atom.size());
+  atom_arena.reserve(atom_arena.size() + aligned_size + 8);
+  atom_arena.append_range(LE_encode(my_string_atom.size()));
+  atom_arena.append_range(my_string_atom);
+  atom_arena.append_range(
+      std::ranges::repeat_view{0, aligned_size - my_string_atom.size()});
   return atom_addr;
 }
 
@@ -523,6 +530,8 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_binary_expr() {
   parse_ok = parse_postfix_expr();
   if (not parse_ok)
     return parse_ok;
+  if (my_token.index() != TOKV_OP)
+    return {};
   switch (std::get<TOKV_OP>(my_token)) {
   case TOK_OPERATOR::EQ_SLOPPY:
   case TOK_OPERATOR::EQ_STRICT:

@@ -2,6 +2,7 @@
 #include <expected>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -134,8 +135,8 @@ public:
 
 class AtomTokenizer : public NumberTokenizer {
 public:
-  std::string my_str1;
-  void str1_encode(char32_t cp);
+  std::string my_string_atom;
+  void encode_string_atom(char32_t cp);
 
   std::size_t find_atom();
   std::size_t alloc_atom();
