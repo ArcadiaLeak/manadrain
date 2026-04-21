@@ -440,12 +440,6 @@ std::size_t aligned_N(std::size_t N) {
   return ((N + MEMORY_ALIGNMENT - 1) / MEMORY_ALIGNMENT) * MEMORY_ALIGNMENT;
 }
 
-std::size_t AtomTokenizer::find_atom() {
-  if (not atom_umap.contains(my_str1))
-    atom_umap[my_str1] = alloc_atom();
-  return atom_umap[my_str1];
-}
-
 std::array<char, 8> LE_encode(std::size_t N) {
   std::array<char, 8> bytes;
   for (int i = 0; i < 8; ++i)
@@ -458,6 +452,19 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
   for (std::size_t i = 0; i < 8; ++i)
     N |= static_cast<std::size_t>(bytes[i]) << (i * 8);
   return N;
+}
+
+std::size_t AtomTokenizer::find_atom() {
+  for (std::size_t p_atom : atom_prealloc_pos) {
+    std::size_t len =
+        LE_decode(std::span{atom_arena}.subspan(p_atom).first<8>());
+    std::string_view str_atom{atom_arena.data() + p_atom + 8, len};
+    if (my_str1 == str_atom)
+      return p_atom;
+  }
+  if (not atom_umap.contains(my_str1))
+    atom_umap[my_str1] = alloc_atom();
+  return atom_umap[my_str1];
 }
 
 std::size_t AtomTokenizer::alloc_atom() {

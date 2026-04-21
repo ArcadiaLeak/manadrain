@@ -18,8 +18,8 @@ function LE_encode(num) {
 
 for (const lit of atom_literal_arr) {
   const lit_length = [
-    0, 0, 0, 0,
-    ...LE_encode(lit.length)
+    ...LE_encode(lit.length),
+    0, 0, 0, 0
   ];
 
   const lit_bytes = Array.from(encoder.encode(lit));
