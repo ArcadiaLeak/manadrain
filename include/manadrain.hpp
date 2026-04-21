@@ -128,6 +128,11 @@ private:
   bool chew_comment_line();
 };
 
+struct MULTIPLE_PRECISION_BINARY {
+  int length;
+  std::array<std::uint32_t, 52> limbs;
+};
+
 class NumberTokenizer : public SpaceChewer {
 public:
   std::optional<TOKEN> tokenize(char32_t leading);

@@ -482,6 +482,8 @@ std::size_t AtomTokenizer::alloc_atom() {
   return atom_addr;
 }
 
+static constexpr int RADIX_MAX = 36;
+
 static int to_digit(char32_t ch) {
   if (ch >= '0' && ch <= '9')
     return ch - '0';
@@ -490,8 +492,26 @@ static int to_digit(char32_t ch) {
   else if (ch >= 'a' && ch <= 'z')
     return ch - 'a' + 10;
   else
-    return 36;
+    return RADIX_MAX;
 }
+
+static constexpr std::array<std::uint8_t, RADIX_MAX - 1> max_digits_table{{
+    64, 80, 32, 55, 49, 45, 21, 40, 38, 37, 35, 34, 33, 32, 16, 31, 30, 30,
+    29, 29, 28, 28, 27, 27, 27, 26, 26, 26, 26, 25, 12, 25, 25, 24, 24,
+}};
+
+static constexpr std::array<std::uint8_t, RADIX_MAX - 1> digits_per_limb_table{
+    {32, 20, 16, 13, 12, 11, 10, 10, 9, 9, 8, 8, 8, 8, 8, 7, 7, 7,
+     7,  7,  7,  7,  6,  6,  6,  6,  6, 6, 6, 6, 6, 6, 6, 6, 6}};
+
+static constexpr std::array<std::uint32_t, RADIX_MAX - 1> radix_base_table{{
+    0x00000000, 0xcfd41b91, 0x00000000, 0x48c27395, 0x81bf1000, 0x75db9c97,
+    0x40000000, 0xcfd41b91, 0x3b9aca00, 0x8c8b6d2b, 0x19a10000, 0x309f1021,
+    0x57f6c100, 0x98c29b81, 0x00000000, 0x18754571, 0x247dbc80, 0x3547667b,
+    0x4c4b4000, 0x6b5a6e1d, 0x94ace180, 0xcaf18367, 0x0b640000, 0x0e8d4a51,
+    0x1269ae40, 0x17179149, 0x1cb91000, 0x23744899, 0x2b73a840, 0x34e63b41,
+    0x40000000, 0x4cfa3cc1, 0x5c13d840, 0x6d91b519, 0x81bf1000,
+}};
 
 std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
   if (not std::isdigit(leading))
@@ -499,6 +519,8 @@ std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
   int radix{10};
   bool has_legacy_octal{};
   std::optional<char32_t> separator{'_'};
+  /* lifting the do-while to a separate method is hard because it
+   * writes to the locals above */
   do {
     if (leading != '0')
       break;
@@ -530,6 +552,18 @@ std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
       break;
     return NUMBER_ERR::INVALID_LITERAL;
   } while (0);
+  int max_digits = max_digits_table[radix - 2];
+  int digits_per_limb = digits_per_limb_table[radix - 2];
+  std::uint32_t radix_base = radix_base_table[radix - 2];
+  MULTIPLE_PRECISION_BINARY mbp{.length = 1};
+  while (1) {
+    std::optional digit =
+        next().transform([](char32_t ch) { return to_digit(ch); });
+    if (digit.transform([radix](int i) { return i >= radix; })) {
+      prev();
+      break;
+    }
+  }
   return std::nullopt;
 }
 
