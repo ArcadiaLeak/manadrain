@@ -44,13 +44,15 @@ Deno.writeTextFile("include/atom_prealloc.hpp", `\
 namespace Manadrain {
 ${atom_prealloc_pos
     .map(({ offset, atom_name }) =>
-      `constexpr std::size_t S_ATOM_${atom_name}{${offset}};`)
+      `inline constexpr std::size_t S_ATOM_${atom_name}{${offset}};`)
     .join('\n')}
 
-constexpr std::array<char, ${atom_prealloc_buf.length}> atom_prealloc_buf{{
-  ${atom_prealloc_buf
-    .map((ch_code) => ch_code.toString())
-    .join(', ')}
+inline constexpr std::array<std::size_t, ${atom_prealloc_pos.length}> atom_prealloc_pos{{
+  ${atom_prealloc_pos.map(({ atom_name }) => `S_ATOM_${atom_name}`).join(', ')}
+}};
+
+inline constexpr std::array<char, ${atom_prealloc_buf.length}> atom_prealloc_buf{{
+  ${atom_prealloc_buf.map((ch_code) => ch_code.toString()).join(', ')}
 }};
 }
 `);

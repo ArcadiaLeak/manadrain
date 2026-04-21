@@ -9,9 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/manadrain",
-            "args": [
-                "${workspaceFolder}/generated/unicode_escape.js"
-            ],
+            "args": ["${workspaceFolder}/generated/legacy_octal_escape.js"],
             "stopAtEntry": true,
             "cwd": "${fileDirname}",
             "environment": [],

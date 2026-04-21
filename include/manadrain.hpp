@@ -134,7 +134,7 @@ public:
 
 class AtomTokenizer : public NumberTokenizer {
 public:
-  std::string str1_temp;
+  std::string my_str1;
   void str1_encode(char32_t cp);
 
   std::size_t find_atom();
@@ -184,7 +184,7 @@ public:
   bool parse();
 
 private:
-  TOKEN token_curr;
+  TOKEN my_token;
 
   EXPR_PTR parse_assign_expr();
   EXPR_PTR parse_binary_expr();

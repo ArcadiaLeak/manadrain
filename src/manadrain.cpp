@@ -20,7 +20,7 @@ void AtomTokenizer::str1_encode(char32_t cp) {
   U8_APPEND(buff.data(), length, buff.size(), cp, is_error);
   if (is_error)
     throw std::runtime_error{"codepoint conversion failed!"};
-  str1_temp.append(std::string_view{buff.data(), length});
+  my_str1.append(std::string_view{buff.data(), length});
 }
 
 std::optional<char32_t> Scanner::next() {
@@ -236,8 +236,8 @@ std::optional<char32_t> IdentifierTokenizer::decode_uni() {
 }
 
 bool IdentifierTokenizer::encode_uchar(char32_t ch) {
-  bool is_legal = u_hasBinaryProperty(ch, str1_temp.size() ? UCHAR_XID_CONTINUE
-                                                           : UCHAR_XID_START);
+  bool is_legal = u_hasBinaryProperty(ch, my_str1.size() ? UCHAR_XID_CONTINUE
+                                                         : UCHAR_XID_START);
   if (is_legal)
     str1_encode(ch);
   return is_legal;
@@ -286,7 +286,7 @@ std::optional<TOKEN> IdentifierTokenizer::tokenize(char32_t leading) {
     }
     break;
   }
-  if (str1_temp.size() == 0)
+  if (my_str1.size() == 0)
     return std::nullopt;
   return TOK_IDENTI{has_escape, find_atom()};
 }
@@ -379,7 +379,7 @@ std::optional<TOKEN> Tokenizer::tokenize_lookahead(char32_t leading) {
   case '\'':
   case '"': {
     TOKEN str_token = StringTokenizer::tokenize(leading);
-    str1_temp = {};
+    my_str1 = {};
     return str_token;
   }
   case '=': {
@@ -430,20 +430,20 @@ TOKEN Tokenizer::tokenize() {
   if (token_opt)
     return token_opt.value();
   token_opt = IdentifierTokenizer::tokenize(leading);
-  str1_temp = {};
+  my_str1 = {};
   if (token_opt)
     return token_opt.value();
   return leading;
 }
 
-std::size_t aligned_N(std::size_t len) {
-  return len / MEMORY_ALIGNMENT + (len % MEMORY_ALIGNMENT != 0);
+std::size_t aligned_N(std::size_t N) {
+  return ((N + MEMORY_ALIGNMENT - 1) / MEMORY_ALIGNMENT) * MEMORY_ALIGNMENT;
 }
 
 std::size_t AtomTokenizer::find_atom() {
-  if (not atom_umap.contains(str1_temp))
-    atom_umap[str1_temp] = alloc_atom();
-  return atom_umap[str1_temp];
+  if (not atom_umap.contains(my_str1))
+    atom_umap[my_str1] = alloc_atom();
+  return atom_umap[my_str1];
 }
 
 std::array<char, 8> LE_encode(std::size_t N) {
@@ -462,13 +462,19 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
 
 std::size_t AtomTokenizer::alloc_atom() {
   std::size_t atom_addr = atom_arena.size();
-  atom_arena.append_range(LE_encode(str1_temp.size()));
-  str1_temp.resize(aligned_N(str1_temp.size()));
-  atom_arena.append_range(str1_temp);
+  atom_arena.append_range(LE_encode(my_str1.size()));
+  my_str1.resize(aligned_N(my_str1.size()));
+  atom_arena.append_range(my_str1);
   return atom_addr;
 }
 
 std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
+  if (leading == '0') {
+    if (reached_eof())
+      return double{0};
+    leading = next().value();
+    return char32_t{leading};
+  }
   return std::nullopt;
 }
 
@@ -476,26 +482,26 @@ std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
 Parser::parse_variable_decl() {
   STMT_VARDECL declaration{};
 
-  std::size_t p_atom = std::get<TOKV_IDENTI>(token_curr).p_atom;
+  std::size_t p_atom = std::get<TOKV_IDENTI>(my_token).p_atom;
   switch (p_atom) {
   case S_ATOM_const:
   case S_ATOM_let:
   case S_ATOM_var:
     declaration.p_kind = p_atom;
-    token_curr = tokenize();
+    my_token = tokenize();
     break;
   default:
     return std::monostate{};
   }
 
-  if (token_curr.index() != TOKV_IDENTI)
+  if (my_token.index() != TOKV_IDENTI)
     return NEEDED_ERR::VARIABLE_NAME;
-  declaration.identifier = std::get<TOK_IDENTI>(token_curr);
-  token_curr = tokenize();
+  declaration.identifier = std::get<TOK_IDENTI>(my_token);
+  my_token = tokenize();
 
-  if (token_curr != TOKEN{U'='})
+  if (my_token != TOKEN{U'='})
     return declaration;
-  token_curr = tokenize();
+  my_token = tokenize();
 
   EXPR_PTR initializer = parse_assign_expr();
   if (initializer->index() == EXPRV_ERROR)
@@ -507,9 +513,9 @@ Parser::parse_variable_decl() {
 
 EXPR_PTR Parser::parse_binary_expr() {
   EXPR_PTR lhs_expression = parse_postfix_expr();
-  if (token_curr.index() != TOKV_OP)
+  if (my_token.index() != TOKV_OP)
     return lhs_expression;
-  switch (std::get<TOKV_OP>(token_curr)) {
+  switch (std::get<TOKV_OP>(my_token)) {
   case TOK_OPERATOR::EQ_SLOPPY:
   case TOK_OPERATOR::EQ_STRICT:
     break;
@@ -517,8 +523,8 @@ EXPR_PTR Parser::parse_binary_expr() {
     return lhs_expression;
   }
   EXPR_PTR bin_expr = std::make_shared<EXPRESSION>(EXPR_BINARY{
-      .left = lhs_expression, .bin_op = std::get<TOKV_OP>(token_curr)});
-  token_curr = tokenize();
+      .left = lhs_expression, .bin_op = std::get<TOKV_OP>(my_token)});
+  my_token = tokenize();
   EXPR_PTR rhs_expression = parse_binary_expr();
   if (rhs_expression->index() == EXPRV_ERROR)
     return rhs_expression;
@@ -527,41 +533,41 @@ EXPR_PTR Parser::parse_binary_expr() {
 }
 
 EXPRESSION Parser::parse_primary_expr(char32_t punct) {
-  switch (std::get<TOKV_PUNCT>(token_curr)) {
+  switch (std::get<TOKV_PUNCT>(my_token)) {
   case '{':
-    token_curr = tokenize();
-    return token_curr == TOKEN{U'}'} ? EXPRESSION{EXPR_OBJECT{}}
-                                     : EXPRESSION{NEEDED_ERR::CLOSING_BRACE};
+    my_token = tokenize();
+    return my_token == TOKEN{U'}'} ? EXPRESSION{EXPR_OBJECT{}}
+                                   : EXPRESSION{NEEDED_ERR::CLOSING_BRACE};
   default:
     return UNEXPECTED_ERR::THIS_TOKEN;
   }
 }
 
 EXPRESSION Parser::parse_primary_expr() {
-  switch (token_curr.index()) {
+  switch (my_token.index()) {
   case TOKV_STRING:
-    return std::get<TOKV_STRING>(token_curr);
+    return std::get<TOKV_STRING>(my_token);
   case TOKV_IDENTI:
-    return std::get<TOKV_IDENTI>(token_curr);
+    return std::get<TOKV_IDENTI>(my_token);
   case TOKV_NUMBER:
-    return std::get<TOKV_NUMBER>(token_curr);
+    return std::get<TOKV_NUMBER>(my_token);
   case TOKV_PUNCT:
-    return parse_primary_expr(std::get<TOKV_PUNCT>(token_curr));
+    return parse_primary_expr(std::get<TOKV_PUNCT>(my_token));
   case TOKV_ERROR:
-    return std::get<TOKV_ERROR>(token_curr);
+    return std::get<TOKV_ERROR>(my_token);
   default:
     return UNEXPECTED_ERR::THIS_TOKEN;
   }
 }
 
 std::pair<bool, EXPR_PTR> Parser::parse_arg_expr() {
-  token_curr = tokenize();
-  if (token_curr == TOKEN{U')'})
+  my_token = tokenize();
+  if (my_token == TOKEN{U')'})
     return {0, nullptr};
   EXPR_PTR arg_expr = parse_assign_expr();
-  if (token_curr == TOKEN{U')'})
+  if (my_token == TOKEN{U')'})
     return std::make_pair(0, arg_expr);
-  if (token_curr != TOKEN{U','})
+  if (my_token != TOKEN{U','})
     return std::make_pair(0, std::make_shared<EXPRESSION>(NEEDED_ERR::COMMA));
   else
     return std::make_pair(1, arg_expr);
@@ -584,19 +590,19 @@ EXPR_PTR Parser::parse_call_expr(EXPR_PTR callee) {
 }
 
 EXPR_PTR Parser::parse_member_expr(EXPR_PTR object) {
-  token_curr = tokenize();
-  return token_curr.index() == TOKV_IDENTI
+  my_token = tokenize();
+  return my_token.index() == TOKV_IDENTI
              ? std::make_shared<EXPRESSION>(
-                   EXPR_MEMBER{object, std::get<TOK_IDENTI>(token_curr)})
+                   EXPR_MEMBER{object, std::get<TOK_IDENTI>(my_token)})
              : std::make_shared<EXPRESSION>(NEEDED_ERR::FIELD_NAME);
 }
 
 EXPR_PTR Parser::parse_array_access(EXPR_PTR object) {
-  token_curr = tokenize();
+  my_token = tokenize();
   EXPR_PTR property_expr = parse_assign_expr();
   if (property_expr->index() == EXPRV_ERROR)
     return property_expr;
-  return token_curr == TOKEN{U']'}
+  return my_token == TOKEN{U']'}
              ? std::make_shared<EXPRESSION>(
                    EXPR_ARRACCESS{object, property_expr})
              : std::make_shared<EXPRESSION>(NEEDED_ERR::CLOSING_BRACKET);
@@ -606,9 +612,9 @@ EXPR_PTR Parser::parse_assign_expr() {
   EXPR_PTR binary_expr = parse_binary_expr();
   if (binary_expr->index() == EXPRV_ERROR)
     return binary_expr;
-  if (token_curr != TOKEN{U'='})
+  if (my_token != TOKEN{U'='})
     return binary_expr;
-  token_curr = tokenize();
+  my_token = tokenize();
   EXPR_PTR rhs_expr = parse_assign_expr();
   if (rhs_expr->index() == EXPRV_ERROR)
     return rhs_expr;
@@ -616,7 +622,7 @@ EXPR_PTR Parser::parse_assign_expr() {
 }
 
 std::pair<bool, EXPR_PTR> Parser::parse_postfix_expr(EXPR_PTR expression) {
-  switch (std::get<TOKV_PUNCT>(token_curr)) {
+  switch (std::get<TOKV_PUNCT>(my_token)) {
   case '.':
     return std::make_pair(1, parse_member_expr(expression));
   case '(':
@@ -638,8 +644,8 @@ EXPR_PTR Parser::parse_postfix_expr() {
   }
   bool go_on{1};
   while (go_on) {
-    token_curr = tokenize();
-    if (token_curr.index() != TOKV_PUNCT)
+    my_token = tokenize();
+    if (my_token.index() != TOKV_PUNCT)
       break;
     auto postfix_expr = parse_postfix_expr(expression);
     switch (postfix_expr.second->index()) {
@@ -655,21 +661,21 @@ EXPR_PTR Parser::parse_postfix_expr() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
-  if (token_curr == TOKEN{U';'}) {
-    token_curr = tokenize();
+  if (my_token == TOKEN{U';'}) {
+    my_token = tokenize();
     return {};
   }
-  bool insertion = token_curr.index() == TOKV_EOF ||
-                   token_curr == TOKEN{U'}'} || newlineSeen();
+  bool insertion =
+      my_token.index() == TOKV_EOF || my_token == TOKEN{U'}'} || newlineSeen();
   if (insertion)
     return {};
   return std::unexpected{NEEDED_ERR::SEMICOLON};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
-  switch (token_curr.index()) {
+  switch (my_token.index()) {
   case TOKV_ERROR:
-    return std::unexpected{std::get<TOKV_ERROR>(token_curr)};
+    return std::unexpected{std::get<TOKV_ERROR>(my_token)};
   case TOKV_IDENTI: {
     auto declaration = parse_variable_decl();
     switch (declaration.index()) {
@@ -694,9 +700,9 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
 }
 
 bool Parser::parse() {
-  token_curr = tokenize();
+  my_token = tokenize();
   while (1) {
-    if (token_curr.index() == TOKV_EOF)
+    if (my_token.index() == TOKV_EOF)
       return 0;
     std::expected<void, PARSE_ERRMSG> status = parse_statement();
     if (not status)
