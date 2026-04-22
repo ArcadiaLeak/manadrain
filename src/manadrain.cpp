@@ -527,11 +527,12 @@ TOKEN NumberTokenizer::tokenize(char32_t leading) {
     leading = next_u();
   }
   do {
-    if (reached_eof())
-      break;
-    char32_t ch = *peek();
-    bool id_continue_ahead = u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE);
-    if (not id_continue_ahead)
+    std::optional glued_idcont = peek().and_then([](char32_t ch) {
+      return u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE)
+                 ? std::make_optional(std::monostate{})
+                 : std::nullopt;
+    });
+    if (not glued_idcont)
       break;
     return NUMBER_ERR::INVALID_LITERAL;
   } while (0);
