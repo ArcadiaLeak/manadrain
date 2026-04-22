@@ -40,13 +40,9 @@ void Scanner::prev() { U8_BACK_1(buffer.data(), 0, buffer_idx); }
 
 std::optional<char32_t> Scanner::peek() {
   std::optional<char32_t> ahead = next();
-  switch (ahead.has_value()) {
-  case 0:
-    return std::nullopt;
-  case 1:
+  if (ahead)
     prev();
-    return ahead.value();
-  }
+  return ahead;
 }
 
 void Scanner::backtrack(std::size_t N) {
@@ -55,20 +51,23 @@ void Scanner::backtrack(std::size_t N) {
 }
 
 void Scanner::chewLF() {
-  if (reached_eof() || next().value() == '\n')
+  std::optional ahead{next()};
+  if (ahead == '\n')
     return;
-  prev();
+  if (ahead)
+    prev();
 }
 
 std::optional<char32_t> StringTokenizer::decode_octal() {
   if (reached_eof())
     return std::nullopt;
-  char32_t ahead = next().value();
-  if (ahead > '7') {
+  std::optional ahead{next()};
+  std::optional ret_opt = ahead.and_then([](char32_t ch) {
+    return ch < '8' ? std::make_optional(ch - '0') : std::nullopt;
+  });
+  if (not ret_opt && ahead)
     prev();
-    return std::nullopt;
-  }
-  return ahead - '0';
+  return ret_opt;
 }
 
 std::optional<int> hex_conv(char32_t digit) {
@@ -88,7 +87,7 @@ std::optional<char32_t> StringTokenizer::decode_hex() {
   std::optional<int> hex1 = next().and_then(hex_conv);
   if (not hex1)
     return std::nullopt;
-  return (hex0.value() << 4) | hex1.value();
+  return (*hex0 << 4) | *hex1;
 }
 
 std::variant<std::monostate, char32_t, PARSE_ERRMSG>
@@ -318,16 +317,14 @@ TOKEN Tokenizer::tokenize() {
     case 0x2029:
       newline_seen = 1;
       break;
-    case '/':
-      if (reached_eof())
-        return U'/';
-      leading = next().value();
-      if (leading == '*') {
+    case '/': {
+      std::optional ahead_opt = next();
+      if (ahead_opt == '*') {
         while (1) {
           if (reached_eof())
             return UNEXPECTED_ERR::COMMENT_END;
           leading = next().value();
-          std::optional ahead_opt = next();
+          ahead_opt = next();
           if (leading == '*' && ahead_opt == '/')
             break;
           if (ahead_opt)
@@ -336,7 +333,7 @@ TOKEN Tokenizer::tokenize() {
             newline_seen = 1;
         }
         break;
-      } else if (leading == '/') {
+      } else if (ahead_opt == '/') {
         while (1) {
           if (reached_eof())
             break;
@@ -348,12 +345,31 @@ TOKEN Tokenizer::tokenize() {
         }
         break;
       }
-      if (leading == '=')
+      if (ahead_opt == '=')
         return TOK_OPERATOR::DIV_ASSIGN;
       else {
-        prev();
+        if (ahead_opt)
+          prev();
         return U'/';
       }
+    }
+    case '\\': {
+      std::optional ahead_opt = next();
+      if (ahead_opt == 'u') {
+        std::optional<int> ch_uni = decode_uni();
+        auto is_id_start = [](char32_t ch) {
+          return u_hasBinaryProperty(ch, UCHAR_XID_START);
+        };
+        if (ch_uni.transform(is_id_start).value_or(0))
+          return IdentifierTokenizer::tokenize(ch_uni.value()).value();
+        else
+          return ESCAPE_ERR::MALFORMED;
+      } else {
+        if (ahead_opt)
+          prev();
+        return U'\\';
+      }
+    }
     case '=': {
       int i;
       for (i = 0; i < 2; i++) {
@@ -375,9 +391,11 @@ TOKEN Tokenizer::tokenize() {
       }
     }
     default:
+      if (std::isdigit(leading))
+        return NumberTokenizer::tokenize(leading);
       if (u_isWhitespace(leading))
         break;
-      return UNEXPECTED_ERR::THIS_CHAR;
+      return IdentifierTokenizer::tokenize(leading).value_or(TOKEN{leading});
     }
   }
 }
@@ -431,47 +449,56 @@ std::size_t AtomTokenizer::atomAlloc() {
   return atom_addr;
 }
 
-std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
-  if (not std::isdigit(leading))
-    return std::nullopt;
-  int radix{10};
-  std::optional<char32_t> separator{'_'};
-  /* lifting the do-while to a separate method is hard because it
-   * writes to the locals above */
-  do {
-    if (reached_eof() || leading != '0')
-      break;
-    if (not peek()
-                .transform([](char32_t ch) { return std::isdigit(ch); })
-                .value())
-      break;
-    separator = std::nullopt;
-    std::optional<char32_t> ahead{};
-    int i{};
-    while (1) {
-      if (reached_eof())
-        break;
-      auto is_octal = [](char32_t ch) { return ch >= '0' && ch <= '7'; };
-      ahead = next();
-      if (is_octal(ahead.value()))
-        ++i;
-      else {
-        prev();
-        break;
-      }
-    }
-    backtrack(i);
-    auto beyond_octal = [](char32_t ch) { return ch == '8' || ch == '9'; };
-    if (not ahead.transform(beyond_octal).value_or(0))
-      radix = 8;
-    else {
+void NumberTokenizer::peek_behind_octal(char32_t &ahead) {
+  int cnt{};
+  while (1) {
+    if (ahead < '0' || ahead > '7') {
       prev();
       break;
     }
-    if (peek().and_then(hex_conv).value_or(16) < radix)
+    if (reached_eof())
       break;
-    return NUMBER_ERR::INVALID_LITERAL;
-  } while (0);
+    ahead = next().value();
+    ++cnt;
+  }
+  backtrack(cnt);
+}
+
+NumberTokenizer::PREFIX NumberTokenizer::decode_prefix() {
+  PREFIX prefix{};
+  std::optional ahead_opt{next()};
+  if (ahead_opt.transform([](char32_t ch) { return std::isdigit(ch); })
+          .value_or(0)) {
+    char32_t trailing{*ahead_opt};
+    peek_behind_octal(trailing);
+    prefix =
+        trailing == '8' || trailing == '9' ? PREFIX::ABSENT : PREFIX::ZERO_LEAD;
+  }
+  if (prefix == PREFIX::ABSENT)
+    backtrack(ahead_opt.has_value() + 1);
+  return prefix;
+}
+
+TOKEN NumberTokenizer::tokenize(char32_t leading) {
+  if (reached_eof())
+    return leading - '0';
+  int radix{10};
+  std::optional separator{U'_'};
+  if (leading == '0') {
+    do {
+      PREFIX prefix{decode_prefix()};
+      if (prefix == PREFIX::ZERO_LEAD) {
+        separator = std::nullopt;
+        radix = 8;
+      } else
+        break;
+      /* there must be a digit after the prefix */
+      std::optional ahead{peek()};
+      if (ahead && *ahead < radix)
+        break;
+      return NUMBER_ERR::INVALID_LITERAL;
+    } while (0);
+  }
   std::string charconv_in{};
   while (1) {
     if (reached_eof())

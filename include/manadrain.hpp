@@ -14,7 +14,7 @@
 namespace Manadrain {
 enum class ESCAPE_ERR { MALFORMED };
 enum class NUMBER_ERR { INVALID_LITERAL };
-enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN, THIS_CHAR };
+enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
 enum class NEEDED_ERR {
   COMMA,
   SEMICOLON,
@@ -115,7 +115,13 @@ private:
 
 class NumberTokenizer : public Scanner {
 public:
-  std::optional<TOKEN> tokenize(char32_t leading);
+  TOKEN tokenize(char32_t leading);
+
+private:
+  void peek_behind_octal(char32_t &ahead);
+
+  enum class PREFIX { ABSENT, HEX, BINARY, OCTAL, ZERO_LEAD };
+  PREFIX decode_prefix();
 };
 
 class AtomTokenizer : public NumberTokenizer {
@@ -148,13 +154,13 @@ public:
   std::optional<TOKEN> tokenize(char32_t leading);
 
 private:
+  bool encode_uchar(char32_t ch);
   std::optional<char32_t> decode_uni_braced();
   std::optional<char32_t> decode_uni_fixed(char32_t leading);
-  std::optional<char32_t> decode_uni();
-  bool encode_uchar(char32_t ch);
+  std::expected<int, PARSE_ERRMSG> decode_escape(char32_t leading);
 
 protected:
-  std::expected<int, PARSE_ERRMSG> decode_escape(char32_t leading);
+  std::optional<char32_t> decode_uni();
 };
 
 class Tokenizer : public IdentifierTokenizer {
