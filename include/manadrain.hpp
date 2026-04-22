@@ -128,9 +128,17 @@ private:
   bool chew_comment_line();
 };
 
+inline constexpr int LIMB_LOG2_BITS = 5;
+inline constexpr int LIMB_BITS = 1 << LIMB_LOG2_BITS;
+inline constexpr int DBIGNUM_LEN_MAX = 52; /* ~ 2^(1072+53)*36^100 (dtoa) */
+
+using limb_t = std::uint32_t;
+using dlimb_t = std::uint64_t;
+
 struct MULTIPLE_PRECISION_BINARY {
   int length;
-  std::array<std::uint32_t, 52> limbs;
+  std::array<limb_t, DBIGNUM_LEN_MAX> limb_arr;
+  void renorm();
 };
 
 class NumberTokenizer : public SpaceChewer {

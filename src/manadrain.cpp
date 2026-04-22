@@ -513,6 +513,23 @@ static constexpr std::array<std::uint32_t, RADIX_MAX - 1> radix_base_table{{
     0x40000000, 0x4cfa3cc1, 0x5c13d840, 0x6d91b519, 0x81bf1000,
 }};
 
+static limb_t limb_mul_add(std::span<limb_t> dest, std::span<const limb_t> src,
+                           dlimb_t multiplier, limb_t carry) {
+  for (int i = 0; i < src.size(); ++i) {
+    dlimb_t prod = dlimb_t{src[i]} * multiplier + carry;
+    /* low limb */
+    dest[i] = static_cast<limb_t>(prod);
+    /* high limb becomes next carry */
+    carry = static_cast<limb_t>(prod >> LIMB_BITS);
+  }
+  return carry;
+}
+
+void MULTIPLE_PRECISION_BINARY::renorm() {
+  while (length > 1 && limb_arr[length - 1] == 0)
+    length--;
+}
+
 std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
   if (not std::isdigit(leading))
     return std::nullopt;
