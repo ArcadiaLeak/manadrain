@@ -14,7 +14,7 @@
 namespace Manadrain {
 enum class ESCAPE_ERR { MALFORMED };
 enum class NUMBER_ERR { INVALID_LITERAL };
-enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
+enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN, THIS_CHAR };
 enum class NEEDED_ERR {
   COMMA,
   SEMICOLON,
@@ -45,7 +45,7 @@ enum TOKV_INDEX {
   TOKV_NUMBER,
   TOKV_OP
 };
-enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY };
+enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY, DIV_ASSIGN };
 using TOKEN = std::variant<std::monostate, PARSE_ERRMSG, char32_t, TOK_STRING,
                            TOK_IDENTI, double, TOK_OPERATOR>;
 
@@ -99,6 +99,7 @@ public:
   std::optional<char32_t> peek();
   void prev();
   void backtrack(std::size_t N);
+  void chewLF();
 
   void setBuffer(const std::basic_string<std::uint8_t> &buffer_ref) {
     buffer = buffer_ref;
@@ -112,23 +113,7 @@ private:
   int buffer_idx;
 };
 
-class SpaceChewer : public Scanner {
-public:
-  void chewLF();
-  std::expected<bool, PARSE_ERRMSG> chewSpace1(char32_t ch);
-
-  bool newlineSeen() { return newline_seen; }
-  void unseeNewline() { newline_seen = 0; }
-
-private:
-  bool newline_seen;
-
-  std::expected<bool, PARSE_ERRMSG> chew_comment(char32_t ch);
-  std::expected<bool, PARSE_ERRMSG> chew_comment_block();
-  bool chew_comment_line();
-};
-
-class NumberTokenizer : public SpaceChewer {
+class NumberTokenizer : public Scanner {
 public:
   std::optional<TOKEN> tokenize(char32_t leading);
 };
@@ -137,8 +122,8 @@ class AtomTokenizer : public NumberTokenizer {
 public:
   std::string my_atom;
 
-  std::size_t find_atom();
-  std::size_t alloc_atom();
+  std::size_t atomFind();
+  std::size_t atomAlloc();
 
 private:
   std::unordered_map<std::string, std::size_t> atom_umap;
@@ -166,16 +151,19 @@ private:
   std::optional<char32_t> decode_uni_braced();
   std::optional<char32_t> decode_uni_fixed(char32_t leading);
   std::optional<char32_t> decode_uni();
-  std::expected<int, PARSE_ERRMSG> decode_escape(char32_t leading);
   bool encode_uchar(char32_t ch);
+
+protected:
+  std::expected<int, PARSE_ERRMSG> decode_escape(char32_t leading);
 };
 
 class Tokenizer : public IdentifierTokenizer {
 public:
   TOKEN tokenize();
+  bool newlineSeen() { return newline_seen; }
 
 private:
-  std::optional<TOKEN> tokenize_lookahead(char32_t leading);
+  bool newline_seen;
 };
 
 class Parser : public Tokenizer {

@@ -54,7 +54,7 @@ void Scanner::backtrack(std::size_t N) {
     prev();
 }
 
-void SpaceChewer::chewLF() {
+void Scanner::chewLF() {
   if (reached_eof() || next().value() == '\n')
     return;
   prev();
@@ -190,7 +190,7 @@ TOKEN StringTokenizer::tokenize(char32_t separator) {
     case 1: {
       char32_t ch = std::get<1>(ch_alter);
       if (ch == separator)
-        return TOK_STRING{separator, find_atom()};
+        return TOK_STRING{separator, atomFind()};
       Ch4Encoder encoder{};
       my_atom.append(encoder(ch));
       continue;
@@ -297,148 +297,89 @@ std::optional<TOKEN> IdentifierTokenizer::tokenize(char32_t leading) {
   if (my_atom.size() == 0)
     return std::nullopt;
   prev();
-  return TOK_IDENTI{has_escape, find_atom()};
-}
-
-bool SpaceChewer::chew_comment_line() {
-  if (reached_eof())
-    return 0;
-  if (lineterm(next().value())) {
-    prev();
-    return 0;
-  }
-  return 1;
-}
-
-std::expected<bool, PARSE_ERRMSG> SpaceChewer::chew_comment_block() {
-  std::array<char32_t, 2> ch{};
-  int i;
-  for (i = 0; i < 2; ++i) {
-    if (reached_eof())
-      break;
-    ch[i] = next().value();
-  }
-  if (i == 0)
-    return std::unexpected{UNEXPECTED_ERR::COMMENT_END};
-  if (ch[0] == '*' && ch[1] == '/')
-    return 0;
-  backtrack(--i);
-  if (lineterm(ch[0]))
-    newline_seen = 1;
-  return 1;
-}
-
-std::expected<bool, PARSE_ERRMSG> SpaceChewer::chew_comment(char32_t ch) {
-  switch (ch) {
-  case '/':
-    while (1) {
-      if (not chew_comment_line())
-        return 1;
-    }
-  case '*':
-    while (1) {
-      std::expected comment = chew_comment_block();
-      switch (comment.has_value()) {
-      case 1:
-        if (not comment.value())
-          return 1;
-        continue;
-      case 0:
-        return std::unexpected{comment.error()};
-      }
-    }
-  default:
-    prev();
-    return 0;
-  }
-}
-
-std::expected<bool, PARSE_ERRMSG> SpaceChewer::chewSpace1(char32_t ch) {
-  switch (ch) {
-  case '\r':
-    chewLF();
-    [[fallthrough]];
-
-  case '\n':
-  case 0x2028:
-  case 0x2029:
-    newline_seen = 1;
-    return 1;
-
-  case '/': {
-    if (reached_eof())
-      return 1;
-    std::expected comment_exp = chew_comment(next().value());
-    if (comment_exp.has_value() && !comment_exp.value())
-      prev();
-    return comment_exp;
-  }
-
-  default: {
-    bool ws = u_isWhitespace(ch);
-    if (not ws)
-      prev();
-    return ws;
-  }
-  }
-}
-
-std::optional<TOKEN> Tokenizer::tokenize_lookahead(char32_t leading) {
-  switch (leading) {
-  case '\'':
-  case '"':
-    return StringTokenizer::tokenize(leading);
-  case '=': {
-    int i;
-    for (i = 0; i < 2; i++) {
-      std::optional ahead = next();
-      if (not ahead.transform([](char32_t ch) { return ch == '='; })
-                  .value_or(0)) {
-        if (ahead)
-          prev();
-        break;
-      }
-    }
-    switch (i) {
-    default:
-      return U'=';
-    case 1:
-      return TOK_OPERATOR::EQ_SLOPPY;
-    case 2:
-      return TOK_OPERATOR::EQ_STRICT;
-    }
-  }
-  default:
-    return std::nullopt;
-  }
+  return TOK_IDENTI{has_escape, atomFind()};
 }
 
 TOKEN Tokenizer::tokenize() {
-  unseeNewline();
-  bool go_on{1};
-  while (go_on) {
+  newline_seen = 0;
+  while (1) {
     if (reached_eof())
       return std::monostate{};
-    std::expected ws_exp = chewSpace1(next().value());
-    switch (ws_exp.has_value()) {
-    case 1:
-      go_on = ws_exp.value();
+    char32_t leading = next().value();
+    switch (leading) {
+    case '\'':
+    case '"':
+      return StringTokenizer::tokenize(leading);
+    case '\r':
+      chewLF();
+      [[fallthrough]];
+    case '\n':
+    case 0x2028:
+    case 0x2029:
+      newline_seen = 1;
       break;
-    case 0:
-      return ws_exp.error();
+    case '/':
+      if (reached_eof())
+        return U'/';
+      leading = next().value();
+      if (leading == '*') {
+        while (1) {
+          if (reached_eof())
+            return UNEXPECTED_ERR::COMMENT_END;
+          leading = next().value();
+          std::optional ahead_opt = next();
+          if (leading == '*' && ahead_opt == '/')
+            break;
+          if (ahead_opt)
+            prev();
+          if (lineterm(leading))
+            newline_seen = 1;
+        }
+        break;
+      } else if (leading == '/') {
+        while (1) {
+          if (reached_eof())
+            break;
+          leading = next().value();
+          if (lineterm(leading)) {
+            prev();
+            break;
+          }
+        }
+        break;
+      }
+      if (leading == '=')
+        return TOK_OPERATOR::DIV_ASSIGN;
+      else {
+        prev();
+        return U'/';
+      }
+    case '=': {
+      int i;
+      for (i = 0; i < 2; i++) {
+        if (reached_eof())
+          break;
+        leading = next().value();
+        if (leading != '=') {
+          prev();
+          break;
+        }
+      }
+      switch (i) {
+      default:
+        return U'=';
+      case 1:
+        return TOK_OPERATOR::EQ_SLOPPY;
+      case 2:
+        return TOK_OPERATOR::EQ_STRICT;
+      }
+    }
+    default:
+      if (u_isWhitespace(leading))
+        break;
+      return UNEXPECTED_ERR::THIS_CHAR;
     }
   }
-  char32_t leading = next().value();
-  std::optional<TOKEN> token_opt = tokenize_lookahead(leading);
-  if (token_opt)
-    return token_opt.value();
-  token_opt = NumberTokenizer::tokenize(leading);
-  if (token_opt)
-    return token_opt.value();
-  token_opt = IdentifierTokenizer::tokenize(leading);
-  if (token_opt)
-    return token_opt.value();
-  return leading;
 }
 
 std::size_t aligned_N(std::size_t N) {
@@ -459,7 +400,7 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
   return N;
 }
 
-std::size_t AtomTokenizer::find_atom() {
+std::size_t AtomTokenizer::atomFind() {
   std::optional<std::size_t> pos_opt{};
   for (std::size_t p_atom : atom_prealloc_pos) {
     std::size_t len =
@@ -472,14 +413,14 @@ std::size_t AtomTokenizer::find_atom() {
   }
   if (not pos_opt) {
     if (not atom_umap.contains(my_atom))
-      atom_umap[my_atom] = alloc_atom();
+      atom_umap[my_atom] = atomAlloc();
     pos_opt = atom_umap[my_atom];
   }
   my_atom = {};
   return pos_opt.value();
 }
 
-std::size_t AtomTokenizer::alloc_atom() {
+std::size_t AtomTokenizer::atomAlloc() {
   std::size_t atom_addr = atom_arena.size();
   std::size_t aligned_size = aligned_N(my_atom.size());
   atom_arena.reserve(atom_arena.size() + aligned_size + 8);
