@@ -628,31 +628,21 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   return std::unexpected{NEEDED_ERR::CLOSING_BRACE};
 }
 
-std::expected<bool, PARSE_ERRMSG> Parser::parse_arg_expr() {
-  my_token = tokenize();
-  if (my_token == TOKEN{U')'})
-    return 0;
-  std::expected parse_ok = parse_assign_expr();
-  if (not parse_ok)
-    return std::unexpected{parse_ok.error()};
-  if (my_token == TOKEN{U')'})
-    return 0;
-  if (my_token != TOKEN{U','})
-    return std::unexpected{NEEDED_ERR::COMMA};
-  else
-    return 1;
-}
-
 std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
   EXPRESSION callee_expr = std::move(my_expression);
   std::vector<EXPRESSION> arguments{};
   while (1) {
-    std::expected parse_ok = parse_arg_expr();
+    my_token = tokenize();
+    if (my_token == TOKEN{U')'})
+      break;
+    std::expected parse_ok = parse_assign_expr();
     if (not parse_ok)
       return std::unexpected{parse_ok.error()};
-    arguments.push_back(std::move(my_expression));
-    if (not *parse_ok)
+    if (my_token == TOKEN{U')'})
       break;
+    if (my_token != TOKEN{U','})
+      return std::unexpected{NEEDED_ERR::COMMA};
+    arguments.push_back(std::move(my_expression));
   }
   my_expression =
       std::make_unique<EXPR_CALL>(std::move(callee_expr), std::move(arguments));

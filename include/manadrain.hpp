@@ -185,7 +185,6 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_binary_expr();
   std::expected<void, PARSE_ERRMSG> parse_postfix_expr();
   std::expected<void, PARSE_ERRMSG> parse_primary_expr();
-  std::expected<bool, PARSE_ERRMSG> parse_arg_expr();
   std::expected<void, PARSE_ERRMSG> parse_call_expr();
   std::expected<void, PARSE_ERRMSG> parse_member_expr();
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
