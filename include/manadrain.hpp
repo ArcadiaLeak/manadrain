@@ -95,6 +95,7 @@ constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 class Scanner {
 public:
   bool reached_eof() { return buffer_idx >= buffer.size(); }
+  char32_t next_u();
   std::optional<char32_t> next();
   std::optional<char32_t> peek();
   void prev();

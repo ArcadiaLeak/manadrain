@@ -28,6 +28,12 @@ private:
   std::uint32_t length;
 };
 
+char32_t Scanner::next_u() {
+  UChar32 ch;
+  U8_NEXT_OR_FFFD(buffer.data(), buffer_idx, buffer.size(), ch);
+  return ch;
+}
+
 std::optional<char32_t> Scanner::next() {
   if (reached_eof())
     return std::nullopt;
@@ -172,7 +178,7 @@ StringTokenizer::decode_special(char32_t separator, char32_t ch) {
   case '\\':
     if (reached_eof())
       return std::monostate{};
-    return decode_escape(*next());
+    return decode_escape(next_u());
   default:
     return ch;
   }
@@ -182,7 +188,7 @@ TOKEN StringTokenizer::tokenize(char32_t separator) {
   while (1) {
     if (reached_eof())
       return UNEXPECTED_ERR::STRING_END;
-    std::variant ch_alter = decode_special(separator, *next());
+    std::variant ch_alter = decode_special(separator, next_u());
     switch (ch_alter.index()) {
     case 0:
       break;
@@ -210,7 +216,7 @@ IdentifierTokenizer::decode_uni_fixed(char32_t leading) {
     num = (num << 4) | *hex;
     if (reached_eof())
       return std::nullopt;
-    curr = *next();
+    curr = next_u();
   }
   return num;
 }
@@ -218,7 +224,7 @@ IdentifierTokenizer::decode_uni_fixed(char32_t leading) {
 std::optional<char32_t> IdentifierTokenizer::decode_uni_braced() {
   if (reached_eof())
     return std::nullopt;
-  char32_t num = 0, curr{*next()};
+  char32_t num = 0, curr{next_u()};
   for (int i = 0; i < 6; ++i) {
     std::optional hex = decode_hex(curr);
     if (not hex.has_value())
@@ -228,7 +234,7 @@ std::optional<char32_t> IdentifierTokenizer::decode_uni_braced() {
       return std::nullopt;
     if (reached_eof())
       return std::nullopt;
-    curr = *next();
+    curr = next_u();
   }
   return curr == '}' ? std::make_optional(num) : std::nullopt;
 }
@@ -236,7 +242,7 @@ std::optional<char32_t> IdentifierTokenizer::decode_uni_braced() {
 std::optional<char32_t> IdentifierTokenizer::decode_uni() {
   if (reached_eof())
     return std::nullopt;
-  char32_t leading = *next();
+  char32_t leading = next_u();
   return leading == '{' ? decode_uni_braced() : decode_uni_fixed(leading);
 }
 
@@ -288,7 +294,7 @@ std::optional<TOKEN> IdentifierTokenizer::tokenize(char32_t leading) {
     case 1:
       if (reached_eof())
         break;
-      leading = *next();
+      leading = next_u();
       continue;
     }
     break;
@@ -304,7 +310,7 @@ TOKEN Tokenizer::tokenize() {
   while (1) {
     if (reached_eof())
       return std::monostate{};
-    char32_t leading = *next();
+    char32_t leading = next_u();
     switch (leading) {
     case '\'':
     case '"':
@@ -323,7 +329,7 @@ TOKEN Tokenizer::tokenize() {
         while (1) {
           if (reached_eof())
             return UNEXPECTED_ERR::COMMENT_END;
-          leading = *next();
+          leading = next_u();
           ahead_opt = next();
           if (leading == '*' && ahead_opt == '/')
             break;
@@ -337,7 +343,7 @@ TOKEN Tokenizer::tokenize() {
         while (1) {
           if (reached_eof())
             break;
-          leading = *next();
+          leading = next_u();
           if (lineterm(leading)) {
             prev();
             break;
@@ -375,7 +381,7 @@ TOKEN Tokenizer::tokenize() {
       for (i = 0; i < 2; i++) {
         if (reached_eof())
           break;
-        leading = *next();
+        leading = next_u();
         if (leading != '=') {
           prev();
           break;
@@ -518,7 +524,7 @@ TOKEN NumberTokenizer::tokenize(char32_t leading) {
     charconv_in.append(encoder(leading));
     if (reached_eof())
       break;
-    leading = *next();
+    leading = next_u();
   }
   do {
     if (reached_eof())
