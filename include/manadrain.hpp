@@ -13,7 +13,7 @@
 
 namespace Manadrain {
 enum class ESCAPE_ERR { MALFORMED };
-enum class NUMBER_ERR { INVALID_LITERAL };
+enum class NUMBER_ERR { INVALID_LITERAL, INTEGER_OVERFLOW };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
 enum class NEEDED_ERR {
   COMMA,
@@ -135,8 +135,7 @@ public:
 
 class AtomTokenizer : public NumberTokenizer {
 public:
-  std::string my_string_atom;
-  void encode_string_atom(char32_t cp);
+  std::string my_atom;
 
   std::size_t find_atom();
   std::size_t alloc_atom();

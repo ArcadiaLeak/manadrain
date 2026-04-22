@@ -13,15 +13,20 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-void AtomTokenizer::encode_string_atom(char32_t cp) {
-  std::array<char, 4> buff{};
-  UBool is_error{};
-  std::uint32_t length{};
-  U8_APPEND(buff.data(), length, buff.size(), cp, is_error);
-  if (is_error)
+class Ch4Encoder {
+public:
+  std::string_view operator()(char32_t cp) {
+    UBool has_error{};
+    U8_APPEND(buff.data(), length, buff.size(), cp, has_error);
+    if (not has_error)
+      return {buff.data(), length};
     throw std::runtime_error{"codepoint conversion failed!"};
-  my_string_atom.append(std::string_view{buff.data(), length});
-}
+  }
+
+private:
+  std::array<char, 4> buff;
+  std::uint32_t length;
+};
 
 std::optional<char32_t> Scanner::next() {
   if (reached_eof())
@@ -186,7 +191,8 @@ TOKEN StringTokenizer::tokenize(char32_t separator) {
       char32_t ch = std::get<1>(ch_alter);
       if (ch == separator)
         return TOK_STRING{separator, find_atom()};
-      encode_string_atom(ch);
+      Ch4Encoder encoder{};
+      my_atom.append(encoder(ch));
       continue;
     }
     default:
@@ -236,10 +242,12 @@ std::optional<char32_t> IdentifierTokenizer::decode_uni() {
 }
 
 bool IdentifierTokenizer::encode_uchar(char32_t ch) {
-  bool is_legal = u_hasBinaryProperty(
-      ch, my_string_atom.size() ? UCHAR_XID_CONTINUE : UCHAR_XID_START);
-  if (is_legal)
-    encode_string_atom(ch);
+  bool is_legal = u_hasBinaryProperty(ch, my_atom.size() ? UCHAR_XID_CONTINUE
+                                                         : UCHAR_XID_START);
+  if (is_legal) {
+    Ch4Encoder encoder{};
+    my_atom.append(encoder(ch));
+  }
   return is_legal;
 }
 
@@ -286,7 +294,7 @@ std::optional<TOKEN> IdentifierTokenizer::tokenize(char32_t leading) {
     }
     break;
   }
-  if (my_string_atom.size() == 0)
+  if (my_atom.size() == 0)
     return std::nullopt;
   prev();
   return TOK_IDENTI{has_escape, find_atom()};
@@ -457,28 +465,28 @@ std::size_t AtomTokenizer::find_atom() {
     std::size_t len =
         LE_decode(std::span{atom_arena}.subspan(p_atom).first<8>());
     std::string_view str_atom{atom_arena.data() + p_atom + 8, len};
-    if (my_string_atom == str_atom) {
+    if (my_atom == str_atom) {
       pos_opt = p_atom;
       break;
     }
   }
   if (not pos_opt) {
-    if (not atom_umap.contains(my_string_atom))
-      atom_umap[my_string_atom] = alloc_atom();
-    pos_opt = atom_umap[my_string_atom];
+    if (not atom_umap.contains(my_atom))
+      atom_umap[my_atom] = alloc_atom();
+    pos_opt = atom_umap[my_atom];
   }
-  my_string_atom = {};
+  my_atom = {};
   return pos_opt.value();
 }
 
 std::size_t AtomTokenizer::alloc_atom() {
   std::size_t atom_addr = atom_arena.size();
-  std::size_t aligned_size = aligned_N(my_string_atom.size());
+  std::size_t aligned_size = aligned_N(my_atom.size());
   atom_arena.reserve(atom_arena.size() + aligned_size + 8);
-  atom_arena.append_range(LE_encode(my_string_atom.size()));
-  atom_arena.append_range(my_string_atom);
+  atom_arena.append_range(LE_encode(my_atom.size()));
+  atom_arena.append_range(my_atom);
   atom_arena.append_range(
-      std::ranges::repeat_view{0, aligned_size - my_string_atom.size()});
+      std::ranges::repeat_view{0, aligned_size - my_atom.size()});
   return atom_addr;
 }
 
@@ -491,40 +499,68 @@ std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
   /* lifting the do-while to a separate method is hard because it
    * writes to the locals above */
   do {
-    if (leading != '0')
+    if (reached_eof() || leading != '0')
       break;
-    std::optional ahead{next()};
-    if (not ahead.transform([](char32_t ch) { return std::isdigit(ch); })
-                .value_or(0))
+    if (not peek()
+                .transform([](char32_t ch) { return std::isdigit(ch); })
+                .value())
       break;
     has_legacy_octal = 1;
     separator = std::nullopt;
+    std::optional<char32_t> ahead{};
     int i{};
     while (1) {
-      bool has_octal =
-          ahead.transform([](char32_t ch) { return ch >= '0' && ch <= '7'; })
-              .value_or(0);
-      if (not has_octal)
+      if (reached_eof())
         break;
+      auto is_octal = [](char32_t ch) { return ch >= '0' && ch <= '7'; };
       ahead = next();
-      ++i;
+      if (is_octal(ahead.value()))
+        ++i;
+      else {
+        prev();
+        break;
+      }
     }
     backtrack(i);
-    if (not ahead.transform([](char32_t ch) { return ch == '8' || ch == '9'; })
-                .value_or(0))
+    auto beyond_octal = [](char32_t ch) { return ch == '8' || ch == '9'; };
+    if (not ahead.transform(beyond_octal).value_or(0))
       radix = 8;
     else {
       prev();
       break;
     }
-    if (peek()
-            .and_then(hex_conv)
-            .transform([](int hex) { return hex < radix; })
-            .value_or(0))
+    if (peek().and_then(hex_conv).value_or(16) < radix)
       break;
     return NUMBER_ERR::INVALID_LITERAL;
   } while (0);
-  return std::nullopt;
+  std::string charconv_in{};
+  while (1) {
+    if (reached_eof())
+      break;
+    char32_t ch = next().value();
+    if (not std::isdigit(ch)) {
+      prev();
+      break;
+    }
+    Ch4Encoder encoder{};
+    charconv_in.append(encoder(ch));
+  }
+  do {
+    if (reached_eof())
+      break;
+    char32_t ch = peek().value();
+    bool id_continue_ahead = u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE);
+    if (not id_continue_ahead)
+      break;
+    return NUMBER_ERR::INVALID_LITERAL;
+  } while (0);
+  std::uint64_t num{};
+  std::from_chars_result res = std::from_chars(
+      charconv_in.data(), charconv_in.data() + charconv_in.size(), num, radix);
+  if (res.ec == std::errc::result_out_of_range ||
+      num >= 1LL << std::numeric_limits<double>::digits)
+    return NUMBER_ERR::INTEGER_OVERFLOW;
+  return static_cast<double>(num);
 }
 
 std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
