@@ -494,7 +494,6 @@ std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
   if (not std::isdigit(leading))
     return std::nullopt;
   int radix{10};
-  bool has_legacy_octal{};
   std::optional<char32_t> separator{'_'};
   /* lifting the do-while to a separate method is hard because it
    * writes to the locals above */
@@ -505,7 +504,6 @@ std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
                 .transform([](char32_t ch) { return std::isdigit(ch); })
                 .value())
       break;
-    has_legacy_octal = 1;
     separator = std::nullopt;
     std::optional<char32_t> ahead{};
     int i{};
@@ -555,12 +553,12 @@ std::optional<TOKEN> NumberTokenizer::tokenize(char32_t leading) {
     return NUMBER_ERR::INVALID_LITERAL;
   } while (0);
   std::uint64_t num{};
-  std::from_chars_result res = std::from_chars(
+  std::from_chars_result status = std::from_chars(
       charconv_in.data(), charconv_in.data() + charconv_in.size(), num, radix);
-  if (res.ec == std::errc::result_out_of_range ||
-      num >= 1LL << std::numeric_limits<double>::digits)
-    return NUMBER_ERR::INTEGER_OVERFLOW;
-  return static_cast<double>(num);
+  bool has_overflow = status.ec == std::errc::result_out_of_range ||
+                      num >= 1LL << std::numeric_limits<double>::digits;
+  return has_overflow ? std::numeric_limits<double>::infinity()
+                      : static_cast<double>(num);
 }
 
 std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>

@@ -13,7 +13,7 @@
 
 namespace Manadrain {
 enum class ESCAPE_ERR { MALFORMED };
-enum class NUMBER_ERR { INVALID_LITERAL, INTEGER_OVERFLOW };
+enum class NUMBER_ERR { INVALID_LITERAL };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
 enum class NEEDED_ERR {
   COMMA,
