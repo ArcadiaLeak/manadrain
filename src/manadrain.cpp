@@ -58,19 +58,19 @@ void Scanner::chewLF() {
     prev();
 }
 
-std::optional<char32_t> StringTokenizer::decode_octal() {
+std::optional<char32_t> StringTokenizer::decode_esc8() {
   if (reached_eof())
     return std::nullopt;
   std::optional ahead{next()};
   std::optional ret_opt = ahead.and_then([](char32_t ch) {
     return ch < '8' ? std::make_optional(ch - '0') : std::nullopt;
   });
-  if (not ret_opt && ahead)
+  if (ahead && !ret_opt)
     prev();
   return ret_opt;
 }
 
-std::optional<int> hex_conv(char32_t digit) {
+std::optional<int> decode_hex(char32_t digit) {
   if (digit >= '0' && digit <= '9')
     return digit - '0';
   if (digit >= 'A' && digit <= 'F')
@@ -80,11 +80,11 @@ std::optional<int> hex_conv(char32_t digit) {
   return std::nullopt;
 }
 
-std::optional<char32_t> StringTokenizer::decode_hex() {
-  std::optional<int> hex0 = next().and_then(hex_conv);
+std::optional<char32_t> StringTokenizer::decode_xseq() {
+  std::optional<int> hex0 = next().and_then(decode_hex);
   if (not hex0)
     return std::nullopt;
-  std::optional<int> hex1 = next().and_then(hex_conv);
+  std::optional<int> hex1 = next().and_then(decode_hex);
   if (not hex1)
     return std::nullopt;
   return (*hex0 << 4) | *hex1;
@@ -119,10 +119,10 @@ StringTokenizer::decode_escape(char32_t ch) {
   case 'v':
     return U'\v';
   case 'x': {
-    std::optional hex = decode_hex();
+    std::optional hex = decode_xseq();
     if (not hex)
       return ESCAPE_ERR::MALFORMED;
-    return hex.value();
+    return *hex;
   }
   case '0':
     if (peek()
@@ -137,18 +137,18 @@ StringTokenizer::decode_escape(char32_t ch) {
   case '5':
   case '6':
   case '7': {
-    std::optional<char32_t> dec{};
+    std::optional<char32_t> digit{};
     char32_t base = ch - '0';
-    dec = decode_octal();
-    if (not dec)
+    digit = decode_esc8();
+    if (not digit)
       return base;
-    base = (base << 3) | dec.value();
+    base = (base << 3) | *digit;
     if (base >= 32)
       return base;
-    dec = decode_octal();
-    if (not dec)
+    digit = decode_esc8();
+    if (not digit)
       return base;
-    base = (base << 3) | dec.value();
+    base = (base << 3) | *digit;
     return base;
   }
   case '8':
@@ -172,7 +172,7 @@ StringTokenizer::decode_special(char32_t separator, char32_t ch) {
   case '\\':
     if (reached_eof())
       return std::monostate{};
-    return decode_escape(next().value());
+    return decode_escape(*next());
   default:
     return ch;
   }
@@ -182,7 +182,7 @@ TOKEN StringTokenizer::tokenize(char32_t separator) {
   while (1) {
     if (reached_eof())
       return UNEXPECTED_ERR::STRING_END;
-    std::variant ch_alter = decode_special(separator, next().value());
+    std::variant ch_alter = decode_special(separator, *next());
     switch (ch_alter.index()) {
     case 0:
       break;
@@ -204,13 +204,13 @@ std::optional<char32_t>
 IdentifierTokenizer::decode_uni_fixed(char32_t leading) {
   char32_t curr{leading}, num{};
   for (int i = 0; i < 4; ++i) {
-    std::optional hex = hex_conv(curr);
+    std::optional hex = decode_hex(curr);
     if (not hex.has_value())
       return std::nullopt;
-    num = (num << 4) | hex.value();
+    num = (num << 4) | *hex;
     if (reached_eof())
       return std::nullopt;
-    curr = next().value();
+    curr = *next();
   }
   return num;
 }
@@ -218,17 +218,17 @@ IdentifierTokenizer::decode_uni_fixed(char32_t leading) {
 std::optional<char32_t> IdentifierTokenizer::decode_uni_braced() {
   if (reached_eof())
     return std::nullopt;
-  char32_t num = 0, curr{next().value()};
+  char32_t num = 0, curr{*next()};
   for (int i = 0; i < 6; ++i) {
-    std::optional hex = hex_conv(curr);
+    std::optional hex = decode_hex(curr);
     if (not hex.has_value())
       break;
-    num = (num << 4) | hex.value();
+    num = (num << 4) | *hex;
     if (num > UCHAR_MAX_VALUE)
       return std::nullopt;
     if (reached_eof())
       return std::nullopt;
-    curr = next().value();
+    curr = *next();
   }
   return curr == '}' ? std::make_optional(num) : std::nullopt;
 }
@@ -236,7 +236,7 @@ std::optional<char32_t> IdentifierTokenizer::decode_uni_braced() {
 std::optional<char32_t> IdentifierTokenizer::decode_uni() {
   if (reached_eof())
     return std::nullopt;
-  char32_t leading = next().value();
+  char32_t leading = *next();
   return leading == '{' ? decode_uni_braced() : decode_uni_fixed(leading);
 }
 
@@ -259,7 +259,7 @@ IdentifierTokenizer::decode_escape(char32_t leading) {
     std::optional<int> ch_uni = decode_uni();
     switch (ch_uni.has_value()) {
     case 1:
-      leading = ch_uni.value();
+      leading = *ch_uni;
       has_escape = 1;
       break;
     default:
@@ -281,14 +281,14 @@ std::optional<TOKEN> IdentifierTokenizer::tokenize(char32_t leading) {
     std::expected esc_exp = decode_escape(leading);
     if (not esc_exp)
       return esc_exp.error();
-    switch (esc_exp.value()) {
+    switch (*esc_exp) {
     case 2:
       has_escape = 1;
       [[fallthrough]];
     case 1:
       if (reached_eof())
         break;
-      leading = next().value();
+      leading = *next();
       continue;
     }
     break;
@@ -304,7 +304,7 @@ TOKEN Tokenizer::tokenize() {
   while (1) {
     if (reached_eof())
       return std::monostate{};
-    char32_t leading = next().value();
+    char32_t leading = *next();
     switch (leading) {
     case '\'':
     case '"':
@@ -323,7 +323,7 @@ TOKEN Tokenizer::tokenize() {
         while (1) {
           if (reached_eof())
             return UNEXPECTED_ERR::COMMENT_END;
-          leading = next().value();
+          leading = *next();
           ahead_opt = next();
           if (leading == '*' && ahead_opt == '/')
             break;
@@ -337,7 +337,7 @@ TOKEN Tokenizer::tokenize() {
         while (1) {
           if (reached_eof())
             break;
-          leading = next().value();
+          leading = *next();
           if (lineterm(leading)) {
             prev();
             break;
@@ -361,7 +361,7 @@ TOKEN Tokenizer::tokenize() {
           return u_hasBinaryProperty(ch, UCHAR_XID_START);
         };
         if (ch_uni.transform(is_id_start).value_or(0))
-          return IdentifierTokenizer::tokenize(ch_uni.value()).value();
+          return IdentifierTokenizer::tokenize(*ch_uni).value();
         else
           return ESCAPE_ERR::MALFORMED;
       } else {
@@ -375,7 +375,7 @@ TOKEN Tokenizer::tokenize() {
       for (i = 0; i < 2; i++) {
         if (reached_eof())
           break;
-        leading = next().value();
+        leading = *next();
         if (leading != '=') {
           prev();
           break;
@@ -449,16 +449,13 @@ std::size_t AtomTokenizer::atomAlloc() {
   return atom_addr;
 }
 
-void NumberTokenizer::peek_behind_octal(char32_t &ahead) {
+void NumberTokenizer::peek_behind_octal(std::optional<char32_t> &trail_opt) {
   int cnt{};
   while (1) {
-    if (ahead < '0' || ahead > '7') {
-      prev();
+    if (trail_opt.transform([](char32_t ch) { return ch < '0' || ch > '7'; })
+            .value_or(1))
       break;
-    }
-    if (reached_eof())
-      break;
-    ahead = next().value();
+    trail_opt = next();
     ++cnt;
   }
   backtrack(cnt);
@@ -469,13 +466,22 @@ NumberTokenizer::PREFIX NumberTokenizer::decode_prefix() {
   std::optional ahead_opt{next()};
   if (ahead_opt.transform([](char32_t ch) { return std::isdigit(ch); })
           .value_or(0)) {
-    char32_t trailing{*ahead_opt};
-    peek_behind_octal(trailing);
-    prefix =
-        trailing == '8' || trailing == '9' ? PREFIX::ABSENT : PREFIX::ZERO_LEAD;
+    std::optional trail_opt{ahead_opt};
+    peek_behind_octal(trail_opt);
+    prefix = trail_opt == '8' || trail_opt == '9' ? PREFIX::ZERO_LEAD_A
+                                                  : PREFIX::ZERO_LEAD_8;
   }
-  if (prefix == PREFIX::ABSENT)
-    backtrack(ahead_opt.has_value() + 1);
+  switch (prefix) {
+  case PREFIX::ZERO_LEAD_A:
+    prev();
+    [[fallthrough]];
+  case PREFIX::ZERO_LEAD_8:
+    if (ahead_opt)
+      prev();
+    break;
+  default:
+    break;
+  }
   return prefix;
 }
 
@@ -487,34 +493,37 @@ TOKEN NumberTokenizer::tokenize(char32_t leading) {
   if (leading == '0') {
     do {
       PREFIX prefix{decode_prefix()};
-      if (prefix == PREFIX::ZERO_LEAD) {
+      if (prefix == PREFIX::ZERO_LEAD_8) {
         separator = std::nullopt;
         radix = 8;
       } else
         break;
       /* there must be a digit after the prefix */
-      std::optional ahead{peek()};
-      if (ahead && *ahead < radix)
+      std::optional ahead{next()};
+      std::optional hex_opt{ahead.and_then(decode_hex)};
+      if (hex_opt && *hex_opt < radix) {
+        leading = *ahead;
         break;
+      }
       return NUMBER_ERR::INVALID_LITERAL;
     } while (0);
   }
   std::string charconv_in{};
   while (1) {
-    if (reached_eof())
-      break;
-    char32_t ch = next().value();
-    if (not std::isdigit(ch)) {
+    if (not std::isdigit(leading)) {
       prev();
       break;
     }
     Ch4Encoder encoder{};
-    charconv_in.append(encoder(ch));
+    charconv_in.append(encoder(leading));
+    if (reached_eof())
+      break;
+    leading = *next();
   }
   do {
     if (reached_eof())
       break;
-    char32_t ch = peek().value();
+    char32_t ch = *peek();
     bool id_continue_ahead = u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE);
     if (not id_continue_ahead)
       break;
@@ -642,7 +651,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
     if (not parse_ok)
       return std::unexpected{parse_ok.error()};
     arguments.push_back(std::move(my_expression));
-    if (not parse_ok.value())
+    if (not *parse_ok)
       break;
   }
   my_expression =

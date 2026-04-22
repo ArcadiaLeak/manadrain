@@ -118,9 +118,9 @@ public:
   TOKEN tokenize(char32_t leading);
 
 private:
-  void peek_behind_octal(char32_t &ahead);
+  void peek_behind_octal(std::optional<char32_t> &trail_opt);
 
-  enum class PREFIX { ABSENT, HEX, BINARY, OCTAL, ZERO_LEAD };
+  enum class PREFIX { ZERO_LEAD_A, HEX, BINARY, OCTAL, ZERO_LEAD_8 };
   PREFIX decode_prefix();
 };
 
@@ -141,8 +141,8 @@ public:
   TOKEN tokenize(char32_t separator);
 
 private:
-  std::optional<char32_t> decode_octal();
-  std::optional<char32_t> decode_hex();
+  std::optional<char32_t> decode_esc8();
+  std::optional<char32_t> decode_xseq();
   std::variant<std::monostate, char32_t, PARSE_ERRMSG>
   decode_escape(char32_t leading);
   std::variant<std::monostate, char32_t, PARSE_ERRMSG>
