@@ -561,15 +561,25 @@ TOKEN NumberTokenizer::tokenize(char32_t leading) {
       break;
     return NUMBER_ERR::INVALID_LITERAL;
   } while (0);
-  std::uint64_t num{};
-  std::string &repr_s = std::get<WHOLE>(repr_node).repr_s;
-  std::from_chars_result status =
-      std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(), num,
-                      radix_from_ind(base_opt));
-  bool has_overflow = status.ec == std::errc::result_out_of_range ||
-                      num >= 1LL << std::numeric_limits<double>::digits;
-  return has_overflow ? std::numeric_limits<double>::infinity()
-                      : static_cast<double>(num);
+  int radix{radix_from_ind(base_opt)};
+  switch (radix) {
+  case 10:
+    break;
+  default: {
+    std::uint64_t result{};
+    std::string repr_s = std::move(std::get<WHOLE>(repr_node).repr_s);
+    auto status = std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(),
+                                  result, radix);
+    if (status.ec == std::errc::result_out_of_range)
+      break;
+    static constexpr std::uint64_t max_safe_int =
+        1LL << std::numeric_limits<double>::digits;
+    if (result >= max_safe_int)
+      break;
+    return static_cast<double>(result);
+  }
+  }
+  return std::numeric_limits<double>::infinity();
 }
 
 std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
