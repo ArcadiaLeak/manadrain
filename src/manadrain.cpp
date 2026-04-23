@@ -575,9 +575,15 @@ TOKEN NumberTokenizer::tokenize(char32_t leading) {
   int radix{radix_from_ind(base_opt)};
   switch (radix) {
   case 10: {
-    std::string collapsed =
-        repr_node.visit([](auto n) { return n.collapse(); });
-    break;
+    double result{};
+    std::string repr_s = repr_node.visit([](auto n) { return n.collapse(); });
+    auto status =
+        std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(), result);
+    if (status.ec == std::errc::result_out_of_range)
+      break;
+    else if (status.ec != std::errc{})
+      return NUMBER_ERR::INVALID_LITERAL;
+    return result;
   }
   default: {
     std::uint64_t result{};
@@ -586,6 +592,8 @@ TOKEN NumberTokenizer::tokenize(char32_t leading) {
                                   result, radix);
     if (status.ec == std::errc::result_out_of_range)
       break;
+    else if (status.ec != std::errc{})
+      return NUMBER_ERR::INVALID_LITERAL;
     static constexpr std::uint64_t max_safe_int =
         1LL << std::numeric_limits<double>::digits;
     if (result >= max_safe_int)
