@@ -122,14 +122,17 @@ public:
 private:
   struct WHOLE {
     std::string repr_s;
+    std::string collapse() { return repr_s; }
   };
   struct FRACTIONAL {
     WHOLE whole;
     std::string frac_s;
+    std::string collapse();
   };
   struct SCIENTIFIC {
     std::variant<WHOLE, FRACTIONAL> expon_base;
     std::string expon_s;
+    std::string collapse() { return {}; }
   };
   using FLOAT_REPR = std::variant<WHOLE, FRACTIONAL, SCIENTIFIC>;
 

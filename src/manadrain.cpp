@@ -462,7 +462,8 @@ void NumberTokenizer::peek_behind_octal(std::optional<char32_t> &trail_opt) {
             .value_or(1))
       break;
     trail_opt = next();
-    ++cnt;
+    if (trail_opt)
+      ++cnt;
   }
   backtrack(cnt);
 }
@@ -525,6 +526,16 @@ std::string NumberTokenizer::scan_numseq(std::optional<BASE_IND> base_opt,
   return accum;
 }
 
+std::string NumberTokenizer::FRACTIONAL::collapse() {
+  std::string ret{};
+  ret.append(whole.repr_s);
+  if (frac_s.empty())
+    return ret;
+  ret.push_back('.');
+  ret.append(frac_s);
+  return ret;
+}
+
 TOKEN NumberTokenizer::tokenize(char32_t leading) {
   if (reached_eof())
     return leading - '0';
@@ -563,8 +574,11 @@ TOKEN NumberTokenizer::tokenize(char32_t leading) {
   } while (0);
   int radix{radix_from_ind(base_opt)};
   switch (radix) {
-  case 10:
+  case 10: {
+    std::string collapsed =
+        repr_node.visit([](auto n) { return n.collapse(); });
     break;
+  }
   default: {
     std::uint64_t result{};
     std::string repr_s = std::move(std::get<WHOLE>(repr_node).repr_s);
