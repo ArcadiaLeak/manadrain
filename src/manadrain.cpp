@@ -467,78 +467,105 @@ void NumberTokenizer::peek_behind_octal(std::optional<char32_t> &trail_opt) {
   backtrack(cnt);
 }
 
-NumberTokenizer::PREFIX NumberTokenizer::decode_prefix() {
-  PREFIX prefix{};
+std::optional<BASE_IND> NumberTokenizer::decode_base_ind() {
+  std::optional<BASE_IND> prefix{};
   std::optional ahead_opt{next()};
   if (ahead_opt.transform([](char32_t ch) { return std::isdigit(ch); })
           .value_or(0)) {
     std::optional trail_opt{ahead_opt};
     peek_behind_octal(trail_opt);
-    prefix = trail_opt == '8' || trail_opt == '9' ? PREFIX::ZERO_LEAD_A
-                                                  : PREFIX::ZERO_LEAD_8;
+    prefix = trail_opt == '8' || trail_opt == '9'
+                 ? std::nullopt
+                 : std::make_optional(BASE_IND::ZERO_LEAD_8);
   }
-  switch (prefix) {
-  case PREFIX::ZERO_LEAD_A:
-    prev();
-    [[fallthrough]];
-  case PREFIX::ZERO_LEAD_8:
+  if (prefix.transform([](BASE_IND p) { return p == BASE_IND::ZERO_LEAD_8; })
+          .value_or(1)) {
+    if (not prefix)
+      prev();
     if (ahead_opt)
       prev();
-    break;
-  default:
-    break;
   }
   return prefix;
+}
+
+int radix_from_ind(std::optional<BASE_IND> ind_opt) {
+  do {
+    if (not ind_opt)
+      break;
+    switch (*ind_opt) {
+    case BASE_IND::BINARY:
+      return 2;
+    case BASE_IND::ZERO_LEAD_8:
+    case BASE_IND::OCTAL:
+      return 8;
+    case BASE_IND::HEX:
+      return 16;
+    }
+  } while (0);
+  return 10;
+}
+
+std::string NumberTokenizer::scan_numseq(std::optional<BASE_IND> base_opt,
+                                         std::optional<char32_t> ahead) {
+  int radix{radix_from_ind(base_opt)};
+  std::string accum{};
+  while (1) {
+    if (not ahead)
+      ahead = next();
+    if (not ahead.and_then(decode_hex)
+                .transform([radix](int digit) { return radix > digit; })
+                .value_or(0))
+      break;
+    Ch4Encoder encoder{};
+    accum.append(encoder(*ahead));
+    ahead = std::nullopt;
+  }
+  if (ahead)
+    prev();
+  return accum;
 }
 
 TOKEN NumberTokenizer::tokenize(char32_t leading) {
   if (reached_eof())
     return leading - '0';
-  int radix{10};
-  std::optional separator{U'_'};
+  std::optional<BASE_IND> base_opt{};
   if (leading == '0') {
     do {
-      PREFIX prefix{decode_prefix()};
-      if (prefix == PREFIX::ZERO_LEAD_8) {
-        separator = std::nullopt;
-        radix = 8;
-      } else
-        break;
-      /* there must be a digit after the prefix */
+      base_opt = decode_base_ind();
+      /* there must be a digit after the indicator */
       std::optional ahead{next()};
-      std::optional hex_opt{ahead.and_then(decode_hex)};
-      if (hex_opt && *hex_opt < radix) {
-        leading = *ahead;
-        break;
-      }
-      return NUMBER_ERR::INVALID_LITERAL;
+      if (not ahead.and_then(decode_hex))
+        return NUMBER_ERR::INVALID_LITERAL;
+      leading = *ahead;
     } while (0);
   }
-  std::string charconv_in{};
-  while (1) {
-    if (not std::isdigit(leading)) {
+  FLOAT_REPR repr_node{};
+  do {
+    WHOLE whole_n{scan_numseq(base_opt, leading)};
+    repr_node = whole_n;
+    if (base_opt)
+      break;
+    if (next() != '.') {
       prev();
       break;
     }
-    Ch4Encoder encoder{};
-    charconv_in.append(encoder(leading));
-    if (reached_eof())
-      break;
-    leading = next_u();
-  }
+    FRACTIONAL frac_n{std::move(whole_n),
+                      scan_numseq(std::nullopt, std::nullopt)};
+    repr_node = frac_n;
+  } while (0);
   do {
-    std::optional glued_idcont = peek().and_then([](char32_t ch) {
-      return u_hasBinaryProperty(ch, UCHAR_XID_CONTINUE)
-                 ? std::make_optional(std::monostate{})
-                 : std::nullopt;
-    });
-    if (not glued_idcont)
+    std::optional ahead{peek()};
+    if (not ahead)
+      break;
+    if (not u_hasBinaryProperty(*ahead, UCHAR_XID_CONTINUE))
       break;
     return NUMBER_ERR::INVALID_LITERAL;
   } while (0);
   std::uint64_t num{};
-  std::from_chars_result status = std::from_chars(
-      charconv_in.data(), charconv_in.data() + charconv_in.size(), num, radix);
+  std::string &repr_s = std::get<WHOLE>(repr_node).repr_s;
+  std::from_chars_result status =
+      std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(), num,
+                      radix_from_ind(base_opt));
   bool has_overflow = status.ec == std::errc::result_out_of_range ||
                       num >= 1LL << std::numeric_limits<double>::digits;
   return has_overflow ? std::numeric_limits<double>::infinity()

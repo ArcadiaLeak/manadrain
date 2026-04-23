@@ -114,15 +114,29 @@ private:
   int buffer_idx;
 };
 
+enum class BASE_IND { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
 class NumberTokenizer : public Scanner {
 public:
   TOKEN tokenize(char32_t leading);
 
 private:
-  void peek_behind_octal(std::optional<char32_t> &trail_opt);
+  struct WHOLE {
+    std::string repr_s;
+  };
+  struct FRACTIONAL {
+    WHOLE whole;
+    std::string frac_s;
+  };
+  struct SCIENTIFIC {
+    std::variant<WHOLE, FRACTIONAL> expon_base;
+    std::string expon_s;
+  };
+  using FLOAT_REPR = std::variant<WHOLE, FRACTIONAL, SCIENTIFIC>;
 
-  enum class PREFIX { ZERO_LEAD_A, HEX, BINARY, OCTAL, ZERO_LEAD_8 };
-  PREFIX decode_prefix();
+  std::optional<BASE_IND> decode_base_ind();
+  void peek_behind_octal(std::optional<char32_t> &trail_opt);
+  std::string scan_numseq(std::optional<BASE_IND> base_opt,
+                          std::optional<char32_t> ahead);
 };
 
 class AtomTokenizer : public NumberTokenizer {
