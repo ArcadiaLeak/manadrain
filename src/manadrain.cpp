@@ -164,13 +164,13 @@ TokString::decode_escape(char32_t ch) {
   case 'x': {
     std::optional hex = decode_xseq();
     if (not hex)
-      return ESCAPE_ERR::MALFORMED;
+      return INVALID_ERR::MALFORMED_ESCAPE;
     return *hex;
   }
   case 'u': {
     std::optional uni = decode_uni();
     if (not uni)
-      return ESCAPE_ERR::MALFORMED;
+      return INVALID_ERR::MALFORMED_ESCAPE;
     return *uni;
   }
   case '0':
@@ -202,7 +202,7 @@ TokString::decode_escape(char32_t ch) {
   }
   case '8':
   case '9':
-    return ESCAPE_ERR::MALFORMED;
+    return INVALID_ERR::MALFORMED_ESCAPE;
   default:
     return std::monostate{};
   }
@@ -300,7 +300,7 @@ std::expected<int, PARSE_ERRMSG> TokIdentif::decode_escape(char32_t leading) {
   bool has_escape{};
   if (leading == '\\') {
     if (not next().transform([](char32_t ch) { return ch == 'u'; }).value_or(0))
-      return std::unexpected{ESCAPE_ERR::MALFORMED};
+      return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
     std::optional<int> ch_uni = decode_uni();
     switch (ch_uni.has_value()) {
     case 1:
@@ -308,14 +308,14 @@ std::expected<int, PARSE_ERRMSG> TokIdentif::decode_escape(char32_t leading) {
       has_escape = 1;
       break;
     default:
-      return std::unexpected{ESCAPE_ERR::MALFORMED};
+      return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
     }
   }
   bool success = encode_uchar(leading);
   if (has_escape) {
     if (success)
       return 2;
-    return std::unexpected{ESCAPE_ERR::MALFORMED};
+    return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
   }
   return success;
 }
@@ -408,7 +408,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
         if (ch_uni.transform(is_id_start).value_or(0))
           return TokIdentif::tokenize(*ch_uni);
         else
-          return std::unexpected{ESCAPE_ERR::MALFORMED};
+          return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
       } else {
         if (ahead_opt)
           prev();
@@ -587,7 +587,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
       /* there must be a digit after the indicator */
       std::optional ahead{next()};
       if (not ahead.and_then(decode_hex))
-        return std::unexpected{NUMBER_ERR::INVALID_LITERAL};
+        return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
       leading = *ahead;
     } while (0);
   }
@@ -611,7 +611,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
       break;
     if (not u_hasBinaryProperty(*ahead, UCHAR_XID_CONTINUE))
       break;
-    return std::unexpected{NUMBER_ERR::INVALID_LITERAL};
+    return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
   } while (0);
   int radix{radix_from_ind(base_opt)};
   switch (radix) {
@@ -623,7 +623,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
     if (status.ec == std::errc::result_out_of_range)
       break;
     else if (status.ec != std::errc{})
-      return std::unexpected{NUMBER_ERR::INVALID_LITERAL};
+      return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
     return result;
   }
   default: {
@@ -634,7 +634,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
     if (status.ec == std::errc::result_out_of_range)
       break;
     else if (status.ec != std::errc{})
-      return std::unexpected{NUMBER_ERR::INVALID_LITERAL};
+      return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
     static constexpr std::uint64_t max_safe_int =
         1LL << std::numeric_limits<double>::digits;
     if (result >= max_safe_int)
@@ -654,9 +654,9 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
   return std::unexpected{tokenize_ok.error()};
 }
 
-#define TRY_EXP(call_expect)                                                   \
+#define TRY_EXP(an_expect)                                                     \
   do {                                                                         \
-    std::expected ok{call_expect()};                                           \
+    std::expected ok{an_expect};                                               \
     if (ok)                                                                    \
       break;                                                                   \
     return std::unexpected{ok.error()};                                        \
@@ -673,25 +673,25 @@ std::expected<STMT_VARDECL, PARSE_ERRMSG> Parser::parse_variable_decl() {
   if (not is_declaration_atom(p_atom))
     throw std::runtime_error("statement isn't a variable declaration!");
   declaration.p_kind = p_atom;
-  TRY_EXP(tokenize)
+  TRY_EXP(tokenize())
 
   if (my_token.index() != TOKV_IDENTI)
     return std::unexpected{NEEDED_ERR::VARIABLE_NAME};
   declaration.identifier = std::get<TOK_IDENTI>(my_token);
-  TRY_EXP(tokenize)
+  TRY_EXP(tokenize())
 
   if (my_token != TOKEN{U'='})
     return declaration;
-  TRY_EXP(tokenize)
+  TRY_EXP(tokenize())
 
-  TRY_EXP(parse_assign_expr)
+  TRY_EXP(parse_assign_expr())
   declaration.initializer = std::move(my_expression);
 
   return declaration;
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_binary_expr() {
-  TRY_EXP(parse_postfix_expr)
+  TRY_EXP(parse_postfix_expr())
   if (my_token.index() != TOKV_OP)
     return {};
   switch (std::get<TOKV_OP>(my_token)) {
@@ -703,8 +703,8 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_binary_expr() {
   }
   EXPRESSION expr_left = std::move(my_expression);
   TOK_OPERATOR bin_op = std::get<TOKV_OP>(my_token);
-  TRY_EXP(tokenize)
-  TRY_EXP(parse_binary_expr)
+  TRY_EXP(tokenize())
+  TRY_EXP(parse_binary_expr())
   my_expression = std::make_unique<EXPR_BINARY>(
       std::move(expr_left), std::move(my_expression), bin_op);
   return {};
@@ -732,20 +732,44 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   default:
     return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
   }
-  TRY_EXP(tokenize)
+  TRY_EXP(tokenize())
   while (my_token != TOKEN{U'}'}) {
-    TRY_EXP(tokenize)
-    return std::unexpected{NEEDED_ERR::CLOSING_BRACE};
+    TRY_EXP(parse_property_name())
   }
   my_expression = std::make_unique<EXPR_OBJECT>();
   return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::expect_punct(char32_t punct) {
+  if (my_token == TOKEN{punct})
+    return {};
+  return std::unexpected{PUNCT_ERR{punct}};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_property_name() {
+  switch (my_token.index()) {
+  case TOKV_PUNCT:
+    break;
+  default:
+    return std::unexpected{INVALID_ERR::PROPERTY_NAME};
+  }
+  switch (std::get<TOKV_PUNCT>(my_token)) {
+  case '[':
+    TRY_EXP(tokenize())
+    TRY_EXP(parse_assign_expr())
+    TRY_EXP(expect_punct(']'))
+    return {};
+  default:
+    return std::unexpected{INVALID_ERR::PROPERTY_NAME};
+  }
+  return std::unexpected{PUNCT_ERR{'}'}};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
   EXPRESSION callee_expr = std::move(my_expression);
   std::vector<EXPRESSION> arguments{};
   while (1) {
-    TRY_EXP(tokenize)
+    TRY_EXP(tokenize())
     if (my_token == TOKEN{U')'})
       break;
     std::expected parse_ok = parse_assign_expr();
@@ -753,8 +777,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
       return std::unexpected{parse_ok.error()};
     if (my_token == TOKEN{U')'})
       break;
-    if (my_token != TOKEN{U','})
-      return std::unexpected{NEEDED_ERR::COMMA};
+    TRY_EXP(expect_punct(','))
     arguments.push_back(std::move(my_expression));
   }
   my_expression =
@@ -763,7 +786,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_member_expr() {
-  TRY_EXP(tokenize)
+  TRY_EXP(tokenize())
   if (my_token.index() == TOKV_IDENTI) {
     my_expression = std::make_unique<EXPR_MEMBER>(
         std::move(my_expression), std::get<TOK_IDENTI>(my_token));
@@ -773,13 +796,12 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_member_expr() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_access_expr() {
-  TRY_EXP(tokenize)
+  TRY_EXP(tokenize())
   EXPRESSION object_expr = std::move(my_expression);
   std::expected parse_ok = parse_assign_expr();
   if (not parse_ok)
     return parse_ok;
-  if (my_token != TOKEN{U']'})
-    return std::unexpected{NEEDED_ERR::CLOSING_BRACKET};
+  TRY_EXP(expect_punct(']'))
   my_expression = std::make_unique<EXPR_ACCESS>(std::move(object_expr),
                                                 std::move(my_expression));
   return {};
@@ -792,7 +814,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
     return parse_ok;
   if (my_token != TOKEN{U'='})
     return {};
-  TRY_EXP(tokenize)
+  TRY_EXP(tokenize())
   EXPRESSION lhs_expr = std::move(my_expression);
   parse_ok = parse_assign_expr();
   if (not parse_ok)
@@ -809,7 +831,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_postfix_expr() {
     return parse_ok;
   while (1) {
     bool go_on{};
-    TRY_EXP(tokenize)
+    TRY_EXP(tokenize())
     if (my_token.index() != TOKV_PUNCT)
       break;
     switch (std::get<TOKV_PUNCT>(my_token)) {
@@ -836,14 +858,14 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_postfix_expr() {
 
 std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
   if (my_token == TOKEN{U';'}) {
-    TRY_EXP(tokenize)
+    TRY_EXP(tokenize())
     return {};
   }
   bool insertion =
       my_token.index() == TOKV_EOF || my_token == TOKEN{U'}'} || newlineSeen();
   if (insertion)
     return {};
-  return std::unexpected{NEEDED_ERR::SEMICOLON};
+  return std::unexpected{PUNCT_ERR{';'}};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {

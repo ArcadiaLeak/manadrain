@@ -12,19 +12,14 @@
 #include "atom_prealloc.hpp"
 
 namespace Manadrain {
-enum class ESCAPE_ERR { MALFORMED };
-enum class NUMBER_ERR { INVALID_LITERAL };
+enum class INVALID_ERR { NUMBER_LITERAL, PROPERTY_NAME, MALFORMED_ESCAPE };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
-enum class NEEDED_ERR {
-  COMMA,
-  SEMICOLON,
-  CLOSING_BRACE,
-  CLOSING_BRACKET,
-  VARIABLE_NAME,
-  FIELD_NAME
+enum class NEEDED_ERR { FIELD_NAME, VARIABLE_NAME };
+struct PUNCT_ERR {
+  char32_t must_be;
 };
 using PARSE_ERRMSG =
-    std::variant<ESCAPE_ERR, NUMBER_ERR, UNEXPECTED_ERR, NEEDED_ERR>;
+    std::variant<INVALID_ERR, UNEXPECTED_ERR, NEEDED_ERR, PUNCT_ERR>;
 
 struct TOK_STRING {
   char32_t separator;
@@ -199,6 +194,7 @@ private:
 
   std::expected<void, PARSE_ERRMSG> tokenize();
   std::expected<void, PARSE_ERRMSG> expect_statement_end();
+  std::expected<void, PARSE_ERRMSG> expect_punct(char32_t punct);
 
   std::expected<void, PARSE_ERRMSG> parse_assign_expr();
   std::expected<void, PARSE_ERRMSG> parse_binary_expr();
@@ -207,6 +203,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_call_expr();
   std::expected<void, PARSE_ERRMSG> parse_member_expr();
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
+  std::expected<void, PARSE_ERRMSG> parse_property_name();
 
   std::expected<STMT_VARDECL, PARSE_ERRMSG> parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_statement();
