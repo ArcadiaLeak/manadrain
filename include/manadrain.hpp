@@ -4,6 +4,7 @@
 #include <optional>
 #include <ranges>
 #include <span>
+#include <stack>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -193,7 +194,7 @@ enum class PROP_KIND { IDENTIF, COMPUTED };
 
 class Parser : public Tokenizer {
 public:
-  std::vector<STATEMENT> program;
+  std::stack<std::vector<STATEMENT>> statements;
   bool parse();
 
 private:
@@ -214,7 +215,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_property_name();
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
 
-  std::expected<STMT_VARDECL, PARSE_ERRMSG> parse_variable_decl();
+  std::expected<void, PARSE_ERRMSG> parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
 } // namespace Manadrain

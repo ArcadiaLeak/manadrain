@@ -665,7 +665,7 @@ bool is_declaration_atom(std::size_t p_atom) {
   return p_atom == S_ATOM_const || p_atom == S_ATOM_let || p_atom == S_ATOM_var;
 }
 
-std::expected<STMT_VARDECL, PARSE_ERRMSG> Parser::parse_variable_decl() {
+std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   STMT_VARDECL declaration{};
 
   std::size_t p_atom{std::get<TOKV_IDENTI>(my_token).p_atom};
@@ -680,13 +680,15 @@ std::expected<STMT_VARDECL, PARSE_ERRMSG> Parser::parse_variable_decl() {
   TRY_EXP(tokenize())
 
   if (my_token != TOKEN{U'='})
-    return declaration;
+    goto wrap_up;
   TRY_EXP(tokenize())
 
   TRY_EXP(parse_assign_expr())
   declaration.initializer = std::move(my_expression);
 
-  return declaration;
+wrap_up:
+  statements.top().push_back(std::move(declaration));
+  return {};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_binary_expr() {
@@ -887,23 +889,16 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
   switch (my_token.index()) {
-  case TOKV_IDENTI: {
+  case TOKV_IDENTI:
     if (is_declaration_atom(std::get<TOKV_IDENTI>(my_token).p_atom)) {
-      std::expected declaration{parse_variable_decl()};
-      if (not declaration)
-        return std::unexpected{declaration.error()};
-      program.push_back(std::move(*declaration));
+      TRY_EXP(parse_variable_decl())
       return expect_statement_end();
     }
     [[fallthrough]];
-  }
-  default: {
-    std::expected parse_ok = parse_assign_expr();
-    if (not parse_ok)
-      return parse_ok;
-    program.push_back(std::move(my_expression));
+  default:
+    TRY_EXP(parse_assign_expr())
+    statements.top().push_back(std::move(my_expression));
     return expect_statement_end();
-  }
   }
 }
 
@@ -911,6 +906,7 @@ bool Parser::parse() {
   std::expected ok{tokenize()};
   if (not ok)
     return 1;
+  statements.emplace();
   while (1) {
     if (my_token.index() == TOKV_EOF)
       return 0;
