@@ -38,7 +38,6 @@ struct TOK_IDENTI {
 };
 enum TOKV_INDEX {
   TOKV_EOF,
-  TOKV_ERROR,
   TOKV_PUNCT,
   TOKV_STRING,
   TOKV_IDENTI,
@@ -46,8 +45,8 @@ enum TOKV_INDEX {
   TOKV_OP
 };
 enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY, DIV_ASSIGN };
-using TOKEN = std::variant<std::monostate, PARSE_ERRMSG, char32_t, TOK_STRING,
-                           TOK_IDENTI, double, TOK_OPERATOR>;
+using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
+                           double, TOK_OPERATOR>;
 
 struct EXPR_CALL;
 struct EXPR_MEMBER;
@@ -117,7 +116,7 @@ private:
 enum class BASE_IND { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
 class NumberTokenizer : public Scanner {
 public:
-  TOKEN tokenize(char32_t leading);
+  std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
 
 private:
   struct WHOLE {
@@ -156,7 +155,7 @@ private:
 
 class StringTokenizer : public AtomTokenizer {
 public:
-  TOKEN tokenize(char32_t separator);
+  std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t separator);
 
 private:
   std::optional<char32_t> decode_esc8();
@@ -169,7 +168,7 @@ private:
 
 class IdentifierTokenizer : public StringTokenizer {
 public:
-  std::optional<TOKEN> tokenize(char32_t leading);
+  std::optional<std::expected<TOKEN, PARSE_ERRMSG>> tokenize(char32_t leading);
 
 private:
   bool encode_uchar(char32_t ch);
@@ -183,7 +182,7 @@ protected:
 
 class Tokenizer : public IdentifierTokenizer {
 public:
-  TOKEN tokenize();
+  std::expected<TOKEN, PARSE_ERRMSG> tokenize();
   bool newlineSeen() { return newline_seen; }
 
 private:
