@@ -97,38 +97,40 @@ std::optional<char32_t> TokString::decode_xseq() {
 }
 
 std::optional<char32_t> TokString::decode_uni() {
-  std::optional leading_opt{next()};
-  if (leading_opt == '{') {
-    if (reached_eof())
-      return std::nullopt;
-    char32_t num = 0, curr{next_u()};
-    for (int i = 0; i < 6; ++i) {
-      std::optional hex = decode_hex(curr);
-      if (not hex.has_value())
-        break;
+  std::optional ahead_opt{next()};
+  char32_t num{};
+  if (ahead_opt == '{') {
+    ahead_opt = std::nullopt;
+    for (int i = 0; i < 7; ++i) {
+      if (not ahead_opt)
+        ahead_opt = next();
+      if (not ahead_opt)
+        return std::nullopt;
+      if (ahead_opt == '}')
+        return num;
+      if (i == 6)
+        return std::nullopt;
+      std::optional hex = ahead_opt.and_then(decode_hex);
+      if (not hex)
+        return std::nullopt;
       num = (num << 4) | *hex;
       if (num > UCHAR_MAX_VALUE)
         return std::nullopt;
-      if (reached_eof())
-        return std::nullopt;
-      curr = next_u();
+      ahead_opt = std::nullopt;
     }
-    return curr == '}' ? std::make_optional(num) : std::nullopt;
-  } else if (leading_opt) {
-    char32_t curr{*leading_opt}, num{};
-    for (int i = 0; i < 4; ++i) {
-      std::optional hex = decode_hex(curr);
-      if (not hex.has_value())
-        return std::nullopt;
-      num = (num << 4) | *hex;
-      if (reached_eof())
-        return std::nullopt;
-      curr = next_u();
-    }
-    prev();
-    return num;
   }
-  return leading_opt;
+  for (int i = 0; i < 4; ++i) {
+    if (not ahead_opt)
+      ahead_opt = next();
+    if (not ahead_opt)
+      return std::nullopt;
+    std::optional hex = ahead_opt.and_then(decode_hex);
+    if (not hex)
+      return std::nullopt;
+    num = (num << 4) | *hex;
+    ahead_opt = std::nullopt;
+  }
+  return num;
 }
 
 std::variant<std::monostate, char32_t, PARSE_ERRMSG>
@@ -248,37 +250,40 @@ std::expected<TOKEN, PARSE_ERRMSG> TokString::tokenize(char32_t separator) {
 }
 
 std::optional<char32_t> TokIdentif::decode_uni() {
-  std::optional leading_opt{next()};
-  if (leading_opt == '{') {
-    if (reached_eof())
-      return std::nullopt;
-    char32_t num = 0, curr{next_u()};
-    for (int i = 0; i < 6; ++i) {
-      std::optional hex = decode_hex(curr);
-      if (not hex.has_value())
-        break;
+  std::optional ahead_opt{next()};
+  char32_t num{};
+  if (ahead_opt == '{') {
+    ahead_opt = std::nullopt;
+    for (int i = 0; i < 7; ++i) {
+      if (not ahead_opt)
+        ahead_opt = next();
+      if (not ahead_opt)
+        return std::nullopt;
+      if (ahead_opt == '}')
+        return num;
+      if (i == 6)
+        return std::nullopt;
+      std::optional hex = ahead_opt.and_then(decode_hex);
+      if (not hex)
+        return std::nullopt;
       num = (num << 4) | *hex;
       if (num > UCHAR_MAX_VALUE)
         return std::nullopt;
-      if (reached_eof())
-        return std::nullopt;
-      curr = next_u();
+      ahead_opt = std::nullopt;
     }
-    return curr == '}' ? std::make_optional(num) : std::nullopt;
-  } else if (leading_opt) {
-    char32_t curr{*leading_opt}, num{};
-    for (int i = 0; i < 4; ++i) {
-      std::optional hex = decode_hex(curr);
-      if (not hex.has_value())
-        return std::nullopt;
-      num = (num << 4) | *hex;
-      if (reached_eof())
-        return std::nullopt;
-      curr = next_u();
-    }
-    return num;
   }
-  return leading_opt;
+  for (int i = 0; i < 4; ++i) {
+    if (not ahead_opt)
+      ahead_opt = next();
+    if (not ahead_opt)
+      return std::nullopt;
+    std::optional hex = ahead_opt.and_then(decode_hex);
+    if (not hex)
+      return std::nullopt;
+    num = (num << 4) | *hex;
+    ahead_opt = std::nullopt;
+  }
+  return num;
 }
 
 bool TokIdentif::encode_uchar(char32_t ch) {
