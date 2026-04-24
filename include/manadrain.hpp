@@ -114,7 +114,7 @@ private:
 };
 
 enum class BASE_IND { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
-class NumberTokenizer : public Scanner {
+class TokNumber : public Scanner {
 public:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
 
@@ -141,7 +141,7 @@ private:
                           std::optional<char32_t> ahead);
 };
 
-class AtomTokenizer : public NumberTokenizer {
+class TokAtom : public TokNumber {
 public:
   std::string my_atom;
 
@@ -153,7 +153,7 @@ private:
   std::vector<char> atom_arena{std::from_range, atom_prealloc_buf};
 };
 
-class StringTokenizer : public AtomTokenizer {
+class TokString : public TokAtom {
 public:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t separator);
 
@@ -166,9 +166,9 @@ private:
   decode_special(char32_t separator, char32_t ch);
 };
 
-class IdentifierTokenizer : public StringTokenizer {
+class TokIdentif : public TokString {
 public:
-  std::optional<std::expected<TOKEN, PARSE_ERRMSG>> tokenize(char32_t leading);
+  std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
 
 private:
   bool encode_uchar(char32_t ch);
@@ -180,7 +180,7 @@ protected:
   std::optional<char32_t> decode_uni();
 };
 
-class Tokenizer : public IdentifierTokenizer {
+class Tokenizer : public TokIdentif {
 public:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize();
   bool newlineSeen() { return newline_seen; }
@@ -198,6 +198,9 @@ private:
   TOKEN my_token;
   EXPRESSION my_expression;
 
+  std::expected<void, PARSE_ERRMSG> tokenize();
+  std::expected<void, PARSE_ERRMSG> expect_statement_end();
+
   std::expected<void, PARSE_ERRMSG> parse_assign_expr();
   std::expected<void, PARSE_ERRMSG> parse_binary_expr();
   std::expected<void, PARSE_ERRMSG> parse_postfix_expr();
@@ -206,9 +209,8 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_member_expr();
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
 
-  std::variant<std::monostate, STMT_VARDECL, PARSE_ERRMSG>
+  std::expected<std::variant<std::monostate, STMT_VARDECL>, PARSE_ERRMSG>
   parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_statement();
-  std::expected<void, PARSE_ERRMSG> expect_statement_end();
 };
 } // namespace Manadrain
