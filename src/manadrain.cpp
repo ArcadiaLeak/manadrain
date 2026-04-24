@@ -241,8 +241,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokString::tokenize(char32_t separator) {
     case 1: {
       Ch4Encoder encoder{};
       my_atom.append(encoder(std::get<1>(ch_alter)));
-      break;
-    }
+    } break;
     default:
       return std::unexpected{std::get<2>(ch_alter)};
     }

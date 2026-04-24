@@ -1,7 +1,9 @@
 const atom_literal_arr = [
   "const",
   "let",
-  "var"
+  "var",
+  "class",
+  "function"
 ];
 
 let offset = 0;
