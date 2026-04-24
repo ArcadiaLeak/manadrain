@@ -212,6 +212,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_member_expr();
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
   std::expected<void, PARSE_ERRMSG> parse_property_name();
+  std::expected<void, PARSE_ERRMSG> parse_object_literal();
 
   std::expected<STMT_VARDECL, PARSE_ERRMSG> parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_statement();

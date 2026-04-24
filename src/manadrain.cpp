@@ -710,28 +710,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_binary_expr() {
   return {};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
-  switch (my_token.index()) {
-  case TOKV_STRING:
-    my_expression = std::get<TOKV_STRING>(my_token);
-    return {};
-  case TOKV_IDENTI:
-    my_expression = std::get<TOKV_IDENTI>(my_token);
-    return {};
-  case TOKV_NUMBER:
-    my_expression = std::get<TOKV_NUMBER>(my_token);
-    return {};
-  case TOKV_PUNCT:
-    break;
-  default:
-    return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
-  }
-  switch (std::get<TOKV_PUNCT>(my_token)) {
-  case '{':
-    break;
-  default:
-    return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
-  }
+std::expected<void, PARSE_ERRMSG> Parser::parse_object_literal() {
   TRY_EXP(tokenize())
   std::vector<EXPR_OBJECT::PROP> prop_vec{};
   while (my_token != TOKEN{U'}'}) {
@@ -751,6 +730,31 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   TRY_EXP(tokenize())
   my_expression = std::make_unique<EXPR_OBJECT>(std::move(prop_vec));
   return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
+  switch (my_token.index()) {
+  case TOKV_STRING:
+    my_expression = std::get<TOKV_STRING>(my_token);
+    return {};
+  case TOKV_IDENTI:
+    my_expression = std::get<TOKV_IDENTI>(my_token);
+    return {};
+  case TOKV_NUMBER:
+    my_expression = std::get<TOKV_NUMBER>(my_token);
+    return {};
+  case TOKV_PUNCT:
+    break;
+  default:
+    return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
+  }
+  switch (std::get<TOKV_PUNCT>(my_token)) {
+  case '{':
+    TRY_EXP(parse_object_literal());
+    return {};
+  default:
+    return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
+  }
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::expect_punct(char32_t punct) {
