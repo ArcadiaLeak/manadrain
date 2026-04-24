@@ -229,19 +229,19 @@ TokString::decode_special(char32_t separator, char32_t ch) {
 
 std::expected<TOKEN, PARSE_ERRMSG> TokString::tokenize(char32_t separator) {
   while (1) {
-    if (reached_eof())
+    std::optional ch_opt{next()};
+    if (not ch_opt)
       return std::unexpected{UNEXPECTED_ERR::STRING_END};
-    std::variant ch_alter = decode_special(separator, next_u());
+    if (ch_opt == separator)
+      return TOK_STRING{separator, atomFind()};
+    std::variant ch_alter = decode_special(separator, *ch_opt);
     switch (ch_alter.index()) {
     case 0:
       break;
     case 1: {
-      char32_t ch = std::get<1>(ch_alter);
-      if (ch == separator)
-        return TOK_STRING{separator, atomFind()};
       Ch4Encoder encoder{};
-      my_atom.append(encoder(ch));
-      continue;
+      my_atom.append(encoder(std::get<1>(ch_alter)));
+      break;
     }
     default:
       return std::unexpected{std::get<2>(ch_alter)};
