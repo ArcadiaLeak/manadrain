@@ -96,6 +96,41 @@ std::optional<char32_t> TokString::decode_xseq() {
   return (*hex0 << 4) | *hex1;
 }
 
+std::optional<char32_t> TokString::decode_uni() {
+  std::optional leading_opt{next()};
+  if (leading_opt == '{') {
+    if (reached_eof())
+      return std::nullopt;
+    char32_t num = 0, curr{next_u()};
+    for (int i = 0; i < 6; ++i) {
+      std::optional hex = decode_hex(curr);
+      if (not hex.has_value())
+        break;
+      num = (num << 4) | *hex;
+      if (num > UCHAR_MAX_VALUE)
+        return std::nullopt;
+      if (reached_eof())
+        return std::nullopt;
+      curr = next_u();
+    }
+    return curr == '}' ? std::make_optional(num) : std::nullopt;
+  } else if (leading_opt) {
+    char32_t curr{*leading_opt}, num{};
+    for (int i = 0; i < 4; ++i) {
+      std::optional hex = decode_hex(curr);
+      if (not hex.has_value())
+        return std::nullopt;
+      num = (num << 4) | *hex;
+      if (reached_eof())
+        return std::nullopt;
+      curr = next_u();
+    }
+    prev();
+    return num;
+  }
+  return leading_opt;
+}
+
 std::variant<std::monostate, char32_t, PARSE_ERRMSG>
 TokString::decode_escape(char32_t ch) {
   switch (ch) {
@@ -129,6 +164,12 @@ TokString::decode_escape(char32_t ch) {
     if (not hex)
       return ESCAPE_ERR::MALFORMED;
     return *hex;
+  }
+  case 'u': {
+    std::optional uni = decode_uni();
+    if (not uni)
+      return ESCAPE_ERR::MALFORMED;
+    return *uni;
   }
   case '0':
     if (peek()
@@ -206,43 +247,38 @@ std::expected<TOKEN, PARSE_ERRMSG> TokString::tokenize(char32_t separator) {
   }
 }
 
-std::optional<char32_t> TokIdentif::decode_uni_fixed(char32_t leading) {
-  char32_t curr{leading}, num{};
-  for (int i = 0; i < 4; ++i) {
-    std::optional hex = decode_hex(curr);
-    if (not hex.has_value())
-      return std::nullopt;
-    num = (num << 4) | *hex;
-    if (reached_eof())
-      return std::nullopt;
-    curr = next_u();
-  }
-  return num;
-}
-
-std::optional<char32_t> TokIdentif::decode_uni_braced() {
-  if (reached_eof())
-    return std::nullopt;
-  char32_t num = 0, curr{next_u()};
-  for (int i = 0; i < 6; ++i) {
-    std::optional hex = decode_hex(curr);
-    if (not hex.has_value())
-      break;
-    num = (num << 4) | *hex;
-    if (num > UCHAR_MAX_VALUE)
-      return std::nullopt;
-    if (reached_eof())
-      return std::nullopt;
-    curr = next_u();
-  }
-  return curr == '}' ? std::make_optional(num) : std::nullopt;
-}
-
 std::optional<char32_t> TokIdentif::decode_uni() {
-  if (reached_eof())
-    return std::nullopt;
-  char32_t leading = next_u();
-  return leading == '{' ? decode_uni_braced() : decode_uni_fixed(leading);
+  std::optional leading_opt{next()};
+  if (leading_opt == '{') {
+    if (reached_eof())
+      return std::nullopt;
+    char32_t num = 0, curr{next_u()};
+    for (int i = 0; i < 6; ++i) {
+      std::optional hex = decode_hex(curr);
+      if (not hex.has_value())
+        break;
+      num = (num << 4) | *hex;
+      if (num > UCHAR_MAX_VALUE)
+        return std::nullopt;
+      if (reached_eof())
+        return std::nullopt;
+      curr = next_u();
+    }
+    return curr == '}' ? std::make_optional(num) : std::nullopt;
+  } else if (leading_opt) {
+    char32_t curr{*leading_opt}, num{};
+    for (int i = 0; i < 4; ++i) {
+      std::optional hex = decode_hex(curr);
+      if (not hex.has_value())
+        return std::nullopt;
+      num = (num << 4) | *hex;
+      if (reached_eof())
+        return std::nullopt;
+      curr = next_u();
+    }
+    return num;
+  }
+  return leading_opt;
 }
 
 bool TokIdentif::encode_uchar(char32_t ch) {
@@ -613,29 +649,26 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
   return std::unexpected{tokenize_ok.error()};
 }
 
-#define TRY_EXP(run_expect)                                                    \
+#define TRY_EXP(call_expect)                                                   \
   do {                                                                         \
-    std::expected ok{run_expect()};                                            \
+    std::expected ok{call_expect()};                                           \
     if (ok)                                                                    \
       break;                                                                   \
     return std::unexpected{ok.error()};                                        \
   } while (0);
 
-std::expected<std::variant<std::monostate, STMT_VARDECL>, PARSE_ERRMSG>
-Parser::parse_variable_decl() {
+bool is_declaration_atom(std::size_t p_atom) {
+  return p_atom == S_ATOM_const || p_atom == S_ATOM_let || p_atom == S_ATOM_var;
+}
+
+std::expected<STMT_VARDECL, PARSE_ERRMSG> Parser::parse_variable_decl() {
   STMT_VARDECL declaration{};
 
-  std::size_t p_atom = std::get<TOKV_IDENTI>(my_token).p_atom;
-  switch (p_atom) {
-  case S_ATOM_const:
-  case S_ATOM_let:
-  case S_ATOM_var:
-    declaration.p_kind = p_atom;
-    TRY_EXP(tokenize)
-    break;
-  default:
-    return std::monostate{};
-  }
+  std::size_t p_atom{std::get<TOKV_IDENTI>(my_token).p_atom};
+  if (not is_declaration_atom(p_atom))
+    throw std::runtime_error("statement isn't a variable declaration!");
+  declaration.p_kind = p_atom;
+  TRY_EXP(tokenize)
 
   if (my_token.index() != TOKV_IDENTI)
     return std::unexpected{NEEDED_ERR::VARIABLE_NAME};
@@ -695,11 +728,12 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
     return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
   }
   TRY_EXP(tokenize)
-  if (my_token == TOKEN{U'}'}) {
-    my_expression = std::make_unique<EXPR_OBJECT>();
-    return {};
+  while (my_token != TOKEN{U'}'}) {
+    TRY_EXP(tokenize)
+    return std::unexpected{NEEDED_ERR::CLOSING_BRACE};
   }
-  return std::unexpected{NEEDED_ERR::CLOSING_BRACE};
+  my_expression = std::make_unique<EXPR_OBJECT>();
+  return {};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
@@ -810,14 +844,11 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
 std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
   switch (my_token.index()) {
   case TOKV_IDENTI: {
-    auto declaration = parse_variable_decl();
-    if (not declaration)
-      return std::unexpected{declaration.error()};
-    switch (declaration->index()) {
-    case 0:
-      break;
-    case 1:
-      program.push_back(std::move(std::get<1>(*declaration)));
+    if (is_declaration_atom(std::get<TOKV_IDENTI>(my_token).p_atom)) {
+      std::expected declaration{parse_variable_decl()};
+      if (not declaration)
+        return std::unexpected{declaration.error()};
+      program.push_back(std::move(*declaration));
       return expect_statement_end();
     }
     [[fallthrough]];
