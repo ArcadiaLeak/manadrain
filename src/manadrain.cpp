@@ -733,10 +733,23 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
     return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
   }
   TRY_EXP(tokenize())
+  std::vector<EXPR_OBJECT::PROP> prop_vec{};
   while (my_token != TOKEN{U'}'}) {
+    EXPR_OBJECT::PROP property{};
     TRY_EXP(parse_property_name())
+    property.prop_key = std::move(my_expression);
+    TRY_EXP(expect_punct(':'))
+    TRY_EXP(tokenize())
+    TRY_EXP(parse_assign_expr())
+    property.prop_val = std::move(my_expression);
+    prop_vec.push_back(std::move(property));
+    if (my_token != TOKEN{U','})
+      break;
+    TRY_EXP(tokenize())
   }
-  my_expression = std::make_unique<EXPR_OBJECT>();
+  TRY_EXP(expect_punct('}'))
+  TRY_EXP(tokenize())
+  my_expression = std::make_unique<EXPR_OBJECT>(std::move(prop_vec));
   return {};
 }
 
@@ -758,6 +771,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_property_name() {
     TRY_EXP(tokenize())
     TRY_EXP(parse_assign_expr())
     TRY_EXP(expect_punct(']'))
+    TRY_EXP(tokenize())
     return {};
   default:
     return std::unexpected{INVALID_ERR::PROPERTY_NAME};

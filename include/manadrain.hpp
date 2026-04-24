@@ -71,7 +71,13 @@ struct EXPR_ASSIGN {
   EXPRESSION left;
   EXPRESSION right;
 };
-struct EXPR_OBJECT {};
+struct EXPR_OBJECT {
+  struct PROP {
+    EXPRESSION prop_key;
+    EXPRESSION prop_val;
+  };
+  std::vector<PROP> props;
+};
 struct EXPR_ACCESS {
   EXPRESSION object;
   EXPRESSION property;
@@ -182,6 +188,8 @@ public:
 private:
   bool newline_seen;
 };
+
+enum class PROP_KIND { IDENTIF, COMPUTED };
 
 class Parser : public Tokenizer {
 public:
