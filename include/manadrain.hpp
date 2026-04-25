@@ -15,7 +15,7 @@
 namespace Manadrain {
 enum class INVALID_ERR { NUMBER_LITERAL, PROPERTY_NAME, MALFORMED_ESCAPE };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
-enum class NEEDED_ERR { FIELD_NAME, VARIABLE_NAME };
+enum class NEEDED_ERR { FIELD_NAME, VARIABLE_NAME, FUNCTION_NAME };
 struct PUNCT_ERR {
   char32_t must_be;
 };
@@ -84,12 +84,18 @@ struct EXPR_ACCESS {
   EXPRESSION property;
 };
 
+struct STMT_VARDECL;
+struct STMT_FUNCDECL;
+using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION, STMT_FUNCDECL>;
 struct STMT_VARDECL {
   std::size_t p_kind;
   TOK_IDENTI identifier;
   EXPRESSION initializer;
 };
-using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION>;
+struct STMT_FUNCDECL {
+  TOK_IDENTI identifier;
+  std::vector<STATEMENT> body;
+};
 
 constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 
@@ -216,6 +222,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();
+  std::expected<void, PARSE_ERRMSG> parse_function_decl();
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
 } // namespace Manadrain

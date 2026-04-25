@@ -481,7 +481,7 @@ std::size_t TokAtom::atomFind() {
     pos_opt = atom_umap[my_atom];
   }
   my_atom = {};
-  return pos_opt.value();
+  return *pos_opt;
 }
 
 std::size_t TokAtom::atomAlloc() {
@@ -661,15 +661,13 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
     return std::unexpected{ok.error()};                                        \
   } while (0);
 
-bool is_declaration_atom(std::size_t p_atom) {
-  return p_atom == S_ATOM_const || p_atom == S_ATOM_let || p_atom == S_ATOM_var;
-}
-
 std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   STMT_VARDECL declaration{};
 
   std::size_t p_atom{std::get<TOKV_IDENTI>(my_token).p_atom};
-  if (not is_declaration_atom(p_atom))
+  bool valid_beginning{p_atom == S_ATOM_const || p_atom == S_ATOM_let ||
+                       p_atom == S_ATOM_var};
+  if (not valid_beginning)
     throw std::runtime_error("statement isn't a variable declaration!");
   declaration.p_kind = p_atom;
   TRY_EXP(tokenize())
@@ -887,12 +885,41 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
   return std::unexpected{PUNCT_ERR{';'}};
 }
 
+std::expected<void, PARSE_ERRMSG> Parser::parse_function_decl() {
+  STMT_FUNCDECL funcdecl{};
+  TRY_EXP(tokenize())
+  if (my_token.index() != TOKV_IDENTI)
+    return std::unexpected{NEEDED_ERR::FUNCTION_NAME};
+  funcdecl.identifier = std::get<TOKV_IDENTI>(my_token);
+  TRY_EXP(tokenize())
+  TRY_EXP(expect_punct('('))
+  TRY_EXP(tokenize())
+  TRY_EXP(expect_punct(')'))
+  TRY_EXP(tokenize())
+  TRY_EXP(expect_punct('{'))
+  TRY_EXP(tokenize())
+  statements.emplace();
+  while (my_token != TOKEN{U'}'}) {
+    TRY_EXP(parse_statement())
+  }
+  funcdecl.body = std::move(statements.top());
+  statements.pop();
+  statements.top().push_back(std::move(funcdecl));
+  TRY_EXP(tokenize())
+  return {};
+}
+
 std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
   switch (my_token.index()) {
   case TOKV_IDENTI:
-    if (is_declaration_atom(std::get<TOKV_IDENTI>(my_token).p_atom)) {
+    switch (std::get<TOKV_IDENTI>(my_token).p_atom) {
+    case S_ATOM_const:
+    case S_ATOM_let:
+    case S_ATOM_var:
       TRY_EXP(parse_variable_decl())
       return expect_statement_end();
+    case S_ATOM_function:
+      return parse_function_decl();
     }
     [[fallthrough]];
   default:
