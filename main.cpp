@@ -4,7 +4,7 @@
 #include <print>
 #include <ranges>
 
-#include "manadrain.hpp"
+#include "interpret.hpp"
 
 int main(int argc, char *argv[]) {
   if (argc != 2) {
@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Parser parser{};
+  Interpret::Parser parser{};
   parser.setBuffer(std::ranges::istream_view<std::uint8_t>{file} |
                    std::ranges::to<std::basic_string<std::uint8_t>>());
   parser.parse();

@@ -6,9 +6,9 @@
 #include <unicode/uchar.h>
 #include <unicode/ustring.h>
 
-#include "manadrain.hpp"
+#include "interpret.hpp"
 
-namespace Manadrain {
+namespace Interpret {
 static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
@@ -942,4 +942,4 @@ bool Parser::parse() {
       return 1;
   }
 }
-} // namespace Manadrain
+} // namespace Interpret

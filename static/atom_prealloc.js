@@ -43,7 +43,7 @@ for (const lit of atom_literal_arr) {
 Deno.writeTextFile("include/atom_prealloc.hpp", `\
 #include <array>
 
-namespace Manadrain {
+namespace Interpret {
 ${atom_prealloc_pos
     .map(({ offset, atom_name }) =>
       `inline constexpr std::size_t S_ATOM_${atom_name}{${offset}};`)

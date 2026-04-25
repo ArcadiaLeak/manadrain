@@ -12,7 +12,7 @@
 
 #include "atom_prealloc.hpp"
 
-namespace Manadrain {
+namespace Interpret {
 enum class INVALID_ERR { NUMBER_LITERAL, PROPERTY_NAME, MALFORMED_ESCAPE };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
 enum class NEEDED_ERR { FIELD_NAME, VARIABLE_NAME, FUNCTION_NAME };
@@ -225,4 +225,4 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_function_decl();
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
-} // namespace Manadrain
+} // namespace Interpret
