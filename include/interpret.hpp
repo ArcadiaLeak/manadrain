@@ -101,6 +101,14 @@ constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 
 class Scanner {
 public:
+  void setBuffer(const std::basic_string<std::uint8_t> &buffer_ref) {
+    buffer = buffer_ref;
+  }
+  void setBuffer(std::basic_string<std::uint8_t> &&buffer_ref) {
+    buffer = std::move(buffer_ref);
+  }
+
+protected:
   bool reached_eof() { return buffer_idx >= buffer.size(); }
   char32_t unchecked_next();
   std::optional<char32_t> next();
@@ -109,22 +117,15 @@ public:
   void backtrack(std::size_t N);
   void chewLF();
 
-  void setBuffer(const std::basic_string<std::uint8_t> &buffer_ref) {
-    buffer = buffer_ref;
-  }
-  void setBuffer(std::basic_string<std::uint8_t> &&buffer_ref) {
-    buffer = std::move(buffer_ref);
-  }
-
 private:
   std::basic_string<std::uint8_t> buffer;
   int buffer_idx;
   std::stack<int> breadcrumb;
 };
 
-enum class BASE_IND { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
+enum class TOK_NUMBER_PREFIX { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
 class TokNumber : public Scanner {
-public:
+protected:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
 
 private:
@@ -144,52 +145,40 @@ private:
   };
   using FLOAT_REPR = std::variant<WHOLE, FRACTIONAL, SCIENTIFIC>;
 
-  std::optional<BASE_IND> decode_base_ind();
+  std::optional<TOK_NUMBER_PREFIX> decode_base_ind();
   void peek_behind_octal(std::optional<char32_t> &trail_opt);
-  std::string scan_numseq(std::optional<BASE_IND> base_opt,
+  std::string scan_numseq(std::optional<TOK_NUMBER_PREFIX> base_opt,
                           std::optional<char32_t> ahead);
 };
 
 class TokAtom : public TokNumber {
-public:
-  std::string my_atom;
-
-  std::size_t atomFind();
-  std::size_t atomAlloc();
-
 private:
   std::unordered_map<std::string, std::size_t> atom_umap;
   std::vector<char> atom_arena{std::from_range, atom_prealloc_buf};
-};
+  std::string my_atom;
 
-class TokString : public TokAtom {
-public:
-  std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t separator);
+  std::size_t atom_find();
+  std::size_t atom_alloc();
 
-private:
-  std::optional<char32_t> decode_esc8();
-  std::optional<char32_t> decode_xseq();
-  std::optional<char32_t> decode_uni();
+  std::optional<char32_t> decode_string_esc8();
+  std::optional<char32_t> decode_string_xseq();
+  std::optional<char32_t> decode_string_uni();
   std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-  decode_escape(char32_t leading);
+  decode_string_escape(char32_t leading);
   std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-  decode_special(char32_t separator, char32_t ch);
-};
+  decode_string_special(char32_t separator, char32_t ch);
 
-class TokIdentif : public TokString {
-public:
-  std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
-
-private:
-  bool encode_uchar(char32_t ch);
-  std::expected<int, PARSE_ERRMSG> decode_escape(char32_t leading);
+  bool encode_identif_uchar(char32_t ch);
+  std::expected<int, PARSE_ERRMSG> decode_identif_escape(char32_t leading);
 
 protected:
-  std::optional<char32_t> decode_uni();
+  std::expected<TOKEN, PARSE_ERRMSG> tokenize_string(char32_t separator);
+  std::expected<TOKEN, PARSE_ERRMSG> tokenize_identif(char32_t leading);
+  std::optional<char32_t> decode_identif_uni();
 };
 
-class Tokenizer : public TokIdentif {
-public:
+class Tokenizer : public TokAtom {
+protected:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize();
   bool newlineSeen() { return newline_seen; }
 

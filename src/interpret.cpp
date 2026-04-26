@@ -69,7 +69,7 @@ void Scanner::chewLF() {
     prev();
 }
 
-std::optional<char32_t> TokString::decode_esc8() {
+std::optional<char32_t> TokAtom::decode_string_esc8() {
   if (reached_eof())
     return std::nullopt;
   std::optional ahead{next()};
@@ -91,7 +91,7 @@ std::optional<int> decode_hex(char32_t digit) {
   return std::nullopt;
 }
 
-std::optional<char32_t> TokString::decode_xseq() {
+std::optional<char32_t> TokAtom::decode_string_xseq() {
   std::optional<int> hex0 = next().and_then(decode_hex);
   if (not hex0)
     return std::nullopt;
@@ -101,7 +101,7 @@ std::optional<char32_t> TokString::decode_xseq() {
   return (*hex0 << 4) | *hex1;
 }
 
-std::optional<char32_t> TokString::decode_uni() {
+std::optional<char32_t> TokAtom::decode_string_uni() {
   std::optional ahead_opt{next()};
   char32_t num{};
   if (ahead_opt == '{') {
@@ -139,7 +139,7 @@ std::optional<char32_t> TokString::decode_uni() {
 }
 
 std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-TokString::decode_escape(char32_t ch) {
+TokAtom::decode_string_escape(char32_t ch) {
   switch (ch) {
   case '\'':
   case '\"':
@@ -167,21 +167,21 @@ TokString::decode_escape(char32_t ch) {
   case 'v':
     return U'\v';
   case 'x': {
-    std::optional hex = decode_xseq();
+    std::optional hex = decode_string_xseq();
     if (not hex)
       return INVALID_ERR::MALFORMED_ESCAPE;
     return *hex;
   }
   case 'u': {
-    std::optional uni = decode_uni();
+    std::optional uni = decode_string_uni();
     if (not uni)
       return INVALID_ERR::MALFORMED_ESCAPE;
     return *uni;
   }
   case '0':
-    if (peek()
-            .transform([](char32_t ahead) { return std::isdigit(ahead); })
-            .value_or(0))
+    if (not peek()
+                .transform([](char32_t ahead) { return std::isdigit(ahead); })
+                .value_or(0))
       return U'\0';
     [[fallthrough]];
   case '1':
@@ -193,13 +193,13 @@ TokString::decode_escape(char32_t ch) {
   case '7': {
     std::optional<char32_t> digit{};
     char32_t base = ch - '0';
-    digit = decode_esc8();
+    digit = decode_string_esc8();
     if (not digit)
       return base;
     base = (base << 3) | *digit;
     if (base >= 32)
       return base;
-    digit = decode_esc8();
+    digit = decode_string_esc8();
     if (not digit)
       return base;
     base = (base << 3) | *digit;
@@ -214,7 +214,7 @@ TokString::decode_escape(char32_t ch) {
 }
 
 std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-TokString::decode_special(char32_t separator, char32_t ch) {
+TokAtom::decode_string_special(char32_t separator, char32_t ch) {
   switch (ch) {
   case '\r':
     chewLF();
@@ -226,20 +226,21 @@ TokString::decode_special(char32_t separator, char32_t ch) {
   case '\\':
     if (reached_eof())
       return std::monostate{};
-    return decode_escape(unchecked_next());
+    return decode_string_escape(unchecked_next());
   default:
     return ch;
   }
 }
 
-std::expected<TOKEN, PARSE_ERRMSG> TokString::tokenize(char32_t separator) {
+std::expected<TOKEN, PARSE_ERRMSG>
+TokAtom::tokenize_string(char32_t separator) {
   while (1) {
     std::optional ch_opt{next()};
     if (not ch_opt)
       return std::unexpected{UNEXPECTED_ERR::STRING_END};
     if (ch_opt == separator)
-      return TOK_STRING{separator, atomFind()};
-    std::variant ch_alter = decode_special(separator, *ch_opt);
+      return TOK_STRING{separator, atom_find()};
+    std::variant ch_alter = decode_string_special(separator, *ch_opt);
     switch (ch_alter.index()) {
     case 0:
       break;
@@ -252,7 +253,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokString::tokenize(char32_t separator) {
   }
 }
 
-std::optional<char32_t> TokIdentif::decode_uni() {
+std::optional<char32_t> TokAtom::decode_identif_uni() {
   std::optional ahead_opt{next()};
   char32_t num{};
   if (ahead_opt == '{') {
@@ -289,7 +290,7 @@ std::optional<char32_t> TokIdentif::decode_uni() {
   return num;
 }
 
-bool TokIdentif::encode_uchar(char32_t ch) {
+bool TokAtom::encode_identif_uchar(char32_t ch) {
   bool is_legal = my_atom.size() ? uc_is_property_xid_continue(ch)
                                  : uc_is_property_xid_start(ch);
   if (is_legal)
@@ -297,12 +298,13 @@ bool TokIdentif::encode_uchar(char32_t ch) {
   return is_legal;
 }
 
-std::expected<int, PARSE_ERRMSG> TokIdentif::decode_escape(char32_t leading) {
+std::expected<int, PARSE_ERRMSG>
+TokAtom::decode_identif_escape(char32_t leading) {
   bool has_escape{};
   if (leading == '\\') {
     if (not next().transform([](char32_t ch) { return ch == 'u'; }).value_or(0))
       return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
-    std::optional<int> ch_uni = decode_uni();
+    std::optional<int> ch_uni = decode_identif_uni();
     switch (ch_uni.has_value()) {
     case 1:
       leading = *ch_uni;
@@ -312,7 +314,7 @@ std::expected<int, PARSE_ERRMSG> TokIdentif::decode_escape(char32_t leading) {
       return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
     }
   }
-  bool success = encode_uchar(leading);
+  bool success = encode_identif_uchar(leading);
   if (has_escape) {
     if (success)
       return 2;
@@ -321,10 +323,10 @@ std::expected<int, PARSE_ERRMSG> TokIdentif::decode_escape(char32_t leading) {
   return success;
 }
 
-std::expected<TOKEN, PARSE_ERRMSG> TokIdentif::tokenize(char32_t leading) {
+std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
   bool has_escape = 0;
   while (1) {
-    std::expected esc_exp = decode_escape(leading);
+    std::expected esc_exp = decode_identif_escape(leading);
     if (not esc_exp)
       return std::unexpected{esc_exp.error()};
     switch (*esc_exp) {
@@ -342,7 +344,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokIdentif::tokenize(char32_t leading) {
   if (my_atom.size() == 0)
     throw std::runtime_error{"tokenizing an identifier failed!"};
   prev();
-  return TOK_IDENTI{has_escape, atomFind()};
+  return TOK_IDENTI{has_escape, atom_find()};
 }
 
 std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
@@ -354,7 +356,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
     switch (leading) {
     case '\'':
     case '"':
-      return TokString::tokenize(leading);
+      return tokenize_string(leading);
     case '\r':
       chewLF();
       [[fallthrough]];
@@ -402,12 +404,12 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
     case '\\': {
       std::optional ahead_opt = next();
       if (ahead_opt == 'u') {
-        std::optional<int> ch_uni = decode_uni();
+        std::optional<int> ch_uni = decode_identif_uni();
         auto is_id_start = [](char32_t ch) {
           return uc_is_property_xid_start(ch);
         };
         if (ch_uni.transform(is_id_start).value_or(0))
-          return TokIdentif::tokenize(*ch_uni);
+          return tokenize_identif(*ch_uni);
         else
           return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
       } else {
@@ -442,7 +444,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
       if (uc_is_property_white_space(leading))
         break;
       if (uc_is_property_xid_start(leading))
-        return TokIdentif::tokenize(leading);
+        return tokenize_identif(leading);
       return leading;
     }
   }
@@ -466,7 +468,7 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
   return N;
 }
 
-std::size_t TokAtom::atomFind() {
+std::size_t TokAtom::atom_find() {
   std::optional<std::size_t> pos_opt{};
   for (std::size_t p_atom : atom_prealloc_pos) {
     std::size_t len =
@@ -479,14 +481,14 @@ std::size_t TokAtom::atomFind() {
   }
   if (not pos_opt) {
     if (not atom_umap.contains(my_atom))
-      atom_umap[my_atom] = atomAlloc();
+      atom_umap[my_atom] = atom_alloc();
     pos_opt = atom_umap[my_atom];
   }
   my_atom = {};
   return *pos_opt;
 }
 
-std::size_t TokAtom::atomAlloc() {
+std::size_t TokAtom::atom_alloc() {
   std::size_t atom_addr = atom_arena.size();
   std::size_t aligned_size = aligned_N(my_atom.size());
   atom_arena.reserve(atom_arena.size() + aligned_size + 8);
@@ -510,8 +512,8 @@ void TokNumber::peek_behind_octal(std::optional<char32_t> &trail_opt) {
   backtrack(cnt);
 }
 
-std::optional<BASE_IND> TokNumber::decode_base_ind() {
-  std::optional<BASE_IND> prefix{};
+std::optional<TOK_NUMBER_PREFIX> TokNumber::decode_base_ind() {
+  std::optional<TOK_NUMBER_PREFIX> prefix{};
   std::optional ahead_opt{next()};
   if (ahead_opt.transform([](char32_t ch) { return std::isdigit(ch); })
           .value_or(0)) {
@@ -519,9 +521,12 @@ std::optional<BASE_IND> TokNumber::decode_base_ind() {
     peek_behind_octal(trail_opt);
     prefix = trail_opt == '8' || trail_opt == '9'
                  ? std::nullopt
-                 : std::make_optional(BASE_IND::ZERO_LEAD_8);
+                 : std::make_optional(TOK_NUMBER_PREFIX::ZERO_LEAD_8);
   }
-  if (prefix.transform([](BASE_IND p) { return p == BASE_IND::ZERO_LEAD_8; })
+  if (prefix
+          .transform([](TOK_NUMBER_PREFIX p) {
+            return p == TOK_NUMBER_PREFIX::ZERO_LEAD_8;
+          })
           .value_or(1)) {
     if (not prefix)
       prev();
@@ -531,24 +536,24 @@ std::optional<BASE_IND> TokNumber::decode_base_ind() {
   return prefix;
 }
 
-int radix_from_ind(std::optional<BASE_IND> ind_opt) {
+int radix_from_ind(std::optional<TOK_NUMBER_PREFIX> ind_opt) {
   do {
     if (not ind_opt)
       break;
     switch (*ind_opt) {
-    case BASE_IND::BINARY:
+    case TOK_NUMBER_PREFIX::BINARY:
       return 2;
-    case BASE_IND::ZERO_LEAD_8:
-    case BASE_IND::OCTAL:
+    case TOK_NUMBER_PREFIX::ZERO_LEAD_8:
+    case TOK_NUMBER_PREFIX::OCTAL:
       return 8;
-    case BASE_IND::HEX:
+    case TOK_NUMBER_PREFIX::HEX:
       return 16;
     }
   } while (0);
   return 10;
 }
 
-std::string TokNumber::scan_numseq(std::optional<BASE_IND> base_opt,
+std::string TokNumber::scan_numseq(std::optional<TOK_NUMBER_PREFIX> base_opt,
                                    std::optional<char32_t> ahead) {
   int radix{radix_from_ind(base_opt)};
   std::string accum{};
@@ -580,7 +585,7 @@ std::string TokNumber::FRACTIONAL::collapse() {
 std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
   if (reached_eof())
     return leading - '0';
-  std::optional<BASE_IND> base_opt{};
+  std::optional<TOK_NUMBER_PREFIX> base_opt{};
   if (leading == '0') {
     do {
       base_opt = decode_base_ind();
