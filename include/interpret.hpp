@@ -32,17 +32,23 @@ struct TOK_IDENTI {
   std::size_t p_atom;
   bool operator==(const TOK_IDENTI &) const = default;
 };
+struct TOK_TEMPLATE {
+  char32_t separator;
+  std::string str_template;
+  bool operator==(const TOK_TEMPLATE &) const = default;
+};
 enum TOKV_INDEX {
   TOKV_EOF,
   TOKV_PUNCT,
   TOKV_STRING,
   TOKV_IDENTI,
   TOKV_NUMBER,
-  TOKV_OP
+  TOKV_OP,
+  TOKV_TEMPLATE
 };
 enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY, DIV_ASSIGN };
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
-                           double, TOK_OPERATOR>;
+                           double, TOK_OPERATOR, TOK_TEMPLATE>;
 
 struct EXPR_CALL;
 struct EXPR_MEMBER;
@@ -172,6 +178,7 @@ private:
   std::expected<int, PARSE_ERRMSG> decode_identif_escape(char32_t leading);
 
 protected:
+  std::expected<TOKEN, PARSE_ERRMSG> tokenize_template_part();
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_string(char32_t separator);
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_identif(char32_t leading);
   std::optional<char32_t> decode_identif_uni();
@@ -210,6 +217,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
   std::expected<void, PARSE_ERRMSG> parse_property_name();
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
+  std::expected<void, PARSE_ERRMSG> parse_template();
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_function_decl();

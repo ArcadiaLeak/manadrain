@@ -13,7 +13,7 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-void append_codepoint(std::string &str, char32_t cp) {
+void uchar_append(std::string &str, char32_t cp) {
   std::array<std::uint8_t, 6> ubuf;
   int len = u8_uctomb(ubuf.data(), cp, ubuf.size());
   if (len > 0) {
@@ -245,11 +245,37 @@ TokAtom::tokenize_string(char32_t separator) {
     case 0:
       break;
     case 1:
-      append_codepoint(my_atom, std::get<1>(ch_alter));
+      uchar_append(my_atom, std::get<1>(ch_alter));
       break;
     default:
       return std::unexpected{std::get<2>(ch_alter)};
     }
+  }
+}
+
+std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_template_part() {
+  std::string str_template{};
+  while (1) {
+    std::optional ch{next()};
+    if (not ch)
+      return std::unexpected{UNEXPECTED_ERR::STRING_END};
+    if (ch == '`')
+      return TOK_TEMPLATE{'`', std::move(str_template)};
+    std::optional ahead{next()};
+    if (ch == '$' && ahead == '{')
+      return TOK_TEMPLATE{'$', std::move(str_template)};
+    if (ch != '\\')
+      prev();
+    else if (ahead) {
+      ch = *ahead;
+      str_template.push_back('\\');
+    } else
+      return std::unexpected{UNEXPECTED_ERR::STRING_END};
+    if (ch == '\r') {
+      chewLF();
+      ch = '\n';
+    }
+    uchar_append(str_template, *ch);
   }
 }
 
@@ -294,7 +320,7 @@ bool TokAtom::encode_identif_uchar(char32_t ch) {
   bool is_legal = my_atom.size() ? uc_is_property_xid_continue(ch)
                                  : uc_is_property_xid_start(ch);
   if (is_legal)
-    append_codepoint(my_atom, ch);
+    uchar_append(my_atom, ch);
   return is_legal;
 }
 
@@ -357,6 +383,8 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
     case '\'':
     case '"':
       return tokenize_string(leading);
+    case '`':
+      return tokenize_template_part();
     case '\r':
       chewLF();
       [[fallthrough]];
@@ -563,7 +591,7 @@ std::string TokNumber::scan_numseq(std::optional<TOK_0PREFIX> base_opt,
                 .transform([radix](int digit) { return radix > digit; })
                 .value_or(0))
       break;
-    append_codepoint(accum, *ahead);
+    uchar_append(accum, *ahead);
     ahead = std::nullopt;
   }
   if (ahead)
@@ -736,10 +764,17 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_object_literal() {
   return {};
 }
 
+std::expected<void, PARSE_ERRMSG> Parser::parse_template() {
+  throw std::runtime_error{"unimplemented!"};
+}
+
 std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   switch (my_token.index()) {
   case TOKV_STRING:
     my_expression = std::get<TOKV_STRING>(my_token);
+    return {};
+  case TOKV_TEMPLATE:
+    TRY_EXP(parse_template());
     return {};
   case TOKV_IDENTI:
     my_expression = std::get<TOKV_IDENTI>(my_token);
