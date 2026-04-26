@@ -245,7 +245,7 @@ TokAtom::tokenize_string(char32_t separator) {
     case 0:
       break;
     case 1:
-      uchar_append(my_atom, std::get<1>(ch_alter));
+      uchar_append(my_sbuf, std::get<1>(ch_alter));
       break;
     default:
       return std::unexpected{std::get<2>(ch_alter)};
@@ -254,28 +254,27 @@ TokAtom::tokenize_string(char32_t separator) {
 }
 
 std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_template_part() {
-  std::string str_template{};
   while (1) {
     std::optional ch{next()};
     if (not ch)
       return std::unexpected{UNEXPECTED_ERR::STRING_END};
     if (ch == '`')
-      return TOK_TEMPLATE{'`', std::move(str_template)};
+      return TOK_TEMPLATE{'`'};
     std::optional ahead{next()};
     if (ch == '$' && ahead == '{')
-      return TOK_TEMPLATE{'$', std::move(str_template)};
+      return TOK_TEMPLATE{'$'};
     if (ch != '\\')
       prev();
     else if (ahead) {
       ch = *ahead;
-      str_template.push_back('\\');
+      my_sbuf.push_back('\\');
     } else
       return std::unexpected{UNEXPECTED_ERR::STRING_END};
     if (ch == '\r') {
       chewLF();
       ch = '\n';
     }
-    uchar_append(str_template, *ch);
+    uchar_append(my_sbuf, *ch);
   }
 }
 
@@ -317,10 +316,10 @@ std::optional<char32_t> TokAtom::decode_identif_uni() {
 }
 
 bool TokAtom::encode_identif_uchar(char32_t ch) {
-  bool is_legal = my_atom.size() ? uc_is_property_xid_continue(ch)
+  bool is_legal = my_sbuf.size() ? uc_is_property_xid_continue(ch)
                                  : uc_is_property_xid_start(ch);
   if (is_legal)
-    uchar_append(my_atom, ch);
+    uchar_append(my_sbuf, ch);
   return is_legal;
 }
 
@@ -367,7 +366,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
     }
     break;
   }
-  if (my_atom.size() == 0)
+  if (my_sbuf.size() == 0)
     throw std::runtime_error{"tokenizing an identifier failed!"};
   prev();
   return TOK_IDENTI{has_escape, atom_find()};
@@ -499,31 +498,30 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
 std::size_t TokAtom::atom_find() {
   std::optional<std::size_t> pos_opt{};
   for (std::size_t p_atom : atom_prealloc_pos) {
-    std::size_t len =
-        LE_decode(std::span{atom_arena}.subspan(p_atom).first<8>());
-    std::string_view str_atom{atom_arena.data() + p_atom + 8, len};
-    if (my_atom == str_atom) {
+    std::size_t len = LE_decode(std::span{mempool}.subspan(p_atom).first<8>());
+    std::string_view str_atom{mempool.data() + p_atom + 8, len};
+    if (my_sbuf == str_atom) {
       pos_opt = p_atom;
       break;
     }
   }
   if (not pos_opt) {
-    if (not atom_umap.contains(my_atom))
-      atom_umap[my_atom] = atom_alloc();
-    pos_opt = atom_umap[my_atom];
+    if (not atom_umap.contains(my_sbuf))
+      atom_umap[my_sbuf] = atom_alloc();
+    pos_opt = atom_umap[my_sbuf];
   }
-  my_atom = {};
+  my_sbuf = {};
   return *pos_opt;
 }
 
 std::size_t TokAtom::atom_alloc() {
-  std::size_t atom_addr = atom_arena.size();
-  std::size_t aligned_size = aligned_N(my_atom.size());
-  atom_arena.reserve(atom_arena.size() + aligned_size + 8);
-  atom_arena.append_range(LE_encode(my_atom.size()));
-  atom_arena.append_range(my_atom);
-  atom_arena.append_range(
-      std::ranges::repeat_view{0, aligned_size - my_atom.size()});
+  std::size_t atom_addr = mempool.size();
+  std::size_t aligned_size = aligned_N(my_sbuf.size());
+  mempool.reserve(mempool.size() + aligned_size + 8);
+  mempool.append_range(LE_encode(my_sbuf.size()));
+  mempool.append_range(my_sbuf);
+  mempool.append_range(
+      std::ranges::repeat_view{0, aligned_size - my_sbuf.size()});
   return atom_addr;
 }
 

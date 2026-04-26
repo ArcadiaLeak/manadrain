@@ -34,7 +34,6 @@ struct TOK_IDENTI {
 };
 struct TOK_TEMPLATE {
   char32_t separator;
-  std::string str_template;
   bool operator==(const TOK_TEMPLATE &) const = default;
 };
 enum TOKV_INDEX {
@@ -160,8 +159,7 @@ private:
 class TokAtom : public TokNumber {
 private:
   std::unordered_map<std::string, std::size_t> atom_umap;
-  std::vector<char> atom_arena{std::from_range, atom_prealloc_buf};
-  std::string my_atom;
+  std::vector<char> mempool{std::from_range, atom_prealloc_buf};
 
   std::size_t atom_find();
   std::size_t atom_alloc();
@@ -178,6 +176,8 @@ private:
   std::expected<int, PARSE_ERRMSG> decode_identif_escape(char32_t leading);
 
 protected:
+  std::string my_sbuf;
+
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_template_part();
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_string(char32_t separator);
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_identif(char32_t leading);
