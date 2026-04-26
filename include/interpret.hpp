@@ -102,7 +102,7 @@ constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 class Scanner {
 public:
   bool reached_eof() { return buffer_idx >= buffer.size(); }
-  char32_t next_u();
+  char32_t unchecked_next();
   std::optional<char32_t> next();
   std::optional<char32_t> peek();
   void prev();
@@ -119,6 +119,7 @@ public:
 private:
   std::basic_string<std::uint8_t> buffer;
   int buffer_idx;
+  std::stack<int> breadcrumb;
 };
 
 enum class BASE_IND { HEX, BINARY, OCTAL, ZERO_LEAD_8 };

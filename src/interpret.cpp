@@ -3,8 +3,8 @@
 #include <limits>
 #include <stdexcept>
 
-#include <unicode/uchar.h>
-#include <unicode/ustring.h>
+#include <unictype.h>
+#include <unistr.h>
 
 #include "interpret.hpp"
 
@@ -13,36 +13,41 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-class Ch4Encoder {
-public:
-  std::string_view operator()(char32_t cp) {
-    UBool has_error{};
-    U8_APPEND(buff.data(), length, buff.size(), cp, has_error);
-    if (not has_error)
-      return {buff.data(), length};
-    throw std::runtime_error{"codepoint conversion failed!"};
+void append_codepoint(std::string &str, char32_t cp) {
+  std::array<std::uint8_t, 6> ubuf;
+  int len = u8_uctomb(ubuf.data(), cp, ubuf.size());
+  if (len > 0) {
+    str.append(reinterpret_cast<const char *>(ubuf.data()),
+               static_cast<std::size_t>(len));
+    return;
   }
+  throw std::runtime_error{"couldn't encode a codepoint!"};
+}
 
-private:
-  std::array<char, 4> buff;
-  std::uint32_t length;
-};
-
-char32_t Scanner::next_u() {
-  UChar32 ch;
-  U8_NEXT_OR_FFFD(buffer.data(), buffer_idx, buffer.size(), ch);
-  return ch;
+char32_t Scanner::unchecked_next() {
+  ucs4_t ch;
+  int len =
+      u8_mbtoucr(&ch, buffer.data() + buffer_idx, buffer.size() - buffer_idx);
+  if (len > 0) {
+    buffer_idx += len;
+    breadcrumb.push(len);
+    return ch;
+  }
+  throw std::runtime_error{"couldn't decode a codepoint!"};
 }
 
 std::optional<char32_t> Scanner::next() {
   if (reached_eof())
     return std::nullopt;
-  UChar32 ch;
-  U8_NEXT_OR_FFFD(buffer.data(), buffer_idx, buffer.size(), ch);
-  return ch;
+  return unchecked_next();
 }
 
-void Scanner::prev() { U8_BACK_1(buffer.data(), 0, buffer_idx); }
+void Scanner::prev() {
+  if (breadcrumb.empty())
+    throw std::runtime_error{"rewind past boundary!"};
+  buffer_idx -= breadcrumb.top();
+  breadcrumb.pop();
+}
 
 std::optional<char32_t> Scanner::peek() {
   std::optional<char32_t> ahead = next();
@@ -114,7 +119,7 @@ std::optional<char32_t> TokString::decode_uni() {
       if (not hex)
         return std::nullopt;
       num = (num << 4) | *hex;
-      if (num > UCHAR_MAX_VALUE)
+      if (num > 0x10ffff)
         return std::nullopt;
       ahead_opt = std::nullopt;
     }
@@ -221,7 +226,7 @@ TokString::decode_special(char32_t separator, char32_t ch) {
   case '\\':
     if (reached_eof())
       return std::monostate{};
-    return decode_escape(next_u());
+    return decode_escape(unchecked_next());
   default:
     return ch;
   }
@@ -238,10 +243,9 @@ std::expected<TOKEN, PARSE_ERRMSG> TokString::tokenize(char32_t separator) {
     switch (ch_alter.index()) {
     case 0:
       break;
-    case 1: {
-      Ch4Encoder encoder{};
-      my_atom.append(encoder(std::get<1>(ch_alter)));
-    } break;
+    case 1:
+      append_codepoint(my_atom, std::get<1>(ch_alter));
+      break;
     default:
       return std::unexpected{std::get<2>(ch_alter)};
     }
@@ -266,7 +270,7 @@ std::optional<char32_t> TokIdentif::decode_uni() {
       if (not hex)
         return std::nullopt;
       num = (num << 4) | *hex;
-      if (num > UCHAR_MAX_VALUE)
+      if (num > 0x10ffff)
         return std::nullopt;
       ahead_opt = std::nullopt;
     }
@@ -286,12 +290,10 @@ std::optional<char32_t> TokIdentif::decode_uni() {
 }
 
 bool TokIdentif::encode_uchar(char32_t ch) {
-  bool is_legal = u_hasBinaryProperty(ch, my_atom.size() ? UCHAR_XID_CONTINUE
-                                                         : UCHAR_XID_START);
-  if (is_legal) {
-    Ch4Encoder encoder{};
-    my_atom.append(encoder(ch));
-  }
+  bool is_legal = my_atom.size() ? uc_is_property_xid_continue(ch)
+                                 : uc_is_property_xid_start(ch);
+  if (is_legal)
+    append_codepoint(my_atom, ch);
   return is_legal;
 }
 
@@ -332,7 +334,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokIdentif::tokenize(char32_t leading) {
     case 1:
       if (reached_eof())
         break;
-      leading = next_u();
+      leading = unchecked_next();
       continue;
     }
     break;
@@ -348,7 +350,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
   while (1) {
     if (reached_eof())
       return std::monostate{};
-    char32_t leading = next_u();
+    char32_t leading = unchecked_next();
     switch (leading) {
     case '\'':
     case '"':
@@ -367,7 +369,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
         while (1) {
           if (reached_eof())
             return std::unexpected{UNEXPECTED_ERR::COMMENT_END};
-          leading = next_u();
+          leading = unchecked_next();
           ahead_opt = next();
           if (leading == '*' && ahead_opt == '/')
             break;
@@ -381,7 +383,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
         while (1) {
           if (reached_eof())
             break;
-          leading = next_u();
+          leading = unchecked_next();
           if (lineterm(leading)) {
             prev();
             break;
@@ -402,7 +404,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
       if (ahead_opt == 'u') {
         std::optional<int> ch_uni = decode_uni();
         auto is_id_start = [](char32_t ch) {
-          return u_hasBinaryProperty(ch, UCHAR_XID_START);
+          return uc_is_property_xid_start(ch);
         };
         if (ch_uni.transform(is_id_start).value_or(0))
           return TokIdentif::tokenize(*ch_uni);
@@ -419,7 +421,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
       for (i = 0; i < 2; i++) {
         if (reached_eof())
           break;
-        leading = next_u();
+        leading = unchecked_next();
         if (leading != '=') {
           prev();
           break;
@@ -437,9 +439,9 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
     default:
       if (std::isdigit(leading))
         return TokNumber::tokenize(leading);
-      if (u_isWhitespace(leading))
+      if (uc_is_property_white_space(leading))
         break;
-      if (u_hasBinaryProperty(leading, UCHAR_XID_START))
+      if (uc_is_property_xid_start(leading))
         return TokIdentif::tokenize(leading);
       return leading;
     }
@@ -557,8 +559,7 @@ std::string TokNumber::scan_numseq(std::optional<BASE_IND> base_opt,
                 .transform([radix](int digit) { return radix > digit; })
                 .value_or(0))
       break;
-    Ch4Encoder encoder{};
-    accum.append(encoder(*ahead));
+    append_codepoint(accum, *ahead);
     ahead = std::nullopt;
   }
   if (ahead)
@@ -608,7 +609,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
     std::optional ahead{peek()};
     if (not ahead)
       break;
-    if (not u_hasBinaryProperty(*ahead, UCHAR_XID_CONTINUE))
+    if (not uc_is_property_xid_continue(*ahead))
       break;
     return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
   } while (0);
