@@ -512,8 +512,8 @@ void TokNumber::peek_behind_octal(std::optional<char32_t> &trail_opt) {
   backtrack(cnt);
 }
 
-std::optional<TOK_NUMBER_PREFIX> TokNumber::decode_base_ind() {
-  std::optional<TOK_NUMBER_PREFIX> prefix{};
+std::optional<TOK_0PREFIX> TokNumber::decode_base_ind() {
+  std::optional<TOK_0PREFIX> prefix{};
   std::optional ahead_opt{next()};
   if (ahead_opt.transform([](char32_t ch) { return std::isdigit(ch); })
           .value_or(0)) {
@@ -521,12 +521,11 @@ std::optional<TOK_NUMBER_PREFIX> TokNumber::decode_base_ind() {
     peek_behind_octal(trail_opt);
     prefix = trail_opt == '8' || trail_opt == '9'
                  ? std::nullopt
-                 : std::make_optional(TOK_NUMBER_PREFIX::ZERO_LEAD_8);
+                 : std::make_optional(TOK_0PREFIX::ZERO_LEAD_8);
   }
   if (prefix
-          .transform([](TOK_NUMBER_PREFIX p) {
-            return p == TOK_NUMBER_PREFIX::ZERO_LEAD_8;
-          })
+          .transform(
+              [](TOK_0PREFIX p) { return p == TOK_0PREFIX::ZERO_LEAD_8; })
           .value_or(1)) {
     if (not prefix)
       prev();
@@ -536,24 +535,24 @@ std::optional<TOK_NUMBER_PREFIX> TokNumber::decode_base_ind() {
   return prefix;
 }
 
-int radix_from_ind(std::optional<TOK_NUMBER_PREFIX> ind_opt) {
+int radix_from_ind(std::optional<TOK_0PREFIX> ind_opt) {
   do {
     if (not ind_opt)
       break;
     switch (*ind_opt) {
-    case TOK_NUMBER_PREFIX::BINARY:
+    case TOK_0PREFIX::BINARY:
       return 2;
-    case TOK_NUMBER_PREFIX::ZERO_LEAD_8:
-    case TOK_NUMBER_PREFIX::OCTAL:
+    case TOK_0PREFIX::ZERO_LEAD_8:
+    case TOK_0PREFIX::OCTAL:
       return 8;
-    case TOK_NUMBER_PREFIX::HEX:
+    case TOK_0PREFIX::HEX:
       return 16;
     }
   } while (0);
   return 10;
 }
 
-std::string TokNumber::scan_numseq(std::optional<TOK_NUMBER_PREFIX> base_opt,
+std::string TokNumber::scan_numseq(std::optional<TOK_0PREFIX> base_opt,
                                    std::optional<char32_t> ahead) {
   int radix{radix_from_ind(base_opt)};
   std::string accum{};
@@ -585,7 +584,7 @@ std::string TokNumber::FRACTIONAL::collapse() {
 std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
   if (reached_eof())
     return leading - '0';
-  std::optional<TOK_NUMBER_PREFIX> base_opt{};
+  std::optional<TOK_0PREFIX> base_opt{};
   if (leading == '0') {
     do {
       base_opt = decode_base_ind();

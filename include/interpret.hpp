@@ -123,7 +123,7 @@ private:
   std::stack<int> breadcrumb;
 };
 
-enum class TOK_NUMBER_PREFIX { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
+enum class TOK_0PREFIX { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
 class TokNumber : public Scanner {
 protected:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
@@ -145,9 +145,9 @@ private:
   };
   using FLOAT_REPR = std::variant<WHOLE, FRACTIONAL, SCIENTIFIC>;
 
-  std::optional<TOK_NUMBER_PREFIX> decode_base_ind();
+  std::optional<TOK_0PREFIX> decode_base_ind();
   void peek_behind_octal(std::optional<char32_t> &trail_opt);
-  std::string scan_numseq(std::optional<TOK_NUMBER_PREFIX> base_opt,
+  std::string scan_numseq(std::optional<TOK_0PREFIX> base_opt,
                           std::optional<char32_t> ahead);
 };
 
