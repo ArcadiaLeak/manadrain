@@ -13,15 +13,13 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-template <typename T> void appendCodepoint(T &str, char32_t cp) {
-  std::array<std::uint8_t, 6> ubuf;
+std::generator<char> traverse_ucs4(ucs4_t cp) {
+  std::array<std::uint8_t, 6> ubuf{};
   int len = u8_uctomb(ubuf.data(), cp, ubuf.size());
-  if (len > 0) {
-    str.append(reinterpret_cast<const char *>(ubuf.data()),
-               static_cast<std::size_t>(len));
-    return;
-  }
-  throw std::runtime_error{"couldn't encode a codepoint!"};
+  if (len < 0)
+    throw std::runtime_error{"couldn't encode a codepoint!"};
+  for (int i = 0; i < len; ++i)
+    co_yield ubuf[i];
 }
 
 bool Scanner::reached_end() { return position >= buffer.size(); }
@@ -139,119 +137,141 @@ std::optional<char32_t> TokAtom::decode_string_uni() {
   return num;
 }
 
-std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-TokAtom::decode_string_escape(char32_t ch) {
-  switch (ch) {
-  case '\'':
-  case '\"':
-  case '\0':
-  case '\\':
-    return ch;
-  case '\r':
-    chewLF();
-    [[fallthrough]];
-  case '\n':
-  case 0x2028:
-  case 0x2029:
-    /* ignore escaped newline sequence */
-    return std::monostate{};
-  case 'b':
-    return U'\b';
-  case 'f':
-    return U'\f';
-  case 'n':
-    return U'\n';
-  case 'r':
-    return U'\r';
-  case 't':
-    return U'\t';
-  case 'v':
-    return U'\v';
-  case 'x': {
-    std::optional hex = decode_string_xseq();
-    if (not hex)
-      return INVALID_ERR::MALFORMED_ESCAPE;
-    return *hex;
+std::generator<std::expected<char32_t, PARSE_ERRMSG>>
+TokAtom::traverse_string(char32_t separator) {
+  std::optional<PARSE_ERRMSG> err_opt{};
+  bool backslash_seen{};
+  while (not err_opt) {
+    std::optional ch_opt{next()};
+    if (not ch_opt) {
+      err_opt = UNEXPECTED_ERR::STRING_END;
+      break;
+    }
+    if (backslash_seen) {
+      backslash_seen = 0;
+      switch (*ch_opt) {
+      case '\'':
+      case '\\':
+      case '"':
+      case '`':
+        co_yield *ch_opt;
+        break;
+      case '\r':
+        chewLF();
+        [[fallthrough]];
+      case '\n':
+      case 0x2028:
+      case 0x2029:
+        /* ignore escaped newline sequence */
+        break;
+      case 'b':
+        co_yield '\b';
+        break;
+      case 'f':
+        co_yield '\f';
+        break;
+      case 'n':
+        co_yield '\n';
+        break;
+      case 'r':
+        co_yield '\r';
+        break;
+      case 't':
+        co_yield '\t';
+        break;
+      case 'v':
+        co_yield '\v';
+        break;
+      case 'x': {
+        std::optional hex = decode_string_xseq();
+        if (hex)
+          co_yield *hex;
+        else
+          err_opt = INVALID_ERR::MALFORMED_ESCAPE;
+        break;
+      }
+      case 'u': {
+        std::optional uni = decode_string_uni();
+        if (uni)
+          co_yield *uni;
+        else
+          err_opt = INVALID_ERR::MALFORMED_ESCAPE;
+        break;
+      }
+      case '0':
+        if (not peek()
+                    .transform(
+                        [](char32_t ahead) { return std::isdigit(ahead); })
+                    .value_or(0)) {
+          co_yield '\0';
+          break;
+        }
+        [[fallthrough]];
+      case '1':
+      case '2':
+      case '3':
+      case '4':
+      case '5':
+      case '6':
+      case '7': {
+        char32_t base = *ch_opt - '0';
+        do {
+          std::optional<char32_t> digit{};
+          digit = decode_string_esc8();
+          if (not digit)
+            break;
+          base = (base << 3) | *digit;
+          if (base >= 32)
+            break;
+          digit = decode_string_esc8();
+          if (not digit)
+            break;
+          base = (base << 3) | *digit;
+        } while (0);
+        co_yield base;
+        break;
+      }
+      case '8':
+      case '9':
+        err_opt = INVALID_ERR::MALFORMED_ESCAPE;
+        break;
+      default:
+        prev();
+        break;
+      }
+    } else {
+      if (ch_opt == separator)
+        co_return;
+      switch (*ch_opt) {
+      case '\r':
+        chewLF();
+        [[fallthrough]];
+      case '\n':
+        if (separator == '`')
+          co_yield '\n';
+        else
+          err_opt = UNEXPECTED_ERR::STRING_END;
+        break;
+      case '\\':
+        backslash_seen = 1;
+        break;
+      default:
+        co_yield *ch_opt;
+        break;
+      }
+    }
   }
-  case 'u': {
-    std::optional uni = decode_string_uni();
-    if (not uni)
-      return INVALID_ERR::MALFORMED_ESCAPE;
-    return *uni;
-  }
-  case '0':
-    if (not peek()
-                .transform([](char32_t ahead) { return std::isdigit(ahead); })
-                .value_or(0))
-      return U'\0';
-    [[fallthrough]];
-  case '1':
-  case '2':
-  case '3':
-  case '4':
-  case '5':
-  case '6':
-  case '7': {
-    std::optional<char32_t> digit{};
-    char32_t base = ch - '0';
-    digit = decode_string_esc8();
-    if (not digit)
-      return base;
-    base = (base << 3) | *digit;
-    if (base >= 32)
-      return base;
-    digit = decode_string_esc8();
-    if (not digit)
-      return base;
-    base = (base << 3) | *digit;
-    return base;
-  }
-  case '8':
-  case '9':
-    return INVALID_ERR::MALFORMED_ESCAPE;
-  default:
-    return std::monostate{};
-  }
-}
-
-std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-TokAtom::decode_string_special(char32_t separator, char32_t ch) {
-  switch (ch) {
-  case '\r':
-    chewLF();
-    [[fallthrough]];
-  case '\n':
-    if (separator == '`')
-      return U'\n';
-    return UNEXPECTED_ERR::STRING_END;
-  case '\\':
-    if (reached_end())
-      return std::monostate{};
-    return decode_string_escape(unchecked_next());
-  default:
-    return ch;
-  }
+  co_yield std::unexpected{*err_opt};
 }
 
 std::expected<TOKEN, PARSE_ERRMSG>
 TokAtom::tokenize_string(char32_t separator) {
-  while (1) {
-    std::optional ch_opt{next()};
-    if (not ch_opt)
-      return std::unexpected{UNEXPECTED_ERR::STRING_END};
-    if (ch_opt == separator)
-      return TOK_STRING{separator, atom_find()};
-    std::variant ch_alter = decode_string_special(separator, *ch_opt);
-    switch (ch_alter.index()) {
-    case 0:
-      break;
-    case 1:
-      appendCodepoint(my_sbuf, std::get<1>(ch_alter));
-      break;
-    default:
-      return std::unexpected{std::get<2>(ch_alter)};
-    }
+  for (std::expected schar : traverse_string(separator)) {
+    if (not schar)
+      return std::unexpected{schar.error()};
+    my_sbuf.append_range(traverse_ucs4(*schar));
   }
+  return TOK_STRING{separator, atom_find()};
 }
 
 std::optional<char32_t> TokAtom::decode_identif_uni() {
@@ -295,7 +315,7 @@ bool TokAtom::encode_identif_uchar(char32_t ch) {
   bool is_legal = my_sbuf.size() ? uc_is_property_xid_continue(ch)
                                  : uc_is_property_xid_start(ch);
   if (is_legal)
-    appendCodepoint(my_sbuf, ch);
+    my_sbuf.append_range(traverse_ucs4(ch));
   return is_legal;
 }
 
@@ -552,7 +572,7 @@ std::string TokNumber::scan_numseq(std::optional<TOK_0PREFIX> base_opt,
                 .transform([radix](int digit) { return radix > digit; })
                 .value_or(0))
       break;
-    appendCodepoint(accum, *ahead);
+    accum.append_range(traverse_ucs4(*ahead));
     ahead = std::nullopt;
   }
   if (ahead)

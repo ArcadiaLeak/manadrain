@@ -1,5 +1,6 @@
 #include <bitset>
 #include <expected>
+#include <generator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -162,10 +163,8 @@ private:
   std::optional<char32_t> decode_string_esc8();
   std::optional<char32_t> decode_string_xseq();
   std::optional<char32_t> decode_string_uni();
-  std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-  decode_string_escape(char32_t leading);
-  std::variant<std::monostate, char32_t, PARSE_ERRMSG>
-  decode_string_special(char32_t separator, char32_t ch);
+  std::generator<std::expected<char32_t, PARSE_ERRMSG>>
+  traverse_string(char32_t separator);
 
   bool encode_identif_uchar(char32_t ch);
   std::expected<int, PARSE_ERRMSG> decode_identif_escape(char32_t leading);
