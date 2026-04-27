@@ -450,6 +450,23 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
         return TOK_OPERATOR::EQ_STRICT;
       }
     }
+    case '&': {
+      std::optional ch_opt{next()};
+      if (not ch_opt)
+        return U'&';
+      if (ch_opt == '=')
+        return TOK_OPERATOR::AND_ASSIGN;
+      if (ch_opt != '&') {
+        prev();
+        return U'&';
+      }
+      ch_opt = next();
+      if (ch_opt != '=') {
+        prev();
+        return TOK_OPERATOR::LOGIC_AND;
+      }
+      return TOK_OPERATOR::LAND_ASSIGN;
+    }
     default:
       if (std::isdigit(leading))
         return TokNumber::tokenize(leading);
@@ -734,10 +751,6 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_object_literal() {
   return {};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_template() {
-  throw std::runtime_error{"unimplemented!"};
-}
-
 std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   switch (my_token.index()) {
   case TOKV_STRING:
@@ -832,19 +845,27 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_access_expr() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
-  std::expected<void, PARSE_ERRMSG> parse_ok{};
-  parse_ok = parse_binary_expr();
-  if (not parse_ok)
-    return parse_ok;
+  TRY_EXP(parse_logical_and_or())
   if (my_token != TOKEN{U'='})
     return {};
   TRY_EXP(tokenize())
   EXPRESSION lhs_expr = std::move(my_expression);
-  parse_ok = parse_assign_expr();
-  if (not parse_ok)
-    return parse_ok;
+  TRY_EXP(parse_assign_expr())
   my_expression = std::make_unique<EXPR_ASSIGN>(std::move(lhs_expr),
                                                 std::move(my_expression));
+  return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_logical_and_or() {
+  TRY_EXP(parse_binary_expr())
+  while (my_token == TOKEN{TOK_OPERATOR::LOGIC_AND}) {
+    EXPRESSION expr_left = std::move(my_expression);
+    TOK_OPERATOR op = std::get<TOKV_OP>(my_token);
+    TRY_EXP(tokenize())
+    TRY_EXP(parse_binary_expr())
+    my_expression = std::make_unique<EXPR_LOGICAL>(
+        std::move(expr_left), std::move(my_expression), op);
+  }
   return {};
 }
 

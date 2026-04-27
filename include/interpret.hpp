@@ -40,7 +40,14 @@ enum TOKV_INDEX {
   TOKV_NUMBER,
   TOKV_OP
 };
-enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY, DIV_ASSIGN };
+enum class TOK_OPERATOR {
+  EQ_STRICT,
+  EQ_SLOPPY,
+  DIV_ASSIGN,
+  AND_ASSIGN,
+  LAND_ASSIGN,
+  LOGIC_AND
+};
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
                            double, TOK_OPERATOR>;
 
@@ -50,11 +57,13 @@ struct EXPR_BINARY;
 struct EXPR_OBJECT;
 struct EXPR_ACCESS;
 struct EXPR_ASSIGN;
+struct EXPR_LOGICAL;
 using EXPRESSION =
     std::variant<std::monostate, TOK_STRING, TOK_IDENTI, double,
                  std::unique_ptr<EXPR_CALL>, std::unique_ptr<EXPR_MEMBER>,
                  std::unique_ptr<EXPR_BINARY>, std::unique_ptr<EXPR_OBJECT>,
-                 std::unique_ptr<EXPR_ACCESS>, std::unique_ptr<EXPR_ASSIGN>>;
+                 std::unique_ptr<EXPR_ACCESS>, std::unique_ptr<EXPR_ASSIGN>,
+                 std::unique_ptr<EXPR_LOGICAL>>;
 struct EXPR_CALL {
   EXPRESSION callee;
   std::vector<EXPRESSION> arguments;
@@ -68,10 +77,6 @@ struct EXPR_BINARY {
   EXPRESSION right;
   TOK_OPERATOR bin_op;
 };
-struct EXPR_ASSIGN {
-  EXPRESSION left;
-  EXPRESSION right;
-};
 struct EXPR_OBJECT {
   struct PROP {
     EXPRESSION prop_key;
@@ -82,6 +87,15 @@ struct EXPR_OBJECT {
 struct EXPR_ACCESS {
   EXPRESSION object;
   EXPRESSION property;
+};
+struct EXPR_ASSIGN {
+  EXPRESSION left;
+  EXPRESSION right;
+};
+struct EXPR_LOGICAL {
+  EXPRESSION left;
+  EXPRESSION right;
+  TOK_OPERATOR op;
 };
 
 struct STMT_VARDECL;
@@ -205,7 +219,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
   std::expected<void, PARSE_ERRMSG> parse_property_name();
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
-  std::expected<void, PARSE_ERRMSG> parse_template();
+  std::expected<void, PARSE_ERRMSG> parse_logical_and_or();
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_function_decl();
