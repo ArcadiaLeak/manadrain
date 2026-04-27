@@ -96,7 +96,7 @@ struct STMT_VARDECL {
 };
 struct STMT_FUNCDECL {
   TOK_IDENTI identifier;
-  std::vector<STATEMENT> body;
+  std::vector<STATEMENT> subprogram;
 };
 
 constexpr std::uint8_t MEMORY_ALIGNMENT = 8;

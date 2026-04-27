@@ -907,11 +907,11 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_function_decl() {
-  STMT_FUNCDECL funcdecl{};
+  STMT_FUNCDECL declaration{};
   TRY_EXP(tokenize())
   if (my_token.index() != TOKV_IDENTI)
     return std::unexpected{NEEDED_ERR::FUNCTION_NAME};
-  funcdecl.identifier = std::get<TOKV_IDENTI>(my_token);
+  declaration.identifier = std::get<TOKV_IDENTI>(my_token);
   TRY_EXP(tokenize())
   TRY_EXP(expect_punct('('))
   TRY_EXP(tokenize())
@@ -919,14 +919,12 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_function_decl() {
   TRY_EXP(tokenize())
   TRY_EXP(expect_punct('{'))
   TRY_EXP(tokenize())
-  std::vector<STATEMENT> super_program{std::move(program)};
-  program = std::vector<STATEMENT>{};
+  program.swap(declaration.subprogram);
   while (my_token != TOKEN{U'}'}) {
     TRY_EXP(parse_statement())
   }
-  funcdecl.body = std::move(program);
-  super_program.push_back(std::move(funcdecl));
-  program = std::move(super_program);
+  program.swap(declaration.subprogram);
+  program.push_back(std::move(declaration));
   TRY_EXP(tokenize())
   return {};
 }
