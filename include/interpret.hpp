@@ -190,7 +190,7 @@ enum class PROP_KIND { IDENTIF, COMPUTED };
 
 class Parser : public Tokenizer {
 public:
-  std::stack<std::vector<STATEMENT>> statements;
+  std::vector<STATEMENT> program;
   bool parse();
 
 private:

@@ -699,7 +699,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   declaration.initializer = std::move(my_expression);
 
 wrap_up:
-  statements.top().push_back(std::move(declaration));
+  program.push_back(std::move(declaration));
   return {};
 }
 
@@ -919,13 +919,14 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_function_decl() {
   TRY_EXP(tokenize())
   TRY_EXP(expect_punct('{'))
   TRY_EXP(tokenize())
-  statements.emplace();
+  std::vector<STATEMENT> super_program{std::move(program)};
+  program = std::vector<STATEMENT>{};
   while (my_token != TOKEN{U'}'}) {
     TRY_EXP(parse_statement())
   }
-  funcdecl.body = std::move(statements.top());
-  statements.pop();
-  statements.top().push_back(std::move(funcdecl));
+  funcdecl.body = std::move(program);
+  super_program.push_back(std::move(funcdecl));
+  program = std::move(super_program);
   TRY_EXP(tokenize())
   return {};
 }
@@ -945,7 +946,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
     [[fallthrough]];
   default:
     TRY_EXP(parse_assign_expr())
-    statements.top().push_back(std::move(my_expression));
+    program.push_back(std::move(my_expression));
     return expect_statement_end();
   }
 }
@@ -954,7 +955,6 @@ bool Parser::parse() {
   std::expected ok{tokenize()};
   if (not ok)
     return 1;
-  statements.emplace();
   while (1) {
     if (my_token.index() == TOKV_EOF)
       return 0;
