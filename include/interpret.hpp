@@ -1,4 +1,3 @@
-#include <bitset>
 #include <expected>
 #include <generator>
 #include <memory>
@@ -39,8 +38,7 @@ enum TOKV_INDEX {
   TOKV_STRING,
   TOKV_IDENTI,
   TOKV_NUMBER,
-  TOKV_OP,
-  TOKV_TEMPLATE
+  TOKV_OP
 };
 enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY, DIV_ASSIGN };
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
@@ -157,21 +155,18 @@ private:
   std::unordered_map<std::string, std::size_t> atom_umap;
   std::vector<char> mempool{std::from_range, atom_prealloc_buf};
 
-  std::size_t atom_find();
-  std::size_t atom_alloc();
+  std::size_t atom_find(std::string needle);
+  std::size_t atom_alloc(std::string_view needle);
 
   std::optional<char32_t> decode_string_esc8();
   std::optional<char32_t> decode_string_xseq();
   std::optional<char32_t> decode_string_uni();
+
   std::generator<std::expected<char32_t, PARSE_ERRMSG>>
   traverse_string(char32_t separator);
-
-  bool encode_identif_uchar(char32_t ch);
-  std::expected<int, PARSE_ERRMSG> decode_identif_escape(char32_t leading);
+  std::generator<std::optional<char32_t>> traverse_identif(bool &has_escape);
 
 protected:
-  std::string my_sbuf;
-
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_string(char32_t separator);
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_identif(char32_t leading);
   std::optional<char32_t> decode_identif_uni();

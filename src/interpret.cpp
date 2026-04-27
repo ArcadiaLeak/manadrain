@@ -266,12 +266,13 @@ TokAtom::traverse_string(char32_t separator) {
 
 std::expected<TOKEN, PARSE_ERRMSG>
 TokAtom::tokenize_string(char32_t separator) {
+  std::string needle{};
   for (std::expected schar : traverse_string(separator)) {
     if (not schar)
       return std::unexpected{schar.error()};
-    my_sbuf.append_range(traverse_ucs4(*schar));
+    needle.append_range(traverse_ucs4(*schar));
   }
-  return TOK_STRING{separator, atom_find()};
+  return TOK_STRING{separator, atom_find(std::move(needle))};
 }
 
 std::optional<char32_t> TokAtom::decode_identif_uni() {
@@ -311,61 +312,50 @@ std::optional<char32_t> TokAtom::decode_identif_uni() {
   return num;
 }
 
-bool TokAtom::encode_identif_uchar(char32_t ch) {
-  bool is_legal = my_sbuf.size() ? uc_is_property_xid_continue(ch)
-                                 : uc_is_property_xid_start(ch);
-  if (is_legal)
-    my_sbuf.append_range(traverse_ucs4(ch));
-  return is_legal;
-}
-
-std::expected<int, PARSE_ERRMSG>
-TokAtom::decode_identif_escape(char32_t leading) {
-  bool has_escape{};
-  if (leading == '\\') {
-    if (not next().transform([](char32_t ch) { return ch == 'u'; }).value_or(0))
-      return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
-    std::optional<int> ch_uni = decode_identif_uni();
-    switch (ch_uni.has_value()) {
-    case 1:
-      leading = *ch_uni;
-      has_escape = 1;
+std::generator<std::optional<char32_t>>
+TokAtom::traverse_identif(bool &has_escape) {
+  while (1) {
+    std::optional ch_opt{next()};
+    if (not ch_opt)
+      co_return;
+    if (uc_is_property_xid_continue(*ch_opt)) {
+      co_yield *ch_opt;
+      continue;
+    }
+    if (ch_opt != '\\') {
+      prev();
+      co_return;
+    }
+    if (next() != 'u') {
+      co_yield std::nullopt;
       break;
-    default:
-      return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
+    }
+    std::optional ch_uni{decode_identif_uni()};
+    if (not ch_uni) {
+      co_yield std::nullopt;
+      break;
+    }
+    has_escape = 1;
+    if (uc_is_property_xid_continue(*ch_uni)) {
+      co_yield *ch_uni;
+      continue;
+    } else {
+      co_yield std::nullopt;
+      break;
     }
   }
-  bool success = encode_identif_uchar(leading);
-  if (has_escape) {
-    if (success)
-      return 2;
-    return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
-  }
-  return success;
 }
 
 std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
+  std::string needle{};
+  needle.append_range(traverse_ucs4(leading));
   bool has_escape = 0;
-  while (1) {
-    std::expected esc_exp = decode_identif_escape(leading);
-    if (not esc_exp)
-      return std::unexpected{esc_exp.error()};
-    switch (*esc_exp) {
-    case 2:
-      has_escape = 1;
-      [[fallthrough]];
-    case 1:
-      if (reached_end())
-        break;
-      leading = unchecked_next();
-      continue;
-    }
-    break;
+  for (std::optional ichar : traverse_identif(has_escape)) {
+    if (not ichar)
+      return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
+    needle.append_range(traverse_ucs4(*ichar));
   }
-  if (my_sbuf.size() == 0)
-    throw std::runtime_error{"tokenizing an identifier failed!"};
-  prev();
-  return TOK_IDENTI{has_escape, atom_find()};
+  return TOK_IDENTI{has_escape, atom_find(std::move(needle))};
 }
 
 std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
@@ -490,33 +480,32 @@ std::size_t LE_decode(std::span<char, 8> bytes) {
   return N;
 }
 
-std::size_t TokAtom::atom_find() {
+std::size_t TokAtom::atom_find(std::string needle) {
   std::optional<std::size_t> pos_opt{};
   for (std::size_t p_atom : atom_prealloc_pos) {
     std::size_t len = LE_decode(std::span{mempool}.subspan(p_atom).first<8>());
     std::string_view str_atom{mempool.data() + p_atom + 8, len};
-    if (my_sbuf == str_atom) {
+    if (needle == str_atom) {
       pos_opt = p_atom;
       break;
     }
   }
   if (not pos_opt) {
-    if (not atom_umap.contains(my_sbuf))
-      atom_umap[my_sbuf] = atom_alloc();
-    pos_opt = atom_umap[my_sbuf];
+    if (not atom_umap.contains(needle))
+      atom_umap[needle] = atom_alloc(needle);
+    pos_opt = atom_umap[needle];
   }
-  my_sbuf = {};
   return *pos_opt;
 }
 
-std::size_t TokAtom::atom_alloc() {
+std::size_t TokAtom::atom_alloc(std::string_view needle) {
   std::size_t atom_addr = mempool.size();
-  std::size_t aligned_size = aligned_N(my_sbuf.size());
+  std::size_t aligned_size = aligned_N(needle.size());
   mempool.reserve(mempool.size() + aligned_size + 8);
-  mempool.append_range(LE_encode(my_sbuf.size()));
-  mempool.append_range(my_sbuf);
+  mempool.append_range(LE_encode(needle.size()));
+  mempool.append_range(needle);
   mempool.append_range(
-      std::ranges::repeat_view{0, aligned_size - my_sbuf.size()});
+      std::ranges::repeat_view{0, aligned_size - needle.size()});
   return atom_addr;
 }
 
@@ -753,9 +742,6 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   switch (my_token.index()) {
   case TOKV_STRING:
     my_expression = std::get<TOKV_STRING>(my_token);
-    return {};
-  case TOKV_TEMPLATE:
-    TRY_EXP(parse_template());
     return {};
   case TOKV_IDENTI:
     my_expression = std::get<TOKV_IDENTI>(my_token);
