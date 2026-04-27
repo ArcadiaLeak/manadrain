@@ -26,8 +26,8 @@ int main(int argc, char *argv[]) {
   file >> std::noskipws;
 
   Interpret::Parser parser{};
-  parser.setBuffer(std::ranges::istream_view<std::uint8_t>{file} |
-                   std::ranges::to<std::basic_string<std::uint8_t>>());
+  parser.populate(std::ranges::istream_view<std::uint8_t>{file} |
+                  std::ranges::to<std::vector<std::uint8_t>>());
   parser.parse();
 
   return 0;

@@ -83,7 +83,7 @@ long string";
 console.log(s7 === "This is a long string"); // true
 
 // 3.9 Template literal escapes (ES6)
-var s8 = `Line1\nLine2\tTabbed\u{1F600}`;
+var s8 = `Li\`ne1\nLine2\tTabbed\u{1F600}`;
 console.log(s8.includes('\n') && s8.includes('\t') && s8.includes('😀')); // true
 
 // 3.10 Combination of escapes

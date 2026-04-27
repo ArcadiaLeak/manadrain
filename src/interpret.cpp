@@ -13,7 +13,7 @@ static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
 
-void uchar_append(std::string &str, char32_t cp) {
+template <typename T> void appendCodepoint(T &str, char32_t cp) {
   std::array<std::uint8_t, 6> ubuf;
   int len = u8_uctomb(ubuf.data(), cp, ubuf.size());
   if (len > 0) {
@@ -24,29 +24,30 @@ void uchar_append(std::string &str, char32_t cp) {
   throw std::runtime_error{"couldn't encode a codepoint!"};
 }
 
+bool Scanner::reached_end() { return position >= buffer.size(); }
+
+void Scanner::prev() {
+  if (backtrace.empty())
+    throw std::runtime_error{"rewind past boundary!"};
+  position -= backtrace.top();
+  backtrace.pop();
+}
+
 char32_t Scanner::unchecked_next() {
   ucs4_t ch;
-  int len =
-      u8_mbtoucr(&ch, buffer.data() + buffer_idx, buffer.size() - buffer_idx);
+  int len = u8_mbtoucr(&ch, buffer.data() + position, buffer.size() - position);
   if (len > 0) {
-    buffer_idx += len;
-    breadcrumb.push(len);
+    position += len;
+    backtrace.push(len);
     return ch;
   }
   throw std::runtime_error{"couldn't decode a codepoint!"};
 }
 
 std::optional<char32_t> Scanner::next() {
-  if (reached_eof())
+  if (reached_end())
     return std::nullopt;
   return unchecked_next();
-}
-
-void Scanner::prev() {
-  if (breadcrumb.empty())
-    throw std::runtime_error{"rewind past boundary!"};
-  buffer_idx -= breadcrumb.top();
-  breadcrumb.pop();
 }
 
 std::optional<char32_t> Scanner::peek() {
@@ -70,7 +71,7 @@ void Scanner::chewLF() {
 }
 
 std::optional<char32_t> TokAtom::decode_string_esc8() {
-  if (reached_eof())
+  if (reached_end())
     return std::nullopt;
   std::optional ahead{next()};
   std::optional ret_opt = ahead.and_then([](char32_t ch) {
@@ -224,7 +225,7 @@ TokAtom::decode_string_special(char32_t separator, char32_t ch) {
       return U'\n';
     return UNEXPECTED_ERR::STRING_END;
   case '\\':
-    if (reached_eof())
+    if (reached_end())
       return std::monostate{};
     return decode_string_escape(unchecked_next());
   default:
@@ -245,36 +246,11 @@ TokAtom::tokenize_string(char32_t separator) {
     case 0:
       break;
     case 1:
-      uchar_append(my_sbuf, std::get<1>(ch_alter));
+      appendCodepoint(my_sbuf, std::get<1>(ch_alter));
       break;
     default:
       return std::unexpected{std::get<2>(ch_alter)};
     }
-  }
-}
-
-std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_template_part() {
-  while (1) {
-    std::optional ch{next()};
-    if (not ch)
-      return std::unexpected{UNEXPECTED_ERR::STRING_END};
-    if (ch == '`')
-      return TOK_TEMPLATE{'`'};
-    std::optional ahead{next()};
-    if (ch == '$' && ahead == '{')
-      return TOK_TEMPLATE{'$'};
-    if (ch != '\\')
-      prev();
-    else if (ahead) {
-      ch = *ahead;
-      my_sbuf.push_back('\\');
-    } else
-      return std::unexpected{UNEXPECTED_ERR::STRING_END};
-    if (ch == '\r') {
-      chewLF();
-      ch = '\n';
-    }
-    uchar_append(my_sbuf, *ch);
   }
 }
 
@@ -319,7 +295,7 @@ bool TokAtom::encode_identif_uchar(char32_t ch) {
   bool is_legal = my_sbuf.size() ? uc_is_property_xid_continue(ch)
                                  : uc_is_property_xid_start(ch);
   if (is_legal)
-    uchar_append(my_sbuf, ch);
+    appendCodepoint(my_sbuf, ch);
   return is_legal;
 }
 
@@ -359,7 +335,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
       has_escape = 1;
       [[fallthrough]];
     case 1:
-      if (reached_eof())
+      if (reached_end())
         break;
       leading = unchecked_next();
       continue;
@@ -375,15 +351,14 @@ std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
 std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
   newline_seen = 0;
   while (1) {
-    if (reached_eof())
+    if (reached_end())
       return std::monostate{};
     char32_t leading = unchecked_next();
     switch (leading) {
     case '\'':
     case '"':
-      return tokenize_string(leading);
     case '`':
-      return tokenize_template_part();
+      return tokenize_string(leading);
     case '\r':
       chewLF();
       [[fallthrough]];
@@ -396,7 +371,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
       std::optional ahead_opt = next();
       if (ahead_opt == '*') {
         while (1) {
-          if (reached_eof())
+          if (reached_end())
             return std::unexpected{UNEXPECTED_ERR::COMMENT_END};
           leading = unchecked_next();
           ahead_opt = next();
@@ -410,7 +385,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
         break;
       } else if (ahead_opt == '/') {
         while (1) {
-          if (reached_eof())
+          if (reached_end())
             break;
           leading = unchecked_next();
           if (lineterm(leading)) {
@@ -448,7 +423,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
     case '=': {
       int i;
       for (i = 0; i < 2; i++) {
-        if (reached_eof())
+        if (reached_end())
           break;
         leading = unchecked_next();
         if (leading != '=') {
@@ -525,40 +500,28 @@ std::size_t TokAtom::atom_alloc() {
   return atom_addr;
 }
 
-void TokNumber::peek_behind_octal(std::optional<char32_t> &trail_opt) {
-  int cnt{};
-  while (1) {
-    if (trail_opt.transform([](char32_t ch) { return ch < '0' || ch > '7'; })
-            .value_or(1))
-      break;
-    trail_opt = next();
-    if (trail_opt)
-      ++cnt;
+std::optional<TOK_0PREFIX> TokNumber::decode_0prefix() {
+  std::u32string ahead{};
+  if (reached_end())
+    goto bail;
+  ahead.push_back(unchecked_next());
+  if (std::isdigit(ahead.front())) {
+    while (1) {
+      if (ahead.back() < '0' || ahead.back() > '7')
+        break;
+      std::optional trail_opt{next()};
+      if (not trail_opt)
+        break;
+      ahead.push_back(*trail_opt);
+    }
+    if (ahead.back() == '8' || ahead.back() == '9')
+      goto bail;
+    backtrack(ahead.size());
+    return TOK_0PREFIX::ZERO;
   }
-  backtrack(cnt);
-}
-
-std::optional<TOK_0PREFIX> TokNumber::decode_base_ind() {
-  std::optional<TOK_0PREFIX> prefix{};
-  std::optional ahead_opt{next()};
-  if (ahead_opt.transform([](char32_t ch) { return std::isdigit(ch); })
-          .value_or(0)) {
-    std::optional trail_opt{ahead_opt};
-    peek_behind_octal(trail_opt);
-    prefix = trail_opt == '8' || trail_opt == '9'
-                 ? std::nullopt
-                 : std::make_optional(TOK_0PREFIX::ZERO_LEAD_8);
-  }
-  if (prefix
-          .transform(
-              [](TOK_0PREFIX p) { return p == TOK_0PREFIX::ZERO_LEAD_8; })
-          .value_or(1)) {
-    if (not prefix)
-      prev();
-    if (ahead_opt)
-      prev();
-  }
-  return prefix;
+bail:
+  backtrack(ahead.size() + 1);
+  return std::nullopt;
 }
 
 int radix_from_ind(std::optional<TOK_0PREFIX> ind_opt) {
@@ -566,12 +529,12 @@ int radix_from_ind(std::optional<TOK_0PREFIX> ind_opt) {
     if (not ind_opt)
       break;
     switch (*ind_opt) {
-    case TOK_0PREFIX::BINARY:
+    case TOK_0PREFIX::ZERO_B:
       return 2;
-    case TOK_0PREFIX::ZERO_LEAD_8:
-    case TOK_0PREFIX::OCTAL:
+    case TOK_0PREFIX::ZERO:
+    case TOK_0PREFIX::ZERO_O:
       return 8;
-    case TOK_0PREFIX::HEX:
+    case TOK_0PREFIX::ZERO_X:
       return 16;
     }
   } while (0);
@@ -589,7 +552,7 @@ std::string TokNumber::scan_numseq(std::optional<TOK_0PREFIX> base_opt,
                 .transform([radix](int digit) { return radix > digit; })
                 .value_or(0))
       break;
-    uchar_append(accum, *ahead);
+    appendCodepoint(accum, *ahead);
     ahead = std::nullopt;
   }
   if (ahead)
@@ -608,12 +571,12 @@ std::string TokNumber::FRACTIONAL::collapse() {
 }
 
 std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
-  if (reached_eof())
+  if (reached_end())
     return leading - '0';
   std::optional<TOK_0PREFIX> base_opt{};
   if (leading == '0') {
     do {
-      base_opt = decode_base_ind();
+      base_opt = decode_0prefix();
       /* there must be a digit after the indicator */
       std::optional ahead{next()};
       if (not ahead.and_then(decode_hex))

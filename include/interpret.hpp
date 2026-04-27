@@ -32,10 +32,6 @@ struct TOK_IDENTI {
   std::size_t p_atom;
   bool operator==(const TOK_IDENTI &) const = default;
 };
-struct TOK_TEMPLATE {
-  char32_t separator;
-  bool operator==(const TOK_TEMPLATE &) const = default;
-};
 enum TOKV_INDEX {
   TOKV_EOF,
   TOKV_PUNCT,
@@ -47,7 +43,7 @@ enum TOKV_INDEX {
 };
 enum class TOK_OPERATOR { EQ_STRICT, EQ_SLOPPY, DIV_ASSIGN };
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
-                           double, TOK_OPERATOR, TOK_TEMPLATE>;
+                           double, TOK_OPERATOR>;
 
 struct EXPR_CALL;
 struct EXPR_MEMBER;
@@ -106,29 +102,29 @@ constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 
 class Scanner {
 public:
-  void setBuffer(const std::basic_string<std::uint8_t> &buffer_ref) {
+  void populate(const std::vector<std::uint8_t> &buffer_ref) {
     buffer = buffer_ref;
   }
-  void setBuffer(std::basic_string<std::uint8_t> &&buffer_ref) {
+  void populate(std::vector<std::uint8_t> &&buffer_ref) {
     buffer = std::move(buffer_ref);
   }
 
 protected:
-  bool reached_eof() { return buffer_idx >= buffer.size(); }
+  bool reached_end();
+  void prev();
   char32_t unchecked_next();
   std::optional<char32_t> next();
   std::optional<char32_t> peek();
-  void prev();
   void backtrack(std::size_t N);
   void chewLF();
 
 private:
-  std::basic_string<std::uint8_t> buffer;
-  int buffer_idx;
-  std::stack<int> breadcrumb;
+  int position;
+  std::vector<std::uint8_t> buffer;
+  std::stack<int> backtrace;
 };
 
-enum class TOK_0PREFIX { HEX, BINARY, OCTAL, ZERO_LEAD_8 };
+enum class TOK_0PREFIX { ZERO_X, ZERO_B, ZERO_O, ZERO };
 class TokNumber : public Scanner {
 protected:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
@@ -150,8 +146,7 @@ private:
   };
   using FLOAT_REPR = std::variant<WHOLE, FRACTIONAL, SCIENTIFIC>;
 
-  std::optional<TOK_0PREFIX> decode_base_ind();
-  void peek_behind_octal(std::optional<char32_t> &trail_opt);
+  std::optional<TOK_0PREFIX> decode_0prefix();
   std::string scan_numseq(std::optional<TOK_0PREFIX> base_opt,
                           std::optional<char32_t> ahead);
 };
@@ -178,7 +173,6 @@ private:
 protected:
   std::string my_sbuf;
 
-  std::expected<TOKEN, PARSE_ERRMSG> tokenize_template_part();
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_string(char32_t separator);
   std::expected<TOKEN, PARSE_ERRMSG> tokenize_identif(char32_t leading);
   std::optional<char32_t> decode_identif_uni();
