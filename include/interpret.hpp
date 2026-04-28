@@ -134,7 +134,8 @@ protected:
   std::optional<char32_t> next();
   std::optional<char32_t> peek();
   void backtrack(std::size_t N);
-  void chewLF();
+  void skip_lf();
+  void skip_shebang();
 
 private:
   int position;

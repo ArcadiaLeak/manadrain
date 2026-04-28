@@ -17,7 +17,7 @@ std::generator<char> traverse_ucs4(ucs4_t cp) {
   std::array<std::uint8_t, 6> ubuf{};
   int len = u8_uctomb(ubuf.data(), cp, ubuf.size());
   if (len < 0)
-    throw std::runtime_error{"couldn't encode a codepoint!"};
+    throw std::runtime_error{"invalid 4-byte UTF!"};
   for (int i = 0; i < len; ++i)
     co_yield ubuf[i];
 }
@@ -34,12 +34,11 @@ void Scanner::prev() {
 char32_t Scanner::unchecked_next() {
   ucs4_t ch;
   int len = u8_mbtoucr(&ch, buffer.data() + position, buffer.size() - position);
-  if (len > 0) {
-    position += len;
-    backtrace.push(len);
-    return ch;
-  }
-  throw std::runtime_error{"couldn't decode a codepoint!"};
+  if (len < 0)
+    throw std::runtime_error{"invalid 1-byte UTF!"};
+  position += len;
+  backtrace.push(len);
+  return ch;
 }
 
 std::optional<char32_t> Scanner::next() {
@@ -60,12 +59,32 @@ void Scanner::backtrack(std::size_t N) {
     prev();
 }
 
-void Scanner::chewLF() {
+void Scanner::skip_lf() {
   std::optional ahead{next()};
   if (ahead == '\n')
     return;
   if (ahead)
     prev();
+}
+
+void Scanner::skip_shebang() {
+  std::optional ahead{next()};
+  if (ahead != '#') {
+    backtrack(ahead.has_value());
+    return;
+  }
+  ahead = next();
+  if (ahead != '!') {
+    backtrack(ahead.has_value() + 1);
+    return;
+  }
+  while (1) {
+    ahead = next();
+    if (not ahead.transform(lineterm).value_or(1))
+      continue;
+    backtrack(ahead.has_value());
+    return;
+  }
 }
 
 std::optional<char32_t> TokAtom::decode_string_esc8() {
@@ -157,7 +176,7 @@ TokAtom::traverse_string(char32_t separator) {
         co_yield *ch_opt;
         break;
       case '\r':
-        chewLF();
+        skip_lf();
         [[fallthrough]];
       case '\n':
       case 0x2028:
@@ -244,7 +263,7 @@ TokAtom::traverse_string(char32_t separator) {
         co_return;
       switch (*ch_opt) {
       case '\r':
-        chewLF();
+        skip_lf();
         [[fallthrough]];
       case '\n':
         if (separator == '`')
@@ -370,7 +389,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
     case '`':
       return tokenize_string(leading);
     case '\r':
-      chewLF();
+      skip_lf();
       [[fallthrough]];
     case '\n':
     case 0x2028:
@@ -1002,6 +1021,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
 }
 
 bool Parser::parse() {
+  skip_shebang();
   std::expected ok{tokenize()};
   if (not ok)
     return 1;
