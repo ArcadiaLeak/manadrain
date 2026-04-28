@@ -673,16 +673,16 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
   return std::unexpected{tokenize_ok.error()};
 }
 
-#define TRY_EXP(an_expect)                                                     \
+#define TRY_EXP(void_exp)                                                      \
   do {                                                                         \
-    std::expected ok{an_expect};                                               \
+    std::expected ok{void_exp};                                                \
     if (ok)                                                                    \
       break;                                                                   \
     return std::unexpected{ok.error()};                                        \
   } while (0);
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
-  STMT_VARDECL declaration{};
+  DECL_VARIABLE declaration{};
 
   std::size_t p_atom{std::get<TOKV_IDENTI>(my_token).p_atom};
   bool valid_beginning{p_atom == S_ATOM_const || p_atom == S_ATOM_let ||
@@ -768,15 +768,20 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_object_literal() {
     } while (0);
     do {
       if (my_token == TOKEN{U':'}) {
-        TRY_EXP(expect_punct(':'))
         TRY_EXP(tokenize())
         TRY_EXP(parse_assign_expr())
         property.prop_val = std::move(my_expression);
         break;
       }
-      if (std::holds_alternative<TOK_IDENTI>(property.prop_key)) {
-        property.prop_val = std::monostate{};
-        break;
+      TOK_IDENTI *identif_ptr = std::get_if<TOK_IDENTI>(&property.prop_key);
+      if (identif_ptr) {
+        if (my_token == TOKEN{U'('}) {
+          TRY_EXP(parse_function_decl(*identif_ptr))
+          break;
+        } else {
+          property.prop_val = std::monostate{};
+          break;
+        }
       }
       return std::unexpected{PUNCT_ERR{U':'}};
     } while (0);
@@ -933,13 +938,9 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
   return std::unexpected{PUNCT_ERR{';'}};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_function_decl() {
-  STMT_FUNCDECL declaration{};
-  TRY_EXP(tokenize())
-  if (my_token.index() != TOKV_IDENTI)
-    return std::unexpected{NEEDED_ERR::FUNCTION_NAME};
-  declaration.identifier = std::get<TOKV_IDENTI>(my_token);
-  TRY_EXP(tokenize())
+std::expected<DECL_FUNCTION, PARSE_ERRMSG>
+Parser::parse_function_decl(TOK_IDENTI identifier) {
+  DECL_FUNCTION declaration{identifier};
   TRY_EXP(expect_punct('('))
   TRY_EXP(tokenize())
   TRY_EXP(expect_punct(')'))
@@ -951,9 +952,8 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_function_decl() {
     TRY_EXP(parse_statement())
   }
   program.swap(declaration.subprogram);
-  program.push_back(std::move(declaration));
   TRY_EXP(tokenize())
-  return {};
+  return declaration;
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
@@ -965,8 +965,18 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
     case S_ATOM_var:
       TRY_EXP(parse_variable_decl())
       return expect_statement_end();
-    case S_ATOM_function:
-      return parse_function_decl();
+    case S_ATOM_function: {
+      TRY_EXP(tokenize())
+      if (my_token.index() != TOKV_IDENTI)
+        return std::unexpected{NEEDED_ERR::FUNCTION_NAME};
+      TOK_IDENTI identifier{std::get<TOKV_IDENTI>(my_token)};
+      TRY_EXP(tokenize())
+      std::expected declaration{parse_function_decl(identifier)};
+      if (not declaration)
+        return std::unexpected{declaration.error()};
+      program.push_back(std::move(*declaration));
+      return {};
+    }
     }
     [[fallthrough]];
   default:

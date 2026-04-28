@@ -98,15 +98,15 @@ struct EXPR_LOGICAL {
   TOKEN op;
 };
 
-struct STMT_VARDECL;
-struct STMT_FUNCDECL;
-using STATEMENT = std::variant<STMT_VARDECL, EXPRESSION, STMT_FUNCDECL>;
-struct STMT_VARDECL {
+struct DECL_VARIABLE;
+struct DECL_FUNCTION;
+using STATEMENT = std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION>;
+struct DECL_VARIABLE {
   std::size_t p_kind;
   TOK_IDENTI identifier;
   EXPRESSION initializer;
 };
-struct STMT_FUNCDECL {
+struct DECL_FUNCTION {
   TOK_IDENTI identifier;
   std::vector<STATEMENT> subprogram;
 };
@@ -222,7 +222,8 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_logical_and_or();
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();
-  std::expected<void, PARSE_ERRMSG> parse_function_decl();
+  std::expected<DECL_FUNCTION, PARSE_ERRMSG>
+  parse_function_decl(TOK_IDENTI identifier);
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
 } // namespace Interpret
