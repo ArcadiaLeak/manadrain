@@ -750,12 +750,36 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_object_literal() {
   std::vector<EXPR_OBJECT::PROP> prop_vec{};
   while (my_token != TOKEN{U'}'}) {
     EXPR_OBJECT::PROP property{};
-    TRY_EXP(parse_property_name())
-    property.prop_key = std::move(my_expression);
-    TRY_EXP(expect_punct(':'))
-    TRY_EXP(tokenize())
-    TRY_EXP(parse_assign_expr())
-    property.prop_val = std::move(my_expression);
+    do {
+      if (my_token == TOKEN{U'['}) {
+        TRY_EXP(tokenize())
+        TRY_EXP(parse_assign_expr())
+        property.prop_key = std::move(my_expression);
+        TRY_EXP(expect_punct(']'))
+        TRY_EXP(tokenize())
+        break;
+      }
+      if (my_token.index() == TOKV_IDENTI) {
+        property.prop_key = std::get<TOK_IDENTI>(my_token);
+        TRY_EXP(tokenize())
+        break;
+      }
+      return std::unexpected{INVALID_ERR::PROPERTY_NAME};
+    } while (0);
+    do {
+      if (my_token == TOKEN{U':'}) {
+        TRY_EXP(expect_punct(':'))
+        TRY_EXP(tokenize())
+        TRY_EXP(parse_assign_expr())
+        property.prop_val = std::move(my_expression);
+        break;
+      }
+      if (std::holds_alternative<TOK_IDENTI>(property.prop_key)) {
+        property.prop_val = std::monostate{};
+        break;
+      }
+      return std::unexpected{PUNCT_ERR{U':'}};
+    } while (0);
     prop_vec.push_back(std::move(property));
     if (my_token != TOKEN{U','})
       break;
@@ -796,17 +820,6 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_punct(char32_t punct) {
   if (my_token == TOKEN{punct})
     return {};
   return std::unexpected{PUNCT_ERR{punct}};
-}
-
-std::expected<void, PARSE_ERRMSG> Parser::parse_property_name() {
-  if (my_token == TOKEN{U'['}) {
-    TRY_EXP(tokenize())
-    TRY_EXP(parse_assign_expr())
-    TRY_EXP(expect_punct(']'))
-    TRY_EXP(tokenize())
-    return {};
-  }
-  return std::unexpected{INVALID_ERR::PROPERTY_NAME};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {

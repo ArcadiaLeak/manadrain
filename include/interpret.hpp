@@ -218,7 +218,6 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_call_expr();
   std::expected<void, PARSE_ERRMSG> parse_member_expr();
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
-  std::expected<void, PARSE_ERRMSG> parse_property_name();
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
   std::expected<void, PARSE_ERRMSG> parse_logical_and_or();
 
