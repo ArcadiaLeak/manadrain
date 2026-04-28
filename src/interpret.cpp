@@ -747,39 +747,45 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_binary_prec5() {
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_object_literal() {
   TRY_EXP(tokenize())
-  std::vector<EXPR_OBJECT::PROP> prop_vec{};
+  std::vector<EXPR_OBJECT::PROPERTY> prop_vec{};
   while (my_token != TOKEN{U'}'}) {
-    EXPR_OBJECT::PROP property{};
+    EXPRESSION prop_key{};
     do {
       if (my_token == TOKEN{U'['}) {
         TRY_EXP(tokenize())
         TRY_EXP(parse_assign_expr())
-        property.prop_key = std::move(my_expression);
+        prop_key = std::move(my_expression);
         TRY_EXP(expect_punct(']'))
         TRY_EXP(tokenize())
         break;
       }
       if (my_token.index() == TOKV_IDENTI) {
-        property.prop_key = std::get<TOK_IDENTI>(my_token);
+        prop_key = std::get<TOK_IDENTI>(my_token);
         TRY_EXP(tokenize())
         break;
       }
       return std::unexpected{INVALID_ERR::PROPERTY_NAME};
     } while (0);
+    EXPR_OBJECT::PROPERTY property{};
     do {
       if (my_token == TOKEN{U':'}) {
         TRY_EXP(tokenize())
         TRY_EXP(parse_assign_expr())
-        property.prop_val = std::move(my_expression);
+        property = EXPR_OBJECT::KEY_VALUE{std::move(prop_key),
+                                          std::move(my_expression)};
         break;
       }
-      TOK_IDENTI *identif_ptr = std::get_if<TOK_IDENTI>(&property.prop_key);
+      TOK_IDENTI *identif_ptr = std::get_if<TOK_IDENTI>(&prop_key);
       if (identif_ptr) {
         if (my_token == TOKEN{U'('}) {
-          TRY_EXP(parse_function_decl(*identif_ptr))
-          break;
+          std::expected declaration{parse_function_decl(*identif_ptr)};
+          if (declaration) {
+            property = std::move(*declaration);
+            break;
+          }
+          return std::unexpected{declaration.error()};
         } else {
-          property.prop_val = std::monostate{};
+          property = EXPR_OBJECT::KEY_VALUE{*identif_ptr, std::monostate{}};
           break;
         }
       }
@@ -964,7 +970,8 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
     case S_ATOM_let:
     case S_ATOM_var:
       TRY_EXP(parse_variable_decl())
-      return expect_statement_end();
+      TRY_EXP(expect_statement_end())
+      return {};
     case S_ATOM_function: {
       TRY_EXP(tokenize())
       if (my_token.index() != TOKV_IDENTI)
@@ -977,12 +984,22 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
       program.push_back(std::move(*declaration));
       return {};
     }
+    case S_ATOM_return: {
+      STMT_RETURN statement{};
+      TRY_EXP(tokenize())
+      TRY_EXP(parse_assign_expr())
+      statement.argument = std::move(my_expression);
+      TRY_EXP(expect_statement_end())
+      program.push_back(std::move(statement));
+      return {};
+    }
     }
     [[fallthrough]];
   default:
     TRY_EXP(parse_assign_expr())
     program.push_back(std::move(my_expression));
-    return expect_statement_end();
+    TRY_EXP(expect_statement_end())
+    return {};
   }
 }
 

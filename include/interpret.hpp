@@ -77,12 +77,14 @@ struct EXPR_BINARY {
   EXPRESSION right;
   TOKEN op;
 };
+struct DECL_FUNCTION;
 struct EXPR_OBJECT {
-  struct PROP {
+  struct KEY_VALUE {
     EXPRESSION prop_key;
     EXPRESSION prop_val;
   };
-  std::vector<PROP> props;
+  using PROPERTY = std::variant<KEY_VALUE, DECL_FUNCTION>;
+  std::vector<PROPERTY> props;
 };
 struct EXPR_ACCESS {
   EXPRESSION object;
@@ -98,14 +100,17 @@ struct EXPR_LOGICAL {
   TOKEN op;
 };
 
-struct DECL_VARIABLE;
-struct DECL_FUNCTION;
-using STATEMENT = std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION>;
 struct DECL_VARIABLE {
   std::size_t p_kind;
   TOK_IDENTI identifier;
   EXPRESSION initializer;
 };
+struct STMT_RETURN {
+  EXPRESSION argument;
+};
+using STATEMENT =
+    std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION, STMT_RETURN>;
+
 struct DECL_FUNCTION {
   TOK_IDENTI identifier;
   std::vector<STATEMENT> subprogram;
