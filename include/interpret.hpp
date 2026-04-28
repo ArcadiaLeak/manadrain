@@ -75,7 +75,7 @@ struct EXPR_MEMBER {
 struct EXPR_BINARY {
   EXPRESSION left;
   EXPRESSION right;
-  TOK_OPERATOR bin_op;
+  TOKEN op;
 };
 struct EXPR_OBJECT {
   struct PROP {
@@ -95,7 +95,7 @@ struct EXPR_ASSIGN {
 struct EXPR_LOGICAL {
   EXPRESSION left;
   EXPRESSION right;
-  TOK_OPERATOR op;
+  TOKEN op;
 };
 
 struct STMT_VARDECL;
@@ -211,7 +211,8 @@ private:
   std::expected<void, PARSE_ERRMSG> expect_punct(char32_t punct);
 
   std::expected<void, PARSE_ERRMSG> parse_assign_expr();
-  std::expected<void, PARSE_ERRMSG> parse_binary_expr();
+  std::expected<void, PARSE_ERRMSG> parse_binary_prec5();
+  std::expected<void, PARSE_ERRMSG> parse_binary_prec4();
   std::expected<void, PARSE_ERRMSG> parse_postfix_expr();
   std::expected<void, PARSE_ERRMSG> parse_primary_expr();
   std::expected<void, PARSE_ERRMSG> parse_call_expr();

@@ -709,23 +709,39 @@ wrap_up:
   return {};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_binary_expr() {
+std::expected<void, PARSE_ERRMSG> Parser::parse_binary_prec4() {
   TRY_EXP(parse_postfix_expr())
-  if (my_token.index() != TOKV_OP)
+  do {
+    if (my_token == TOKEN{U'>'})
+      break;
+    if (my_token == TOKEN{U'<'})
+      break;
     return {};
-  switch (std::get<TOKV_OP>(my_token)) {
-  case TOK_OPERATOR::EQ_SLOPPY:
-  case TOK_OPERATOR::EQ_STRICT:
-    break;
-  default:
-    return {};
-  }
+  } while (0);
   EXPRESSION expr_left = std::move(my_expression);
-  TOK_OPERATOR bin_op = std::get<TOKV_OP>(my_token);
+  TOKEN op = my_token;
   TRY_EXP(tokenize())
-  TRY_EXP(parse_binary_expr())
-  my_expression = std::make_unique<EXPR_BINARY>(
-      std::move(expr_left), std::move(my_expression), bin_op);
+  TRY_EXP(parse_postfix_expr())
+  my_expression = std::make_unique<EXPR_BINARY>(std::move(expr_left),
+                                                std::move(my_expression), op);
+  return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_binary_prec5() {
+  TRY_EXP(parse_binary_prec4())
+  do {
+    if (my_token == TOKEN{TOK_OPERATOR::EQ_SLOPPY})
+      break;
+    if (my_token == TOKEN{TOK_OPERATOR::EQ_STRICT})
+      break;
+    return {};
+  } while (0);
+  EXPRESSION expr_left = std::move(my_expression);
+  TOKEN op = my_token;
+  TRY_EXP(tokenize())
+  TRY_EXP(parse_binary_prec4())
+  my_expression = std::make_unique<EXPR_BINARY>(std::move(expr_left),
+                                                std::move(my_expression), op);
   return {};
 }
 
@@ -783,23 +799,14 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_punct(char32_t punct) {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_property_name() {
-  switch (my_token.index()) {
-  case TOKV_PUNCT:
-    break;
-  default:
-    return std::unexpected{INVALID_ERR::PROPERTY_NAME};
-  }
-  switch (std::get<TOKV_PUNCT>(my_token)) {
-  case '[':
+  if (my_token == TOKEN{U'['}) {
     TRY_EXP(tokenize())
     TRY_EXP(parse_assign_expr())
     TRY_EXP(expect_punct(']'))
     TRY_EXP(tokenize())
     return {};
-  default:
-    return std::unexpected{INVALID_ERR::PROPERTY_NAME};
   }
-  return std::unexpected{PUNCT_ERR{'}'}};
+  return std::unexpected{INVALID_ERR::PROPERTY_NAME};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
@@ -857,12 +864,12 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_logical_and_or() {
-  TRY_EXP(parse_binary_expr())
+  TRY_EXP(parse_binary_prec5())
   while (my_token == TOKEN{TOK_OPERATOR::LOGIC_AND}) {
     EXPRESSION expr_left = std::move(my_expression);
-    TOK_OPERATOR op = std::get<TOKV_OP>(my_token);
+    TOKEN op = my_token;
     TRY_EXP(tokenize())
-    TRY_EXP(parse_binary_expr())
+    TRY_EXP(parse_binary_prec5())
     my_expression = std::make_unique<EXPR_LOGICAL>(
         std::move(expr_left), std::move(my_expression), op);
   }
