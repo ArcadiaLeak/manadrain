@@ -775,19 +775,17 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_object_literal() {
                                           std::move(my_expression)};
         break;
       }
-      TOK_IDENTI *identif_ptr = std::get_if<TOK_IDENTI>(&prop_key);
-      if (identif_ptr) {
-        if (my_token == TOKEN{U'('}) {
-          std::expected declaration{parse_function_decl(*identif_ptr)};
-          if (declaration) {
-            property = std::move(*declaration);
-            break;
-          }
-          return std::unexpected{declaration.error()};
-        } else {
-          property = EXPR_OBJECT::KEY_VALUE{*identif_ptr, std::monostate{}};
+      if (my_token == TOKEN{U'('}) {
+        std::expected declaration{parse_function_decl(std::move(prop_key))};
+        if (declaration) {
+          property = std::move(*declaration);
           break;
         }
+        return std::unexpected{declaration.error()};
+      } else {
+        property =
+            EXPR_OBJECT::KEY_VALUE{std::move(prop_key), std::monostate{}};
+        break;
       }
       return std::unexpected{PUNCT_ERR{U':'}};
     } while (0);
@@ -945,8 +943,8 @@ std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
 }
 
 std::expected<DECL_FUNCTION, PARSE_ERRMSG>
-Parser::parse_function_decl(TOK_IDENTI identifier) {
-  DECL_FUNCTION declaration{identifier};
+Parser::parse_function_decl(EXPRESSION identifier) {
+  DECL_FUNCTION declaration{std::move(identifier)};
   TRY_EXP(expect_punct('('))
   TRY_EXP(tokenize())
   TRY_EXP(expect_punct(')'))

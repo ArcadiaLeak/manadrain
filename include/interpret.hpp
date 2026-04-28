@@ -112,7 +112,7 @@ using STATEMENT =
     std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION, STMT_RETURN>;
 
 struct DECL_FUNCTION {
-  TOK_IDENTI identifier;
+  EXPRESSION identifier;
   std::vector<STATEMENT> subprogram;
 };
 
@@ -228,7 +228,7 @@ private:
 
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();
   std::expected<DECL_FUNCTION, PARSE_ERRMSG>
-  parse_function_decl(TOK_IDENTI identifier);
+  parse_function_decl(EXPRESSION identifier);
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
 } // namespace Interpret
