@@ -4,7 +4,12 @@ const atom_literal_arr = [
   "var",
   "class",
   "function",
-  "return"
+  "return",
+  "import",
+  "export",
+  "from",
+  "as",
+  "default"
 ];
 
 let offset = 0;
