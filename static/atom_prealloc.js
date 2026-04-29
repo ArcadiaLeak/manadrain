@@ -9,7 +9,11 @@ const atom_literal_arr = [
   "export",
   "from",
   "as",
-  "default"
+  "default",
+  "undefined",
+  "null",
+  "true",
+  "false"
 ];
 
 let offset = 0;
