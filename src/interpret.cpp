@@ -979,10 +979,39 @@ Parser::parse_function_decl(EXPRESSION identifier) {
   return declaration;
 }
 
+std::expected<void, PARSE_ERRMSG> Parser::parse_import() {
+  DECL_IMPORT declaration{};
+  TRY_EXP(expect_punct('{'))
+  TRY_EXP(tokenize())
+  while (my_token != TOKEN{U'}'}) {
+    if (my_token.index() != TOKV_IDENTI)
+      return std::unexpected{NEEDED_ERR::IDENTIFIER};
+    declaration.specifiers.push_back(std::get<TOKV_IDENTI>(my_token));
+    TRY_EXP(tokenize())
+    if (my_token != TOKEN{U','})
+      break;
+    TRY_EXP(tokenize())
+  }
+  TRY_EXP(expect_punct('}'))
+  TRY_EXP(tokenize())
+  if (my_token != TOKEN{TOK_IDENTI{0, S_ATOM_from}})
+    return std::unexpected{NEEDED_ERR::FROM_CLAUSE};
+  TRY_EXP(tokenize())
+  if (my_token.index() != TOKV_STRING)
+    return std::unexpected{NEEDED_ERR::STRING_LITERAL};
+  declaration.source = std::get<TOKV_STRING>(my_token);
+  TRY_EXP(tokenize())
+  TRY_EXP(expect_statement_end())
+  program.push_back(declaration);
+  return {};
+}
+
 std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
-  switch (my_token.index()) {
-  case TOKV_IDENTI:
-    switch (std::get<TOKV_IDENTI>(my_token).p_atom) {
+  do {
+    TOK_IDENTI *identif = std::get_if<TOKV_IDENTI>(&my_token);
+    if (not identif || identif->has_escape)
+      break;
+    switch (identif->p_atom) {
     case S_ATOM_const:
     case S_ATOM_let:
     case S_ATOM_var:
@@ -1010,14 +1039,16 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
       program.push_back(std::move(statement));
       return {};
     }
+    case S_ATOM_import:
+      TRY_EXP(tokenize())
+      TRY_EXP(parse_import())
+      return {};
     }
-    [[fallthrough]];
-  default:
-    TRY_EXP(parse_assign_expr())
-    program.push_back(std::move(my_expression));
-    TRY_EXP(expect_statement_end())
-    return {};
-  }
+  } while (0);
+  TRY_EXP(parse_assign_expr())
+  program.push_back(std::move(my_expression));
+  TRY_EXP(expect_statement_end())
+  return {};
 }
 
 bool Parser::parse() {

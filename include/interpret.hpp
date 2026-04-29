@@ -15,7 +15,14 @@
 namespace Interpret {
 enum class INVALID_ERR { NUMBER_LITERAL, PROPERTY_NAME, MALFORMED_ESCAPE };
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
-enum class NEEDED_ERR { FIELD_NAME, VARIABLE_NAME, FUNCTION_NAME };
+enum class NEEDED_ERR {
+  FIELD_NAME,
+  VARIABLE_NAME,
+  FUNCTION_NAME,
+  IDENTIFIER,
+  FROM_CLAUSE,
+  STRING_LITERAL
+};
 struct PUNCT_ERR {
   char32_t must_be;
 };
@@ -105,11 +112,15 @@ struct DECL_VARIABLE {
   TOK_IDENTI identifier;
   EXPRESSION initializer;
 };
+struct DECL_IMPORT {
+  std::vector<TOK_IDENTI> specifiers;
+  TOK_STRING source;
+};
 struct STMT_RETURN {
   EXPRESSION argument;
 };
-using STATEMENT =
-    std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION, STMT_RETURN>;
+using STATEMENT = std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION,
+                               STMT_RETURN, DECL_IMPORT>;
 
 struct DECL_FUNCTION {
   EXPRESSION identifier;
@@ -227,6 +238,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
   std::expected<void, PARSE_ERRMSG> parse_logical_and_or();
 
+  std::expected<void, PARSE_ERRMSG> parse_import();
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();
   std::expected<DECL_FUNCTION, PARSE_ERRMSG>
   parse_function_decl(EXPRESSION identifier);
