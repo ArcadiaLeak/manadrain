@@ -3,7 +3,6 @@
 #include <limits>
 #include <stdexcept>
 
-#include <gmpxx.h>
 #include <unictype.h>
 #include <unistr.h>
 
@@ -499,51 +498,17 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
   }
 }
 
-std::size_t aligned_N(std::size_t N) {
-  return ((N + MEMORY_ALIGNMENT - 1) / MEMORY_ALIGNMENT) * MEMORY_ALIGNMENT;
-}
-
-std::array<char, 8> LE_encode(std::size_t N) {
-  std::array<char, 8> bytes;
-  for (int i = 0; i < 8; ++i)
-    bytes[i] = static_cast<char>((N >> (i * 8)) & 0xFF);
-  return bytes;
-}
-
-std::size_t LE_decode(std::span<char, 8> bytes) {
-  std::size_t N = 0;
-  for (std::size_t i = 0; i < 8; ++i)
-    N |= static_cast<std::size_t>(bytes[i]) << (i * 8);
-  return N;
-}
-
 std::size_t TokAtom::atom_find(std::string needle) {
-  std::optional<std::size_t> pos_opt{};
-  for (std::size_t p_atom : atom_prealloc_pos) {
-    std::size_t len = LE_decode(std::span{mempool}.subspan(p_atom).first<8>());
-    std::string_view str_atom{mempool.data() + p_atom + 8, len};
-    if (needle == str_atom) {
-      pos_opt = p_atom;
-      break;
-    }
-  }
-  if (not pos_opt) {
-    if (not atom_umap.contains(needle))
-      atom_umap[needle] = atom_alloc(needle);
-    pos_opt = atom_umap[needle];
-  }
-  return *pos_opt;
-}
-
-std::size_t TokAtom::atom_alloc(std::string_view needle) {
-  std::size_t atom_addr = mempool.size();
-  std::size_t aligned_size = aligned_N(needle.size());
-  mempool.reserve(mempool.size() + aligned_size + 8);
-  mempool.append_range(LE_encode(needle.size()));
-  mempool.append_range(needle);
-  mempool.append_range(
-      std::ranges::repeat_view{0, aligned_size - needle.size()});
-  return atom_addr;
+  auto it_prealloc = std::ranges::find(atom_prealloc, needle);
+  if (it_prealloc != atom_prealloc.end())
+    return std::distance(atom_prealloc.begin(), it_prealloc);
+  auto it_umap = atom_umap.find(needle);
+  if (it_umap != atom_umap.end())
+    return it_umap->second;
+  auto it_vec = atom_vec.insert(atom_vec.end(), std::move(needle));
+  std::size_t atom_idx = std::distance(atom_vec.begin(), it_vec) << 16;
+  atom_umap[*it_vec] = atom_idx;
+  return atom_idx;
 }
 
 std::optional<TOK_0PREFIX> TokNumber::decode_0prefix() {
@@ -662,8 +627,10 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
   int radix{radix_from_ind(base_opt)};
   switch (is_bigint) {
   case 1: {
-    mpz_class mpz_bigint{std::get<WHOLE>(repr_node).repr_s, radix};
-    throw std::runtime_error{"unimplemented!"};
+    auto bigint_it = bigint_vec.insert(
+        bigint_vec.end(), mpz_class{std::get<WHOLE>(repr_node).repr_s, radix});
+    std::size_t bigint_idx = std::distance(bigint_vec.begin(), bigint_it);
+    return TOK_BIGINT{bigint_idx};
   }
   default:
     switch (radix) {
@@ -718,12 +685,12 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
 std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   DECL_VARIABLE declaration{};
 
-  std::size_t p_atom{std::get<TOKV_IDENTI>(my_token).p_atom};
-  bool valid_beginning{p_atom == S_ATOM_const || p_atom == S_ATOM_let ||
-                       p_atom == S_ATOM_var};
+  std::size_t atom_sh{std::get<TOKV_IDENTI>(my_token).atom_sh};
+  bool valid_beginning{atom_sh == S_ATOM_const || atom_sh == S_ATOM_let ||
+                       atom_sh == S_ATOM_var};
   if (not valid_beginning)
     throw std::runtime_error("statement isn't a variable declaration!");
-  declaration.p_kind = p_atom;
+  declaration.kind = atom_sh;
   TRY_EXP(tokenize())
 
   if (my_token.index() != TOKV_IDENTI)
@@ -1026,7 +993,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
     TOK_IDENTI *identif = std::get_if<TOKV_IDENTI>(&my_token);
     if (not identif || identif->has_escape)
       break;
-    switch (identif->p_atom) {
+    switch (identif->atom_sh) {
     case S_ATOM_const:
     case S_ATOM_let:
     case S_ATOM_var:

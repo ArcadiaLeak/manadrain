@@ -1,3 +1,4 @@
+#include <deque>
 #include <expected>
 #include <generator>
 #include <memory>
@@ -9,6 +10,8 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
+
+#include <gmpxx.h>
 
 #include "atom_prealloc.hpp"
 
@@ -36,13 +39,17 @@ using PARSE_ERRMSG =
 
 struct TOK_STRING {
   char32_t separator;
-  std::size_t p_atom;
+  std::size_t atom_sh;
   bool operator==(const TOK_STRING &) const = default;
 };
 struct TOK_IDENTI {
   bool has_escape;
-  std::size_t p_atom;
+  std::size_t atom_sh;
   bool operator==(const TOK_IDENTI &) const = default;
+};
+struct TOK_BIGINT {
+  std::size_t idx;
+  bool operator==(const TOK_BIGINT &) const = default;
 };
 enum TOKV_INDEX {
   TOKV_EOF,
@@ -50,7 +57,8 @@ enum TOKV_INDEX {
   TOKV_STRING,
   TOKV_IDENTI,
   TOKV_NUMBER,
-  TOKV_OP
+  TOKV_OP,
+  TOKV_BIGINT
 };
 enum class TOK_OPERATOR {
   EQ_STRICT,
@@ -61,7 +69,7 @@ enum class TOK_OPERATOR {
   LOGIC_AND
 };
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
-                           double, TOK_OPERATOR>;
+                           double, TOK_OPERATOR, TOK_BIGINT>;
 
 struct EXPR_CALL;
 struct EXPR_MEMBER;
@@ -113,7 +121,7 @@ struct EXPR_LOGICAL {
 };
 
 struct DECL_VARIABLE {
-  std::size_t p_kind;
+  std::size_t kind;
   TOK_IDENTI identifier;
   EXPRESSION initializer;
 };
@@ -131,8 +139,6 @@ struct DECL_FUNCTION {
   EXPRESSION identifier;
   std::vector<STATEMENT> subprogram;
 };
-
-constexpr std::uint8_t MEMORY_ALIGNMENT = 8;
 
 class Scanner {
 public:
@@ -165,6 +171,8 @@ protected:
   std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
 
 private:
+  std::vector<mpz_class> bigint_vec;
+
   struct WHOLE {
     std::string repr_s;
     std::string collapse() { return repr_s; }
@@ -188,11 +196,10 @@ private:
 
 class TokAtom : public TokNumber {
 private:
-  std::unordered_map<std::string, std::size_t> atom_umap;
-  std::vector<char> mempool{std::from_range, atom_prealloc_buf};
+  std::unordered_map<std::string_view, std::size_t> atom_umap;
+  std::deque<std::string> atom_vec{};
 
   std::size_t atom_find(std::string needle);
-  std::size_t atom_alloc(std::string_view needle);
 
   std::optional<char32_t> decode_string_esc8();
   std::optional<char32_t> decode_string_xseq();
