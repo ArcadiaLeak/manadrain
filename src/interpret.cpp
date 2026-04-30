@@ -3,6 +3,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include <gmpxx.h>
 #include <unictype.h>
 #include <unistr.h>
 
@@ -206,7 +207,7 @@ TokAtom::traverse_string(char32_t separator) {
         if (hex)
           co_yield *hex;
         else
-          err_opt = INVALID_ERR::MALFORMED_ESCAPE;
+          err_opt = INVALID_ERR::BACKSLASH_ESCAPE;
         break;
       }
       case 'u': {
@@ -214,7 +215,7 @@ TokAtom::traverse_string(char32_t separator) {
         if (uni)
           co_yield *uni;
         else
-          err_opt = INVALID_ERR::MALFORMED_ESCAPE;
+          err_opt = INVALID_ERR::BACKSLASH_ESCAPE;
         break;
       }
       case '0':
@@ -252,7 +253,7 @@ TokAtom::traverse_string(char32_t separator) {
       }
       case '8':
       case '9':
-        err_opt = INVALID_ERR::MALFORMED_ESCAPE;
+        err_opt = INVALID_ERR::BACKSLASH_ESCAPE;
         break;
       default:
         prev();
@@ -371,7 +372,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
   bool has_escape = 0;
   for (std::optional ichar : traverse_identif(has_escape)) {
     if (not ichar)
-      return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
+      return std::unexpected{INVALID_ERR::BACKSLASH_ESCAPE};
     needle.append_range(traverse_ucs4(*ichar));
   }
   return TOK_IDENTI{has_escape, atom_find(std::move(needle))};
@@ -442,7 +443,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
         if (ch_uni.transform(is_id_start).value_or(0))
           return tokenize_identif(*ch_uni);
         else
-          return std::unexpected{INVALID_ERR::MALFORMED_ESCAPE};
+          return std::unexpected{INVALID_ERR::BACKSLASH_ESCAPE};
       } else {
         if (ahead_opt)
           prev();
@@ -643,42 +644,56 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
                       scan_numseq(std::nullopt, std::nullopt)};
     repr_node = frac_n;
   } while (0);
+  bool is_bigint{};
   do {
-    std::optional ahead{peek()};
-    if (not ahead)
-      break;
-    if (not uc_is_property_xid_continue(*ahead))
+    std::optional ahead{next()};
+    if (ahead != 'n')
+      backtrack(ahead.has_value());
+    else if (repr_node.index() > 0 || base_opt == TOK_0PREFIX::ZERO)
+      return std::unexpected{INVALID_ERR::BIGINT_LITERAL};
+    else {
+      is_bigint = 1;
+      ahead = peek();
+    }
+    if (not ahead || !uc_is_property_xid_continue(*ahead))
       break;
     return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
   } while (0);
   int radix{radix_from_ind(base_opt)};
-  switch (radix) {
-  case 10: {
-    double result{};
-    std::string repr_s = repr_node.visit([](auto n) { return n.collapse(); });
-    auto status =
-        std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(), result);
-    if (status.ec == std::errc::result_out_of_range)
-      break;
-    else if (status.ec != std::errc{})
-      return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
-    return result;
+  switch (is_bigint) {
+  case 1: {
+    mpz_class mpz_bigint{std::get<WHOLE>(repr_node).repr_s, radix};
+    throw std::runtime_error{"unimplemented!"};
   }
-  default: {
-    std::uint64_t result{};
-    std::string repr_s = std::move(std::get<WHOLE>(repr_node).repr_s);
-    auto status = std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(),
-                                  result, radix);
-    if (status.ec == std::errc::result_out_of_range)
-      break;
-    else if (status.ec != std::errc{})
-      return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
-    static constexpr std::uint64_t max_safe_int =
-        1LL << std::numeric_limits<double>::digits;
-    if (result >= max_safe_int)
-      break;
-    return static_cast<double>(result);
-  }
+  default:
+    switch (radix) {
+    case 10: {
+      double result{};
+      std::string repr_s = repr_node.visit([](auto n) { return n.collapse(); });
+      auto status =
+          std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(), result);
+      if (status.ec == std::errc::result_out_of_range)
+        break;
+      else if (status.ec != std::errc{})
+        return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
+      return result;
+    }
+    default: {
+      std::uint64_t result{};
+      std::string repr_s = std::move(std::get<WHOLE>(repr_node).repr_s);
+      auto status = std::from_chars(
+          repr_s.data(), repr_s.data() + repr_s.size(), result, radix);
+      if (status.ec == std::errc::result_out_of_range)
+        break;
+      else if (status.ec != std::errc{})
+        return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
+      static constexpr std::uint64_t max_safe_int =
+          1LL << std::numeric_limits<double>::digits;
+      if (result >= max_safe_int)
+        break;
+      return static_cast<double>(result);
+    }
+    }
   }
   return std::numeric_limits<double>::infinity();
 }

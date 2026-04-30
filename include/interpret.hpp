@@ -13,7 +13,12 @@
 #include "atom_prealloc.hpp"
 
 namespace Interpret {
-enum class INVALID_ERR { NUMBER_LITERAL, PROPERTY_NAME, MALFORMED_ESCAPE };
+enum class INVALID_ERR {
+  NUMBER_LITERAL,
+  BIGINT_LITERAL,
+  PROPERTY_NAME,
+  BACKSLASH_ESCAPE
+};
 enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
 enum class NEEDED_ERR {
   FIELD_NAME,
