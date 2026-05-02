@@ -84,12 +84,13 @@ struct EXPR_OBJECT;
 struct EXPR_ACCESS;
 struct EXPR_ASSIGN;
 struct EXPR_LOGICAL;
+struct DECL_FUNCTION;
 using EXPRESSION =
     std::variant<std::monostate, TOK_STRING, TOK_IDENTI, double,
                  std::unique_ptr<EXPR_CALL>, std::unique_ptr<EXPR_MEMBER>,
                  std::unique_ptr<EXPR_BINARY>, std::unique_ptr<EXPR_OBJECT>,
                  std::unique_ptr<EXPR_ACCESS>, std::unique_ptr<EXPR_ASSIGN>,
-                 std::unique_ptr<EXPR_LOGICAL>>;
+                 std::unique_ptr<EXPR_LOGICAL>, std::unique_ptr<DECL_FUNCTION>>;
 struct EXPR_CALL {
   EXPRESSION callee;
   std::vector<EXPRESSION> arguments;
@@ -249,6 +250,7 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_assign_expr();
   std::expected<void, PARSE_ERRMSG> parse_equality_expr();
   std::expected<void, PARSE_ERRMSG> parse_relation_expr();
+  std::expected<void, PARSE_ERRMSG> parse_additive_expr();
   std::expected<void, PARSE_ERRMSG> parse_postfix_expr();
   std::expected<void, PARSE_ERRMSG> parse_primary_expr();
   std::expected<void, PARSE_ERRMSG> parse_call_expr();

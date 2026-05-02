@@ -70,7 +70,7 @@ function createPerson(name, age) {
         getName: function() { return _name; },
         getAge: function() { return _age; },
         setAge: function(newAge) {
-            if (typeof newAge === "number" && newAge > 0) {
+            if (newAge > 0) {
                 _age = newAge;
                 return true;
             }
