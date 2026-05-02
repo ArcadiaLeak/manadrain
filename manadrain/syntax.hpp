@@ -13,8 +13,6 @@
 
 #include <gmpxx.h>
 
-#include "atom_prealloc.hpp"
-
 namespace Manadrain {
 namespace Syntax {
 enum class INVALID_ERR {
@@ -30,13 +28,17 @@ enum class NEEDED_ERR {
   FUNCTION_NAME,
   IDENTIFIER,
   FROM_CLAUSE,
-  STRING_LITERAL
+  STRING_LITERAL,
+  FORMAL_PARAMETER
 };
 struct PUNCT_ERR {
   char32_t must_be;
 };
-using PARSE_ERRMSG =
-    std::variant<INVALID_ERR, UNEXPECTED_ERR, NEEDED_ERR, PUNCT_ERR>;
+struct RESERVED_ERR {
+  std::size_t atom_sh;
+};
+using PARSE_ERRMSG = std::variant<INVALID_ERR, UNEXPECTED_ERR, NEEDED_ERR,
+                                  PUNCT_ERR, RESERVED_ERR>;
 
 struct TOK_STRING {
   char32_t separator;
@@ -138,6 +140,7 @@ using STATEMENT = std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION,
 
 struct DECL_FUNCTION {
   EXPRESSION identifier;
+  std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
 };
 

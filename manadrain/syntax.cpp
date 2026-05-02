@@ -6,6 +6,7 @@
 #include <unictype.h>
 #include <unistr.h>
 
+#include "atom_prealloc.hpp"
 #include "syntax.hpp"
 
 namespace Manadrain {
@@ -840,9 +841,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_call_expr() {
     TRY_EXP(tokenize())
     if (my_token == TOKEN{U')'})
       break;
-    std::expected parse_ok = parse_assign_expr();
-    if (not parse_ok)
-      return std::unexpected{parse_ok.error()};
+    TRY_EXP(parse_assign_expr())
     if (my_token == TOKEN{U')'})
       break;
     TRY_EXP(expect_punct(','))
@@ -949,7 +948,18 @@ Parser::parse_function_decl(EXPRESSION identifier) {
   DECL_FUNCTION declaration{std::move(identifier)};
   TRY_EXP(expect_punct('('))
   TRY_EXP(tokenize())
-  TRY_EXP(expect_punct(')'))
+  while (my_token != TOKEN{U')'}) {
+    if (my_token.index() != TOKV_IDENTI)
+      return std::unexpected{NEEDED_ERR::FORMAL_PARAMETER};
+    std::size_t atom_sh{std::get<TOKV_IDENTI>(my_token).atom_sh};
+    if (is_reserved(atom_sh))
+      return std::unexpected{RESERVED_ERR{atom_sh}};
+    declaration.arguments.push_back(atom_sh);
+    TRY_EXP(tokenize())
+    if (my_token == TOKEN{U')'})
+      break;
+    TRY_EXP(expect_punct(','))
+  }
   TRY_EXP(tokenize())
   TRY_EXP(expect_punct('{'))
   TRY_EXP(tokenize())

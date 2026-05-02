@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/manadrain",
-            "args": ["${workspaceFolder}/generated/diverse_statement.js"],
+            "args": ["${workspaceFolder}/sample_syntax/closures.js"],
             "stopAtEntry": true,
             "cwd": "${fileDirname}",
             "environment": [],
