@@ -6,9 +6,10 @@
 #include <unictype.h>
 #include <unistr.h>
 
-#include "interpret.hpp"
+#include "syntax.hpp"
 
-namespace Interpret {
+namespace Manadrain {
+namespace Syntax {
 static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
@@ -1046,4 +1047,5 @@ bool Parser::parse() {
       return 1;
   }
 }
-} // namespace Interpret
+} // namespace Syntax
+} // namespace Manadrain

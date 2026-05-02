@@ -16,10 +16,11 @@ const atom_literal_arr = [
   "false"
 ];
 
-Deno.writeTextFile("include/atom_prealloc.hpp", `\
+Deno.writeTextFile("manadrain/atom_prealloc.hpp", `\
 #include <array>
 
-namespace Interpret {
+namespace Manadrain {
+namespace Syntax {
 ${atom_literal_arr
     .map((atom_s, atom_idx) =>
       `inline constexpr std::size_t S_ATOM_${atom_s}{${atom_idx}};`)
@@ -28,5 +29,6 @@ ${atom_literal_arr
 static const std::array<std::string_view, ${atom_literal_arr.length}> atom_prealloc{{
   ${atom_literal_arr.map((atom_s) => `"${atom_s}"`).join(', ')}
 }};
+}
 }
 `);

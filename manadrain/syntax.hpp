@@ -15,7 +15,8 @@
 
 #include "atom_prealloc.hpp"
 
-namespace Interpret {
+namespace Manadrain {
+namespace Syntax {
 enum class INVALID_ERR {
   NUMBER_LITERAL,
   BIGINT_LITERAL,
@@ -256,4 +257,5 @@ private:
   parse_function_decl(EXPRESSION identifier);
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
-} // namespace Interpret
+} // namespace Syntax
+} // namespace Manadrain

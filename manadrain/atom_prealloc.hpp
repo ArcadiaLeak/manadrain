@@ -1,6 +1,7 @@
 #include <array>
 
-namespace Interpret {
+namespace Manadrain {
+namespace Syntax {
 inline constexpr std::size_t S_ATOM_const{0};
 inline constexpr std::size_t S_ATOM_let{1};
 inline constexpr std::size_t S_ATOM_var{2};
@@ -20,4 +21,5 @@ inline constexpr std::size_t S_ATOM_false{14};
 static const std::array<std::string_view, 15> atom_prealloc{
     {"const", "let", "var", "class", "function", "return", "import", "export",
      "from", "as", "default", "undefined", "null", "true", "false"}};
-} // namespace Interpret
+} // namespace Syntax
+} // namespace Manadrain

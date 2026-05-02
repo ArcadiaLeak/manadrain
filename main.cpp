@@ -4,7 +4,7 @@
 #include <print>
 #include <ranges>
 
-#include "interpret.hpp"
+#include "syntax.hpp"
 
 int main(int argc, char *argv[]) {
   if (argc != 2) {
@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Interpret::Parser parser{};
+  Manadrain::Syntax::Parser parser{};
   parser.populate(std::ranges::istream_view<std::uint8_t>{file} |
                   std::ranges::to<std::vector<std::uint8_t>>());
   parser.parse();
