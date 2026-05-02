@@ -66,10 +66,13 @@ enum TOKV_INDEX {
 enum class TOK_OPERATOR {
   EQ_STRICT,
   EQ_SLOPPY,
-  DIV_ASSIGN,
-  AND_ASSIGN,
-  LAND_ASSIGN,
-  LOGIC_AND
+  DIVIDE_ASSIGN,
+  BITWISE_CONJUNCT_ASSIGN,
+  LOGICAL_CONJUNCT_ASSIGN,
+  LOGICAL_CONJUNCT,
+  BITWISE_DISJUNCT_ASSIGN,
+  LOGICAL_DISJUNCT_ASSIGN,
+  LOGICAL_DISJUNCT
 };
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
                            double, TOK_OPERATOR, TOK_BIGINT>;
@@ -244,15 +247,16 @@ private:
   std::expected<void, PARSE_ERRMSG> expect_punct(char32_t punct);
 
   std::expected<void, PARSE_ERRMSG> parse_assign_expr();
-  std::expected<void, PARSE_ERRMSG> parse_binary_prec5();
-  std::expected<void, PARSE_ERRMSG> parse_binary_prec4();
+  std::expected<void, PARSE_ERRMSG> parse_equality_expr();
+  std::expected<void, PARSE_ERRMSG> parse_relation_expr();
   std::expected<void, PARSE_ERRMSG> parse_postfix_expr();
   std::expected<void, PARSE_ERRMSG> parse_primary_expr();
   std::expected<void, PARSE_ERRMSG> parse_call_expr();
   std::expected<void, PARSE_ERRMSG> parse_member_expr();
   std::expected<void, PARSE_ERRMSG> parse_access_expr();
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
-  std::expected<void, PARSE_ERRMSG> parse_logical_and_or();
+  std::expected<void, PARSE_ERRMSG> parse_logical_conjunct();
+  std::expected<void, PARSE_ERRMSG> parse_logical_disjunct();
 
   std::expected<void, PARSE_ERRMSG> parse_import();
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();

@@ -427,7 +427,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
         break;
       }
       if (ahead_opt == '=')
-        return TOK_OPERATOR::DIV_ASSIGN;
+        return TOK_OPERATOR::DIVIDE_ASSIGN;
       else {
         if (ahead_opt)
           prev();
@@ -473,20 +473,35 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
     }
     case '&': {
       std::optional ch_opt{next()};
-      if (not ch_opt)
-        return U'&';
       if (ch_opt == '=')
-        return TOK_OPERATOR::AND_ASSIGN;
+        return TOK_OPERATOR::BITWISE_CONJUNCT_ASSIGN;
       if (ch_opt != '&') {
-        prev();
+        backtrack(ch_opt.has_value());
         return U'&';
       }
       ch_opt = next();
-      if (ch_opt != '=') {
-        prev();
-        return TOK_OPERATOR::LOGIC_AND;
+      if (ch_opt == '=')
+        return TOK_OPERATOR::LOGICAL_CONJUNCT_ASSIGN;
+      else {
+        backtrack(ch_opt.has_value());
+        return TOK_OPERATOR::LOGICAL_CONJUNCT;
       }
-      return TOK_OPERATOR::LAND_ASSIGN;
+    }
+    case '|': {
+      std::optional ch_opt{next()};
+      if (ch_opt == '=')
+        return TOK_OPERATOR::BITWISE_DISJUNCT_ASSIGN;
+      if (ch_opt != '|') {
+        backtrack(ch_opt.has_value());
+        return U'|';
+      }
+      ch_opt = next();
+      if (ch_opt == '=')
+        return TOK_OPERATOR::LOGICAL_DISJUNCT_ASSIGN;
+      else {
+        backtrack(ch_opt.has_value());
+        return TOK_OPERATOR::LOGICAL_DISJUNCT;
+      }
     }
     default:
       if (std::isdigit(leading))
@@ -712,7 +727,7 @@ wrap_up:
   return {};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_binary_prec4() {
+std::expected<void, PARSE_ERRMSG> Parser::parse_relation_expr() {
   TRY_EXP(parse_postfix_expr())
   do {
     if (my_token == TOKEN{U'>'})
@@ -730,8 +745,8 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_binary_prec4() {
   return {};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_binary_prec5() {
-  TRY_EXP(parse_binary_prec4())
+std::expected<void, PARSE_ERRMSG> Parser::parse_equality_expr() {
+  TRY_EXP(parse_relation_expr())
   do {
     if (my_token == TOKEN{TOK_OPERATOR::EQ_SLOPPY})
       break;
@@ -742,7 +757,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_binary_prec5() {
   EXPRESSION expr_left = std::move(my_expression);
   TOKEN op = my_token;
   TRY_EXP(tokenize())
-  TRY_EXP(parse_binary_prec4())
+  TRY_EXP(parse_relation_expr())
   my_expression = std::make_unique<EXPR_BINARY>(std::move(expr_left),
                                                 std::move(my_expression), op);
   return {};
@@ -875,7 +890,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_access_expr() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
-  TRY_EXP(parse_logical_and_or())
+  TRY_EXP(parse_logical_disjunct())
   if (my_token != TOKEN{U'='})
     return {};
   TRY_EXP(tokenize())
@@ -886,13 +901,26 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
   return {};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_logical_and_or() {
-  TRY_EXP(parse_binary_prec5())
-  while (my_token == TOKEN{TOK_OPERATOR::LOGIC_AND}) {
+std::expected<void, PARSE_ERRMSG> Parser::parse_logical_conjunct() {
+  TRY_EXP(parse_equality_expr())
+  while (my_token == TOKEN{TOK_OPERATOR::LOGICAL_CONJUNCT}) {
     EXPRESSION expr_left = std::move(my_expression);
     TOKEN op = my_token;
     TRY_EXP(tokenize())
-    TRY_EXP(parse_binary_prec5())
+    TRY_EXP(parse_equality_expr())
+    my_expression = std::make_unique<EXPR_LOGICAL>(
+        std::move(expr_left), std::move(my_expression), op);
+  }
+  return {};
+}
+
+std::expected<void, PARSE_ERRMSG> Parser::parse_logical_disjunct() {
+  TRY_EXP(parse_logical_conjunct())
+  while (my_token == TOKEN{TOK_OPERATOR::LOGICAL_DISJUNCT}) {
+    EXPRESSION expr_left = std::move(my_expression);
+    TOKEN op = my_token;
+    TRY_EXP(tokenize())
+    TRY_EXP(parse_logical_conjunct())
     my_expression = std::make_unique<EXPR_LOGICAL>(
         std::move(expr_left), std::move(my_expression), op);
   }
