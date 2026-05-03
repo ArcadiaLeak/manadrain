@@ -5,10 +5,19 @@
 [
   {
     "adapter": "GDB",
-    "label": "manadrain (GDB)",
+    "label": "language (GDB)",
     "request": "launch",
-    "program": "./build/manadrain",
-    "args": ["./sample_syntax/closures.js"],
+    "program": "./build/language",
+    "args": ["./language/samples/closures.js"],
+    "stopAtBeginningOfMainSubprogram": true,
+    "cwd": "/home/evgenii/manadrain",
+  },
+  {
+    "adapter": "GDB",
+    "label": "bytecode (GDB)",
+    "request": "launch",
+    "program": "./build/bytecode",
+    "args": ["./bytecode/samples/factorial.wasm"],
     "stopAtBeginningOfMainSubprogram": true,
     "cwd": "/home/evgenii/manadrain",
   },
