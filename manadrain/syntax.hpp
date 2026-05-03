@@ -246,7 +246,7 @@ enum class PROP_KIND { IDENTIF, COMPUTED };
 class Parser : public Tokenizer {
 public:
   std::vector<STATEMENT> program;
-  bool parse();
+  std::expected<void, PARSE_ERRMSG> parse();
 
 private:
   TOKEN my_token;

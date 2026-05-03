@@ -28,7 +28,10 @@ int main(int argc, char *argv[]) {
   Manadrain::Syntax::Parser parser{};
   parser.populate(std::ranges::istream_view<std::uint8_t>{file} |
                   std::ranges::to<std::vector<std::uint8_t>>());
-  parser.parse();
+  if (not parser.parse()) {
+    std::println(std::cout, "Error: could not parse the buffer!");
+    return 1;
+  }
 
   return 0;
 }

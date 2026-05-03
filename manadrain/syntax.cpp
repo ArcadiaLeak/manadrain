@@ -1134,17 +1134,15 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
   }
 }
 
-bool Parser::parse() {
+std::expected<void, PARSE_ERRMSG> Parser::parse() {
   skip_shebang();
-  std::expected ok{tokenize()};
-  if (not ok)
-    return 1;
+  TRY_EXP(tokenize())
   while (1) {
     if (my_token.index() == TOKV_EOF)
-      return 0;
+      return {};
     std::expected status{parse_statement()};
     if (not status)
-      return 1;
+      return std::unexpected{status.error()};
     program.push_back(std::move(my_statement));
   }
 }
