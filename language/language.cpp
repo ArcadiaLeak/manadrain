@@ -690,9 +690,8 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
 #define TRY_EXP(void_exp)                                                      \
   do {                                                                         \
     std::expected ok{void_exp};                                                \
-    if (ok)                                                                    \
-      break;                                                                   \
-    return std::unexpected{ok.error()};                                        \
+    if (not ok)                                                                \
+      return std::unexpected{ok.error()};                                      \
   } while (0);
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {

@@ -3,7 +3,8 @@
 #include <iostream>
 #include <print>
 #include <ranges>
-#include <vector>
+
+#include "bytecode.hpp"
 
 int main(int argc, char *argv[]) {
   if (argc != 2) {
@@ -24,8 +25,10 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  std::vector buffer{std::ranges::istream_view<std::uint8_t>{file} |
-                     std::ranges::to<std::vector<std::uint8_t>>()};
+  Manadrain::Bytecode::Reader reader{};
+  reader.populate(std::ranges::istream_view<std::uint8_t>{file} |
+                  std::ranges::to<std::vector<std::uint8_t>>());
+  reader.read_module();
 
   return 0;
 }
