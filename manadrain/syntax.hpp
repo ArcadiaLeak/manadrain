@@ -139,9 +139,18 @@ struct DECL_IMPORT {
 struct STMT_RETURN {
   EXPRESSION argument;
 };
+struct STMT_BLOCK;
+struct STMT_IF;
 using STATEMENT = std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION,
-                               STMT_RETURN, DECL_IMPORT>;
-
+                               STMT_RETURN, DECL_IMPORT, STMT_BLOCK, STMT_IF>;
+struct STMT_BLOCK {
+  std::vector<STATEMENT> subprogram;
+};
+struct STMT_IF {
+  EXPRESSION condition;
+  std::unique_ptr<STATEMENT> consequent;
+  std::unique_ptr<STATEMENT> alternate;
+};
 struct DECL_FUNCTION {
   EXPRESSION identifier;
   std::vector<std::size_t> arguments;
@@ -242,6 +251,7 @@ public:
 private:
   TOKEN my_token;
   EXPRESSION my_expression;
+  STATEMENT my_statement;
 
   std::expected<void, PARSE_ERRMSG> tokenize();
   std::expected<void, PARSE_ERRMSG> expect_statement_end();
@@ -259,11 +269,14 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
   std::expected<void, PARSE_ERRMSG> parse_logical_conjunct();
   std::expected<void, PARSE_ERRMSG> parse_logical_disjunct();
+  std::expected<void, PARSE_ERRMSG> parse_paren_expr();
 
   std::expected<void, PARSE_ERRMSG> parse_import();
   std::expected<void, PARSE_ERRMSG> parse_variable_decl();
-  std::expected<DECL_FUNCTION, PARSE_ERRMSG>
-  parse_function_decl(EXPRESSION identifier);
+  std::expected<void, PARSE_ERRMSG> parse_function_decl(EXPRESSION identifier);
+  std::expected<void, PARSE_ERRMSG> parse_stmt_expression();
+  std::expected<void, PARSE_ERRMSG> parse_ident_statement();
+  std::expected<void, PARSE_ERRMSG> parse_punct_statement();
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
 } // namespace Syntax
