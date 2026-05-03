@@ -602,16 +602,16 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
   if (reached_end())
     return leading - '0';
   std::optional<TOK_0PREFIX> base_opt{};
-  if (leading == '0') {
-    do {
+  do {
+    if (leading == '0') {
       base_opt = decode_0prefix();
       /* there must be a digit after the indicator */
       std::optional ahead{next()};
       if (not ahead.and_then(decode_hex))
         return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
       leading = *ahead;
-    } while (0);
-  }
+    }
+  } while (0);
   FLOAT_REPR repr_node{};
   do {
     WHOLE whole_n{scan_numseq(base_opt, leading)};
@@ -642,16 +642,14 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
     return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
   } while (0);
   int radix{radix_from_ind(base_opt)};
-  switch (is_bigint) {
-  case 1: {
-    auto bigint_it = bigint_vec.insert(
-        bigint_vec.end(), mpz_class{std::get<WHOLE>(repr_node).repr_s, radix});
-    std::size_t bigint_idx = std::distance(bigint_vec.begin(), bigint_it);
-    return TOK_BIGINT{bigint_idx};
-  }
-  default:
-    switch (radix) {
-    case 10: {
+  do {
+    if (is_bigint) {
+      auto bigint_it = bigint_vec.insert(
+          bigint_vec.end(),
+          mpz_class{std::get<WHOLE>(repr_node).repr_s, radix});
+      std::size_t bigint_idx = std::distance(bigint_vec.begin(), bigint_it);
+      return TOK_BIGINT{bigint_idx};
+    } else if (radix == 10) {
       double result{};
       std::string repr_s = repr_node.visit([](auto n) { return n.collapse(); });
       auto status =
@@ -661,8 +659,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
       else if (status.ec != std::errc{})
         return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
       return result;
-    }
-    default: {
+    } else {
       std::uint64_t result{};
       std::string repr_s = std::move(std::get<WHOLE>(repr_node).repr_s);
       auto status = std::from_chars(
@@ -677,8 +674,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
         break;
       return static_cast<double>(result);
     }
-    }
-  }
+  } while (0);
   return std::numeric_limits<double>::infinity();
 }
 
@@ -954,7 +950,6 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_logical_disjunct() {
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_postfix_expr() {
-  std::expected<void, PARSE_ERRMSG> parse_ok{};
   TRY_EXP(parse_primary_expr())
   while (1) {
     bool go_on{};

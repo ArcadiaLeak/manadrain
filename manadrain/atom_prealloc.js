@@ -13,7 +13,15 @@ const reserved_word_arr = [
   "undefined",
   "null",
   "true",
-  "false"
+  "false",
+  "if",
+  "else",
+  "while",
+  "for",
+  "do",
+  "break",
+  "continue",
+  "switch"
 ];
 
 Deno.writeTextFile("manadrain/atom_prealloc.hpp", `\

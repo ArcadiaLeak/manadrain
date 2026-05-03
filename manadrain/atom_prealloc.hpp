@@ -17,10 +17,20 @@ inline constexpr std::size_t S_ATOM_undefined{11};
 inline constexpr std::size_t S_ATOM_null{12};
 inline constexpr std::size_t S_ATOM_true{13};
 inline constexpr std::size_t S_ATOM_false{14};
+inline constexpr std::size_t S_ATOM_if{15};
+inline constexpr std::size_t S_ATOM_else{16};
+inline constexpr std::size_t S_ATOM_while{17};
+inline constexpr std::size_t S_ATOM_for{18};
+inline constexpr std::size_t S_ATOM_do{19};
+inline constexpr std::size_t S_ATOM_break{20};
+inline constexpr std::size_t S_ATOM_continue{21};
+inline constexpr std::size_t S_ATOM_switch{22};
 
-static const std::array<std::string_view, 15> atom_prealloc{
-    {"const", "let", "var", "class", "function", "return", "import", "export",
-     "from", "as", "default", "undefined", "null", "true", "false"}};
+static const std::array<std::string_view, 23> atom_prealloc{
+    {"const",  "let",    "var",   "class",    "function", "return",
+     "import", "export", "from",  "as",       "default",  "undefined",
+     "null",   "true",   "false", "if",       "else",     "while",
+     "for",    "do",     "break", "continue", "switch"}};
 
 static bool is_reserved(std::size_t atom_idx) {
   switch (atom_idx) {
@@ -39,6 +49,14 @@ static bool is_reserved(std::size_t atom_idx) {
   case S_ATOM_null:
   case S_ATOM_true:
   case S_ATOM_false:
+  case S_ATOM_if:
+  case S_ATOM_else:
+  case S_ATOM_while:
+  case S_ATOM_for:
+  case S_ATOM_do:
+  case S_ATOM_break:
+  case S_ATOM_continue:
+  case S_ATOM_switch:
     return 1;
   default:
     return 0;

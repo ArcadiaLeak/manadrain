@@ -9,12 +9,18 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/manadrain",
-            "args": ["${workspaceFolder}/sample_syntax/closures.js"],
+            "args": [
+                "${workspaceFolder}/sample_syntax/closures.js"
+            ],
             "stopAtEntry": true,
             "cwd": "${fileDirname}",
             "environment": [],
             "externalConsole": false,
-            "MIMode": "gdb"
+            "MIMode": "gdb",
+            "logging": {
+                "engineLogging": true,
+                "trace": true
+            }
         }
     ]
 }
