@@ -6,8 +6,8 @@
 #include <unictype.h>
 #include <unistr.h>
 
-#include "atom_prealloc.hpp"
 #include "language.hpp"
+#include "persistent_atoms.hpp"
 
 namespace Manadrain {
 namespace Language {
@@ -516,9 +516,9 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
 }
 
 std::size_t TokAtom::atom_find(std::string needle) {
-  auto it_prealloc = std::ranges::find(atom_prealloc, needle);
-  if (it_prealloc != atom_prealloc.end())
-    return std::distance(atom_prealloc.begin(), it_prealloc);
+  auto it_prealloc = std::ranges::find(persistent_arr, needle);
+  if (it_prealloc != persistent_arr.end())
+    return std::distance(persistent_arr.begin(), it_prealloc);
   auto it_umap = atom_umap.find(needle);
   if (it_umap != atom_umap.end())
     return it_umap->second;
