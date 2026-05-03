@@ -26,7 +26,7 @@ inline constexpr std::size_t S_ATOM_break{20};
 inline constexpr std::size_t S_ATOM_continue{21};
 inline constexpr std::size_t S_ATOM_switch{22};
 
-static const std::array<std::string_view, 23> persistent_arr{
+static const std::array<std::string_view, 23> S_ATOM_ARR{
     {"const",  "let",    "var",   "class",    "function", "return",
      "import", "export", "from",  "as",       "default",  "undefined",
      "null",   "true",   "false", "if",       "else",     "while",

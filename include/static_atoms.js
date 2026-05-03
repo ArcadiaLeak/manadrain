@@ -25,7 +25,7 @@ const reserved_words = [
 ];
 
 Deno.writeTextFile(
-  "include/persistent_atoms.hpp",
+  "include/static_atoms.hpp",
   `\
 #include <array>
 
@@ -38,7 +38,7 @@ ${reserved_words
   )
   .join("\n")}
 
-static const std::array<std::string_view, ${reserved_words.length}> persistent_arr{{
+static const std::array<std::string_view, ${reserved_words.length}> S_ATOM_ARR{{
   ${reserved_words.map((atom_s) => `"${atom_s}"`).join(", ")}
 }};
 
