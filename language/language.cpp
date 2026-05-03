@@ -7,10 +7,10 @@
 #include <unistr.h>
 
 #include "atom_prealloc.hpp"
-#include "syntax.hpp"
+#include "language.hpp"
 
 namespace Manadrain {
-namespace Syntax {
+namespace Language {
 static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
@@ -466,9 +466,9 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
       default:
         return U'=';
       case 1:
-        return TOK_OPERATOR::EQ_SLOPPY;
+        return TOK_OPERATOR::DOUBLE_EQUALS;
       case 2:
-        return TOK_OPERATOR::EQ_STRICT;
+        return TOK_OPERATOR::TRIPLE_EQUALS;
       }
     }
     case '&': {
@@ -762,9 +762,9 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_relation_expr() {
 std::expected<void, PARSE_ERRMSG> Parser::parse_equality_expr() {
   TRY_EXP(parse_relation_expr())
   do {
-    if (my_token == TOKEN{TOK_OPERATOR::EQ_SLOPPY})
+    if (my_token == TOKEN{TOK_OPERATOR::DOUBLE_EQUALS})
       break;
-    if (my_token == TOKEN{TOK_OPERATOR::EQ_STRICT})
+    if (my_token == TOKEN{TOK_OPERATOR::TRIPLE_EQUALS})
       break;
     return {};
   } while (0);
@@ -1146,5 +1146,5 @@ std::expected<void, PARSE_ERRMSG> Parser::parse() {
     program.push_back(std::move(my_statement));
   }
 }
-} // namespace Syntax
+} // namespace Language
 } // namespace Manadrain

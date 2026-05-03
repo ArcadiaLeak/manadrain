@@ -1,7 +1,7 @@
 #include <array>
 
 namespace Manadrain {
-namespace Syntax {
+namespace Language {
 inline constexpr std::size_t S_ATOM_const{0};
 inline constexpr std::size_t S_ATOM_let{1};
 inline constexpr std::size_t S_ATOM_var{2};
@@ -62,5 +62,5 @@ static bool is_reserved(std::size_t atom_idx) {
     return 0;
   }
 }
-} // namespace Syntax
+} // namespace Language
 } // namespace Manadrain

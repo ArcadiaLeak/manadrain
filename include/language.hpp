@@ -14,7 +14,7 @@
 #include <gmpxx.h>
 
 namespace Manadrain {
-namespace Syntax {
+namespace Language {
 enum class INVALID_ERR {
   NUMBER_LITERAL,
   BIGINT_LITERAL,
@@ -64,8 +64,10 @@ enum TOKV_INDEX {
   TOKV_BIGINT
 };
 enum class TOK_OPERATOR {
-  EQ_STRICT,
-  EQ_SLOPPY,
+  DOUBLE_EQUALS,
+  TRIPLE_EQUALS,
+  BANG_EQUALS,
+  BANG_DOUBLE_EQUALS,
   DIVIDE_ASSIGN,
   BITWISE_CONJUNCT_ASSIGN,
   LOGICAL_CONJUNCT_ASSIGN,
@@ -279,5 +281,5 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_punct_statement();
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
-} // namespace Syntax
+} // namespace Language
 } // namespace Manadrain

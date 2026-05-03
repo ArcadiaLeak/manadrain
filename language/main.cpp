@@ -4,7 +4,7 @@
 #include <print>
 #include <ranges>
 
-#include "syntax.hpp"
+#include "language.hpp"
 
 int main(int argc, char *argv[]) {
   if (argc != 2) {
@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Syntax::Parser parser{};
+  Manadrain::Language::Parser parser{};
   parser.populate(std::ranges::istream_view<std::uint8_t>{file} |
                   std::ranges::to<std::vector<std::uint8_t>>());
   if (not parser.parse()) {
