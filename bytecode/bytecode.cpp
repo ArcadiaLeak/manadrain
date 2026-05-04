@@ -10,10 +10,10 @@ void Reader::populate(std::vector<std::uint8_t> &&buffer_ref) {
 }
 
 std::expected<std::uint32_t, READER_ERR> Reader::read_u32(int cnt) {
-  int start{position};
+  std::size_t start{position};
   std::uint32_t result{};
   while (position < buffer.size()) {
-    int i = position - start;
+    std::size_t i{position - start};
     if (i == cnt)
       return result;
     std::uint32_t single = buffer[position++];
@@ -59,7 +59,22 @@ std::expected<std::uint32_t, READER_ERR> Reader::read_u32_leb128() {
   return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
 }
 
+expected_task<void, READER_ERR> Reader::read_type_form() {
+  std::uint32_t type_form{co_await read_u32(1)};
+  if (type_form == 0x60)
+    co_return {};
+  co_return std::unexpected{UNEXPECT_ERR::TYPE_FORM};
+}
+
 expected_task<void, READER_ERR> Reader::read_type_section(std::uint32_t size) {
+  std::uint32_t num_signatures{co_await read_u32_leb128()};
+  for (std::uint32_t i = 0; i < num_signatures; ++i) {
+    co_await read_type_form().ok();
+    std::uint32_t num_params{co_await read_u32_leb128()};
+    std::vector<std::monostate> param_types{num_params};
+    for (std::uint32_t j = 0; i < num_params; ++j) {
+    }
+  }
   co_return {};
 }
 

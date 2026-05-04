@@ -13,7 +13,8 @@ inline constexpr std::uint32_t WASM_BINARY_LAYER_MODULE{0};
 
 enum class CORRUPT_ERR { UNSIGN_FIXED, UNSIGN_LEB128 };
 enum class INVALID_ERR { WASM_MAGIC, WASM_LAYER, WASM_VERSN, SECTION_CODE };
-using READER_ERR = std::variant<CORRUPT_ERR, INVALID_ERR>;
+enum class UNEXPECT_ERR { TYPE_FORM };
+using READER_ERR = std::variant<CORRUPT_ERR, INVALID_ERR, UNEXPECT_ERR>;
 
 class Reader {
 public:
@@ -22,7 +23,7 @@ public:
   expected_task<void, READER_ERR> read_module();
 
 private:
-  int position;
+  std::size_t position;
   std::vector<std::uint8_t> buffer;
 
   std::expected<std::uint32_t, READER_ERR> read_u32(int cnt);
@@ -30,6 +31,7 @@ private:
 
   expected_task<void, READER_ERR> read_sections();
   expected_task<void, READER_ERR> read_type_section(std::uint32_t size);
+  expected_task<void, READER_ERR> read_type_form();
 };
 } // namespace Bytecode
 } // namespace Manadrain

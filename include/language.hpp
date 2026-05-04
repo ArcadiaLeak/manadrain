@@ -23,8 +23,8 @@ enum class INVALID_ERR {
   PROPERTY_NAME,
   BACKSLASH_ESCAPE
 };
-enum class UNEXPECTED_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
-enum class NEEDED_ERR {
+enum class UNEXPECT_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
+enum class REQUIRED_ERR {
   FIELD_NAME,
   VARIABLE_NAME,
   FUNCTION_NAME,
@@ -33,14 +33,14 @@ enum class NEEDED_ERR {
   STRING_LITERAL,
   FORMAL_PARAMETER
 };
+struct KEYWORD_ERR {
+  std::size_t atom_sh;
+};
 struct PUNCT_ERR {
   char32_t must_be;
 };
-struct RESERVED_ERR {
-  std::size_t atom_sh;
-};
-using PARSE_ERRMSG = std::variant<INVALID_ERR, UNEXPECTED_ERR, NEEDED_ERR,
-                                  PUNCT_ERR, RESERVED_ERR>;
+using PARSE_ERRMSG = std::variant<INVALID_ERR, UNEXPECT_ERR, REQUIRED_ERR,
+                                  PUNCT_ERR, KEYWORD_ERR>;
 
 struct TOK_STRING {
   char32_t separator;
@@ -181,7 +181,7 @@ protected:
   void skip_shebang();
 
 private:
-  int position;
+  std::size_t position;
   std::vector<std::uint8_t> buffer;
   std::stack<int> backtrace;
 };

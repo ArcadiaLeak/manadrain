@@ -164,7 +164,7 @@ TokAtom::traverse_string(char32_t separator) {
   while (not err_opt) {
     std::optional ch_opt{next()};
     if (not ch_opt) {
-      err_opt = UNEXPECTED_ERR::STRING_END;
+      err_opt = UNEXPECT_ERR::STRING_END;
       break;
     }
     if (backslash_seen) {
@@ -270,7 +270,7 @@ TokAtom::traverse_string(char32_t separator) {
         if (separator == '`')
           co_yield '\n';
         else
-          err_opt = UNEXPECTED_ERR::STRING_END;
+          err_opt = UNEXPECT_ERR::STRING_END;
         break;
       case '\\':
         backslash_seen = 1;
@@ -402,7 +402,7 @@ std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
       if (ahead_opt == '*') {
         while (1) {
           if (reached_end())
-            return std::unexpected{UNEXPECTED_ERR::COMMENT_END};
+            return std::unexpected{UNEXPECT_ERR::COMMENT_END};
           leading = unchecked_next();
           ahead_opt = next();
           if (leading == '*' && ahead_opt == '/')
@@ -697,7 +697,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   co_await tokenize();
 
   if (my_token.index() != TOKV_IDENTI)
-    co_return std::unexpected{NEEDED_ERR::VARIABLE_NAME};
+    co_return std::unexpected{REQUIRED_ERR::VARIABLE_NAME};
   declaration.identifier = std::get<TOK_IDENTI>(my_token);
   co_await tokenize();
 
@@ -848,7 +848,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
     }
     [[fallthrough]];
   default:
-    co_return std::unexpected{UNEXPECTED_ERR::THIS_TOKEN};
+    co_return std::unexpected{UNEXPECT_ERR::THIS_TOKEN};
   }
 }
 
@@ -883,7 +883,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_member_expr() {
         std::move(my_expression), std::get<TOK_IDENTI>(my_token));
     co_return {};
   }
-  co_return std::unexpected{NEEDED_ERR::FIELD_NAME};
+  co_return std::unexpected{REQUIRED_ERR::FIELD_NAME};
 }
 
 expected_task<void, PARSE_ERRMSG> Parser::parse_access_expr() {
@@ -989,10 +989,10 @@ Parser::parse_function_decl(EXPRESSION identifier) {
   co_await tokenize();
   while (my_token != TOKEN{U')'}) {
     if (my_token.index() != TOKV_IDENTI)
-      co_return std::unexpected{NEEDED_ERR::FORMAL_PARAMETER};
+      co_return std::unexpected{REQUIRED_ERR::FORMAL_PARAMETER};
     std::size_t atom_sh{std::get<TOKV_IDENTI>(my_token).atom_sh};
     if (is_reserved(atom_sh))
-      co_return std::unexpected{RESERVED_ERR{atom_sh}};
+      co_return std::unexpected{KEYWORD_ERR{atom_sh}};
     declaration.arguments.push_back(atom_sh);
     co_await tokenize();
     if (my_token == TOKEN{U')'})
@@ -1017,7 +1017,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_import() {
   co_await tokenize();
   while (my_token != TOKEN{U'}'}) {
     if (my_token.index() != TOKV_IDENTI)
-      co_return std::unexpected{NEEDED_ERR::IDENTIFIER};
+      co_return std::unexpected{REQUIRED_ERR::IDENTIFIER};
     declaration.specifiers.push_back(std::get<TOKV_IDENTI>(my_token));
     co_await tokenize();
     if (my_token != TOKEN{U','})
@@ -1027,10 +1027,10 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_import() {
   co_await expect_punct('}');
   co_await tokenize();
   if (my_token != TOKEN{TOK_IDENTI{0, S_ATOM_from}})
-    co_return std::unexpected{NEEDED_ERR::FROM_CLAUSE};
+    co_return std::unexpected{REQUIRED_ERR::FROM_CLAUSE};
   co_await tokenize();
   if (my_token.index() != TOKV_STRING)
-    co_return std::unexpected{NEEDED_ERR::STRING_LITERAL};
+    co_return std::unexpected{REQUIRED_ERR::STRING_LITERAL};
   declaration.source = std::get<TOKV_STRING>(my_token);
   co_await tokenize();
   co_await expect_statement_end().ok();
@@ -1075,7 +1075,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_ident_statement() {
   case S_ATOM_function: {
     co_await tokenize();
     if (my_token.index() != TOKV_IDENTI)
-      co_return std::unexpected{NEEDED_ERR::FUNCTION_NAME};
+      co_return std::unexpected{REQUIRED_ERR::FUNCTION_NAME};
     TOK_IDENTI identifier{std::get<TOKV_IDENTI>(my_token)};
     co_await tokenize();
     co_await parse_function_decl(identifier).ok();
