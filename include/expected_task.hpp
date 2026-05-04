@@ -13,14 +13,14 @@ template <typename T, typename E> struct expected_task {
       return expected_task{HANDLE::from_promise(*this)};
     }
     void unhandled_exception() { eptr = std::current_exception(); }
-    auto await_transform(std::expected<T, E> &&e) {
+    template <typename U> auto await_transform(std::expected<U, E> &&e) {
       struct Awaiter {
-        std::expected<T, E> value;
+        std::expected<U, E> value;
         bool await_ready() { return value.has_value(); }
         void await_suspend(std::coroutine_handle<promise_type> handle) {
           handle.promise().result = std::unexpected{value.error()};
         }
-        void await_resume() {}
+        U await_resume() { return *value; }
       };
       return Awaiter{std::move(e)};
     }
@@ -40,7 +40,7 @@ template <typename T, typename E> struct expected_task {
     other.handle = nullptr;
   }
 
-  std::expected<T, E> result() const {
+  std::expected<T, E> ok() const {
     if (handle.promise().eptr)
       std::rethrow_exception(handle.promise().eptr);
     return std::move(handle.promise().result);

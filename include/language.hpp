@@ -248,7 +248,7 @@ private:
 class Parser : public Tokenizer {
 public:
   std::vector<STATEMENT> program;
-  std::expected<void, PARSE_ERRMSG> parse();
+  expected_task<void, PARSE_ERRMSG> parse();
 
 private:
   TOKEN my_token;
@@ -256,29 +256,29 @@ private:
   STATEMENT my_statement;
 
   std::expected<void, PARSE_ERRMSG> tokenize();
-  std::expected<void, PARSE_ERRMSG> expect_statement_end();
+  expected_task<void, PARSE_ERRMSG> expect_statement_end();
   std::expected<void, PARSE_ERRMSG> expect_punct(char32_t punct);
 
-  std::expected<void, PARSE_ERRMSG> parse_assign_expr();
-  std::expected<void, PARSE_ERRMSG> parse_equality_expr();
-  std::expected<void, PARSE_ERRMSG> parse_relation_expr();
-  std::expected<void, PARSE_ERRMSG> parse_additive_expr();
-  std::expected<void, PARSE_ERRMSG> parse_postfix_expr();
-  std::expected<void, PARSE_ERRMSG> parse_primary_expr();
-  std::expected<void, PARSE_ERRMSG> parse_call_expr();
-  std::expected<void, PARSE_ERRMSG> parse_member_expr();
-  std::expected<void, PARSE_ERRMSG> parse_access_expr();
-  std::expected<void, PARSE_ERRMSG> parse_object_literal();
-  std::expected<void, PARSE_ERRMSG> parse_logical_conjunct();
-  std::expected<void, PARSE_ERRMSG> parse_logical_disjunct();
+  expected_task<void, PARSE_ERRMSG> parse_assign_expr();
+  expected_task<void, PARSE_ERRMSG> parse_equality_expr();
+  expected_task<void, PARSE_ERRMSG> parse_relation_expr();
+  expected_task<void, PARSE_ERRMSG> parse_additive_expr();
+  expected_task<void, PARSE_ERRMSG> parse_postfix_expr();
+  expected_task<void, PARSE_ERRMSG> parse_primary_expr();
+  expected_task<void, PARSE_ERRMSG> parse_call_expr();
+  expected_task<void, PARSE_ERRMSG> parse_member_expr();
+  expected_task<void, PARSE_ERRMSG> parse_access_expr();
+  expected_task<void, PARSE_ERRMSG> parse_object_literal();
+  expected_task<void, PARSE_ERRMSG> parse_logical_conjunct();
+  expected_task<void, PARSE_ERRMSG> parse_logical_disjunct();
   expected_task<void, PARSE_ERRMSG> parse_paren_expr();
 
-  std::expected<void, PARSE_ERRMSG> parse_import();
+  expected_task<void, PARSE_ERRMSG> parse_import();
   expected_task<void, PARSE_ERRMSG> parse_variable_decl();
-  std::expected<void, PARSE_ERRMSG> parse_function_decl(EXPRESSION identifier);
-  std::expected<void, PARSE_ERRMSG> parse_stmt_expression();
-  std::expected<void, PARSE_ERRMSG> parse_ident_statement();
-  std::expected<void, PARSE_ERRMSG> parse_punct_statement();
+  expected_task<void, PARSE_ERRMSG> parse_function_decl(EXPRESSION identifier);
+  expected_task<void, PARSE_ERRMSG> parse_stmt_expression();
+  expected_task<void, PARSE_ERRMSG> parse_ident_statement();
+  expected_task<void, PARSE_ERRMSG> parse_punct_statement();
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
 } // namespace Language
