@@ -694,7 +694,7 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
       return std::unexpected{ok.error()};                                      \
   } while (0);
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
+expected_task<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   DECL_VARIABLE declaration{};
 
   std::size_t atom_sh{std::get<TOKV_IDENTI>(my_token).atom_sh};
@@ -703,23 +703,23 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   if (not valid_beginning)
     throw std::runtime_error("statement isn't a variable declaration!");
   declaration.kind = atom_sh;
-  TRY_EXP(tokenize())
+  co_await tokenize();
 
   if (my_token.index() != TOKV_IDENTI)
-    return std::unexpected{NEEDED_ERR::VARIABLE_NAME};
+    co_return std::unexpected{NEEDED_ERR::VARIABLE_NAME};
   declaration.identifier = std::get<TOK_IDENTI>(my_token);
-  TRY_EXP(tokenize())
+  co_await tokenize();
 
   if (my_token != TOKEN{U'='})
     goto wrap_up;
-  TRY_EXP(tokenize())
+  co_await tokenize();
 
-  TRY_EXP(parse_assign_expr())
+  co_await parse_assign_expr();
   declaration.initializer = std::move(my_expression);
 
 wrap_up:
   my_statement = std::move(declaration);
-  return {};
+  co_return {};
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::parse_additive_expr() {
@@ -972,13 +972,12 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_postfix_expr() {
   return {};
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_paren_expr() {
-  TRY_EXP(expect_punct('('))
-  TRY_EXP(tokenize())
-  TRY_EXP(parse_assign_expr())
-  TRY_EXP(expect_punct(')'))
-  TRY_EXP(tokenize())
-  return {};
+expected_task<void, PARSE_ERRMSG> Parser::parse_paren_expr() {
+  co_await expect_punct('(');
+  co_await tokenize();
+  co_await parse_assign_expr();
+  co_await expect_punct(')');
+  co_await tokenize();
 }
 
 std::expected<void, PARSE_ERRMSG> Parser::expect_statement_end() {
@@ -1080,7 +1079,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_ident_statement() {
   case S_ATOM_const:
   case S_ATOM_let:
   case S_ATOM_var:
-    TRY_EXP(parse_variable_decl())
+    TRY_EXP(parse_variable_decl().result())
     TRY_EXP(expect_statement_end())
     return {};
   case S_ATOM_function: {
@@ -1109,7 +1108,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_ident_statement() {
   case S_ATOM_if: {
     STMT_IF statement{};
     TRY_EXP(tokenize())
-    TRY_EXP(parse_paren_expr())
+    TRY_EXP(parse_paren_expr().result())
     statement.condition = std::move(my_expression);
     TRY_EXP(parse_statement())
     statement.consequent = std::make_unique<STATEMENT>(std::move(my_statement));

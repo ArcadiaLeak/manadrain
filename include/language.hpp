@@ -1,3 +1,5 @@
+#include <gmpxx.h>
+
 #include <deque>
 #include <expected>
 #include <generator>
@@ -11,7 +13,7 @@
 #include <variant>
 #include <vector>
 
-#include <gmpxx.h>
+#include "expected_task.hpp"
 
 namespace Manadrain {
 namespace Language {
@@ -243,8 +245,6 @@ private:
   bool newline_seen;
 };
 
-enum class PROP_KIND { IDENTIF, COMPUTED };
-
 class Parser : public Tokenizer {
 public:
   std::vector<STATEMENT> program;
@@ -271,10 +271,10 @@ private:
   std::expected<void, PARSE_ERRMSG> parse_object_literal();
   std::expected<void, PARSE_ERRMSG> parse_logical_conjunct();
   std::expected<void, PARSE_ERRMSG> parse_logical_disjunct();
-  std::expected<void, PARSE_ERRMSG> parse_paren_expr();
+  expected_task<void, PARSE_ERRMSG> parse_paren_expr();
 
   std::expected<void, PARSE_ERRMSG> parse_import();
-  std::expected<void, PARSE_ERRMSG> parse_variable_decl();
+  expected_task<void, PARSE_ERRMSG> parse_variable_decl();
   std::expected<void, PARSE_ERRMSG> parse_function_decl(EXPRESSION identifier);
   std::expected<void, PARSE_ERRMSG> parse_stmt_expression();
   std::expected<void, PARSE_ERRMSG> parse_ident_statement();
