@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <charconv>
 #include <limits>
-#include <stdexcept>
 
 #include <unictype.h>
 #include <unistr.h>

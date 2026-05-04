@@ -1,5 +1,6 @@
 #include <coroutine>
 #include <expected>
+#include <stdexcept>
 
 template <typename T, typename E> struct expected_task {
   struct promise_type {
