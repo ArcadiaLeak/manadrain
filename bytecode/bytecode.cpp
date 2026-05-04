@@ -19,23 +19,44 @@ std::expected<std::uint32_t, READER_ERR> Reader::read_u32(int cnt) {
     std::uint32_t single = buffer[position++];
     result = single << 8 * i | result;
   }
-  return std::unexpected{INVALID_ERR::BYTE_SEQUENCE};
+  return std::unexpected{CORRUPT_ERR::UNSIGN_FIXED};
 }
 
 std::expected<std::uint32_t, READER_ERR> Reader::read_u32_leb128() {
-  int start{position};
-  std::uint32_t result{};
-  while (position < buffer.size()) {
-    int count{position - start};
-    if (count == 5)
-      break;
-    int shift{count * 7};
-    std::uint32_t payload{buffer[position] & 0b1111111u};
-    result |= (payload << shift);
-    if ((buffer[position++] & 0b10000000u) == 0)
-      return result;
-  }
-  return std::unexpected{INVALID_ERR::BYTE_SEQUENCE};
+  std::uint32_t payload{}, result{};
+  if (position >= buffer.size())
+    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+  payload = buffer[position] & 0b1111111u;
+  result |= payload;
+  if ((buffer[position++] & 0x80u) == 0)
+    return result;
+  if (position >= buffer.size())
+    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+  payload = buffer[position] & 0b1111111u;
+  result |= payload << 7;
+  if ((buffer[position++] & 0x80u) == 0)
+    return result;
+  if (position >= buffer.size())
+    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+  payload = buffer[position] & 0b1111111u;
+  result |= payload << 14;
+  if ((buffer[position++] & 0x80u) == 0)
+    return result;
+  if (position >= buffer.size())
+    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+  payload = buffer[position] & 0b1111111u;
+  result |= payload << 21;
+  if ((buffer[position++] & 0x80u) == 0)
+    return result;
+  if (position >= buffer.size())
+    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+  payload = buffer[position] & 0b1111111u;
+  if (payload & 0b1110000u)
+    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+  result |= payload << 28;
+  if ((buffer[position++] & 0x80u) == 0)
+    return result;
+  return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
 }
 
 expected_task<void, READER_ERR> Reader::read_type_section(std::uint32_t size) {
