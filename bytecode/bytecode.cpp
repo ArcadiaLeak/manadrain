@@ -72,17 +72,39 @@ expected_task<void, READER_ERR> Reader::read_type_form() {
   co_return std::unexpected{UNEXPECT_ERR::TYPE_FORM};
 }
 
+std::expected<PRIM_TYPE, READER_ERR>
+decode_primary_type(std::int32_t param_type) {
+  switch (param_type) {
+  case -1:
+    return PRIM_TYPE::I32T;
+  case -2:
+    return PRIM_TYPE::I64T;
+  case -3:
+    return PRIM_TYPE::F32T;
+  case -4:
+    return PRIM_TYPE::F64T;
+  }
+  return std::unexpected{INVALID_ERR::PARAM_TYPE};
+}
+
 expected_task<void, READER_ERR> Reader::read_type_section(std::uint32_t size) {
   std::uint32_t num_signatures{co_await read_u32_leb128()};
   for (std::uint32_t i = 0; i < num_signatures; ++i) {
     co_await read_type_form().ok();
+    FUNC_TYPE func_type{};
     std::uint32_t num_params{co_await read_u32_leb128()};
-    std::vector<std::int32_t> param_types{};
-    param_types.resize(num_params);
+    func_type.param_types.resize(num_params);
     for (std::uint32_t j = 0; j < num_params; ++j) {
       std::int32_t param_type{co_await read_s32_leb128()};
-      param_types[j] = param_type;
+      func_type.param_types[j] = co_await decode_primary_type(param_type);
     }
+    std::uint32_t num_results{co_await read_u32_leb128()};
+    func_type.result_types.resize(num_results);
+    for (std::uint32_t j = 0; j < num_results; ++j) {
+      std::int32_t result_type{co_await read_s32_leb128()};
+      func_type.result_types[j] = co_await decode_primary_type(result_type);
+    }
+    func_types.push_back(std::move(func_type));
   }
   co_return {};
 }
@@ -95,7 +117,7 @@ expected_task<void, READER_ERR> Reader::read_sections() {
       co_await read_type_section(section_size).ok();
       continue;
     }
-    co_return std::unexpected{INVALID_ERR::SECTION_CODE};
+    co_return std::unexpected{INVALID_ERR::SECTN_CODE};
   }
 }
 
