@@ -13,7 +13,12 @@ inline constexpr std::uint32_t WASM_BINARY_LAYER_MODULE{0};
 
 enum class PRIM_TYPE { I32T, I64T, F32T, F64T };
 
-enum class CORRUPT_ERR { UNSIGN_FIXED, SIGNED_LEB128, UNSIGN_LEB128 };
+enum class CORRUPT_ERR {
+  UNSIGN_FIXED,
+  SIGNED_LEB128,
+  UNSIGN_LEB128,
+  SHORT_SECTN
+};
 enum class INVALID_ERR {
   WASM_MAGIC,
   WASM_LAYER,
@@ -48,6 +53,7 @@ private:
   expected_task<void, READER_ERR> read_sections();
   expected_task<void, READER_ERR> read_type_section(std::uint32_t size);
   expected_task<void, READER_ERR> read_type_form();
+  expected_task<void, READER_ERR> read_function_section(std::uint32_t size);
 };
 } // namespace Bytecode
 } // namespace Manadrain

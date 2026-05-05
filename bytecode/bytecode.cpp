@@ -109,15 +109,29 @@ expected_task<void, READER_ERR> Reader::read_type_section(std::uint32_t size) {
   co_return {};
 }
 
+expected_task<void, READER_ERR>
+Reader::read_function_section(std::uint32_t size) {
+  co_return {};
+}
+
 expected_task<void, READER_ERR> Reader::read_sections() {
   while (position < buffer.size()) {
     std::uint32_t section_code{co_await read_u32(1)};
     std::uint32_t section_size{co_await read_u32_leb128()};
-    if (section_code == 1) {
+    std::size_t section_end{position + section_size};
+    switch (section_code) {
+    case 1:
       co_await read_type_section(section_size).ok();
-      continue;
+      break;
+    case 3:
+      co_await read_function_section(section_size).ok();
+      break;
+    default:
+      co_return std::unexpected{INVALID_ERR::SECTN_CODE};
     }
-    co_return std::unexpected{INVALID_ERR::SECTN_CODE};
+    if (position == section_end)
+      continue;
+    co_return std::unexpected{CORRUPT_ERR::SHORT_SECTN};
   }
 }
 
