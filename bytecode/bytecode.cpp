@@ -1,3 +1,5 @@
+#include <unistr.h>
+
 #include "bytecode.hpp"
 
 namespace Manadrain {
@@ -22,7 +24,7 @@ std::expected<std::uint32_t, READER_ERR> Reader::read_u32(int cnt) {
   return std::unexpected{CORRUPT_ERR::UNSIGN_FIXED};
 }
 
-std::expected<std::uint32_t, READER_ERR> Reader::read_u32_leb128() {
+std::expected<std::uint32_t, READER_ERR> Reader::unsign_leb128() {
   std::uint32_t payload{}, result{};
   for (int i = 0; i < 4; ++i) {
     if (position >= buffer.size())
@@ -43,7 +45,7 @@ std::expected<std::uint32_t, READER_ERR> Reader::read_u32_leb128() {
   return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
 }
 
-std::expected<std::int32_t, READER_ERR> Reader::read_s32_leb128() {
+std::expected<std::int32_t, READER_ERR> Reader::signed_leb128() {
   std::uint32_t result{};
   for (int i = 0; i < 4; ++i) {
     if (position >= buffer.size())
@@ -87,21 +89,38 @@ decode_primary_type(std::int32_t param_type) {
   return std::unexpected{INVALID_ERR::PARAM_TYPE};
 }
 
-expected_task<void, READER_ERR> Reader::read_type_section(std::uint32_t size) {
-  std::uint32_t num_signatures{co_await read_u32_leb128()};
+std::expected<EXTERN_KIND, READER_ERR>
+decode_extern_kind(std::uint32_t extern_kind) {
+  switch (extern_kind) {
+  case 0:
+    return EXTERN_KIND::FUNC;
+  case 1:
+    return EXTERN_KIND::TABLE;
+  case 2:
+    return EXTERN_KIND::MEMORY;
+  case 3:
+    return EXTERN_KIND::GLOBAL;
+  }
+  return std::unexpected{INVALID_ERR::EXTERN_KIND};
+}
+
+expected_task<void, READER_ERR> Reader::read_type_section() {
+  std::uint32_t num_signatures{co_await unsign_leb128()};
   for (std::uint32_t i = 0; i < num_signatures; ++i) {
     co_await read_type_form().ok();
     FUNC_TYPE func_type{};
-    std::uint32_t num_params{co_await read_u32_leb128()};
+    std::uint32_t num_params{co_await unsign_leb128()};
     func_type.param_types.resize(num_params);
     for (std::uint32_t j = 0; j < num_params; ++j) {
-      std::int32_t param_type{co_await read_s32_leb128()};
+      std::int32_t param_type{co_await signed_leb128()};
       func_type.param_types[j] = co_await decode_primary_type(param_type);
     }
-    std::uint32_t num_results{co_await read_u32_leb128()};
+    std::uint32_t num_results{co_await unsign_leb128()};
+    if (num_results > 1)
+      co_return std::unexpected{CORRUPT_ERR::MULTIVAL_RET};
     func_type.result_types.resize(num_results);
     for (std::uint32_t j = 0; j < num_results; ++j) {
-      std::int32_t result_type{co_await read_s32_leb128()};
+      std::int32_t result_type{co_await signed_leb128()};
       func_type.result_types[j] = co_await decode_primary_type(result_type);
     }
     func_types.push_back(std::move(func_type));
@@ -109,22 +128,44 @@ expected_task<void, READER_ERR> Reader::read_type_section(std::uint32_t size) {
   co_return {};
 }
 
-expected_task<void, READER_ERR>
-Reader::read_function_section(std::uint32_t size) {
+expected_task<void, READER_ERR> Reader::read_function_section() {
+  std::uint32_t signature_count{co_await unsign_leb128()};
+  for (std::uint32_t i = 0; i < signature_count; ++i) {
+    std::uint32_t sig_index{co_await unsign_leb128()};
+    func_headers.push_back(sig_index);
+  }
+  co_return {};
+}
+
+expected_task<void, READER_ERR> Reader::read_export_section() {
+  std::uint32_t export_count{co_await unsign_leb128()};
+  for (std::uint32_t i = 0; i < export_count; ++i) {
+    std::uint32_t str_len{co_await unsign_leb128()};
+    if (u8_check(buffer.data() + position, str_len))
+      co_return std::unexpected{INVALID_ERR::UTF8_STRING};
+    std::string export_name{};
+    for (int j = 0; j < str_len; ++j)
+      export_name.push_back(buffer[position++]);
+    std::uint32_t kind{co_await read_u32(1)};
+    std::uint32_t item_idx{co_await unsign_leb128()};
+  }
   co_return {};
 }
 
 expected_task<void, READER_ERR> Reader::read_sections() {
   while (position < buffer.size()) {
     std::uint32_t section_code{co_await read_u32(1)};
-    std::uint32_t section_size{co_await read_u32_leb128()};
+    std::uint32_t section_size{co_await unsign_leb128()};
     std::size_t section_end{position + section_size};
     switch (section_code) {
     case 1:
-      co_await read_type_section(section_size).ok();
+      co_await read_type_section().ok();
       break;
     case 3:
-      co_await read_function_section(section_size).ok();
+      co_await read_function_section().ok();
+      break;
+    case 7:
+      co_await read_export_section().ok();
       break;
     default:
       co_return std::unexpected{INVALID_ERR::SECTN_CODE};
