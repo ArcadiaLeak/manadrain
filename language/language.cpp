@@ -521,9 +521,9 @@ std::size_t TokAtom::atom_find(std::string needle) {
   auto it_umap = atom_umap.find(needle);
   if (it_umap != atom_umap.end())
     return it_umap->second;
-  auto it_vec = atom_vec.insert(atom_vec.end(), std::move(needle));
-  std::size_t atom_idx = std::distance(atom_vec.begin(), it_vec) << 16;
-  atom_umap[*it_vec] = atom_idx;
+  auto it_deq = atom_deq.insert(atom_deq.end(), std::move(needle));
+  std::size_t atom_idx = std::distance(atom_deq.begin(), it_deq) << 16;
+  atom_umap[*it_deq] = atom_idx;
   return atom_idx;
 }
 

@@ -98,8 +98,6 @@ decode_extern_kind(std::uint32_t extern_kind) {
     return EXTERN_KIND::TABLE;
   case 2:
     return EXTERN_KIND::MEMORY;
-  case 3:
-    return EXTERN_KIND::GLOBAL;
   }
   return std::unexpected{INVALID_ERR::EXTERN_KIND};
 }
@@ -123,7 +121,7 @@ expected_task<void, READER_ERR> Reader::read_type_section() {
       std::int32_t result_type{co_await signed_leb128()};
       func_type.result_types[j] = co_await decode_primary_type(result_type);
     }
-    func_types.push_back(std::move(func_type));
+    module_types.push_back(std::move(func_type));
   }
   co_return {};
 }
@@ -146,11 +144,21 @@ expected_task<void, READER_ERR> Reader::read_export_section() {
     std::string export_name{};
     for (int j = 0; j < str_len; ++j)
       export_name.push_back(buffer[position++]);
+    if (export_umap.contains(export_name))
+      co_return std::unexpected{CORRUPT_ERR::DUP_EXPORT};
     std::uint32_t kind{co_await read_u32(1)};
-    std::uint32_t item_idx{co_await unsign_leb128()};
+    std::uint32_t type_idx{co_await unsign_leb128()};
+    auto export_it = export_deq.insert(
+        export_deq.end(),
+        EXPORT_DESC{std::move(export_name), co_await decode_extern_kind(kind),
+                    type_idx});
+    std::size_t export_idx = std::distance(export_deq.begin(), export_it);
+    export_umap[export_it->name] = export_idx;
   }
   co_return {};
 }
+
+expected_task<void, READER_ERR> Reader::read_code_section() { co_return {}; }
 
 expected_task<void, READER_ERR> Reader::read_sections() {
   while (position < buffer.size()) {
@@ -160,19 +168,27 @@ expected_task<void, READER_ERR> Reader::read_sections() {
     switch (section_code) {
     case 1:
       co_await read_type_section().ok();
-      break;
+      if (position == section_end)
+        break;
+      co_return std::unexpected{CORRUPT_ERR::SECTION_TOO_SHORT};
     case 3:
       co_await read_function_section().ok();
-      break;
+      if (position == section_end)
+        break;
+      co_return std::unexpected{CORRUPT_ERR::SECTION_TOO_SHORT};
     case 7:
       co_await read_export_section().ok();
-      break;
+      if (position == section_end)
+        break;
+      co_return std::unexpected{CORRUPT_ERR::SECTION_TOO_SHORT};
+    case 10:
+      co_await read_code_section().ok();
+      if (position == section_end)
+        break;
+      co_return std::unexpected{CORRUPT_ERR::SECTION_TOO_SHORT};
     default:
-      co_return std::unexpected{INVALID_ERR::SECTN_CODE};
+      co_return std::unexpected{CORRUPT_ERR::SECTION_CODE};
     }
-    if (position == section_end)
-      continue;
-    co_return std::unexpected{CORRUPT_ERR::SHORT_SECTN};
   }
 }
 

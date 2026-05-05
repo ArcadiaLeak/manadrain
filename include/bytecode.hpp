@@ -1,5 +1,7 @@
 #include <cstdint>
+#include <deque>
 #include <optional>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -12,20 +14,21 @@ inline constexpr std::uint32_t WASM_BINARY_VERSION{1};
 inline constexpr std::uint32_t WASM_BINARY_LAYER_MODULE{0};
 
 enum class PRIM_TYPE { I32T, I64T, F32T, F64T };
-enum class EXTERN_KIND { FUNC, TABLE, MEMORY, GLOBAL };
+enum class EXTERN_KIND { FUNC, TABLE, MEMORY };
 
 enum class CORRUPT_ERR {
   UNSIGN_FIXED,
   SIGNED_LEB128,
   UNSIGN_LEB128,
-  SHORT_SECTN,
-  MULTIVAL_RET
+  SECTION_CODE,
+  SECTION_TOO_SHORT,
+  MULTIVAL_RET,
+  DUP_EXPORT
 };
 enum class INVALID_ERR {
   WASM_MAGIC,
   WASM_LAYER,
   WASM_VERSN,
-  SECTN_CODE,
   PARAM_TYPE,
   UTF8_STRING,
   EXTERN_KIND
@@ -38,19 +41,27 @@ struct FUNC_TYPE {
   std::vector<PRIM_TYPE> result_types;
 };
 
+struct EXPORT_DESC {
+  std::string name;
+  EXTERN_KIND kind;
+  std::uint32_t type_idx;
+};
+
 class Reader {
 public:
   void populate(const std::vector<std::uint8_t> &buffer_ref);
   void populate(std::vector<std::uint8_t> &&buffer_ref);
-
-  std::vector<FUNC_TYPE> func_types;
-  std::vector<std::uint32_t> func_headers;
-
   expected_task<void, READER_ERR> read_module();
 
 private:
   std::size_t position;
   std::vector<std::uint8_t> buffer;
+
+  std::vector<FUNC_TYPE> module_types;
+  std::vector<std::uint32_t> func_headers;
+
+  std::unordered_map<std::string_view, std::size_t> export_umap;
+  std::deque<EXPORT_DESC> export_deq;
 
   std::expected<std::uint32_t, READER_ERR> read_u32(int cnt);
   std::expected<std::uint32_t, READER_ERR> unsign_leb128();
@@ -61,6 +72,7 @@ private:
   expected_task<void, READER_ERR> read_type_form();
   expected_task<void, READER_ERR> read_function_section();
   expected_task<void, READER_ERR> read_export_section();
+  expected_task<void, READER_ERR> read_code_section();
 };
 } // namespace Bytecode
 } // namespace Manadrain

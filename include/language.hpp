@@ -218,7 +218,7 @@ private:
 class TokAtom : public TokNumber {
 private:
   std::unordered_map<std::string_view, std::size_t> atom_umap;
-  std::deque<std::string> atom_vec{};
+  std::deque<std::string> atom_deq{};
 
   std::size_t atom_find(std::string needle);
 
