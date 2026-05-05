@@ -24,30 +24,14 @@ std::expected<std::uint32_t, READER_ERR> Reader::read_u32(int cnt) {
 
 std::expected<std::uint32_t, READER_ERR> Reader::read_u32_leb128() {
   std::uint32_t payload{}, result{};
-  if (position >= buffer.size())
-    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
-  payload = buffer[position] & 0b1111111u;
-  result |= payload;
-  if ((buffer[position++] & 0x80u) == 0)
-    return result;
-  if (position >= buffer.size())
-    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
-  payload = buffer[position] & 0b1111111u;
-  result |= payload << 7;
-  if ((buffer[position++] & 0x80u) == 0)
-    return result;
-  if (position >= buffer.size())
-    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
-  payload = buffer[position] & 0b1111111u;
-  result |= payload << 14;
-  if ((buffer[position++] & 0x80u) == 0)
-    return result;
-  if (position >= buffer.size())
-    return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
-  payload = buffer[position] & 0b1111111u;
-  result |= payload << 21;
-  if ((buffer[position++] & 0x80u) == 0)
-    return result;
+  for (int i = 0; i < 4; ++i) {
+    if (position >= buffer.size())
+      return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+    payload = buffer[position] & 0b1111111u;
+    result |= payload << i * 7;
+    if ((buffer[position++] & 0x80u) == 0)
+      return result;
+  }
   if (position >= buffer.size())
     return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
   payload = buffer[position] & 0b1111111u;
@@ -57,6 +41,28 @@ std::expected<std::uint32_t, READER_ERR> Reader::read_u32_leb128() {
   if ((buffer[position++] & 0x80u) == 0)
     return result;
   return std::unexpected{CORRUPT_ERR::UNSIGN_LEB128};
+}
+
+std::expected<std::int32_t, READER_ERR> Reader::read_s32_leb128() {
+  std::uint32_t result{};
+  for (int i = 0; i < 4; ++i) {
+    if (position >= buffer.size())
+      return std::unexpected{CORRUPT_ERR::SIGNED_LEB128};
+    result |= (buffer[position] & 0b1111111u) << i * 7;
+    std::uint32_t extension{~0u << (i + 1) * 7};
+    extension = buffer[position] & 0x40u ? extension : 0;
+    if ((buffer[position++] & 0x80u) == 0)
+      return std::bit_cast<std::int32_t>(result | extension);
+  }
+  if (position >= buffer.size())
+    return std::unexpected{CORRUPT_ERR::SIGNED_LEB128};
+  std::uint8_t must_be = buffer[position] & 0x40u ? 0b111000u : 0;
+  if ((buffer[position] & 0b111000u) != must_be)
+    return std::unexpected{CORRUPT_ERR::SIGNED_LEB128};
+  result |= (buffer[position] & 0b1111111u) << 28;
+  if ((buffer[position++] & 0x80u) == 0)
+    return std::bit_cast<std::int32_t>(result);
+  return std::unexpected{CORRUPT_ERR::SIGNED_LEB128};
 }
 
 expected_task<void, READER_ERR> Reader::read_type_form() {
@@ -71,8 +77,11 @@ expected_task<void, READER_ERR> Reader::read_type_section(std::uint32_t size) {
   for (std::uint32_t i = 0; i < num_signatures; ++i) {
     co_await read_type_form().ok();
     std::uint32_t num_params{co_await read_u32_leb128()};
-    std::vector<std::monostate> param_types{num_params};
-    for (std::uint32_t j = 0; i < num_params; ++j) {
+    std::vector<std::int32_t> param_types{};
+    param_types.resize(num_params);
+    for (std::uint32_t j = 0; j < num_params; ++j) {
+      std::int32_t param_type{co_await read_s32_leb128()};
+      param_types[j] = param_type;
     }
   }
   co_return {};

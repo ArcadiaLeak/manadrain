@@ -11,7 +11,7 @@ inline constexpr std::uint32_t WASM_BINARY_MAGIC{0x6d736100};
 inline constexpr std::uint32_t WASM_BINARY_VERSION{1};
 inline constexpr std::uint32_t WASM_BINARY_LAYER_MODULE{0};
 
-enum class CORRUPT_ERR { UNSIGN_FIXED, UNSIGN_LEB128 };
+enum class CORRUPT_ERR { UNSIGN_FIXED, SIGNED_LEB128, UNSIGN_LEB128 };
 enum class INVALID_ERR { WASM_MAGIC, WASM_LAYER, WASM_VERSN, SECTION_CODE };
 enum class UNEXPECT_ERR { TYPE_FORM };
 using READER_ERR = std::variant<CORRUPT_ERR, INVALID_ERR, UNEXPECT_ERR>;
@@ -28,6 +28,7 @@ private:
 
   std::expected<std::uint32_t, READER_ERR> read_u32(int cnt);
   std::expected<std::uint32_t, READER_ERR> read_u32_leb128();
+  std::expected<std::int32_t, READER_ERR> read_s32_leb128();
 
   expected_task<void, READER_ERR> read_sections();
   expected_task<void, READER_ERR> read_type_section(std::uint32_t size);
