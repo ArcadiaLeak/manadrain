@@ -31,17 +31,28 @@ struct LOCAL_STOR {
 };
 using COMMAND = std::variant<I32_ADD, I64_ADD, F32_ADD, LOCAL_LOAD, LOCAL_STOR>;
 
-struct Execution {
+class RegisterFile {
+public:
+  std::uint64_t &at(std::uint8_t idx) { return regfile[idx & 0b11111]; }
+
+private:
+  std::array<std::uint64_t, 32> regfile;
+};
+
+class Execution {
+public:
   std::vector<COMMAND> script;
   std::vector<std::uint64_t> local_heap;
-  std::array<std::uint64_t, 32> register_file;
 
+  void operator()();
   void operator()(I32_ADD cmd);
   void operator()(I64_ADD cmd);
   void operator()(F32_ADD cmd);
   void operator()(LOCAL_LOAD cmd);
   void operator()(LOCAL_STOR cmd);
-  void operator()();
+
+private:
+  RegisterFile regfile;
 };
 } // namespace Machine
 } // namespace Manadrain
