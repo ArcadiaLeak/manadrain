@@ -158,7 +158,18 @@ expected_task<void, READER_ERR> Reader::read_export_section() {
   co_return {};
 }
 
-expected_task<void, READER_ERR> Reader::read_code_section() { co_return {}; }
+expected_task<void, READER_ERR> Reader::read_code_section() {
+  std::uint32_t num_function_bodies{co_await unsign_leb128()};
+  for (std::uint32_t i = 0; i < num_function_bodies; ++i) {
+    std::uint32_t body_size{co_await unsign_leb128()};
+    std::uint32_t num_local_decls{co_await unsign_leb128()};
+    for (std::uint32_t j = 0; i < num_local_decls; ++i) {
+      std::uint32_t num_local_types{co_await unsign_leb128()};
+      throw std::runtime_error{"unimplemented!"};
+    }
+  }
+  co_return {};
+}
 
 expected_task<void, READER_ERR> Reader::read_sections() {
   while (position < buffer.size()) {

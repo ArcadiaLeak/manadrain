@@ -21,4 +21,13 @@
     "stopAtBeginningOfMainSubprogram": true,
     "cwd": "/home/evgenii/manadrain",
   },
+  {
+    "adapter": "GDB",
+    "label": "machine (GDB)",
+    "request": "launch",
+    "program": "./build/machine",
+    "args": [],
+    "stopAtBeginningOfMainSubprogram": true,
+    "cwd": "/home/evgenii/manadrain",
+  },
 ]
