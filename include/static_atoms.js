@@ -30,7 +30,6 @@ Deno.writeTextFile(
 #include <array>
 
 namespace Manadrain {
-namespace Language {
 ${reserved_words
   .map(
     (atom_s, atom_idx) =>
@@ -49,7 +48,6 @@ static bool is_reserved(std::size_t atom_idx) {
     default:
       return 0;
   }
-}
 }
 }
 `,

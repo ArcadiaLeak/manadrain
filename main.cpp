@@ -25,7 +25,7 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Language::Parser parser{};
+  Manadrain::Parser parser{};
   parser.populate(std::ranges::istream_view<std::uint8_t>{file} |
                   std::ranges::to<std::vector<std::uint8_t>>());
   if (not parser.parse().ok()) {

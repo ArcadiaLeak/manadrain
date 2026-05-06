@@ -5,7 +5,6 @@
 #include <vector>
 
 namespace Manadrain {
-namespace Machine {
 struct I32_ADD {
   std::uint8_t dest;
   std::uint8_t lhs;
@@ -31,7 +30,7 @@ struct LOCAL_STOR {
 };
 using COMMAND = std::variant<I32_ADD, I64_ADD, F32_ADD, LOCAL_LOAD, LOCAL_STOR>;
 
-struct Execution {
+struct Machine {
   std::vector<COMMAND> script;
   std::vector<std::uint64_t> local_heap;
   std::array<std::uint64_t, 32> register_file;
@@ -43,5 +42,4 @@ struct Execution {
   void operator()(LOCAL_STOR cmd);
   void operator()();
 };
-} // namespace Machine
 } // namespace Manadrain

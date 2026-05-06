@@ -16,7 +16,6 @@
 #include "expected_task.hpp"
 
 namespace Manadrain {
-namespace Language {
 enum class INVALID_ERR {
   NUMBER_LITERAL,
   BIGINT_LITERAL,
@@ -281,5 +280,4 @@ private:
   expected_task<void, PARSE_ERRMSG> parse_punct_statement();
   std::expected<void, PARSE_ERRMSG> parse_statement();
 };
-} // namespace Language
 } // namespace Manadrain

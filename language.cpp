@@ -6,10 +6,10 @@
 #include <unistr.h>
 
 #include "language.hpp"
+#include "machine.hpp"
 #include "static_atoms.hpp"
 
 namespace Manadrain {
-namespace Language {
 static bool lineterm(char32_t ch) {
   return ch == '\r' || ch == '\n' || ch == 0x2028 || ch == 0x2029;
 }
@@ -1132,5 +1132,4 @@ expected_task<void, PARSE_ERRMSG> Parser::parse() {
     program.push_back(std::move(my_statement));
   }
 }
-} // namespace Language
 } // namespace Manadrain
