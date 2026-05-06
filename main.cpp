@@ -25,10 +25,10 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Parser parser{};
-  parser.populate(std::ranges::istream_view<std::uint8_t>{file} |
+  Manadrain::Language language{};
+  language.populate(std::ranges::istream_view<std::uint8_t>{file} |
                   std::ranges::to<std::vector<std::uint8_t>>());
-  if (not parser.parse().ok()) {
+  if (not language.parse().ok()) {
     std::println(std::cout, "Error: could not parse the buffer!");
     return 1;
   }

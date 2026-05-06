@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "expected_task.hpp"
+#include "machine.hpp"
 
 namespace Manadrain {
 enum class INVALID_ERR {
@@ -30,7 +31,8 @@ enum class REQUIRED_ERR {
   IDENTIFIER,
   FROM_CLAUSE,
   STRING_LITERAL,
-  FORMAL_PARAMETER
+  FORMAL_PARAMETER,
+  RETURN_TYPE
 };
 struct KEYWORD_ERR {
   std::size_t atom_sh;
@@ -156,6 +158,7 @@ struct STMT_IF {
 };
 struct DECL_FUNCTION {
   EXPRESSION identifier;
+  TOK_IDENTI return_type;
   std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
 };
@@ -279,5 +282,10 @@ private:
   expected_task<void, PARSE_ERRMSG> parse_ident_statement();
   expected_task<void, PARSE_ERRMSG> parse_punct_statement();
   std::expected<void, PARSE_ERRMSG> parse_statement();
+};
+
+class Language : public Parser {
+public:
+  Machine machine;
 };
 } // namespace Manadrain

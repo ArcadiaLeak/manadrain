@@ -1,6 +1,8 @@
 #include <array>
 #include <cstdint>
 #include <stdfloat>
+#include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -31,7 +33,8 @@ struct LOCAL_STOR {
 using COMMAND = std::variant<I32_ADD, I64_ADD, F32_ADD, LOCAL_LOAD, LOCAL_STOR>;
 
 struct Machine {
-  std::vector<COMMAND> script;
+  std::vector<std::vector<COMMAND>> function_vec;
+  std::unordered_map<std::string, std::size_t> funcname_umap;
   std::vector<std::uint64_t> local_heap;
   std::array<std::uint64_t, 32> register_file;
 
@@ -40,6 +43,6 @@ struct Machine {
   void operator()(F32_ADD cmd);
   void operator()(LOCAL_LOAD cmd);
   void operator()(LOCAL_STOR cmd);
-  void operator()();
+  void operator()(std::size_t func_idx);
 };
 } // namespace Manadrain

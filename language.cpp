@@ -6,7 +6,6 @@
 #include <unistr.h>
 
 #include "language.hpp"
-#include "machine.hpp"
 #include "static_atoms.hpp"
 
 namespace Manadrain {
@@ -1000,6 +999,12 @@ Parser::parse_function_decl(EXPRESSION identifier) {
     co_await expect_punct(',');
     co_await tokenize();
   }
+  co_await tokenize();
+  co_await expect_punct(':');
+  co_await tokenize();
+  if (my_token.index() != TOKV_IDENTI)
+    co_return std::unexpected{REQUIRED_ERR::RETURN_TYPE};
+  declaration.return_type = std::get<TOKV_IDENTI>(my_token);
   co_await tokenize();
   co_await expect_punct('{');
   co_await tokenize();

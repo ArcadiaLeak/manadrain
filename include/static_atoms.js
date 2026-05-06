@@ -22,6 +22,12 @@ const reserved_words = [
   "break",
   "continue",
   "switch",
+  "int",
+  "long",
+  "uint",
+  "ulong",
+  "float",
+  "double",
 ];
 
 Deno.writeTextFile(

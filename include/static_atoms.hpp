@@ -24,12 +24,19 @@ inline constexpr std::size_t S_ATOM_do{19};
 inline constexpr std::size_t S_ATOM_break{20};
 inline constexpr std::size_t S_ATOM_continue{21};
 inline constexpr std::size_t S_ATOM_switch{22};
+inline constexpr std::size_t S_ATOM_int{23};
+inline constexpr std::size_t S_ATOM_long{24};
+inline constexpr std::size_t S_ATOM_uint{25};
+inline constexpr std::size_t S_ATOM_ulong{26};
+inline constexpr std::size_t S_ATOM_float{27};
+inline constexpr std::size_t S_ATOM_double{28};
 
-static const std::array<std::string_view, 23> S_ATOM_ARR{
+static const std::array<std::string_view, 29> S_ATOM_ARR{
     {"const",  "let",    "var",   "class",    "function", "return",
      "import", "export", "from",  "as",       "default",  "undefined",
      "null",   "true",   "false", "if",       "else",     "while",
-     "for",    "do",     "break", "continue", "switch"}};
+     "for",    "do",     "break", "continue", "switch",   "int",
+     "long",   "uint",   "ulong", "float",    "double"}};
 
 static bool is_reserved(std::size_t atom_idx) {
   switch (atom_idx) {
@@ -56,6 +63,12 @@ static bool is_reserved(std::size_t atom_idx) {
   case S_ATOM_break:
   case S_ATOM_continue:
   case S_ATOM_switch:
+  case S_ATOM_int:
+  case S_ATOM_long:
+  case S_ATOM_uint:
+  case S_ATOM_ulong:
+  case S_ATOM_float:
+  case S_ATOM_double:
     return 1;
   default:
     return 0;

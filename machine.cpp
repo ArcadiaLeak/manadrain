@@ -34,8 +34,8 @@ void Machine::operator()(LOCAL_STOR cmd) {
   local_heap[cmd.offset] = register_file[cmd.reg];
 }
 
-void Machine::operator()() {
-  for (COMMAND cmd : script) {
+void Machine::operator()(std::size_t func_idx) {
+  for (COMMAND cmd : function_vec[func_idx]) {
     cmd.visit(*this);
   }
 }
