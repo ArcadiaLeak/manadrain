@@ -27,11 +27,16 @@ int main(int argc, char *argv[]) {
 
   Manadrain::Language language{};
   language.populate(std::ranges::istream_view<std::uint8_t>{file} |
-                  std::ranges::to<std::vector<std::uint8_t>>());
+                    std::ranges::to<std::vector<std::uint8_t>>());
   if (not language.parse().ok()) {
     std::println(std::cout, "Error: could not parse the buffer!");
     return 1;
   }
+  if (not language.compile().ok()) {
+    std::println(std::cout, "Error: could not compile the AST!");
+    return 1;
+  }
+  language.machine(0);
 
   return 0;
 }

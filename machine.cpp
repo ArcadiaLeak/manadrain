@@ -31,6 +31,10 @@ void Machine::operator()(U64_LOC_STOR cmd) {
   local_heap[cmd.offset >> 3].ulong = register_file[cmd.reg >> 3].ulong;
 }
 
+void Machine::operator()(I32_IMM_LOAD cmd) {
+  register_file[cmd.dest >> 3].sint[(cmd.dest >> 2) & 1] = cmd.val;
+}
+
 void Machine::operator()(std::size_t func_idx) {
   for (COMMAND cmd : function_vec[func_idx]) {
     cmd.visit(*this);

@@ -40,8 +40,8 @@ struct KEYWORD_ERR {
 struct PUNCT_ERR {
   char32_t must_be;
 };
-using PARSE_ERRMSG = std::variant<INVALID_ERR, UNEXPECT_ERR, REQUIRED_ERR,
-                                  PUNCT_ERR, KEYWORD_ERR>;
+using PARSE_ERR = std::variant<INVALID_ERR, UNEXPECT_ERR, REQUIRED_ERR,
+                               PUNCT_ERR, KEYWORD_ERR>;
 
 struct TOK_STRING {
   char32_t separator;
@@ -82,6 +82,20 @@ enum class TOK_OPERATOR {
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
                            double, TOK_OPERATOR, TOK_BIGINT>;
 
+enum EXPRV_INDEX {
+  EXPRV_NIL,
+  EXPRV_STRING,
+  EXPRV_IDENTI,
+  EXPRV_NUMBER,
+  EXPRV_CALL,
+  EXPRV_MEMBER,
+  EXPRV_BINARY,
+  EXPRV_OBJECT,
+  EXPRV_ACCESS,
+  EXPRV_ASSIGN,
+  EXPRV_LOGICAL,
+  EXPRV_FUNCDEC
+};
 struct EXPR_CALL;
 struct EXPR_MEMBER;
 struct EXPR_BINARY;
@@ -132,6 +146,7 @@ struct EXPR_LOGICAL {
   TOKEN op;
 };
 
+enum class COMPILE_ERR { FUNCTION_IDENTIFIER, FUNCNAME_RESERVED };
 struct DECL_VARIABLE {
   std::size_t kind;
   TOK_IDENTI identifier;
@@ -161,6 +176,7 @@ struct DECL_FUNCTION {
   TOK_IDENTI return_type;
   std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
+  std::expected<std::size_t, COMPILE_ERR> get_iatom();
 };
 
 class Scanner {
@@ -191,7 +207,7 @@ private:
 enum class TOK_0PREFIX { ZERO_X, ZERO_B, ZERO_O, ZERO };
 class TokNumber : public Scanner {
 protected:
-  std::expected<TOKEN, PARSE_ERRMSG> tokenize(char32_t leading);
+  std::expected<TOKEN, PARSE_ERR> tokenize(char32_t leading);
 
 private:
   std::vector<mpz_class> bigint_vec;
@@ -219,28 +235,28 @@ private:
 
 class TokAtom : public TokNumber {
 private:
-  std::unordered_map<std::string_view, std::size_t> atom_umap;
-  std::deque<std::string> atom_deq{};
-
   std::size_t atom_find(std::string needle);
 
   std::optional<char32_t> decode_string_esc8();
   std::optional<char32_t> decode_string_xseq();
   std::optional<char32_t> decode_string_uni();
 
-  std::generator<std::expected<char32_t, PARSE_ERRMSG>>
+  std::generator<std::expected<char32_t, PARSE_ERR>>
   traverse_string(char32_t separator);
   std::generator<std::optional<char32_t>> traverse_identif(bool &has_escape);
 
 protected:
-  std::expected<TOKEN, PARSE_ERRMSG> tokenize_string(char32_t separator);
-  std::expected<TOKEN, PARSE_ERRMSG> tokenize_identif(char32_t leading);
+  std::unordered_map<std::string_view, std::size_t> atom_umap;
+  std::deque<std::string> atom_deq{};
+
+  std::expected<TOKEN, PARSE_ERR> tokenize_string(char32_t separator);
+  std::expected<TOKEN, PARSE_ERR> tokenize_identif(char32_t leading);
   std::optional<char32_t> decode_identif_uni();
 };
 
 class Tokenizer : public TokAtom {
 protected:
-  std::expected<TOKEN, PARSE_ERRMSG> tokenize();
+  std::expected<TOKEN, PARSE_ERR> tokenize();
   bool newlineSeen() { return newline_seen; }
 
 private:
@@ -250,42 +266,43 @@ private:
 class Parser : public Tokenizer {
 public:
   std::vector<STATEMENT> program;
-  expected_task<void, PARSE_ERRMSG> parse();
+  expected_task<void, PARSE_ERR> parse();
 
 private:
   TOKEN my_token;
   EXPRESSION my_expression;
   STATEMENT my_statement;
 
-  std::expected<void, PARSE_ERRMSG> tokenize();
-  expected_task<void, PARSE_ERRMSG> expect_statement_end();
-  std::expected<void, PARSE_ERRMSG> expect_punct(char32_t punct);
+  std::expected<void, PARSE_ERR> tokenize();
+  expected_task<void, PARSE_ERR> expect_statement_end();
+  std::expected<void, PARSE_ERR> expect_punct(char32_t punct);
 
-  expected_task<void, PARSE_ERRMSG> parse_assign_expr();
-  expected_task<void, PARSE_ERRMSG> parse_equality_expr();
-  expected_task<void, PARSE_ERRMSG> parse_relation_expr();
-  expected_task<void, PARSE_ERRMSG> parse_additive_expr();
-  expected_task<void, PARSE_ERRMSG> parse_postfix_expr();
-  expected_task<void, PARSE_ERRMSG> parse_primary_expr();
-  expected_task<void, PARSE_ERRMSG> parse_call_expr();
-  expected_task<void, PARSE_ERRMSG> parse_member_expr();
-  expected_task<void, PARSE_ERRMSG> parse_access_expr();
-  expected_task<void, PARSE_ERRMSG> parse_object_literal();
-  expected_task<void, PARSE_ERRMSG> parse_logical_conjunct();
-  expected_task<void, PARSE_ERRMSG> parse_logical_disjunct();
-  expected_task<void, PARSE_ERRMSG> parse_paren_expr();
+  expected_task<void, PARSE_ERR> parse_assign_expr();
+  expected_task<void, PARSE_ERR> parse_equality_expr();
+  expected_task<void, PARSE_ERR> parse_relation_expr();
+  expected_task<void, PARSE_ERR> parse_additive_expr();
+  expected_task<void, PARSE_ERR> parse_postfix_expr();
+  expected_task<void, PARSE_ERR> parse_primary_expr();
+  expected_task<void, PARSE_ERR> parse_call_expr();
+  expected_task<void, PARSE_ERR> parse_member_expr();
+  expected_task<void, PARSE_ERR> parse_access_expr();
+  expected_task<void, PARSE_ERR> parse_object_literal();
+  expected_task<void, PARSE_ERR> parse_logical_conjunct();
+  expected_task<void, PARSE_ERR> parse_logical_disjunct();
+  expected_task<void, PARSE_ERR> parse_paren_expr();
 
-  expected_task<void, PARSE_ERRMSG> parse_import();
-  expected_task<void, PARSE_ERRMSG> parse_variable_decl();
-  expected_task<void, PARSE_ERRMSG> parse_function_decl(EXPRESSION identifier);
-  expected_task<void, PARSE_ERRMSG> parse_stmt_expression();
-  expected_task<void, PARSE_ERRMSG> parse_ident_statement();
-  expected_task<void, PARSE_ERRMSG> parse_punct_statement();
-  std::expected<void, PARSE_ERRMSG> parse_statement();
+  expected_task<void, PARSE_ERR> parse_import();
+  expected_task<void, PARSE_ERR> parse_variable_decl();
+  expected_task<void, PARSE_ERR> parse_function_decl(EXPRESSION identifier);
+  expected_task<void, PARSE_ERR> parse_stmt_expression();
+  expected_task<void, PARSE_ERR> parse_ident_statement();
+  expected_task<void, PARSE_ERR> parse_punct_statement();
+  std::expected<void, PARSE_ERR> parse_statement();
 };
 
 class Language : public Parser {
 public:
   Machine machine;
+  expected_task<void, COMPILE_ERR> compile();
 };
 } // namespace Manadrain

@@ -23,6 +23,10 @@ struct F32_ADD {
   std::uint8_t lhs;
   std::uint8_t rhs;
 };
+struct I32_IMM_LOAD {
+  std::uint8_t dest;
+  std::int32_t val;
+};
 struct U64_LOC_LOAD {
   std::size_t offset;
   std::uint8_t reg;
@@ -31,8 +35,8 @@ struct U64_LOC_STOR {
   std::size_t offset;
   std::uint8_t reg;
 };
-using COMMAND =
-    std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD, U64_LOC_STOR>;
+using COMMAND = std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD,
+                             U64_LOC_STOR, I32_IMM_LOAD>;
 
 union UNIFORM {
   std::uint64_t ulong;
@@ -70,6 +74,7 @@ struct Machine {
   void operator()(F32_ADD cmd);
   void operator()(U64_LOC_LOAD cmd);
   void operator()(U64_LOC_STOR cmd);
+  void operator()(I32_IMM_LOAD cmd);
   void operator()(std::size_t func_idx);
 };
 } // namespace Manadrain

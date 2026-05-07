@@ -154,9 +154,9 @@ std::optional<char32_t> TokAtom::decode_string_uni() {
   return num;
 }
 
-std::generator<std::expected<char32_t, PARSE_ERRMSG>>
+std::generator<std::expected<char32_t, PARSE_ERR>>
 TokAtom::traverse_string(char32_t separator) {
-  std::optional<PARSE_ERRMSG> err_opt{};
+  std::optional<PARSE_ERR> err_opt{};
   bool backslash_seen{};
   while (not err_opt) {
     std::optional ch_opt{next()};
@@ -281,8 +281,7 @@ TokAtom::traverse_string(char32_t separator) {
   co_yield std::unexpected{*err_opt};
 }
 
-std::expected<TOKEN, PARSE_ERRMSG>
-TokAtom::tokenize_string(char32_t separator) {
+std::expected<TOKEN, PARSE_ERR> TokAtom::tokenize_string(char32_t separator) {
   std::string needle{};
   for (std::expected schar : traverse_string(separator)) {
     if (not schar)
@@ -363,7 +362,7 @@ TokAtom::traverse_identif(bool &has_escape) {
   }
 }
 
-std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
+std::expected<TOKEN, PARSE_ERR> TokAtom::tokenize_identif(char32_t leading) {
   std::string needle{};
   needle.append_range(traverse_ucs4(leading));
   bool has_escape = 0;
@@ -375,7 +374,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokAtom::tokenize_identif(char32_t leading) {
   return TOK_IDENTI{has_escape, atom_find(std::move(needle))};
 }
 
-std::expected<TOKEN, PARSE_ERRMSG> Tokenizer::tokenize() {
+std::expected<TOKEN, PARSE_ERR> Tokenizer::tokenize() {
   newline_seen = 0;
   while (1) {
     if (reached_end())
@@ -519,7 +518,8 @@ std::size_t TokAtom::atom_find(std::string needle) {
   if (it_umap != atom_umap.end())
     return it_umap->second;
   auto it_deq = atom_deq.insert(atom_deq.end(), std::move(needle));
-  std::size_t atom_idx = std::distance(atom_deq.begin(), it_deq) << 16;
+  std::size_t atom_idx =
+      (1 << 15) | (std::distance(atom_deq.begin(), it_deq) << 16);
   atom_umap[*it_deq] = atom_idx;
   return atom_idx;
 }
@@ -594,7 +594,7 @@ std::string TokNumber::FRACTIONAL::collapse() {
   return ret;
 }
 
-std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
+std::expected<TOKEN, PARSE_ERR> TokNumber::tokenize(char32_t leading) {
   if (reached_end())
     return leading - '0';
   std::optional<TOK_0PREFIX> base_opt{};
@@ -674,7 +674,7 @@ std::expected<TOKEN, PARSE_ERRMSG> TokNumber::tokenize(char32_t leading) {
   return std::numeric_limits<double>::infinity();
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
+std::expected<void, PARSE_ERR> Parser::tokenize() {
   std::expected tokenize_ok = Tokenizer::tokenize();
   if (not tokenize_ok)
     return std::unexpected{tokenize_ok.error()};
@@ -682,7 +682,7 @@ std::expected<void, PARSE_ERRMSG> Parser::tokenize() {
   return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
+expected_task<void, PARSE_ERR> Parser::parse_variable_decl() {
   DECL_VARIABLE declaration{};
 
   std::size_t atom_sh{std::get<TOKV_IDENTI>(my_token).atom_sh};
@@ -708,7 +708,7 @@ wrap_up:
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_additive_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_additive_expr() {
   co_await parse_postfix_expr().ok();
   do {
     if (my_token == TOKEN{U'+'})
@@ -726,7 +726,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_additive_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_relation_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_relation_expr() {
   co_await parse_additive_expr().ok();
   do {
     if (my_token == TOKEN{U'>'})
@@ -744,7 +744,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_relation_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_equality_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_equality_expr() {
   co_await parse_relation_expr().ok();
   do {
     if (my_token == TOKEN{TOK_OPERATOR::DOUBLE_EQUALS})
@@ -762,7 +762,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_equality_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_object_literal() {
+expected_task<void, PARSE_ERR> Parser::parse_object_literal() {
   co_await tokenize();
   std::vector<EXPR_OBJECT::PROPERTY> prop_vec{};
   while (my_token != TOKEN{U'}'}) {
@@ -815,7 +815,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_object_literal() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_primary_expr() {
   switch (my_token.index()) {
   case TOKV_STRING:
     my_expression = std::get<TOKV_STRING>(my_token);
@@ -847,13 +847,13 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_primary_expr() {
   }
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::expect_punct(char32_t punct) {
+std::expected<void, PARSE_ERR> Parser::expect_punct(char32_t punct) {
   if (my_token == TOKEN{punct})
     return {};
   return std::unexpected{PUNCT_ERR{punct}};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_call_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_call_expr() {
   EXPRESSION callee_expr = std::move(my_expression);
   std::vector<EXPRESSION> arguments{};
   while (1) {
@@ -871,7 +871,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_call_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_member_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_member_expr() {
   co_await tokenize();
   if (my_token.index() == TOKV_IDENTI) {
     my_expression = std::make_unique<EXPR_MEMBER>(
@@ -881,7 +881,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_member_expr() {
   co_return std::unexpected{REQUIRED_ERR::FIELD_NAME};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_access_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_access_expr() {
   co_await tokenize();
   EXPRESSION object_expr = std::move(my_expression);
   co_await parse_assign_expr().ok();
@@ -891,7 +891,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_access_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_assign_expr() {
   co_await parse_logical_disjunct().ok();
   if (my_token != TOKEN{U'='})
     co_return {};
@@ -903,7 +903,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_assign_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_logical_conjunct() {
+expected_task<void, PARSE_ERR> Parser::parse_logical_conjunct() {
   co_await parse_equality_expr().ok();
   while (my_token == TOKEN{TOK_OPERATOR::LOGICAL_CONJUNCT}) {
     EXPRESSION expr_left = std::move(my_expression);
@@ -916,7 +916,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_logical_conjunct() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_logical_disjunct() {
+expected_task<void, PARSE_ERR> Parser::parse_logical_disjunct() {
   co_await parse_logical_conjunct().ok();
   while (my_token == TOKEN{TOK_OPERATOR::LOGICAL_DISJUNCT}) {
     EXPRESSION expr_left = std::move(my_expression);
@@ -929,7 +929,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_logical_disjunct() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_postfix_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_postfix_expr() {
   co_await parse_primary_expr().ok();
   while (1) {
     bool go_on{};
@@ -956,7 +956,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_postfix_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_paren_expr() {
+expected_task<void, PARSE_ERR> Parser::parse_paren_expr() {
   co_await expect_punct('(');
   co_await tokenize();
   co_await parse_assign_expr().ok();
@@ -965,7 +965,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_paren_expr() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::expect_statement_end() {
+expected_task<void, PARSE_ERR> Parser::expect_statement_end() {
   if (my_token == TOKEN{U';'}) {
     co_await tokenize();
     co_return {};
@@ -977,7 +977,7 @@ expected_task<void, PARSE_ERRMSG> Parser::expect_statement_end() {
   co_return std::unexpected{PUNCT_ERR{';'}};
 }
 
-expected_task<void, PARSE_ERRMSG>
+expected_task<void, PARSE_ERR>
 Parser::parse_function_decl(EXPRESSION identifier) {
   DECL_FUNCTION declaration{std::move(identifier)};
   co_await expect_punct('(');
@@ -1012,7 +1012,7 @@ Parser::parse_function_decl(EXPRESSION identifier) {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_import() {
+expected_task<void, PARSE_ERR> Parser::parse_import() {
   DECL_IMPORT declaration{};
   co_await expect_punct('{');
   co_await tokenize();
@@ -1039,14 +1039,14 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_import() {
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_stmt_expression() {
+expected_task<void, PARSE_ERR> Parser::parse_stmt_expression() {
   co_await parse_assign_expr().ok();
   my_statement = std::move(my_expression);
   co_await expect_statement_end().ok();
   co_return {};
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_punct_statement() {
+expected_task<void, PARSE_ERR> Parser::parse_punct_statement() {
   switch (std::get<TOKV_PUNCT>(my_token)) {
   case '{': {
     STMT_BLOCK statement{};
@@ -1065,7 +1065,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_punct_statement() {
   }
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse_ident_statement() {
+expected_task<void, PARSE_ERR> Parser::parse_ident_statement() {
   switch (std::get<TOKV_IDENTI>(my_token).atom_sh) {
   case S_ATOM_const:
   case S_ATOM_let:
@@ -1112,7 +1112,7 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_ident_statement() {
   }
 }
 
-std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
+std::expected<void, PARSE_ERR> Parser::parse_statement() {
   switch (my_token.index()) {
   case TOKV_IDENTI:
     return parse_ident_statement().ok();
@@ -1123,7 +1123,7 @@ std::expected<void, PARSE_ERRMSG> Parser::parse_statement() {
   }
 }
 
-expected_task<void, PARSE_ERRMSG> Parser::parse() {
+expected_task<void, PARSE_ERR> Parser::parse() {
   skip_shebang();
   co_await tokenize();
   while (1) {
@@ -1132,5 +1132,40 @@ expected_task<void, PARSE_ERRMSG> Parser::parse() {
     co_await parse_statement();
     program.push_back(std::move(my_statement));
   }
+}
+
+std::expected<std::size_t, COMPILE_ERR> DECL_FUNCTION::get_iatom() {
+  switch (identifier.index()) {
+  case EXPRV_STRING:
+    return std::get<EXPRV_STRING>(identifier).atom_sh;
+  case EXPRV_IDENTI:
+    return std::get<EXPRV_IDENTI>(identifier).atom_sh;
+  default:
+    return std::unexpected{COMPILE_ERR::FUNCTION_IDENTIFIER};
+  }
+}
+
+expected_task<void, COMPILE_ERR> Language::compile() {
+  for (STATEMENT &statement : program) {
+    DECL_FUNCTION *decl_ptr = std::get_if<DECL_FUNCTION>(&statement);
+    if (not decl_ptr)
+      continue;
+    std::size_t atom_sh{co_await decl_ptr->get_iatom()};
+    if (is_reserved(atom_sh))
+      co_return std::unexpected{COMPILE_ERR::FUNCNAME_RESERVED};
+    std::string_view func_name{atom_deq[atom_sh >> 16]};
+    std::vector<COMMAND> command_vec{};
+    for (STATEMENT &func_stmt : decl_ptr->subprogram) {
+      STMT_RETURN *ret_ptr = std::get_if<STMT_RETURN>(&func_stmt);
+      double ret_num = std::get<double>(ret_ptr->argument);
+      command_vec.push_back(
+          I32_IMM_LOAD{0, static_cast<std::int32_t>(ret_num)});
+    }
+    auto function_it = machine.function_vec.insert(machine.function_vec.end(),
+                                                   std::move(command_vec));
+    machine.funcname_umap.insert(std::make_pair(
+        func_name, std::distance(machine.function_vec.begin(), function_it)));
+  }
+  co_return {};
 }
 } // namespace Manadrain
