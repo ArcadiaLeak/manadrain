@@ -1121,13 +1121,18 @@ std::expected<std::size_t, COMPILE_ERR> get_iatom(DECL_FUNCTION &decl) {
   }
 }
 
+expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER &expr) {
+  co_return expr.visit(*this).ok();
+}
+
+expected_task<void, COMPILE_ERR> Language::operator()(std::uint64_t num) {
+  scope_stack.top().command_vec.push_back(U64_IMM_LOAD{regstack_height, num});
+  co_return {};
+}
+
 expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN &ret_stmt) {
-  if (scope_stack.size() == 0)
-    co_return std::unexpected{COMPILE_ERR::STMT_INAPPROP};
-  std::uint64_t ret_num =
-      std::get<std::uint64_t>(std::get<EXPR_NUMBER>(ret_stmt.argument));
-  scope_stack.top().command_vec.push_back(
-      I32_IMM_LOAD{0, static_cast<std::int32_t>(ret_num)});
+  co_await ret_stmt.argument.visit(*this).ok();
+  scope_stack.top().command_vec.push_back(U64_TO_I32{regstack_height});
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(DECL_FUNCTION &decl) {
