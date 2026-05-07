@@ -971,7 +971,7 @@ Parser::parse_function_decl(EXPRESSION identifier) {
     co_return std::unexpected{REQUIRED_ERR::RETURN_TYPE};
   switch (std::get<TOKV_IDENTI>(my_token).atom_sh) {
   case S_ATOM_int:
-    declaration.return_type = MACHINE_DATATYPE::I32T;
+    declaration.return_type = DATATYPE_I32{};
     break;
   default:
     co_return std::unexpected{INVALID_ERR::RETURN_TYPE};
@@ -1120,41 +1120,48 @@ std::expected<std::size_t, COMPILE_ERR> get_iatom(DECL_FUNCTION &decl) {
   }
 }
 
-expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER &expr) {
-  co_return expr.visit(*this).ok();
+std::expected<MACHINE_CMD, COMPILE_ERR>
+Language::operator()(MAKE_CONV, DATATYPE_U64 lhs, DATATYPE_I32 rhs) {
+  MACHINE_CMD cmd{U64_TO_I32{regfile_idx}};
+  regfile_type[regfile_idx] = DATATYPE_I32{};
+  return cmd;
+}
+
+std::expected<MACHINE_CMD, COMPILE_ERR>
+Language::operator()(MAKE_CONV, DATATYPE_I64 lhs, DATATYPE_I32 rhs) {
+  MACHINE_CMD cmd{I64_TO_I32{regfile_idx}};
+  regfile_type[regfile_idx] = DATATYPE_I32{};
+  return cmd;
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(std::int64_t num) {
   scope_stack.top().command_vec.push_back(I64_IMM_LOAD{regfile_idx, num});
-  regfile_type[regfile_idx] = MACHINE_DATATYPE::I64T;
+  regfile_type[regfile_idx] = DATATYPE_I64{};
   co_return {};
 }
 
-std::expected<MACHINE_CMD, COMPILE_ERR> Language::make_conv_I32T() {
-  switch (regfile_type[regfile_idx]) {
-  case MACHINE_DATATYPE::U64T:
-    return U64_TO_I32{regfile_idx};
-  case MACHINE_DATATYPE::I64T:
-    return I64_TO_I32{regfile_idx};
-  default:
-    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
-  }
+expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER &expr) {
+  co_return expr.visit(*this).ok();
 }
 
-std::expected<MACHINE_CMD, COMPILE_ERR>
-Language::make_conv_to(MACHINE_DATATYPE datatype) {
-  switch (datatype) {
-  case MACHINE_DATATYPE::I32T:
-    return make_conv_I32T();
-  default:
-    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
-  }
+expected_task<void, COMPILE_ERR> Language::operator()(EXPR_BINARY &expr) {
+  co_await expr.left.visit(*this).ok();
+  ++regfile_idx;
+  co_await expr.right.visit(*this).ok();
+  --regfile_idx;
+  co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
+}
+
+expected_task<void, COMPILE_ERR>
+Language::operator()(std::unique_ptr<EXPR_NODE> &expr) {
+  co_return expr->visit(*this).ok();
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN &ret_stmt) {
   co_await ret_stmt.argument.visit(*this).ok();
-  scope_stack.top().command_vec.push_back(
-      co_await make_conv_to(scope_stack.top().return_type));
+  scope_stack.top().command_vec.push_back(co_await std::visit(
+      *this, DISPATCH_TAG{MAKE_CONV{}}, regfile_type[regfile_idx],
+      scope_stack.top().return_type));
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(DECL_FUNCTION &decl) {

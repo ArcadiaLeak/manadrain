@@ -303,14 +303,27 @@ public:
   Machine machine;
   expected_task<void, COMPILE_ERR> compile();
 
-  std::expected<MACHINE_CMD, COMPILE_ERR> make_conv_I32T();
+  struct MAKE_CONV {};
+  using DISPATCH_TAG = std::variant<MAKE_CONV>;
+
   std::expected<MACHINE_CMD, COMPILE_ERR>
-  make_conv_to(MACHINE_DATATYPE datatype);
+  operator()(MAKE_CONV, DATATYPE_U64 lhs, DATATYPE_I32 rhs);
+  std::expected<MACHINE_CMD, COMPILE_ERR>
+  operator()(MAKE_CONV, DATATYPE_I64 lhs, DATATYPE_I32 rhs);
+  template <typename T, typename U, typename V>
+  std::expected<MACHINE_CMD, COMPILE_ERR> operator()(T tag, U lhs, V rhs) {
+    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
+  }
+
+  expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
+  expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER &expr);
+
+  expected_task<void, COMPILE_ERR> operator()(std::unique_ptr<EXPR_NODE> &expr);
+  expected_task<void, COMPILE_ERR> operator()(EXPR_BINARY &expr);
 
   expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
   expected_task<void, COMPILE_ERR> operator()(STMT_RETURN &ret_stmt);
-  expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER &expr);
-  expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
+
   template <typename T> expected_task<void, COMPILE_ERR> operator()(T &stmt) {
     co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
   }

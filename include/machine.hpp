@@ -8,7 +8,14 @@
 #include <vector>
 
 namespace Manadrain {
-enum class MACHINE_DATATYPE { I32T, I64T, F32T, F64T, U32T, U64T };
+struct DATATYPE_I32 {};
+struct DATATYPE_I64 {};
+struct DATATYPE_F32 {};
+struct DATATYPE_F64 {};
+struct DATATYPE_U32 {};
+struct DATATYPE_U64 {};
+using MACHINE_DATATYPE = std::variant<DATATYPE_I32, DATATYPE_I64, DATATYPE_F32,
+                                      DATATYPE_F64, DATATYPE_U32, DATATYPE_U64>;
 
 struct I32_ADD {
   std::uint8_t dst;
