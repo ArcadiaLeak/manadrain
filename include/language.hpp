@@ -82,7 +82,7 @@ enum class TOK_OPERATOR {
   LOGICAL_DISJUNCT
 };
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
-                           double, TOK_OPERATOR, TOK_BIGINT, std::uint64_t>;
+                           double, TOK_OPERATOR, TOK_BIGINT, std::int64_t>;
 
 struct EXPR_CALL;
 struct EXPR_MEMBER;
@@ -101,7 +101,7 @@ enum EXPRV_INDEX {
   EXPRV_NUMBER,
   EXPRV_PTR
 };
-using EXPR_NUMBER = std::variant<double, std::uint64_t>;
+using EXPR_NUMBER = std::variant<double, std::int64_t>;
 using EXPRESSION = std::variant<std::monostate, TOK_STRING, TOK_IDENTI,
                                 EXPR_NUMBER, std::unique_ptr<EXPR_NODE>>;
 struct EXPR_CALL {
@@ -310,7 +310,7 @@ public:
   expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
   expected_task<void, COMPILE_ERR> operator()(STMT_RETURN &ret_stmt);
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER &expr);
-  expected_task<void, COMPILE_ERR> operator()(std::uint64_t num);
+  expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
   template <typename T> expected_task<void, COMPILE_ERR> operator()(T &stmt) {
     co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
   }

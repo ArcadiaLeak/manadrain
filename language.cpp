@@ -596,7 +596,7 @@ std::string TokNumber::FRACTIONAL::collapse() {
 
 std::expected<TOKEN, PARSE_ERR> TokNumber::tokenize(char32_t leading) {
   if (reached_end())
-    return std::uint64_t{leading - '0'};
+    return std::int64_t{leading - '0'};
   std::optional<TOK_0PREFIX> base_opt{};
   do {
     if (leading == '0') {
@@ -645,18 +645,12 @@ std::expected<TOKEN, PARSE_ERR> TokNumber::tokenize(char32_t leading) {
       std::size_t bigint_idx = std::distance(bigint_vec.begin(), bigint_it);
       return TOK_BIGINT{bigint_idx};
     } else if (std::holds_alternative<WHOLE>(num_repr)) {
-      std::uint64_t result{};
+      std::int64_t result{};
       std::string repr_s = std::move(std::get<WHOLE>(num_repr).repr_s);
       auto status = std::from_chars(
           repr_s.data(), repr_s.data() + repr_s.size(), result, radix);
-      if (status.ec == std::errc::result_out_of_range)
-        break;
-      else if (status.ec != std::errc{})
+      if (status.ec != std::errc{})
         return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
-      static constexpr std::uint64_t max_safe_int =
-          1LL << std::numeric_limits<double>::digits;
-      if (result >= max_safe_int)
-        break;
       return result;
     } else {
       double result{};
@@ -664,13 +658,12 @@ std::expected<TOKEN, PARSE_ERR> TokNumber::tokenize(char32_t leading) {
       auto status =
           std::from_chars(repr_s.data(), repr_s.data() + repr_s.size(), result);
       if (status.ec == std::errc::result_out_of_range)
-        break;
+        return std::numeric_limits<double>::infinity();
       else if (status.ec != std::errc{})
         return std::unexpected{INVALID_ERR::NUMBER_LITERAL};
       return result;
     }
   } while (0);
-  return std::numeric_limits<double>::infinity();
 }
 
 std::expected<void, PARSE_ERR> Parser::tokenize() {
@@ -1131,9 +1124,9 @@ expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER &expr) {
   co_return expr.visit(*this).ok();
 }
 
-expected_task<void, COMPILE_ERR> Language::operator()(std::uint64_t num) {
-  scope_stack.top().command_vec.push_back(U64_IMM_LOAD{regfile_idx, num});
-  regfile_type[regfile_idx] = MACHINE_DATATYPE::U64T;
+expected_task<void, COMPILE_ERR> Language::operator()(std::int64_t num) {
+  scope_stack.top().command_vec.push_back(I64_IMM_LOAD{regfile_idx, num});
+  regfile_type[regfile_idx] = MACHINE_DATATYPE::I64T;
   co_return {};
 }
 
@@ -1141,6 +1134,8 @@ std::expected<MACHINE_CMD, COMPILE_ERR> Language::make_conv_I32T() {
   switch (regfile_type[regfile_idx]) {
   case MACHINE_DATATYPE::U64T:
     return U64_TO_I32{regfile_idx};
+  case MACHINE_DATATYPE::I64T:
+    return I64_TO_I32{regfile_idx};
   default:
     return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
   }

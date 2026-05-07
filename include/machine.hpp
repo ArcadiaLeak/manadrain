@@ -33,6 +33,10 @@ struct U64_IMM_LOAD {
   std::uint8_t dst;
   std::uint64_t val;
 };
+struct I64_IMM_LOAD {
+  std::uint8_t dst;
+  std::int64_t val;
+};
 struct U64_LOC_LOAD {
   std::size_t offset;
   std::uint8_t reg;
@@ -41,12 +45,15 @@ struct U64_LOC_STOR {
   std::size_t offset;
   std::uint8_t reg;
 };
+struct I64_TO_I32 {
+  std::uint8_t reg;
+};
 struct U64_TO_I32 {
   std::uint8_t reg;
 };
-using MACHINE_CMD =
-    std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD, U64_LOC_STOR,
-                 I32_IMM_LOAD, U64_IMM_LOAD, U64_TO_I32>;
+using MACHINE_CMD = std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD,
+                                 U64_LOC_STOR, I32_IMM_LOAD, I64_IMM_LOAD,
+                                 U64_IMM_LOAD, I64_TO_I32, U64_TO_I32>;
 
 union UNIFORM {
   std::uint64_t ulong;
@@ -90,7 +97,9 @@ struct Machine {
   void operator()(U64_LOC_LOAD cmd);
   void operator()(U64_LOC_STOR cmd);
   void operator()(I32_IMM_LOAD cmd);
+  void operator()(I64_IMM_LOAD cmd);
   void operator()(U64_IMM_LOAD cmd);
+  void operator()(I64_TO_I32 cmd);
   void operator()(U64_TO_I32 cmd);
   void operator()(std::size_t func_idx);
 };
