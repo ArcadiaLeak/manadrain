@@ -287,9 +287,22 @@ private:
   std::expected<void, PARSE_ERR> parse_statement();
 };
 
+struct FUNCTION_IR {
+  std::vector<MACHINE_CMD> command_vec;
+};
+
 class Language : public Parser {
+private:
+  std::stack<FUNCTION_IR> scope_stack;
+
 public:
   Machine machine;
   expected_task<void, COMPILE_ERR> compile();
+
+  expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
+  expected_task<void, COMPILE_ERR> operator()(STMT_RETURN &ret_stmt);
+  template <typename T> expected_task<void, COMPILE_ERR> operator()(T &stmt) {
+    co_return std::unexpected{COMPILE_ERR::STMT_INAPPROP};
+  }
 };
 } // namespace Manadrain

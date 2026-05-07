@@ -1121,27 +1121,32 @@ std::expected<std::size_t, COMPILE_ERR> get_iatom(DECL_FUNCTION &decl) {
   }
 }
 
+expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN &ret_stmt) {
+  if (scope_stack.size() == 0)
+    co_return std::unexpected{COMPILE_ERR::STMT_INAPPROP};
+  std::uint64_t ret_num =
+      std::get<std::uint64_t>(std::get<EXPR_NUMBER>(ret_stmt.argument));
+  scope_stack.top().command_vec.push_back(
+      I32_IMM_LOAD{0, static_cast<std::int32_t>(ret_num)});
+}
+
+expected_task<void, COMPILE_ERR> Language::operator()(DECL_FUNCTION &decl) {
+  std::size_t atom_sh{co_await get_iatom(decl)};
+  if (is_reserved(atom_sh))
+    co_return std::unexpected{COMPILE_ERR::FUNCNAME_RESERVED};
+  scope_stack.emplace();
+  std::string_view func_name{atom_deq[atom_sh >> 16]};
+  for (STATEMENT &func_stmt : decl.subprogram)
+    co_await func_stmt.visit(*this).ok();
+  std::size_t func_idx{machine.function_vec.size()};
+  machine.funcname_umap.insert(std::make_pair(func_name, func_idx));
+  machine.function_vec.emplace_back(std::move(scope_stack.top().command_vec));
+  scope_stack.pop();
+}
+
 expected_task<void, COMPILE_ERR> Language::compile() {
-  for (STATEMENT &statement : program) {
-    DECL_FUNCTION *decl_ptr = std::get_if<DECL_FUNCTION>(&statement);
-    if (not decl_ptr)
-      co_return std::unexpected{COMPILE_ERR::STMT_INAPPROP};
-    std::size_t atom_sh{co_await get_iatom(*decl_ptr)};
-    if (is_reserved(atom_sh))
-      co_return std::unexpected{COMPILE_ERR::FUNCNAME_RESERVED};
-    std::string_view func_name{atom_deq[atom_sh >> 16]};
-    std::vector<MACHINE_CMD> command_vec{};
-    for (STATEMENT &func_stmt : decl_ptr->subprogram) {
-      STMT_RETURN *ret_ptr = std::get_if<STMT_RETURN>(&func_stmt);
-      std::uint64_t ret_num =
-          std::get<std::uint64_t>(std::get<EXPR_NUMBER>(ret_ptr->argument));
-      command_vec.push_back(
-          I32_IMM_LOAD{0, static_cast<std::int32_t>(ret_num)});
-    }
-    std::size_t func_idx{machine.function_vec.size()};
-    machine.function_vec.emplace_back(std::move(command_vec));
-    machine.funcname_umap.insert(std::make_pair(func_name, func_idx));
-  }
+  for (STATEMENT &statement : program)
+    co_await statement.visit(*this).ok();
   co_return {};
 }
 } // namespace Manadrain
