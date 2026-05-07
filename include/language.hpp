@@ -62,9 +62,10 @@ enum TOKV_INDEX {
   TOKV_PUNCT,
   TOKV_STRING,
   TOKV_IDENTI,
-  TOKV_NUMBER,
+  TOKV_FLOAT,
   TOKV_OP,
-  TOKV_BIGINT
+  TOKV_BIGINT,
+  TOKV_INT
 };
 enum class TOK_OPERATOR {
   DOUBLE_EQUALS,
@@ -80,36 +81,28 @@ enum class TOK_OPERATOR {
   LOGICAL_DISJUNCT
 };
 using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
-                           double, TOK_OPERATOR, TOK_BIGINT>;
+                           double, TOK_OPERATOR, TOK_BIGINT, std::uint64_t>;
 
-enum EXPRV_INDEX {
-  EXPRV_NIL,
-  EXPRV_STRING,
-  EXPRV_IDENTI,
-  EXPRV_NUMBER,
-  EXPRV_CALL,
-  EXPRV_MEMBER,
-  EXPRV_BINARY,
-  EXPRV_OBJECT,
-  EXPRV_ACCESS,
-  EXPRV_ASSIGN,
-  EXPRV_LOGICAL,
-  EXPRV_FUNCDEC
-};
 struct EXPR_CALL;
 struct EXPR_MEMBER;
 struct EXPR_BINARY;
 struct EXPR_OBJECT;
 struct EXPR_ACCESS;
 struct EXPR_ASSIGN;
-struct EXPR_LOGICAL;
-struct DECL_FUNCTION;
-using EXPRESSION =
-    std::variant<std::monostate, TOK_STRING, TOK_IDENTI, double,
-                 std::unique_ptr<EXPR_CALL>, std::unique_ptr<EXPR_MEMBER>,
-                 std::unique_ptr<EXPR_BINARY>, std::unique_ptr<EXPR_OBJECT>,
-                 std::unique_ptr<EXPR_ACCESS>, std::unique_ptr<EXPR_ASSIGN>,
-                 std::unique_ptr<EXPR_LOGICAL>, std::unique_ptr<DECL_FUNCTION>>;
+struct EXPR_LOGIC;
+using EXPR_NODE = std::variant<EXPR_CALL, EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT,
+                               EXPR_ACCESS, EXPR_ASSIGN, EXPR_LOGIC>;
+
+enum EXPRV_INDEX {
+  EXPRV_NIL,
+  EXPRV_STRING,
+  EXPRV_IDENTI,
+  EXPRV_NUMBER,
+  EXPRV_PTR
+};
+using EXPR_NUMBER = std::variant<double, std::uint64_t>;
+using EXPRESSION = std::variant<std::monostate, TOK_STRING, TOK_IDENTI,
+                                EXPR_NUMBER, std::unique_ptr<EXPR_NODE>>;
 struct EXPR_CALL {
   EXPRESSION callee;
   std::vector<EXPRESSION> arguments;
@@ -123,14 +116,8 @@ struct EXPR_BINARY {
   EXPRESSION right;
   TOKEN op;
 };
-struct DECL_FUNCTION;
 struct EXPR_OBJECT {
-  struct KEY_VALUE {
-    EXPRESSION prop_key;
-    EXPRESSION prop_val;
-  };
-  using PROPERTY = std::variant<KEY_VALUE, DECL_FUNCTION>;
-  std::vector<PROPERTY> props;
+  std::vector<std::pair<EXPRESSION, EXPRESSION>> props;
 };
 struct EXPR_ACCESS {
   EXPRESSION object;
@@ -140,13 +127,14 @@ struct EXPR_ASSIGN {
   EXPRESSION left;
   EXPRESSION right;
 };
-struct EXPR_LOGICAL {
+struct EXPR_LOGIC {
   EXPRESSION left;
   EXPRESSION right;
   TOKEN op;
 };
 
-enum class COMPILE_ERR { FUNCTION_IDENTIFIER, FUNCNAME_RESERVED };
+enum class COMPILE_ERR { STMT_INAPPROP, FUNCNAME_INAPPROP, FUNCNAME_RESERVED };
+struct DECL_FUNCTION;
 struct DECL_VARIABLE {
   std::size_t kind;
   TOK_IDENTI identifier;
@@ -176,7 +164,6 @@ struct DECL_FUNCTION {
   TOK_IDENTI return_type;
   std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
-  std::expected<std::size_t, COMPILE_ERR> get_iatom();
 };
 
 class Scanner {
@@ -226,7 +213,7 @@ private:
     std::string expon_s;
     std::string collapse() { return {}; }
   };
-  using FLOAT_REPR = std::variant<WHOLE, FRACTIONAL, SCIENTIFIC>;
+  using NUM_REPRESENT = std::variant<WHOLE, FRACTIONAL, SCIENTIFIC>;
 
   std::optional<TOK_0PREFIX> decode_0prefix();
   std::string scan_numseq(std::optional<TOK_0PREFIX> base_opt,

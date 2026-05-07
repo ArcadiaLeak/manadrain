@@ -9,22 +9,22 @@
 
 namespace Manadrain {
 struct I32_ADD {
-  std::uint8_t dest;
+  std::uint8_t dst;
   std::uint8_t lhs;
   std::uint8_t rhs;
 };
 struct I64_ADD {
-  std::uint8_t dest;
+  std::uint8_t dst;
   std::uint8_t lhs;
   std::uint8_t rhs;
 };
 struct F32_ADD {
-  std::uint8_t dest;
+  std::uint8_t dst;
   std::uint8_t lhs;
   std::uint8_t rhs;
 };
 struct I32_IMM_LOAD {
-  std::uint8_t dest;
+  std::uint8_t dst;
   std::int32_t val;
 };
 struct U64_LOC_LOAD {
@@ -35,8 +35,8 @@ struct U64_LOC_STOR {
   std::size_t offset;
   std::uint8_t reg;
 };
-using COMMAND = std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD,
-                             U64_LOC_STOR, I32_IMM_LOAD>;
+using MACHINE_CMD = std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD,
+                                 U64_LOC_STOR, I32_IMM_LOAD>;
 
 union UNIFORM {
   std::uint64_t ulong;
@@ -54,8 +54,13 @@ struct HEAP_VACANCY {
 using HEAP_SLOT =
     std::variant<std::vector<UNIFORM>, HEAP_TOMBSTONE, HEAP_VACANCY>;
 
+struct MACHINE_FUNC {
+  std::vector<MACHINE_CMD> command_vec;
+  const std::vector<std::vector<UNIFORM>> const_pool;
+};
+
 struct Machine {
-  std::vector<std::vector<COMMAND>> function_vec;
+  std::vector<MACHINE_FUNC> function_vec;
   std::unordered_map<std::string, std::size_t> funcname_umap;
   std::vector<UNIFORM> local_heap;
   std::array<UNIFORM, 32> register_file;
