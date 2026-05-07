@@ -8,6 +8,8 @@
 #include <vector>
 
 namespace Manadrain {
+enum class MACHINE_DATATYPE { I32T, I64T, F32T, F64T, U32T, U64T };
+
 struct I32_ADD {
   std::uint8_t dst;
   std::uint8_t lhs;

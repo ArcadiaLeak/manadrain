@@ -21,7 +21,8 @@ enum class INVALID_ERR {
   NUMBER_LITERAL,
   BIGINT_LITERAL,
   PROPERTY_NAME,
-  BACKSLASH_ESCAPE
+  BACKSLASH_ESCAPE,
+  RETURN_TYPE
 };
 enum class UNEXPECT_ERR { STRING_END, COMMENT_END, THIS_TOKEN };
 enum class REQUIRED_ERR {
@@ -133,11 +134,7 @@ struct EXPR_LOGIC {
   TOKEN op;
 };
 
-enum class COMPILE_ERR {
-  SYTXNODE_INAPPROP,
-  FUNCNAME_INAPPROP,
-  FUNCNAME_RESERVED
-};
+enum class COMPILE_ERR { UNSUPPORTED, RESERVED_WORD, TYPE_MISMATCH };
 struct DECL_FUNCTION;
 struct DECL_VARIABLE {
   std::size_t kind;
@@ -165,7 +162,7 @@ struct STMT_IF {
 };
 struct DECL_FUNCTION {
   EXPRESSION identifier;
-  TOK_IDENTI return_type;
+  MACHINE_DATATYPE return_type;
   std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
 };
@@ -292,13 +289,15 @@ private:
 };
 
 struct FUNCTION_IR {
+  MACHINE_DATATYPE return_type;
   std::vector<MACHINE_CMD> command_vec;
 };
 
 class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
-  std::uint8_t regstack_height;
+  std::array<MACHINE_DATATYPE, 32> regfile_type;
+  std::uint8_t regfile_idx;
 
 public:
   Machine machine;
@@ -309,7 +308,7 @@ public:
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER &expr);
   expected_task<void, COMPILE_ERR> operator()(std::uint64_t num);
   template <typename T> expected_task<void, COMPILE_ERR> operator()(T &stmt) {
-    co_return std::unexpected{COMPILE_ERR::SYTXNODE_INAPPROP};
+    co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
   }
 };
 } // namespace Manadrain

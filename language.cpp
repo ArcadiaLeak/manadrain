@@ -976,7 +976,13 @@ Parser::parse_function_decl(EXPRESSION identifier) {
   co_await tokenize();
   if (my_token.index() != TOKV_IDENTI)
     co_return std::unexpected{REQUIRED_ERR::RETURN_TYPE};
-  declaration.return_type = std::get<TOKV_IDENTI>(my_token);
+  switch (std::get<TOKV_IDENTI>(my_token).atom_sh) {
+  case S_ATOM_int:
+    declaration.return_type = MACHINE_DATATYPE::I32T;
+    break;
+  default:
+    co_return std::unexpected{INVALID_ERR::RETURN_TYPE};
+  }
   co_await tokenize();
   co_await expect_punct('{');
   co_await tokenize();
@@ -1117,7 +1123,7 @@ std::expected<std::size_t, COMPILE_ERR> get_iatom(DECL_FUNCTION &decl) {
   case EXPRV_IDENTI:
     return std::get<EXPRV_IDENTI>(decl.identifier).atom_sh;
   default:
-    return std::unexpected{COMPILE_ERR::FUNCNAME_INAPPROP};
+    return std::unexpected{COMPILE_ERR::UNSUPPORTED};
   }
 }
 
@@ -1126,20 +1132,38 @@ expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER &expr) {
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(std::uint64_t num) {
-  scope_stack.top().command_vec.push_back(U64_IMM_LOAD{regstack_height, num});
+  scope_stack.top().command_vec.push_back(U64_IMM_LOAD{regfile_idx, num});
+  regfile_type[regfile_idx] = MACHINE_DATATYPE::U64T;
   co_return {};
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN &ret_stmt) {
   co_await ret_stmt.argument.visit(*this).ok();
-  scope_stack.top().command_vec.push_back(U64_TO_I32{regstack_height});
+  switch (scope_stack.top().return_type) {
+  case MACHINE_DATATYPE::I32T:
+    goto return_i32;
+  default:
+    goto mismatch;
+  }
+
+return_i32:
+  switch (regfile_type[regfile_idx]) {
+  case MACHINE_DATATYPE::U64T:
+    scope_stack.top().command_vec.push_back(U64_TO_I32{regfile_idx});
+    co_return {};
+  default:
+    goto mismatch;
+  }
+
+mismatch:
+  co_return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(DECL_FUNCTION &decl) {
   std::size_t atom_sh{co_await get_iatom(decl)};
   if (is_reserved(atom_sh))
-    co_return std::unexpected{COMPILE_ERR::FUNCNAME_RESERVED};
-  scope_stack.emplace();
+    co_return std::unexpected{COMPILE_ERR::RESERVED_WORD};
+  scope_stack.push(FUNCTION_IR{decl.return_type});
   std::string_view func_name{atom_deq[atom_sh >> 16]};
   for (STATEMENT &func_stmt : decl.subprogram)
     co_await func_stmt.visit(*this).ok();
