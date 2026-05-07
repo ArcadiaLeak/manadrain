@@ -303,6 +303,10 @@ public:
   Machine machine;
   expected_task<void, COMPILE_ERR> compile();
 
+  std::expected<MACHINE_CMD, COMPILE_ERR> make_conv_I32T();
+  std::expected<MACHINE_CMD, COMPILE_ERR>
+  make_conv_to(MACHINE_DATATYPE datatype);
+
   expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
   expected_task<void, COMPILE_ERR> operator()(STMT_RETURN &ret_stmt);
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER &expr);

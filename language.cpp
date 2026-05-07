@@ -1137,26 +1137,29 @@ expected_task<void, COMPILE_ERR> Language::operator()(std::uint64_t num) {
   co_return {};
 }
 
-expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN &ret_stmt) {
-  co_await ret_stmt.argument.visit(*this).ok();
-  switch (scope_stack.top().return_type) {
-  case MACHINE_DATATYPE::I32T:
-    goto return_i32;
-  default:
-    goto mismatch;
-  }
-
-return_i32:
+std::expected<MACHINE_CMD, COMPILE_ERR> Language::make_conv_I32T() {
   switch (regfile_type[regfile_idx]) {
   case MACHINE_DATATYPE::U64T:
-    scope_stack.top().command_vec.push_back(U64_TO_I32{regfile_idx});
-    co_return {};
+    return U64_TO_I32{regfile_idx};
   default:
-    goto mismatch;
+    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
   }
+}
 
-mismatch:
-  co_return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
+std::expected<MACHINE_CMD, COMPILE_ERR>
+Language::make_conv_to(MACHINE_DATATYPE datatype) {
+  switch (datatype) {
+  case MACHINE_DATATYPE::I32T:
+    return make_conv_I32T();
+  default:
+    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
+  }
+}
+
+expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN &ret_stmt) {
+  co_await ret_stmt.argument.visit(*this).ok();
+  scope_stack.top().command_vec.push_back(
+      co_await make_conv_to(scope_stack.top().return_type));
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(DECL_FUNCTION &decl) {
