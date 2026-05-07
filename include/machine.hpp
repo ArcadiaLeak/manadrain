@@ -1,5 +1,6 @@
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <stdfloat>
 #include <string>
 #include <unordered_map>
@@ -42,11 +43,27 @@ union UNIFORM {
   std::float32_t float32[2];
 };
 
+struct HEAP_TOMBSTONE {};
+struct HEAP_VACANCY {
+  std::optional<std::size_t> another;
+};
+using HEAP_SLOT =
+    std::variant<std::vector<UNIFORM>, HEAP_TOMBSTONE, HEAP_VACANCY>;
+
 struct Machine {
   std::vector<std::vector<COMMAND>> function_vec;
   std::unordered_map<std::string, std::size_t> funcname_umap;
   std::vector<UNIFORM> local_heap;
   std::array<UNIFORM, 32> register_file;
+
+  std::size_t n_tombstones;
+  std::optional<std::size_t> last_vacancy;
+  std::vector<HEAP_SLOT> global_heap;
+
+  std::size_t heap_alloc();
+  void heap_free(std::size_t);
+  bool is_tombstone_ptr(UNIFORM word);
+  void heap_reclaim();
 
   void operator()(I32_ADD cmd);
   void operator()(I64_ADD cmd);

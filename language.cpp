@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cassert>
 #include <charconv>
 #include <limits>
 
@@ -16,8 +17,7 @@ static bool lineterm(char32_t ch) {
 std::generator<char> traverse_ucs4(ucs4_t cp) {
   std::array<std::uint8_t, 6> ubuf{};
   int len = u8_uctomb(ubuf.data(), cp, ubuf.size());
-  if (len < 0)
-    throw std::runtime_error{"invalid 4-byte UTF!"};
+  assert(len >= 0);
   for (int i = 0; i < len; ++i)
     co_yield ubuf[i];
 }
@@ -25,8 +25,7 @@ std::generator<char> traverse_ucs4(ucs4_t cp) {
 bool Scanner::reached_end() { return position >= buffer.size(); }
 
 void Scanner::prev() {
-  if (backtrace.empty())
-    throw std::runtime_error{"rewind past boundary!"};
+  assert(not backtrace.empty());
   position -= backtrace.top();
   backtrace.pop();
 }
@@ -34,8 +33,7 @@ void Scanner::prev() {
 char32_t Scanner::unchecked_next() {
   ucs4_t ch;
   int len = u8_mbtoucr(&ch, buffer.data() + position, buffer.size() - position);
-  if (len < 0)
-    throw std::runtime_error{"invalid 1-byte UTF!"};
+  assert(len >= 0);
   position += len;
   backtrace.push(len);
   return ch;
@@ -688,10 +686,8 @@ expected_task<void, PARSE_ERRMSG> Parser::parse_variable_decl() {
   DECL_VARIABLE declaration{};
 
   std::size_t atom_sh{std::get<TOKV_IDENTI>(my_token).atom_sh};
-  bool valid_beginning{atom_sh == S_ATOM_const || atom_sh == S_ATOM_let ||
-                       atom_sh == S_ATOM_var};
-  if (not valid_beginning)
-    throw std::runtime_error("statement isn't a variable declaration!");
+  assert(atom_sh == S_ATOM_const || atom_sh == S_ATOM_let ||
+         atom_sh == S_ATOM_var);
   declaration.kind = atom_sh;
   co_await tokenize();
 
