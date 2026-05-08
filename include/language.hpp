@@ -3,7 +3,6 @@
 #include <deque>
 #include <expected>
 #include <generator>
-#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -106,16 +105,6 @@ using TOKEN =
     std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI, double,
                  TOK_OPERATOR, TOK_BIGINT, std::int64_t, TOK_ASSIGN>;
 
-struct EXPR_CALL;
-struct EXPR_MEMBER;
-struct EXPR_BINARY;
-struct EXPR_OBJECT;
-struct EXPR_ACCESS;
-struct EXPR_ASSIGN;
-struct EXPR_LOGIC;
-using EXPR_NODE = std::variant<EXPR_CALL, EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT,
-                               EXPR_ACCESS, EXPR_ASSIGN, EXPR_LOGIC>;
-
 enum EXPRV_INDEX {
   EXPRV_NIL,
   EXPRV_STRING,
@@ -125,7 +114,8 @@ enum EXPRV_INDEX {
 };
 using EXPR_NUMBER = std::variant<double, std::int64_t>;
 using EXPRESSION = std::variant<std::monostate, TOK_STRING, TOK_IDENTI,
-                                EXPR_NUMBER, std::unique_ptr<EXPR_NODE>>;
+                                EXPR_NUMBER, std::size_t>;
+
 struct EXPR_CALL {
   EXPRESSION callee;
   std::vector<EXPRESSION> arguments;
@@ -155,32 +145,31 @@ struct EXPR_LOGIC {
   EXPRESSION right;
   TOKEN op;
 };
+using EXPR_NODE = std::variant<EXPR_CALL, EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT,
+                               EXPR_ACCESS, EXPR_ASSIGN, EXPR_LOGIC>;
 
-enum class COMPILE_ERR { UNSUPPORTED, RESERVED_WORD, TYPE_MISMATCH };
-struct DECL_FUNCTION;
 struct DECL_VARIABLE {
   std::size_t kind;
   TOK_IDENTI identifier;
   EXPRESSION initializer;
 };
 struct DECL_IMPORT {
-  std::vector<TOK_IDENTI> specifiers;
+  std::size_t specifiers;
   TOK_STRING source;
 };
 struct STMT_RETURN {
   EXPRESSION argument;
 };
-struct STMT_BLOCK;
-struct STMT_IF;
-using STATEMENT = std::variant<DECL_VARIABLE, EXPRESSION, DECL_FUNCTION,
-                               STMT_RETURN, DECL_IMPORT, STMT_BLOCK, STMT_IF>;
+using STATEMENT = std::variant<std::monostate, DECL_VARIABLE, EXPRESSION,
+                               std::size_t, STMT_RETURN, DECL_IMPORT>;
+
 struct STMT_BLOCK {
   std::vector<STATEMENT> subprogram;
 };
 struct STMT_IF {
   EXPRESSION condition;
-  std::unique_ptr<STATEMENT> consequent;
-  std::unique_ptr<STATEMENT> alternate;
+  STATEMENT consequent;
+  STATEMENT alternate;
 };
 struct DECL_FUNCTION {
   EXPRESSION identifier;
@@ -188,6 +177,7 @@ struct DECL_FUNCTION {
   std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
 };
+using STMT_NODE = std::variant<STMT_BLOCK, STMT_IF, DECL_FUNCTION>;
 
 class Scanner {
 public:
@@ -280,34 +270,36 @@ public:
 
 private:
   TOKEN my_token;
-  EXPRESSION my_expression;
-  STATEMENT my_statement;
+  std::vector<STMT_NODE> stmt_vec;
+  std::vector<EXPR_NODE> expr_vec;
+  std::vector<std::vector<TOK_IDENTI>> specifier_vec;
 
   std::expected<void, PARSE_ERR> tokenize();
   expected_task<void, PARSE_ERR> expect_statement_end();
   std::expected<void, PARSE_ERR> expect_punct(char32_t punct);
 
-  expected_task<void, PARSE_ERR> parse_assign_expr();
-  expected_task<void, PARSE_ERR> parse_equality_expr();
-  expected_task<void, PARSE_ERR> parse_relation_expr();
-  expected_task<void, PARSE_ERR> parse_additive_expr();
-  expected_task<void, PARSE_ERR> parse_postfix_expr();
-  expected_task<void, PARSE_ERR> parse_primary_expr();
-  expected_task<void, PARSE_ERR> parse_call_expr();
-  expected_task<void, PARSE_ERR> parse_member_expr();
-  expected_task<void, PARSE_ERR> parse_access_expr();
-  expected_task<void, PARSE_ERR> parse_object_literal();
-  expected_task<void, PARSE_ERR> parse_logical_conjunct();
-  expected_task<void, PARSE_ERR> parse_logical_disjunct();
-  expected_task<void, PARSE_ERR> parse_paren_expr();
+  expected_task<EXPRESSION, PARSE_ERR> parse_assign_expr();
+  expected_task<EXPRESSION, PARSE_ERR> parse_equality_expr();
+  expected_task<EXPRESSION, PARSE_ERR> parse_relation_expr();
+  expected_task<EXPRESSION, PARSE_ERR> parse_additive_expr();
+  expected_task<EXPRESSION, PARSE_ERR> parse_postfix_expr();
+  std::expected<EXPRESSION, PARSE_ERR> parse_primary_expr();
+  expected_task<EXPRESSION, PARSE_ERR> parse_call_expr(EXPRESSION callee_expr);
+  expected_task<EXPRESSION, PARSE_ERR> parse_member_expr(EXPRESSION obj_expr);
+  expected_task<EXPRESSION, PARSE_ERR> parse_access_expr(EXPRESSION obj_expr);
+  expected_task<EXPRESSION, PARSE_ERR> parse_object_literal();
+  expected_task<EXPRESSION, PARSE_ERR> parse_logical_conjunct();
+  expected_task<EXPRESSION, PARSE_ERR> parse_logical_disjunct();
+  expected_task<EXPRESSION, PARSE_ERR> parse_paren_expr();
 
-  expected_task<void, PARSE_ERR> parse_import();
-  expected_task<void, PARSE_ERR> parse_variable_decl();
-  expected_task<void, PARSE_ERR> parse_function_decl(EXPRESSION identifier);
-  expected_task<void, PARSE_ERR> parse_stmt_expression();
-  expected_task<void, PARSE_ERR> parse_ident_statement();
-  expected_task<void, PARSE_ERR> parse_punct_statement();
-  std::expected<void, PARSE_ERR> parse_statement();
+  expected_task<STATEMENT, PARSE_ERR> parse_import();
+  expected_task<STATEMENT, PARSE_ERR> parse_variable_decl();
+  expected_task<STATEMENT, PARSE_ERR>
+  parse_function_decl(EXPRESSION identifier);
+  expected_task<STATEMENT, PARSE_ERR> parse_stmt_expression();
+  expected_task<STATEMENT, PARSE_ERR> parse_ident_statement();
+  expected_task<STATEMENT, PARSE_ERR> parse_punct_statement();
+  std::expected<STATEMENT, PARSE_ERR> parse_statement();
 };
 
 struct FUNCTION_IR {
@@ -315,6 +307,7 @@ struct FUNCTION_IR {
   std::vector<MACHINE_CMD> command_vec;
 };
 
+enum class COMPILE_ERR { UNSUPPORTED, RESERVED_WORD, TYPE_MISMATCH };
 class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
@@ -338,10 +331,6 @@ public:
     return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
   }
 
-  // std::expected<MACHINE_CMD, COMPILE_ERR>
-  // operator()(MAKE_BINARY, std::int64_t lhs, std::int64_t rhs);
-  // std::expected<MACHINE_CMD, COMPILE_ERR>
-  // operator()(MAKE_BINARY, EXPR_NUMBER &lhs, EXPR_NUMBER &rhs);
   template <typename T, typename U>
   std::expected<MACHINE_CMD, COMPILE_ERR> operator()(MAKE_BINARY, T lhs,
                                                      const U &rhs) {
@@ -350,8 +339,6 @@ public:
 
   expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER &expr);
-
-  expected_task<void, COMPILE_ERR> operator()(std::unique_ptr<EXPR_NODE> &expr);
   expected_task<void, COMPILE_ERR> operator()(EXPR_BINARY &expr);
 
   expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
