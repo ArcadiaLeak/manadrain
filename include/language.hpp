@@ -299,8 +299,7 @@ enum class COMPILE_ERR { UNSUPPORTED, RESERVED_WORD, TYPE_MISMATCH };
 class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
-  std::array<MACHINE_DATATYPE, 256> regfile_type;
-  std::uint8_t regfile_idx;
+  std::inplace_vector<MACHINE_DATATYPE, 32> regfile_type;
 
 public:
   Machine machine;

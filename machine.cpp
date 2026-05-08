@@ -6,51 +6,55 @@
 
 namespace Manadrain {
 void Machine::operator()(I32_ADD cmd) {
-  std::int32_t lhs{register_file[cmd.lhs >> 3].sint[(cmd.lhs >> 2) & 1]};
-  std::int32_t rhs{register_file[cmd.rhs >> 3].sint[(cmd.rhs >> 2) & 1]};
-  register_file[cmd.dst >> 3].sint[(cmd.dst >> 2) & 1] = lhs + rhs;
+  std::int32_t lhs{register_file.back().sint};
+  register_file.pop_back();
+  std::int32_t rhs{register_file.back().sint};
+  register_file.back().sint = lhs + rhs;
 }
 
 void Machine::operator()(I64_ADD cmd) {
-  std::int64_t lhs{register_file[cmd.lhs >> 3].slong};
-  std::int64_t rhs{register_file[cmd.rhs >> 3].slong};
-  register_file[cmd.dst >> 3].slong = lhs + rhs;
+  std::int64_t lhs{register_file.back().slong};
+  register_file.pop_back();
+  std::int64_t rhs{register_file.back().slong};
+  register_file.back().slong = lhs + rhs;
 }
 
 void Machine::operator()(F32_ADD cmd) {
-  std::float32_t lhs{register_file[cmd.lhs >> 3].float32[(cmd.lhs >> 2) & 1]};
-  std::float32_t rhs{register_file[cmd.rhs >> 3].float32[(cmd.rhs >> 2) & 1]};
-  register_file[cmd.dst >> 3].float32[(cmd.dst >> 2) & 1] = lhs + rhs;
+  std::float32_t lhs{register_file.back().float32};
+  register_file.pop_back();
+  std::float32_t rhs{register_file.back().float32};
+  register_file.back().float32 = lhs + rhs;
 }
 
 void Machine::operator()(U64_LOC_LOAD cmd) {
-  register_file[cmd.reg >> 3].ulong = local_heap[cmd.offset >> 3].ulong;
+  register_file.push_back(UNIFORM{.ulong = local_heap[cmd.offset >> 3].ulong});
 }
 
 void Machine::operator()(U64_LOC_STOR cmd) {
-  local_heap[cmd.offset >> 3].ulong = register_file[cmd.reg >> 3].ulong;
+  local_heap[cmd.offset >> 3].ulong = register_file.back().ulong;
+  register_file.pop_back();
 }
 
-void Machine::operator()(I32_IMM_LOAD cmd) {
-  register_file[cmd.dst >> 3].sint[(cmd.dst >> 2) & 1] = cmd.val;
+void Machine::operator()(I32_PUSH cmd) {
+  register_file.push_back(UNIFORM{.sint = cmd.val});
 }
 
-void Machine::operator()(I64_IMM_LOAD cmd) {
-  register_file[cmd.dst >> 3].slong = cmd.val;
+void Machine::operator()(I64_PUSH cmd) {
+  register_file.push_back(UNIFORM{.slong = cmd.val});
 }
 
-void Machine::operator()(U64_IMM_LOAD cmd) {
-  register_file[cmd.dst >> 3].ulong = cmd.val;
+void Machine::operator()(U64_PUSH cmd) {
+  register_file.push_back(UNIFORM{.ulong = cmd.val});
 }
 
 void Machine::operator()(U64_TO_I32 cmd) {
-  register_file[cmd.reg >> 3].sint[(cmd.reg >> 2) & 1] =
-      static_cast<std::int32_t>(register_file[cmd.reg >> 3].ulong);
+  register_file.back().sint =
+      static_cast<std::int32_t>(register_file.back().ulong);
 }
 
 void Machine::operator()(I64_TO_I32 cmd) {
-  register_file[cmd.reg >> 3].sint[(cmd.reg >> 2) & 1] =
-      static_cast<std::int32_t>(register_file[cmd.reg >> 3].slong);
+  register_file.back().sint =
+      static_cast<std::int32_t>(register_file.back().slong);
 }
 
 void Machine::operator()(std::size_t func_idx) {

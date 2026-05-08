@@ -1,5 +1,5 @@
-#include <array>
 #include <cstdint>
+#include <inplace_vector>
 #include <optional>
 #include <stdfloat>
 #include <string>
@@ -10,58 +10,37 @@
 namespace Manadrain {
 enum class MACHINE_DATATYPE { I32T, I64T, F32T, F64T, U32T, U64T };
 
-struct I32_ADD {
-  std::uint8_t dst;
-  std::uint8_t lhs;
-  std::uint8_t rhs;
-};
-struct I64_ADD {
-  std::uint8_t dst;
-  std::uint8_t lhs;
-  std::uint8_t rhs;
-};
-struct F32_ADD {
-  std::uint8_t dst;
-  std::uint8_t lhs;
-  std::uint8_t rhs;
-};
-struct I32_IMM_LOAD {
-  std::uint8_t dst;
+struct I32_ADD {};
+struct I64_ADD {};
+struct F32_ADD {};
+struct I32_PUSH {
   std::int32_t val;
 };
-struct U64_IMM_LOAD {
-  std::uint8_t dst;
-  std::uint64_t val;
-};
-struct I64_IMM_LOAD {
-  std::uint8_t dst;
+struct I64_PUSH {
   std::int64_t val;
+};
+struct U64_PUSH {
+  std::uint64_t val;
 };
 struct U64_LOC_LOAD {
   std::size_t offset;
-  std::uint8_t reg;
 };
 struct U64_LOC_STOR {
   std::size_t offset;
-  std::uint8_t reg;
 };
-struct I64_TO_I32 {
-  std::uint8_t reg;
-};
-struct U64_TO_I32 {
-  std::uint8_t reg;
-};
-using MACHINE_CMD = std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD,
-                                 U64_LOC_STOR, I32_IMM_LOAD, I64_IMM_LOAD,
-                                 U64_IMM_LOAD, I64_TO_I32, U64_TO_I32>;
+struct I64_TO_I32 {};
+struct U64_TO_I32 {};
+using MACHINE_CMD =
+    std::variant<I32_ADD, I64_ADD, F32_ADD, U64_LOC_LOAD, U64_LOC_STOR,
+                 I32_PUSH, I64_PUSH, U64_PUSH, I64_TO_I32, U64_TO_I32>;
 
 union UNIFORM {
   std::uint64_t ulong;
-  std::uint32_t uint[2];
+  std::uint32_t uint;
   std::int64_t slong;
-  std::int32_t sint[2];
+  std::int32_t sint;
   std::float64_t float64;
-  std::float32_t float32[2];
+  std::float32_t float32;
 };
 
 struct HEAP_TOMBSTONE {};
@@ -80,7 +59,7 @@ struct Machine {
   std::vector<MACHINE_FUNC> function_vec;
   std::unordered_map<std::string, std::size_t> funcname_umap;
   std::vector<UNIFORM> local_heap;
-  std::array<UNIFORM, 32> register_file;
+  std::inplace_vector<UNIFORM, 32> register_file;
 
   std::size_t n_tombstones;
   std::optional<std::size_t> last_vacancy;
@@ -96,9 +75,9 @@ struct Machine {
   void operator()(F32_ADD cmd);
   void operator()(U64_LOC_LOAD cmd);
   void operator()(U64_LOC_STOR cmd);
-  void operator()(I32_IMM_LOAD cmd);
-  void operator()(I64_IMM_LOAD cmd);
-  void operator()(U64_IMM_LOAD cmd);
+  void operator()(I32_PUSH cmd);
+  void operator()(I64_PUSH cmd);
+  void operator()(U64_PUSH cmd);
   void operator()(I64_TO_I32 cmd);
   void operator()(U64_TO_I32 cmd);
   void operator()(std::size_t func_idx);

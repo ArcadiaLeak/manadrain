@@ -1088,8 +1088,8 @@ std::expected<std::size_t, COMPILE_ERR> get_iatom(DECL_FUNCTION &decl) {
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(std::int64_t num) {
-  scope_stack.top().command_vec.push_back(I64_IMM_LOAD{regfile_idx, num});
-  regfile_type[regfile_idx] = MACHINE_DATATYPE::I64T;
+  scope_stack.top().command_vec.push_back(I64_PUSH{num});
+  regfile_type.push_back(MACHINE_DATATYPE::I64T);
   co_return {};
 }
 
@@ -1098,18 +1098,16 @@ expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER expr) {
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(EXPR_BINARY &expr) {
-  std::uint8_t lhs_reg{regfile_idx};
   expr.left.visit(*this);
-  regfile_idx += static_cast<std::uint8_t>(sizeof(UNIFORM));
-  std::uint8_t rhs_reg{regfile_idx};
   expr.right.visit(*this);
-  regfile_idx -= static_cast<std::uint8_t>(sizeof(UNIFORM));
-  if (regfile_type[lhs_reg] != regfile_type[rhs_reg])
+  if (regfile_type.at(regfile_type.size() - 1) !=
+      regfile_type.at(regfile_type.size() - 2))
     co_return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
   std::optional<MACHINE_CMD> cmd{};
-  if (expr.op == TOKEN{U'+'} && regfile_type[lhs_reg] == MACHINE_DATATYPE::I64T)
-    cmd = I64_ADD{regfile_idx, lhs_reg, rhs_reg};
+  if (expr.op == TOKEN{U'+'} && regfile_type.back() == MACHINE_DATATYPE::I64T)
+    cmd = I64_ADD{};
   if (cmd) {
+    regfile_type.pop_back();
     scope_stack.top().command_vec.push_back(*cmd);
     co_return {};
   }
@@ -1125,11 +1123,11 @@ Language::append_cast(bool is_implicit, MACHINE_DATATYPE from,
                       MACHINE_DATATYPE to) {
   std::optional<MACHINE_CMD> cmd{};
   if (from == MACHINE_DATATYPE::I64T && to == MACHINE_DATATYPE::I32T)
-    cmd = I64_TO_I32{regfile_idx};
+    cmd = I64_TO_I32{};
   else if (from == MACHINE_DATATYPE::U64T && to == MACHINE_DATATYPE::I32T)
-    cmd = U64_TO_I32{regfile_idx};
+    cmd = U64_TO_I32{};
   if (cmd) {
-    regfile_type[regfile_idx] = to;
+    regfile_type.back() = to;
     return *cmd;
   }
   return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
@@ -1137,10 +1135,10 @@ Language::append_cast(bool is_implicit, MACHINE_DATATYPE from,
 
 expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN ret_stmt) {
   co_await ret_stmt.argument.visit(*this).ok();
-  if (regfile_type[regfile_idx] == scope_stack.top().return_type)
+  if (regfile_type.back() == scope_stack.top().return_type)
     co_return {};
   scope_stack.top().command_vec.push_back(co_await append_cast(
-      true, regfile_type[regfile_idx], scope_stack.top().return_type));
+      true, regfile_type.back(), scope_stack.top().return_type));
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(DECL_FUNCTION &decl) {
