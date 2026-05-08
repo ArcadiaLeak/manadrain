@@ -327,27 +327,8 @@ private:
 public:
   Machine machine;
   expected_task<void, COMPILE_ERR> compile();
-
-  struct MAKE_CONV {};
-  struct MAKE_BINARY {};
-  using DISPATCH_TAG = std::variant<MAKE_CONV, MAKE_BINARY>;
-
   std::expected<MACHINE_CMD, COMPILE_ERR>
-  operator()(MAKE_CONV, DATATYPE_U64 lhs, DATATYPE_I32 rhs);
-  std::expected<MACHINE_CMD, COMPILE_ERR>
-  operator()(MAKE_CONV, DATATYPE_I64 lhs, DATATYPE_I32 rhs);
-  template <typename T, typename U>
-  std::expected<MACHINE_CMD, COMPILE_ERR> operator()(MAKE_CONV, T lhs, U rhs) {
-    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
-  }
-
-  std::expected<MACHINE_CMD, COMPILE_ERR>
-  operator()(MAKE_BINARY, EXPR_NUMBER lhs, EXPR_NUMBER rhs);
-  template <typename T, typename U>
-  std::expected<MACHINE_CMD, COMPILE_ERR> operator()(MAKE_BINARY, T lhs,
-                                                     U rhs) {
-    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
-  }
+  append_cast(bool is_implicit, MACHINE_DATATYPE from, MACHINE_DATATYPE to);
 
   expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER expr);
