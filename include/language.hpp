@@ -68,21 +68,43 @@ enum TOKV_INDEX {
   TOKV_BIGINT,
   TOKV_INT
 };
-enum class TOK_OPERATOR {
-  DOUBLE_EQUALS,
-  TRIPLE_EQUALS,
-  BANG_EQUALS,
-  BANG_DOUBLE_EQUALS,
-  DIVIDE_ASSIGN,
-  BITWISE_CONJUNCT_ASSIGN,
-  LOGICAL_CONJUNCT_ASSIGN,
+struct DOUBLE_EQUALS {
+  bool operator==(const DOUBLE_EQUALS &) const = default;
+};
+struct TRIPLE_EQUALS {
+  bool operator==(const TRIPLE_EQUALS &) const = default;
+};
+struct BANG_EQUALS {
+  bool operator==(const BANG_EQUALS &) const = default;
+};
+struct BANG_DOUBLE_EQUALS {
+  bool operator==(const BANG_DOUBLE_EQUALS &) const = default;
+};
+struct LOGICAL_CONJUNCT {
+  bool operator==(const LOGICAL_CONJUNCT &) const = default;
+};
+struct LOGICAL_DISJUNCT {
+  bool operator==(const LOGICAL_DISJUNCT &) const = default;
+};
+struct OP_ADDITION {
+  bool operator==(const OP_ADDITION &) const = default;
+};
+struct OP_SUBTRACT {
+  bool operator==(const OP_SUBTRACT &) const = default;
+};
+using TOK_OPERATOR =
+    std::variant<DOUBLE_EQUALS, TRIPLE_EQUALS, BANG_EQUALS, BANG_DOUBLE_EQUALS,
+                 LOGICAL_CONJUNCT, LOGICAL_DISJUNCT, OP_ADDITION, OP_SUBTRACT>;
+enum class TOK_ASSIGN {
+  DIVIDE,
+  BITWISE_CONJUNCT,
   LOGICAL_CONJUNCT,
-  BITWISE_DISJUNCT_ASSIGN,
-  LOGICAL_DISJUNCT_ASSIGN,
+  BITWISE_DISJUNCT,
   LOGICAL_DISJUNCT
 };
-using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
-                           double, TOK_OPERATOR, TOK_BIGINT, std::int64_t>;
+using TOKEN =
+    std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI, double,
+                 TOK_OPERATOR, TOK_BIGINT, std::int64_t, TOK_ASSIGN>;
 
 struct EXPR_CALL;
 struct EXPR_MEMBER;
@@ -115,7 +137,7 @@ struct EXPR_MEMBER {
 struct EXPR_BINARY {
   EXPRESSION left;
   EXPRESSION right;
-  TOKEN op;
+  TOK_OPERATOR op;
 };
 struct EXPR_OBJECT {
   std::vector<std::pair<EXPRESSION, EXPRESSION>> props;
@@ -296,7 +318,7 @@ struct FUNCTION_IR {
 class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
-  std::array<MACHINE_DATATYPE, 32> regfile_type;
+  std::array<MACHINE_DATATYPE, 256> regfile_type;
   std::uint8_t regfile_idx;
 
 public:
@@ -304,14 +326,25 @@ public:
   expected_task<void, COMPILE_ERR> compile();
 
   struct MAKE_CONV {};
-  using DISPATCH_TAG = std::variant<MAKE_CONV>;
+  struct MAKE_BINARY {};
+  using DISPATCH_TAG = std::variant<MAKE_CONV, MAKE_BINARY>;
 
   std::expected<MACHINE_CMD, COMPILE_ERR>
   operator()(MAKE_CONV, DATATYPE_U64 lhs, DATATYPE_I32 rhs);
   std::expected<MACHINE_CMD, COMPILE_ERR>
   operator()(MAKE_CONV, DATATYPE_I64 lhs, DATATYPE_I32 rhs);
-  template <typename T, typename U, typename V>
-  std::expected<MACHINE_CMD, COMPILE_ERR> operator()(T tag, U lhs, V rhs) {
+  template <typename T, typename U>
+  std::expected<MACHINE_CMD, COMPILE_ERR> operator()(MAKE_CONV, T lhs, U rhs) {
+    return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
+  }
+
+  // std::expected<MACHINE_CMD, COMPILE_ERR>
+  // operator()(MAKE_BINARY, std::int64_t lhs, std::int64_t rhs);
+  // std::expected<MACHINE_CMD, COMPILE_ERR>
+  // operator()(MAKE_BINARY, EXPR_NUMBER &lhs, EXPR_NUMBER &rhs);
+  template <typename T, typename U>
+  std::expected<MACHINE_CMD, COMPILE_ERR> operator()(MAKE_BINARY, T lhs,
+                                                     const U &rhs) {
     return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
   }
 

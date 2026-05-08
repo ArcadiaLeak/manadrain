@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cassert>
 #include <charconv>
+#include <functional>
 #include <limits>
 
 #include <unictype.h>
@@ -422,7 +423,7 @@ std::expected<TOKEN, PARSE_ERR> Tokenizer::tokenize() {
         break;
       }
       if (ahead_opt == '=')
-        return TOK_OPERATOR::DIVIDE_ASSIGN;
+        return TOK_ASSIGN::DIVIDE;
       else {
         if (ahead_opt)
           prev();
@@ -461,43 +462,47 @@ std::expected<TOKEN, PARSE_ERR> Tokenizer::tokenize() {
       default:
         return U'=';
       case 1:
-        return TOK_OPERATOR::DOUBLE_EQUALS;
+        return DOUBLE_EQUALS{};
       case 2:
-        return TOK_OPERATOR::TRIPLE_EQUALS;
+        return TRIPLE_EQUALS{};
       }
     }
     case '&': {
       std::optional ch_opt{next()};
       if (ch_opt == '=')
-        return TOK_OPERATOR::BITWISE_CONJUNCT_ASSIGN;
+        return TOK_ASSIGN::BITWISE_CONJUNCT;
       if (ch_opt != '&') {
         backtrack(ch_opt.has_value());
         return U'&';
       }
       ch_opt = next();
       if (ch_opt == '=')
-        return TOK_OPERATOR::LOGICAL_CONJUNCT_ASSIGN;
+        return TOK_ASSIGN::LOGICAL_CONJUNCT;
       else {
         backtrack(ch_opt.has_value());
-        return TOK_OPERATOR::LOGICAL_CONJUNCT;
+        return LOGICAL_CONJUNCT{};
       }
     }
     case '|': {
       std::optional ch_opt{next()};
       if (ch_opt == '=')
-        return TOK_OPERATOR::BITWISE_DISJUNCT_ASSIGN;
+        return TOK_ASSIGN::BITWISE_DISJUNCT;
       if (ch_opt != '|') {
         backtrack(ch_opt.has_value());
         return U'|';
       }
       ch_opt = next();
       if (ch_opt == '=')
-        return TOK_OPERATOR::LOGICAL_DISJUNCT_ASSIGN;
+        return TOK_ASSIGN::LOGICAL_DISJUNCT;
       else {
         backtrack(ch_opt.has_value());
-        return TOK_OPERATOR::LOGICAL_DISJUNCT;
+        return LOGICAL_DISJUNCT{};
       }
     }
+    case '+':
+      return OP_ADDITION{};
+    case '-':
+      return OP_SUBTRACT{};
     default:
       if (std::isdigit(leading))
         return TokNumber::tokenize(leading);
@@ -703,14 +708,14 @@ wrap_up:
 expected_task<void, PARSE_ERR> Parser::parse_additive_expr() {
   co_await parse_postfix_expr().ok();
   do {
-    if (my_token == TOKEN{U'+'})
+    if (my_token == TOKEN{OP_ADDITION{}})
       break;
-    if (my_token == TOKEN{U'-'})
+    if (my_token == TOKEN{OP_SUBTRACT{}})
       break;
     co_return {};
   } while (0);
   EXPRESSION expr_left = std::move(my_expression);
-  TOKEN op = my_token;
+  TOK_OPERATOR op = std::get<TOK_OPERATOR>(my_token);
   co_await tokenize();
   co_await parse_postfix_expr().ok();
   my_expression = std::make_unique<EXPR_NODE>(
@@ -728,7 +733,7 @@ expected_task<void, PARSE_ERR> Parser::parse_relation_expr() {
     co_return {};
   } while (0);
   EXPRESSION expr_left = std::move(my_expression);
-  TOKEN op = my_token;
+  TOK_OPERATOR op = std::get<TOK_OPERATOR>(my_token);
   co_await tokenize();
   co_await parse_additive_expr().ok();
   my_expression = std::make_unique<EXPR_NODE>(
@@ -739,14 +744,14 @@ expected_task<void, PARSE_ERR> Parser::parse_relation_expr() {
 expected_task<void, PARSE_ERR> Parser::parse_equality_expr() {
   co_await parse_relation_expr().ok();
   do {
-    if (my_token == TOKEN{TOK_OPERATOR::DOUBLE_EQUALS})
+    if (my_token == TOKEN{DOUBLE_EQUALS{}})
       break;
-    if (my_token == TOKEN{TOK_OPERATOR::TRIPLE_EQUALS})
+    if (my_token == TOKEN{TRIPLE_EQUALS{}})
       break;
     co_return {};
   } while (0);
   EXPRESSION expr_left = std::move(my_expression);
-  TOKEN op = my_token;
+  TOK_OPERATOR op = std::get<TOK_OPERATOR>(my_token);
   co_await tokenize();
   co_await parse_relation_expr().ok();
   my_expression = std::make_unique<EXPR_NODE>(
@@ -874,7 +879,7 @@ expected_task<void, PARSE_ERR> Parser::parse_assign_expr() {
 
 expected_task<void, PARSE_ERR> Parser::parse_logical_conjunct() {
   co_await parse_equality_expr().ok();
-  while (my_token == TOKEN{TOK_OPERATOR::LOGICAL_CONJUNCT}) {
+  while (my_token == TOKEN{LOGICAL_CONJUNCT{}}) {
     EXPRESSION expr_left = std::move(my_expression);
     TOKEN op = my_token;
     co_await tokenize();
@@ -887,7 +892,7 @@ expected_task<void, PARSE_ERR> Parser::parse_logical_conjunct() {
 
 expected_task<void, PARSE_ERR> Parser::parse_logical_disjunct() {
   co_await parse_logical_conjunct().ok();
-  while (my_token == TOKEN{TOK_OPERATOR::LOGICAL_DISJUNCT}) {
+  while (my_token == TOKEN{LOGICAL_DISJUNCT{}}) {
     EXPRESSION expr_left = std::move(my_expression);
     TOKEN op = my_token;
     co_await tokenize();
@@ -1144,12 +1149,26 @@ expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER &expr) {
   co_return expr.visit(*this).ok();
 }
 
+// std::expected<MACHINE_CMD, COMPILE_ERR>
+// Language::operator()(MAKE_BINARY, std::int64_t lhs, std::int64_t rhs) {
+//   std::uint8_t lhs_idx{regfile_idx};
+//   regfile_idx += 8;
+//   std::uint8_t rhs_idx{regfile_idx};
+//   regfile_idx -= 8;
+//   return I64_ADD{regfile_idx, lhs_idx, rhs_idx};
+// }
+
+// std::expected<MACHINE_CMD, COMPILE_ERR>
+// Language::operator()(MAKE_BINARY, EXPR_NUMBER &lhs, EXPR_NUMBER &rhs) {
+//   return std::visit(*this, DISPATCH_TAG{MAKE_BINARY{}}, lhs, rhs);
+// }
+
 expected_task<void, COMPILE_ERR> Language::operator()(EXPR_BINARY &expr) {
-  co_await expr.left.visit(*this).ok();
-  ++regfile_idx;
-  co_await expr.right.visit(*this).ok();
-  --regfile_idx;
-  co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
+  // MACHINE_CMD cmd{co_await };
+  // scope_stack.top().command_vec.push_back(cmd);
+  std::visit(*this, DISPATCH_TAG{MAKE_BINARY{}}, DISPATCH_TAG{MAKE_BINARY{}},
+             expr.right);
+  co_return {};
 }
 
 expected_task<void, COMPILE_ERR>
