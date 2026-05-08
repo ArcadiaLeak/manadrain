@@ -67,43 +67,21 @@ enum TOKV_INDEX {
   TOKV_BIGINT,
   TOKV_INT
 };
-struct DOUBLE_EQUALS {
-  bool operator==(const DOUBLE_EQUALS &) const = default;
-};
-struct TRIPLE_EQUALS {
-  bool operator==(const TRIPLE_EQUALS &) const = default;
-};
-struct BANG_EQUALS {
-  bool operator==(const BANG_EQUALS &) const = default;
-};
-struct BANG_DOUBLE_EQUALS {
-  bool operator==(const BANG_DOUBLE_EQUALS &) const = default;
-};
-struct LOGICAL_CONJUNCT {
-  bool operator==(const LOGICAL_CONJUNCT &) const = default;
-};
-struct LOGICAL_DISJUNCT {
-  bool operator==(const LOGICAL_DISJUNCT &) const = default;
-};
-struct OP_ADDITION {
-  bool operator==(const OP_ADDITION &) const = default;
-};
-struct OP_SUBTRACT {
-  bool operator==(const OP_SUBTRACT &) const = default;
-};
-using TOK_OPERATOR =
-    std::variant<DOUBLE_EQUALS, TRIPLE_EQUALS, BANG_EQUALS, BANG_DOUBLE_EQUALS,
-                 LOGICAL_CONJUNCT, LOGICAL_DISJUNCT, OP_ADDITION, OP_SUBTRACT>;
-enum class TOK_ASSIGN {
-  DIVIDE,
-  BITWISE_CONJUNCT,
+enum class TOK_OPERATOR {
+  DOUBLE_EQUALS,
+  TRIPLE_EQUALS,
+  BANG_EQUALS,
+  BANG_DOUBLE_EQUALS,
+  DIVIDE_ASSIGN,
+  BITWISE_CONJUNCT_ASSIGN,
+  LOGICAL_CONJUNCT_ASSIGN,
   LOGICAL_CONJUNCT,
-  BITWISE_DISJUNCT,
+  BITWISE_DISJUNCT_ASSIGN,
+  LOGICAL_DISJUNCT_ASSIGN,
   LOGICAL_DISJUNCT
 };
-using TOKEN =
-    std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI, double,
-                 TOK_OPERATOR, TOK_BIGINT, std::int64_t, TOK_ASSIGN>;
+using TOKEN = std::variant<std::monostate, char32_t, TOK_STRING, TOK_IDENTI,
+                           double, TOK_OPERATOR, TOK_BIGINT, std::int64_t>;
 
 enum EXPRV_INDEX {
   EXPRV_NIL,
@@ -132,7 +110,7 @@ struct EXPR_MEMBER {
 struct EXPR_BINARY {
   EXPRESSION left;
   EXPRESSION right;
-  TOK_OPERATOR op;
+  TOKEN op;
 };
 struct EXPR_OBJECT {
   std::vector<std::pair<EXPRESSION, EXPRESSION>> props;
