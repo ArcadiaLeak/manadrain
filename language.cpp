@@ -708,14 +708,14 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_additive_expr() {
       break;
     if (my_token == TOKEN{OP_SUBTRACT{}})
       break;
-    co_return {};
+    co_return expr_left;
   } while (0);
   TOK_OPERATOR op = std::get<TOK_OPERATOR>(my_token);
   co_await tokenize();
   auto ret_expr = expr_vec.insert(
       expr_vec.end(),
       EXPR_BINARY{expr_left, co_await parse_postfix_expr().ok(), op});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_relation_expr() {
@@ -725,14 +725,14 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_relation_expr() {
       break;
     if (my_token == TOKEN{U'<'})
       break;
-    co_return {};
+    co_return expr_left;
   } while (0);
   TOK_OPERATOR op = std::get<TOK_OPERATOR>(my_token);
   co_await tokenize();
   auto ret_expr = expr_vec.insert(
       expr_vec.end(),
       EXPR_BINARY{expr_left, co_await parse_additive_expr().ok(), op});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_equality_expr() {
@@ -742,14 +742,14 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_equality_expr() {
       break;
     if (my_token == TOKEN{TRIPLE_EQUALS{}})
       break;
-    co_return {};
+    co_return expr_left;
   } while (0);
   TOK_OPERATOR op = std::get<TOK_OPERATOR>(my_token);
   co_await tokenize();
   auto ret_expr = expr_vec.insert(
       expr_vec.end(),
       EXPR_BINARY{expr_left, co_await parse_relation_expr().ok(), op});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_object_literal() {
@@ -785,7 +785,7 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_object_literal() {
   co_await tokenize();
   auto ret_expr =
       expr_vec.insert(expr_vec.end(), EXPR_OBJECT{std::move(prop_vec)});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 std::expected<EXPRESSION, PARSE_ERR> Parser::parse_primary_expr() {
@@ -795,9 +795,9 @@ std::expected<EXPRESSION, PARSE_ERR> Parser::parse_primary_expr() {
   case TOKV_IDENTI:
     return std::get<TOKV_IDENTI>(my_token);
   case TOKV_FLOAT:
-    return std::get<TOKV_FLOAT>(my_token);
+    return EXPR_NUMBER{std::get<TOKV_FLOAT>(my_token)};
   case TOKV_INT:
-    return std::get<TOKV_INT>(my_token);
+    return EXPR_NUMBER{std::get<TOKV_INT>(my_token)};
   case TOKV_PUNCT:
     if (my_token == TOKEN{U'{'})
       return parse_object_literal().ok();
@@ -828,7 +828,7 @@ Parser::parse_call_expr(EXPRESSION callee_expr) {
   }
   auto ret_expr = expr_vec.insert(expr_vec.end(),
                                   EXPR_CALL{callee_expr, std::move(arguments)});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 expected_task<EXPRESSION, PARSE_ERR>
@@ -838,7 +838,7 @@ Parser::parse_member_expr(EXPRESSION obj_expr) {
     co_return std::unexpected{REQUIRED_ERR::FIELD_NAME};
   auto ret_expr = expr_vec.insert(
       expr_vec.end(), EXPR_MEMBER{obj_expr, std::get<TOK_IDENTI>(my_token)});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 expected_task<EXPRESSION, PARSE_ERR>
@@ -848,17 +848,17 @@ Parser::parse_access_expr(EXPRESSION obj_expr) {
   co_await expect_punct(']');
   auto ret_expr =
       expr_vec.insert(expr_vec.end(), EXPR_ACCESS{obj_expr, prop_expr});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_assign_expr() {
   EXPRESSION lhs_expr{co_await parse_logical_disjunct().ok()};
   if (my_token != TOKEN{U'='})
-    co_return {};
+    co_return lhs_expr;
   co_await tokenize();
   auto ret_expr = expr_vec.insert(
       expr_vec.end(), EXPR_ASSIGN{lhs_expr, co_await parse_assign_expr().ok()});
-  co_return std::distance(expr_vec.begin(), ret_expr);
+  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_logical_conjunct() {
@@ -869,7 +869,7 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_logical_conjunct() {
     auto ret_expr = expr_vec.insert(
         expr_vec.end(),
         EXPR_LOGIC{expr_left, co_await parse_equality_expr().ok(), op});
-    expr_left = std::distance(expr_vec.begin(), ret_expr);
+    expr_left = EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
   }
   co_return expr_left;
 }
@@ -882,7 +882,7 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_logical_disjunct() {
     auto ret_expr = expr_vec.insert(
         expr_vec.end(),
         EXPR_LOGIC{expr_left, co_await parse_logical_conjunct().ok(), op});
-    expr_left = std::distance(expr_vec.begin(), ret_expr);
+    expr_left = EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
   }
   co_return expr_left;
 }
@@ -966,7 +966,7 @@ Parser::parse_function_decl(EXPRESSION identifier) {
   while (my_token != TOKEN{U'}'})
     declaration.subprogram.push_back(co_await parse_statement());
   auto ret_stmt = stmt_vec.insert(stmt_vec.end(), std::move(declaration));
-  co_return std::distance(stmt_vec.begin(), ret_stmt);
+  co_return STMT_PTR{std::distance(stmt_vec.begin(), ret_stmt)};
 }
 
 expected_task<STATEMENT, PARSE_ERR> Parser::parse_import() {
@@ -1012,7 +1012,7 @@ expected_task<STATEMENT, PARSE_ERR> Parser::parse_punct_statement() {
       statement.subprogram.push_back(co_await parse_statement());
     co_await tokenize();
     auto ret_stmt = stmt_vec.insert(stmt_vec.end(), std::move(statement));
-    co_return std::distance(stmt_vec.begin(), ret_stmt);
+    co_return STMT_PTR{std::distance(stmt_vec.begin(), ret_stmt)};
   }
   default:
     co_return parse_stmt_expression().ok();
@@ -1052,7 +1052,7 @@ expected_task<STATEMENT, PARSE_ERR> Parser::parse_ident_statement() {
     auto ret_stmt = stmt_vec.insert(
         stmt_vec.end(),
         STMT_IF{co_await parse_paren_expr().ok(), co_await parse_statement()});
-    co_return std::distance(stmt_vec.begin(), ret_stmt);
+    co_return STMT_PTR{std::distance(stmt_vec.begin(), ret_stmt)};
   }
   default:
     co_return parse_stmt_expression().ok();
@@ -1111,15 +1111,25 @@ expected_task<void, COMPILE_ERR> Language::operator()(std::int64_t num) {
   co_return {};
 }
 
-expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER &expr) {
-  co_return expr.visit(*this).ok();
+expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER expr) {
+  co_return expr.alt.visit(*this).ok();
+}
+
+std::expected<MACHINE_CMD, COMPILE_ERR>
+Language::operator()(MAKE_BINARY, EXPR_NUMBER lhs, EXPR_NUMBER rhs) {
+  return {};
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(EXPR_BINARY &expr) {
+  std::visit(*this, DISPATCH_TAG{MAKE_BINARY{}}, expr.left, expr.right);
   co_return {};
 }
 
-expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN &ret_stmt) {
+expected_task<void, COMPILE_ERR> Language::operator()(EXPR_PTR expr_ptr) {
+  co_return expr_vec[expr_ptr.expr_idx].visit(*this).ok();
+}
+
+expected_task<void, COMPILE_ERR> Language::operator()(STMT_RETURN ret_stmt) {
   co_await ret_stmt.argument.visit(*this).ok();
   scope_stack.top().command_vec.push_back(co_await std::visit(
       *this, DISPATCH_TAG{MAKE_CONV{}}, regfile_type[regfile_idx],
@@ -1138,6 +1148,10 @@ expected_task<void, COMPILE_ERR> Language::operator()(DECL_FUNCTION &decl) {
   machine.funcname_umap.insert(std::make_pair(func_name, func_idx));
   machine.function_vec.emplace_back(std::move(scope_stack.top().command_vec));
   scope_stack.pop();
+}
+
+expected_task<void, COMPILE_ERR> Language::operator()(STMT_PTR stmt_ptr) {
+  co_return stmt_vec[stmt_ptr.stmt_idx].visit(*this).ok();
 }
 
 expected_task<void, COMPILE_ERR> Language::compile() {

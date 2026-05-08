@@ -112,9 +112,14 @@ enum EXPRV_INDEX {
   EXPRV_NUMBER,
   EXPRV_PTR
 };
-using EXPR_NUMBER = std::variant<double, std::int64_t>;
-using EXPRESSION = std::variant<std::monostate, TOK_STRING, TOK_IDENTI,
-                                EXPR_NUMBER, std::size_t>;
+struct EXPR_NUMBER {
+  std::variant<double, std::int64_t> alt;
+};
+struct EXPR_PTR {
+  std::ptrdiff_t expr_idx;
+};
+using EXPRESSION =
+    std::variant<std::monostate, TOK_STRING, TOK_IDENTI, EXPR_NUMBER, EXPR_PTR>;
 
 struct EXPR_CALL {
   EXPRESSION callee;
@@ -160,8 +165,11 @@ struct DECL_IMPORT {
 struct STMT_RETURN {
   EXPRESSION argument;
 };
+struct STMT_PTR {
+  std::ptrdiff_t stmt_idx;
+};
 using STATEMENT = std::variant<std::monostate, DECL_VARIABLE, EXPRESSION,
-                               std::size_t, STMT_RETURN, DECL_IMPORT>;
+                               STMT_PTR, STMT_RETURN, DECL_IMPORT>;
 
 struct STMT_BLOCK {
   std::vector<STATEMENT> subprogram;
@@ -268,11 +276,13 @@ public:
   std::vector<STATEMENT> program;
   expected_task<void, PARSE_ERR> parse();
 
-private:
-  TOKEN my_token;
+protected:
   std::vector<STMT_NODE> stmt_vec;
   std::vector<EXPR_NODE> expr_vec;
   std::vector<std::vector<TOK_IDENTI>> specifier_vec;
+
+private:
+  TOKEN my_token;
 
   std::expected<void, PARSE_ERR> tokenize();
   expected_task<void, PARSE_ERR> expect_statement_end();
@@ -331,18 +341,24 @@ public:
     return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
   }
 
+  std::expected<MACHINE_CMD, COMPILE_ERR>
+  operator()(MAKE_BINARY, EXPR_NUMBER lhs, EXPR_NUMBER rhs);
   template <typename T, typename U>
   std::expected<MACHINE_CMD, COMPILE_ERR> operator()(MAKE_BINARY, T lhs,
-                                                     const U &rhs) {
+                                                     U rhs) {
     return std::unexpected{COMPILE_ERR::TYPE_MISMATCH};
   }
 
   expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
-  expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER &expr);
+  expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER expr);
+
   expected_task<void, COMPILE_ERR> operator()(EXPR_BINARY &expr);
+  expected_task<void, COMPILE_ERR> operator()(EXPR_PTR expr_ptr);
+
+  expected_task<void, COMPILE_ERR> operator()(STMT_RETURN ret_stmt);
 
   expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
-  expected_task<void, COMPILE_ERR> operator()(STMT_RETURN &ret_stmt);
+  expected_task<void, COMPILE_ERR> operator()(STMT_PTR stmt_ptr);
 
   template <typename T> expected_task<void, COMPILE_ERR> operator()(T &stmt) {
     co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
