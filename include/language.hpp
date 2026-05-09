@@ -295,11 +295,17 @@ private:
 };
 
 struct FUNCTION_IR {
+  std::vector<std::pair<MACHINE_DATATYPE, std::size_t>> loctype_vec;
   MACHINE_DATATYPE return_type;
   std::vector<MACHINE_CMD> command_vec;
 };
 
-enum class COMPILE_ERR { UNSUPPORTED, RESERVED_WORD, TYPE_MISMATCH };
+enum class COMPILE_ERR {
+  UNSUPPORTED,
+  RESERVED_WORD,
+  TYPE_MISMATCH,
+  VOID_IDENTIF
+};
 class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
@@ -308,18 +314,22 @@ private:
 public:
   Machine machine;
   expected_task<void, COMPILE_ERR> compile();
-  std::expected<MACHINE_CMD, COMPILE_ERR>
-  append_cast(bool is_implicit, MACHINE_DATATYPE from, MACHINE_DATATYPE to);
+  std::expected<MACHINE_CMD, COMPILE_ERR> make_cast(bool is_implicit,
+                                                    std::uint8_t adv,
+                                                    MACHINE_DATATYPE from,
+                                                    MACHINE_DATATYPE to);
 
   expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER expr);
+  expected_task<void, COMPILE_ERR> operator()(TOK_IDENTI identifier);
 
   expected_task<void, COMPILE_ERR> operator()(EXPR_BINARY &expr);
   expected_task<void, COMPILE_ERR> operator()(EXPR_PTR expr_ptr);
 
-  expected_task<void, COMPILE_ERR> operator()(STMT_RETURN ret_stmt);
-
+  expected_task<void, COMPILE_ERR> operator()(DECL_VARIABLE &decl);
   expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
+
+  expected_task<void, COMPILE_ERR> operator()(STMT_RETURN ret_stmt);
   expected_task<void, COMPILE_ERR> operator()(STMT_PTR stmt_ptr);
 
   template <typename T> expected_task<void, COMPILE_ERR> operator()(T &stmt) {

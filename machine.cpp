@@ -6,55 +6,76 @@
 
 namespace Manadrain {
 void Machine::operator()(I32_ADD cmd) {
-  std::int32_t lhs{register_file.back().sint};
+  std::int32_t rhs{std::bit_cast<std::int32_t>(
+      static_cast<std::uint32_t>(register_file.back()))};
   register_file.pop_back();
-  std::int32_t rhs{register_file.back().sint};
-  register_file.back().sint = lhs + rhs;
+  std::int32_t lhs{std::bit_cast<std::int32_t>(
+      static_cast<std::uint32_t>(register_file.back()))};
+  register_file.back() = std::bit_cast<std::uint32_t>(lhs + rhs);
 }
 
 void Machine::operator()(I64_ADD cmd) {
-  std::int64_t lhs{register_file.back().slong};
+  std::int64_t rhs{std::bit_cast<std::int64_t>(register_file.back())};
   register_file.pop_back();
-  std::int64_t rhs{register_file.back().slong};
-  register_file.back().slong = lhs + rhs;
+  std::int64_t lhs{std::bit_cast<std::int64_t>(register_file.back())};
+  register_file.back() = std::bit_cast<std::uint64_t>(lhs + rhs);
 }
 
 void Machine::operator()(F32_ADD cmd) {
-  std::float32_t lhs{register_file.back().float32};
+  std::float32_t rhs{std::bit_cast<std::float32_t>(
+      static_cast<std::uint32_t>(register_file.back()))};
   register_file.pop_back();
-  std::float32_t rhs{register_file.back().float32};
-  register_file.back().float32 = lhs + rhs;
+  std::float32_t lhs{std::bit_cast<std::float32_t>(
+      static_cast<std::uint32_t>(register_file.back()))};
+  register_file.back() = std::bit_cast<std::uint32_t>(lhs + rhs);
 }
 
-void Machine::operator()(U64_LOC_LOAD cmd) {
-  register_file.push_back(UNIFORM{.ulong = local_heap[cmd.offset >> 3].ulong});
+void Machine::operator()(I64_SUB cmd) {
+  std::int64_t rhs{std::bit_cast<std::int64_t>(register_file.back())};
+  register_file.pop_back();
+  std::int64_t lhs{std::bit_cast<std::int64_t>(register_file.back())};
+  register_file.back() = std::bit_cast<std::uint64_t>(lhs - rhs);
 }
 
-void Machine::operator()(U64_LOC_STOR cmd) {
-  local_heap[cmd.offset >> 3].ulong = register_file.back().ulong;
+void Machine::operator()(LOC_LOAD cmd) {
+  register_file.push_back(local_heap[cmd.offset]);
+}
+
+void Machine::operator()(LOC_STORE cmd) {
+  local_heap[cmd.offset] = register_file.back();
+  register_file.pop_back();
+}
+
+void Machine::operator()(LOC_APPEND cmd) {
+  local_heap.push_back(register_file.back());
   register_file.pop_back();
 }
 
 void Machine::operator()(I32_PUSH cmd) {
-  register_file.push_back(UNIFORM{.sint = cmd.val});
+  register_file.push_back(std::bit_cast<std::uint32_t>(cmd.val));
 }
 
 void Machine::operator()(I64_PUSH cmd) {
-  register_file.push_back(UNIFORM{.slong = cmd.val});
+  register_file.push_back(std::bit_cast<std::uint64_t>(cmd.val));
 }
 
-void Machine::operator()(U64_PUSH cmd) {
-  register_file.push_back(UNIFORM{.ulong = cmd.val});
-}
+void Machine::operator()(U64_PUSH cmd) { register_file.push_back(cmd.val); }
 
 void Machine::operator()(U64_TO_I32 cmd) {
-  register_file.back().sint =
-      static_cast<std::int32_t>(register_file.back().ulong);
+  register_file.back() = std::bit_cast<std::uint32_t>(
+      static_cast<std::int32_t>(register_file.back()));
 }
 
 void Machine::operator()(I64_TO_I32 cmd) {
-  register_file.back().sint =
-      static_cast<std::int32_t>(register_file.back().slong);
+  register_file.back() = std::bit_cast<std::uint32_t>(static_cast<std::int32_t>(
+      std::bit_cast<std::int64_t>(register_file.back())));
+}
+
+void Machine::operator()(I32_TO_I64 cmd) {
+  auto src_it = std::next(register_file.rbegin(), cmd.adv);
+  std::int32_t src{
+      std::bit_cast<std::int32_t>(static_cast<std::uint32_t>(*src_it))};
+  *src_it = static_cast<std::int64_t>(src);
 }
 
 void Machine::operator()(std::size_t func_idx) {
@@ -69,8 +90,7 @@ std::size_t Machine::heap_alloc() {
     last_vacancy = std::get<HEAP_VACANCY>(global_heap[idx]).another;
     return idx;
   }
-  auto heap_iter =
-      global_heap.insert(global_heap.end(), std::vector<UNIFORM>{});
+  auto heap_iter = global_heap.emplace(global_heap.end());
   return std::distance(global_heap.begin(), heap_iter);
 }
 
@@ -85,9 +105,8 @@ void Machine::heap_free(std::size_t idx) {
     heap_reclaim();
 }
 
-bool Machine::is_tombstone_ptr(UNIFORM word) {
-  std::size_t idx{word.ulong};
-  return idx < global_heap.size() && global_heap[idx].index() == 1;
+bool Machine::is_tombstone_ptr(std::uint64_t word) {
+  return word < global_heap.size() && global_heap[word].index() == 1;
 };
 
 void Machine::heap_reclaim() {
@@ -97,11 +116,11 @@ void Machine::heap_reclaim() {
   auto united_heap = std::ranges::concat_view{
       local_heap, global_heap | std::views::transform([](HEAP_SLOT &slot) {
                     return slot.index() == 0 ? std::span{std::get<0>(slot)}
-                                             : std::span<UNIFORM>{};
+                                             : std::span<std::uint64_t>{};
                   }) | std::views::join};
-  for (UNIFORM w : united_heap)
+  for (std::uint64_t w : united_heap)
     if (is_tombstone_ptr(w))
-      referenced[w.ulong] = 1;
+      referenced[w] = 1;
 
   for (std::size_t idx = 0; idx < global_heap.size(); ++idx)
     if (not referenced[idx] && global_heap[idx].index() == 1) {
