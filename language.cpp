@@ -928,11 +928,11 @@ expected_task<void, PARSE_ERR> Parser::expect_statement_end() {
   co_return std::unexpected{UNEXPECTED_PUNCT{';'}};
 }
 
-expected_task<MACHINE_DATATYPE, PARSE_ERR> Parser::parse_type_annotation() {
+expected_task<std::size_t, PARSE_ERR> Parser::parse_type_annotation() {
   co_await expect_punct(':');
   co_await tokenize();
   if (my_token == TOKEN{TOK_IDENTI{false, S_ATOM_int}})
-    co_return MACHINE_DATATYPE::I32T;
+    co_return DATATYPE_I32;
   co_return std::unexpected{INVALID_TYPE_ANNOTATION{}};
 }
 
@@ -1089,7 +1089,7 @@ std::expected<std::size_t, COMPILE_ERR> get_iatom(DECL_FUNCTION &decl) {
 
 expected_task<void, COMPILE_ERR> Language::operator()(std::int64_t num) {
   scope_stack.top().command_vec.push_back(I64_PUSH{num});
-  regfile_type.push_back(MACHINE_DATATYPE::I64T);
+  regfile_type.push_back(DATATYPE_I64);
   co_return {};
 }
 
@@ -1098,20 +1098,20 @@ expected_task<void, COMPILE_ERR> Language::operator()(EXPR_NUMBER expr) {
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(TOK_IDENTI identifier) {
-  auto local_it{scope_stack.top().loctype_vec.begin()};
+  auto local_it{scope_stack.top().local_vec.begin()};
   std::size_t offset{};
   while (1) {
-    if (local_it == scope_stack.top().loctype_vec.end())
+    if (local_it == scope_stack.top().local_vec.end())
       co_return std::unexpected{COMPILE_ERR::VOID_IDENTIF};
-    if (local_it->second == identifier.atom_sh)
+    if (local_it->identifier == identifier.atom_sh)
       break;
     ++local_it;
     ++offset;
   }
-  switch (local_it->first) {
-  case MACHINE_DATATYPE::I32T:
+  switch (local_it->datatype) {
+  case DATATYPE_I32:
     scope_stack.top().command_vec.push_back(LOC_LOAD{offset});
-    regfile_type.push_back(MACHINE_DATATYPE::I32T);
+    regfile_type.push_back(DATATYPE_I32);
     co_return {};
   default:
     co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
@@ -1123,34 +1123,34 @@ expected_task<void, COMPILE_ERR> Language::operator()(EXPR_BINARY &expr) {
   co_await expr.right.visit(*this).ok();
   bool matched{1};
   do {
-    if (regfile_type.at(regfile_type.size() - 2) == MACHINE_DATATYPE::I64T) {
+    if (regfile_type.at(regfile_type.size() - 2) == DATATYPE_I64) {
       if (expr.op == TOKEN{U'+'} &&
-          regfile_type.at(regfile_type.size() - 1) == MACHINE_DATATYPE::I64T) {
+          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I64) {
         scope_stack.top().command_vec.push_back(I64_ADD{});
         break;
       }
       if (expr.op == TOKEN{U'+'} &&
-          regfile_type.at(regfile_type.size() - 1) == MACHINE_DATATYPE::I32T) {
+          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I32) {
         scope_stack.top().command_vec.push_back(I32_TO_I64{0});
         scope_stack.top().command_vec.push_back(I64_ADD{});
         break;
       }
       if (expr.op == TOKEN{U'-'} &&
-          regfile_type.at(regfile_type.size() - 1) == MACHINE_DATATYPE::I32T) {
+          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I32) {
         scope_stack.top().command_vec.push_back(I32_TO_I64{0});
         scope_stack.top().command_vec.push_back(I64_SUB{});
         break;
       }
     }
-    if (regfile_type.at(regfile_type.size() - 2) == MACHINE_DATATYPE::I32T) {
+    if (regfile_type.at(regfile_type.size() - 2) == DATATYPE_I32) {
       if (expr.op == TOKEN{U'+'} &&
-          regfile_type.at(regfile_type.size() - 1) == MACHINE_DATATYPE::I64T) {
+          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I64) {
         scope_stack.top().command_vec.push_back(I32_TO_I64{1});
         scope_stack.top().command_vec.push_back(I64_ADD{});
         break;
       }
       if (expr.op == TOKEN{U'-'} &&
-          regfile_type.at(regfile_type.size() - 1) == MACHINE_DATATYPE::I64T) {
+          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I64) {
         scope_stack.top().command_vec.push_back(I32_TO_I64{1});
         scope_stack.top().command_vec.push_back(I64_SUB{});
         break;
@@ -1169,15 +1169,16 @@ expected_task<void, COMPILE_ERR> Language::operator()(EXPR_PTR expr_ptr) {
   co_return expr_vec[expr_ptr.expr_idx].visit(*this).ok();
 }
 
-std::expected<MACHINE_CMD, COMPILE_ERR>
-Language::make_cast(bool is_implicit, std::uint8_t adv, MACHINE_DATATYPE from,
-                    MACHINE_DATATYPE to) {
+std::expected<MACHINE_CMD, COMPILE_ERR> Language::make_cast(bool is_implicit,
+                                                            std::uint8_t adv,
+                                                            std::size_t from,
+                                                            std::size_t to) {
   std::optional<MACHINE_CMD> cmd{};
-  if (from == MACHINE_DATATYPE::I64T && to == MACHINE_DATATYPE::I32T)
+  if (from == DATATYPE_I64 && to == DATATYPE_I32)
     cmd = I64_TO_I32{};
-  else if (from == MACHINE_DATATYPE::U64T && to == MACHINE_DATATYPE::I32T)
+  else if (from == DATATYPE_U64 && to == DATATYPE_I32)
     cmd = U64_TO_I32{};
-  else if (from == MACHINE_DATATYPE::I32T && to == MACHINE_DATATYPE::I64T)
+  else if (from == DATATYPE_I32 && to == DATATYPE_I64)
     cmd = I32_TO_I64{adv};
   if (cmd) {
     regfile_type.back() = to;
@@ -1204,7 +1205,7 @@ expected_task<void, COMPILE_ERR> Language::operator()(DECL_VARIABLE &decl) {
     scope_stack.top().command_vec.push_back(cast_cmd);
   }
   scope_stack.top().command_vec.push_back(LOC_APPEND{});
-  scope_stack.top().loctype_vec.push_back(
+  scope_stack.top().local_vec.push_back(
       {decl.datatype, decl.identifier.atom_sh});
   regfile_type.pop_back();
   co_return {};

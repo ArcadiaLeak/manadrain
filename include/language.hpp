@@ -135,7 +135,7 @@ using EXPR_NODE = std::variant<EXPR_CALL, EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT,
 struct DECL_VARIABLE {
   std::size_t kind;
   TOK_IDENTI identifier;
-  MACHINE_DATATYPE datatype;
+  std::size_t datatype;
   EXPRESSION initializer;
 };
 struct DECL_IMPORT {
@@ -161,7 +161,7 @@ struct STMT_IF {
 };
 struct DECL_FUNCTION {
   EXPRESSION identifier;
-  MACHINE_DATATYPE return_type;
+  std::size_t return_type;
   std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
 };
@@ -282,7 +282,7 @@ private:
   expected_task<EXPRESSION, PARSE_ERR> parse_logical_disjunct();
   expected_task<EXPRESSION, PARSE_ERR> parse_paren_expr();
 
-  expected_task<MACHINE_DATATYPE, PARSE_ERR> parse_type_annotation();
+  expected_task<std::size_t, PARSE_ERR> parse_type_annotation();
 
   expected_task<STATEMENT, PARSE_ERR> parse_import();
   expected_task<STATEMENT, PARSE_ERR> parse_variable_decl();
@@ -295,8 +295,12 @@ private:
 };
 
 struct FUNCTION_IR {
-  std::vector<std::pair<MACHINE_DATATYPE, std::size_t>> loctype_vec;
-  MACHINE_DATATYPE return_type;
+  struct LOCAL_VAR {
+    std::size_t datatype;
+    std::size_t identifier;
+  };
+  std::vector<LOCAL_VAR> local_vec;
+  std::size_t return_type;
   std::vector<MACHINE_CMD> command_vec;
 };
 
@@ -309,15 +313,15 @@ enum class COMPILE_ERR {
 class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
-  std::inplace_vector<MACHINE_DATATYPE, 32> regfile_type;
+  std::inplace_vector<std::size_t, 32> regfile_type;
 
 public:
   Machine machine;
   expected_task<void, COMPILE_ERR> compile();
   std::expected<MACHINE_CMD, COMPILE_ERR> make_cast(bool is_implicit,
                                                     std::uint8_t adv,
-                                                    MACHINE_DATATYPE from,
-                                                    MACHINE_DATATYPE to);
+                                                    std::size_t from,
+                                                    std::size_t to);
 
   expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER expr);

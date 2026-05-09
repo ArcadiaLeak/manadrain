@@ -9,7 +9,13 @@
 #include <vector>
 
 namespace Manadrain {
-enum class MACHINE_DATATYPE { I32T, I64T, F32T, F64T, U32T, U64T };
+inline constexpr std::size_t DATATYPE_I32{0};
+inline constexpr std::size_t DATATYPE_I64{1};
+inline constexpr std::size_t DATATYPE_F32{2};
+inline constexpr std::size_t DATATYPE_F64{3};
+inline constexpr std::size_t DATATYPE_U32{4};
+inline constexpr std::size_t DATATYPE_U64{5};
+inline constexpr std::size_t DATATYPE_STR{6};
 
 struct I32_ADD {};
 struct I64_ADD {};
