@@ -1,3 +1,4 @@
 function helloworld(): int {
-    return 2 + 2;
+    let i: int = 2 + 7;
+    return i - 4;
 }
