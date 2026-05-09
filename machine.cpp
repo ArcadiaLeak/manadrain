@@ -120,8 +120,8 @@ void Machine::heap_reclaim() {
                                             : std::span<std::uint64_t>{};
                   }) | std::views::join};
   for (std::uint64_t w : united_heap)
-    if (is_tombstone_ptr(w))
-      referenced[w] = 1;
+    if (is_tombstone_ptr(~w))
+      referenced[~w] = 1;
 
   for (std::size_t idx = 0; idx < global_heap.size(); ++idx)
     if (not referenced[idx] && !global_heap[idx] &&
