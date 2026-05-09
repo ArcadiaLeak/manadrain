@@ -710,10 +710,9 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_additive_expr() {
   } while (0);
   TOKEN op = my_token;
   co_await tokenize();
-  auto ret_expr = expr_vec.insert(
-      expr_vec.end(),
-      EXPR_BINARY{expr_left, co_await parse_postfix_expr().ok(), op});
-  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
+  EXPR_BINARY binary_expr{expr_left, co_await parse_postfix_expr().ok(), op};
+  co_return EXPR_PTR{std::distance(
+      expr_vec.begin(), expr_vec.insert(expr_vec.end(), binary_expr))};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_relation_expr() {
@@ -727,10 +726,9 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_relation_expr() {
   } while (0);
   TOKEN op = my_token;
   co_await tokenize();
-  auto ret_expr = expr_vec.insert(
-      expr_vec.end(),
-      EXPR_BINARY{expr_left, co_await parse_additive_expr().ok(), op});
-  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
+  EXPR_BINARY binary_expr{expr_left, co_await parse_additive_expr().ok(), op};
+  co_return EXPR_PTR{std::distance(
+      expr_vec.begin(), expr_vec.insert(expr_vec.end(), binary_expr))};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_equality_expr() {
@@ -744,10 +742,9 @@ expected_task<EXPRESSION, PARSE_ERR> Parser::parse_equality_expr() {
   } while (0);
   TOKEN op = my_token;
   co_await tokenize();
-  auto ret_expr = expr_vec.insert(
-      expr_vec.end(),
-      EXPR_BINARY{expr_left, co_await parse_relation_expr().ok(), op});
-  co_return EXPR_PTR{std::distance(expr_vec.begin(), ret_expr)};
+  EXPR_BINARY binary_expr{expr_left, co_await parse_relation_expr().ok(), op};
+  co_return EXPR_PTR{std::distance(
+      expr_vec.begin(), expr_vec.insert(expr_vec.end(), binary_expr))};
 }
 
 expected_task<EXPRESSION, PARSE_ERR> Parser::parse_object_literal() {
@@ -931,8 +928,15 @@ expected_task<void, PARSE_ERR> Parser::expect_statement_end() {
 expected_task<std::size_t, PARSE_ERR> Parser::parse_type_annotation() {
   co_await expect_punct(':');
   co_await tokenize();
-  if (my_token == TOKEN{TOK_IDENTI{false, S_ATOM_int}})
-    co_return DATATYPE_I32;
+  if (my_token.index() == TOKV_IDENTI &&
+      !std::get<TOKV_IDENTI>(my_token).has_escape) {
+    switch (std::get<TOKV_IDENTI>(my_token).atom_sh) {
+    case S_ATOM_int:
+      co_return DATATYPE_I32;
+    case S_ATOM_string:
+      co_return DATATYPE_STR;
+    }
+  }
   co_return std::unexpected{INVALID_TYPE_ANNOTATION{}};
 }
 
@@ -1116,6 +1120,10 @@ expected_task<void, COMPILE_ERR> Language::operator()(TOK_IDENTI identifier) {
   default:
     co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
   }
+}
+
+expected_task<void, COMPILE_ERR> Language::operator()(TOK_STRING token_str) {
+  co_return {};
 }
 
 expected_task<void, COMPILE_ERR> Language::operator()(EXPR_BINARY &expr) {

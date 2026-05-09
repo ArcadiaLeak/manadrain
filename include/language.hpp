@@ -5,7 +5,6 @@
 #include <generator>
 #include <optional>
 #include <ranges>
-#include <span>
 #include <stack>
 #include <string>
 #include <unordered_map>
@@ -326,6 +325,7 @@ public:
   expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
   expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER expr);
   expected_task<void, COMPILE_ERR> operator()(TOK_IDENTI identifier);
+  expected_task<void, COMPILE_ERR> operator()(TOK_STRING token_str);
 
   expected_task<void, COMPILE_ERR> operator()(EXPR_BINARY &expr);
   expected_task<void, COMPILE_ERR> operator()(EXPR_PTR expr_ptr);

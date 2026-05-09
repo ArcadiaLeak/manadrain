@@ -1,6 +1,5 @@
 #include <cassert>
 #include <ranges>
-#include <span>
 
 #include "machine.hpp"
 
@@ -116,8 +115,10 @@ void Machine::heap_reclaim() {
 
   auto united_heap = std::ranges::concat_view{
       local_heap, global_heap | std::views::transform([](HEAP_SLOT &slot) {
-                    return slot.has_value() ? std::span{*slot}
-                                            : std::span<std::uint64_t>{};
+                    return slot ? slot->visit([](auto &ref_underlying) {
+                      return std::span{ref_underlying};
+                    })
+                                : std::span<std::uint64_t>{};
                   }) | std::views::join};
   for (std::uint64_t w : united_heap)
     if (is_tombstone_ptr(~w))

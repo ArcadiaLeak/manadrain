@@ -2,6 +2,7 @@
 #include <expected>
 #include <inplace_vector>
 #include <optional>
+#include <span>
 #include <stdfloat>
 #include <string>
 #include <unordered_map>
@@ -51,18 +52,21 @@ struct HEAP_VACANCY {
   std::optional<std::size_t> another;
 };
 using HEAP_NULL = std::variant<HEAP_TOMBSTONE, HEAP_VACANCY>;
-using HEAP_SLOT = std::expected<std::vector<std::uint64_t>, HEAP_NULL>;
+using HEAP_SLOT = std::expected<
+    std::variant<std::vector<std::uint64_t>, std::span<std::uint64_t>>,
+    HEAP_NULL>;
 
 struct MACHINE_FUNC {
   std::vector<MACHINE_CMD> command_vec;
-  const std::vector<std::uint64_t> const_pool;
 };
 
 struct Machine {
   std::vector<MACHINE_FUNC> function_vec;
   std::unordered_map<std::string, std::size_t> funcname_umap;
-  std::vector<std::uint64_t> local_heap;
+  std::vector<std::uint64_t> static_pool;
+
   std::inplace_vector<std::uint64_t, 32> register_file;
+  std::vector<std::uint64_t> local_heap;
 
   std::size_t n_tombstones;
   std::optional<std::size_t> last_vacancy;
