@@ -87,7 +87,7 @@ void Machine::operator()(std::size_t func_idx) {
 std::size_t Machine::heap_alloc() {
   if (last_vacancy) {
     std::size_t idx{*last_vacancy};
-    last_vacancy = std::get<HEAP_VACANCY>(global_heap[idx]).another;
+    last_vacancy = std::get<HEAP_VACANCY>(global_heap[idx].error()).another;
     return idx;
   }
   auto heap_iter = global_heap.emplace(global_heap.end());
@@ -96,9 +96,9 @@ std::size_t Machine::heap_alloc() {
 
 void Machine::heap_free(std::size_t idx) {
   assert(idx < global_heap.size());
-  assert(global_heap[idx].index() == 0);
+  assert(global_heap[idx].has_value());
 
-  global_heap[idx] = HEAP_TOMBSTONE{};
+  global_heap[idx] = std::unexpected{HEAP_TOMBSTONE{}};
   ++n_tombstones;
 
   if (n_tombstones >= (global_heap.size() >> 1))
@@ -106,7 +106,8 @@ void Machine::heap_free(std::size_t idx) {
 }
 
 bool Machine::is_tombstone_ptr(std::uint64_t word) {
-  return word < global_heap.size() && global_heap[word].index() == 1;
+  return word < global_heap.size() && !global_heap[word] &&
+         std::holds_alternative<HEAP_TOMBSTONE>(global_heap[word].error());
 };
 
 void Machine::heap_reclaim() {
@@ -115,17 +116,18 @@ void Machine::heap_reclaim() {
 
   auto united_heap = std::ranges::concat_view{
       local_heap, global_heap | std::views::transform([](HEAP_SLOT &slot) {
-                    return slot.index() == 0 ? std::span{std::get<0>(slot)}
-                                             : std::span<std::uint64_t>{};
+                    return slot.has_value() ? std::span{*slot}
+                                            : std::span<std::uint64_t>{};
                   }) | std::views::join};
   for (std::uint64_t w : united_heap)
     if (is_tombstone_ptr(w))
       referenced[w] = 1;
 
   for (std::size_t idx = 0; idx < global_heap.size(); ++idx)
-    if (not referenced[idx] && global_heap[idx].index() == 1) {
+    if (not referenced[idx] && !global_heap[idx] &&
+        std::holds_alternative<HEAP_TOMBSTONE>(global_heap[idx].error())) {
       --n_tombstones;
-      global_heap[idx] = HEAP_VACANCY{last_vacancy};
+      global_heap[idx] = std::unexpected{HEAP_VACANCY{last_vacancy}};
       last_vacancy = idx;
     }
 }

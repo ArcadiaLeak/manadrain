@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <expected>
 #include <inplace_vector>
 #include <optional>
 #include <stdfloat>
@@ -43,8 +44,8 @@ struct HEAP_TOMBSTONE {};
 struct HEAP_VACANCY {
   std::optional<std::size_t> another;
 };
-using HEAP_SLOT =
-    std::variant<std::vector<std::uint64_t>, HEAP_TOMBSTONE, HEAP_VACANCY>;
+using HEAP_NULL = std::variant<HEAP_TOMBSTONE, HEAP_VACANCY>;
+using HEAP_SLOT = std::expected<std::vector<std::uint64_t>, HEAP_NULL>;
 
 struct MACHINE_FUNC {
   std::vector<MACHINE_CMD> command_vec;
