@@ -688,6 +688,7 @@ expected_task<STATEMENT, PARSE_ERR> Parser::parse_variable_decl() {
     co_return std::unexpected{MISSING_VARIABLE_NAME{}};
   declaration.identifier = std::get<TOK_IDENTI>(my_token);
   co_await tokenize();
+  declaration.datatype = co_await parse_type_annotation().ok();
 
   if (my_token != TOKEN{U'='})
     co_return declaration;
@@ -926,6 +927,14 @@ expected_task<void, PARSE_ERR> Parser::expect_statement_end() {
   co_return std::unexpected{UNEXPECTED_PUNCT{';'}};
 }
 
+expected_task<MACHINE_DATATYPE, PARSE_ERR> Parser::parse_type_annotation() {
+  co_await expect_punct(':');
+  co_await tokenize();
+  if (my_token == TOKEN{TOK_IDENTI{false, S_ATOM_int}})
+    co_return MACHINE_DATATYPE::I32T;
+  co_return std::unexpected{INVALID_TYPE_ANNOTATION{}};
+}
+
 expected_task<STATEMENT, PARSE_ERR>
 Parser::parse_function_decl(EXPRESSION identifier) {
   DECL_FUNCTION declaration{identifier};
@@ -945,17 +954,7 @@ Parser::parse_function_decl(EXPRESSION identifier) {
     co_await tokenize();
   }
   co_await tokenize();
-  co_await expect_punct(':');
-  co_await tokenize();
-  if (my_token.index() != TOKV_IDENTI)
-    co_return std::unexpected{MISSING_TYPE_ANNOTATION{}};
-  switch (std::get<TOKV_IDENTI>(my_token).atom_sh) {
-  case S_ATOM_int:
-    declaration.return_type = MACHINE_DATATYPE::I32T;
-    break;
-  default:
-    co_return std::unexpected{INVALID_TYPE_ANNOTATION{}};
-  }
+  declaration.return_type = co_await parse_type_annotation().ok();
   co_await tokenize();
   co_await expect_punct('{');
   co_await tokenize();
@@ -982,7 +981,7 @@ expected_task<STATEMENT, PARSE_ERR> Parser::parse_import() {
   }
   co_await expect_punct('}');
   co_await tokenize();
-  if (my_token != TOKEN{TOK_IDENTI{0, S_ATOM_from}})
+  if (my_token != TOKEN{TOK_IDENTI{false, S_ATOM_from}})
     co_return std::unexpected{MISSING_FROM_CLAUSE{}};
   co_await tokenize();
   if (my_token.index() != TOKV_STRING)

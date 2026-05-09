@@ -135,6 +135,7 @@ using EXPR_NODE = std::variant<EXPR_CALL, EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT,
 struct DECL_VARIABLE {
   std::size_t kind;
   TOK_IDENTI identifier;
+  MACHINE_DATATYPE datatype;
   EXPRESSION initializer;
 };
 struct DECL_IMPORT {
@@ -280,6 +281,8 @@ private:
   expected_task<EXPRESSION, PARSE_ERR> parse_logical_conjunct();
   expected_task<EXPRESSION, PARSE_ERR> parse_logical_disjunct();
   expected_task<EXPRESSION, PARSE_ERR> parse_paren_expr();
+
+  expected_task<MACHINE_DATATYPE, PARSE_ERR> parse_type_annotation();
 
   expected_task<STATEMENT, PARSE_ERR> parse_import();
   expected_task<STATEMENT, PARSE_ERR> parse_variable_decl();
