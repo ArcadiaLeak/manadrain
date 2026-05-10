@@ -1,8 +1,9 @@
+#include <array>
 #include <cstdint>
-#include <expected>
-#include <inplace_vector>
+#include <deque>
+#include <list>
+#include <map>
 #include <optional>
-#include <span>
 #include <stdfloat>
 #include <string>
 #include <unordered_map>
@@ -10,92 +11,27 @@
 #include <vector>
 
 namespace Manadrain {
-inline constexpr std::size_t DATATYPE_I32{0};
-inline constexpr std::size_t DATATYPE_I64{1};
-inline constexpr std::size_t DATATYPE_F32{2};
-inline constexpr std::size_t DATATYPE_F64{3};
-inline constexpr std::size_t DATATYPE_U32{4};
-inline constexpr std::size_t DATATYPE_U64{5};
-inline constexpr std::size_t DATATYPE_STR{6};
-
-struct I32_ADD {};
-struct I64_ADD {};
-struct F32_ADD {};
-struct I64_SUB {};
-struct I32_PUSH {
-  std::int32_t val;
-};
-struct I64_PUSH {
-  std::int64_t val;
-};
-struct U64_PUSH {
-  std::uint64_t val;
-};
-struct I64_TO_I32 {};
-struct U64_TO_I32 {};
-struct I32_TO_I64 {
-  std::uint8_t adv;
-};
-struct LOC_LOAD {
-  std::size_t offset;
-};
-struct LOC_STORE {
-  std::size_t offset;
-};
-struct LOC_APPEND {};
-struct PIN_STATIC {
-  std::size_t offset;
-  std::size_t length;
-};
-using MACHINE_CMD =
-    std::variant<I32_ADD, I64_ADD, F32_ADD, I64_SUB, I32_PUSH, I64_PUSH,
-                 U64_PUSH, I64_TO_I32, U64_TO_I32, I32_TO_I64, LOC_LOAD,
-                 LOC_STORE, LOC_APPEND, PIN_STATIC>;
-
-struct HEAP_TOMBSTONE {};
-struct HEAP_VACANCY {
-  std::optional<std::size_t> another;
-};
-using HEAP_NULL = std::variant<HEAP_TOMBSTONE, HEAP_VACANCY>;
-using HEAP_SLOT = std::expected<
-    std::variant<std::vector<std::uint64_t>, std::span<std::uint64_t>>,
-    HEAP_NULL>;
-
-struct MACHINE_FUNC {
-  std::vector<MACHINE_CMD> command_vec;
-};
-
 struct Machine {
-  std::vector<MACHINE_FUNC> function_vec;
-  std::unordered_map<std::string, std::size_t> funcname_umap;
-  std::vector<std::uint64_t> static_pool;
+  static constexpr std::size_t I32T{0};
+  static constexpr std::size_t I64T{1};
+  static constexpr std::size_t F32T{2};
+  static constexpr std::size_t F64T{3};
+  static constexpr std::size_t U32T{4};
+  static constexpr std::size_t U64T{5};
 
-  std::inplace_vector<std::uint64_t, 32> register_file;
+  using INSTRUCTION = std::variant<std::monostate>;
+  struct FUNCTION {
+    std::vector<INSTRUCTION> inst_vec;
+  };
+  std::vector<FUNCTION> function_vec;
+  std::unordered_map<std::string, std::size_t> funcname_umap;
+
+  std::array<std::uint64_t, 32> register_file;
   std::vector<std::uint64_t> local_heap;
 
-  std::size_t n_tombstones;
-  std::optional<std::size_t> last_vacancy;
-  std::vector<HEAP_SLOT> global_heap;
-
-  std::size_t heap_alloc();
-  void heap_free(std::size_t);
-  bool is_tombstone_ptr(std::uint64_t word);
-  void heap_reclaim();
-
-  void operator()(I32_ADD cmd);
-  void operator()(I64_ADD cmd);
-  void operator()(F32_ADD cmd);
-  void operator()(I64_SUB cmd);
-  void operator()(I32_PUSH cmd);
-  void operator()(I64_PUSH cmd);
-  void operator()(U64_PUSH cmd);
-  void operator()(I64_TO_I32 cmd);
-  void operator()(U64_TO_I32 cmd);
-  void operator()(I32_TO_I64 cmd);
-  void operator()(LOC_LOAD cmd);
-  void operator()(LOC_STORE cmd);
-  void operator()(LOC_APPEND cmd);
-  void operator()(PIN_STATIC cmd);
-  void operator()(std::size_t func_idx);
+  using SHARED_HEAP = std::list<std::vector<std::uint64_t>>;
+  SHARED_HEAP shared_heap;
+  std::pair<std::optional<std::size_t>, SHARED_HEAP::iterator> shared_cache;
+  std::map<std::size_t, std::deque<SHARED_HEAP::iterator>> shared_lookup;
 };
 } // namespace Manadrain

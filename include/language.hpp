@@ -3,6 +3,7 @@
 #include <deque>
 #include <expected>
 #include <generator>
+#include <inplace_vector>
 #include <optional>
 #include <ranges>
 #include <stack>
@@ -138,10 +139,12 @@ struct EXPR_LOGIC {
 using EXPR_NODE = std::variant<EXPR_CALL, EXPR_MEMBER, EXPR_BINARY, EXPR_OBJECT,
                                EXPR_ACCESS, EXPR_ASSIGN, EXPR_LOGIC>;
 
+enum class TYPE_ANNOTATION { I32T, I64T, F32T, F64T, U32T, U64T, TYPE_STR };
+
 struct DECL_VARIABLE {
   std::size_t kind;
   TOK_IDENTI identifier;
-  std::size_t datatype;
+  TYPE_ANNOTATION datatype;
   EXPRESSION initializer;
 };
 struct DECL_IMPORT {
@@ -167,7 +170,7 @@ struct STMT_IF {
 };
 struct DECL_FUNCTION {
   EXPRESSION identifier;
-  std::size_t return_type;
+  TYPE_ANNOTATION return_type;
   std::vector<std::size_t> arguments;
   std::vector<STATEMENT> subprogram;
 };
@@ -289,7 +292,7 @@ private:
   EXPRESSION parse_logical_disjunct();
   EXPRESSION parse_paren_expr();
 
-  std::size_t parse_type_annotation();
+  TYPE_ANNOTATION parse_type_annotation();
 
   STATEMENT parse_import();
   STATEMENT parse_variable_decl();
@@ -307,7 +310,7 @@ struct FUNCTION_IR {
   };
   std::vector<LOCAL_VAR> local_vec;
   std::size_t return_type;
-  std::vector<MACHINE_CMD> command_vec;
+  std::vector<Machine::INSTRUCTION> inst_vec;
 };
 
 class COMPILE_ERROR : public std::exception {
@@ -329,35 +332,10 @@ class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
   std::inplace_vector<std::size_t, 32> regfile_type;
-  struct STATIC_ENTRY {
-    std::size_t offset;
-    std::size_t length;
-  };
-  std::unordered_map<std::size_t, STATIC_ENTRY> static_umap;
-
-  MACHINE_CMD make_cast(bool is_implicit, std::uint8_t adv, std::size_t from,
-                        std::size_t to);
-  std::pair<std::size_t, FUNCTION_IR::LOCAL_VAR>
-  find_local(std::size_t atom_sh);
 
 public:
   Machine machine;
   void compile();
-
-  void operator()(std::int64_t num);
-  void operator()(EXPR_NUMBER expr);
-  void operator()(TOK_IDENTI identifier);
-  void operator()(TOK_STRING token_str);
-
-  void operator()(EXPR_BINARY &expr);
-  void operator()(EXPR_CALL &expr);
-  void operator()(EXPR_PTR expr_ptr);
-
-  void operator()(DECL_VARIABLE &decl);
-  void operator()(DECL_FUNCTION &decl);
-
-  void operator()(STMT_RETURN ret_stmt);
-  void operator()(STMT_PTR stmt_ptr);
 
   template <typename T> void operator()(T &stmt) {
     throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};

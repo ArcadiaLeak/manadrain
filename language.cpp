@@ -924,16 +924,16 @@ void Parser::expect_statement_end() {
   }
 }
 
-std::size_t Parser::parse_type_annotation() {
+TYPE_ANNOTATION Parser::parse_type_annotation() {
   expect_punct(':');
   tokenize();
   if (my_token.index() == TOKV_IDENTI &&
       !std::get<TOKV_IDENTI>(my_token).has_escape) {
     switch (std::get<TOKV_IDENTI>(my_token).atom_sh) {
     case S_ATOM_int:
-      return DATATYPE_I32;
+      return TYPE_ANNOTATION::I32T;
     case S_ATOM_string:
-      return DATATYPE_STR;
+      return TYPE_ANNOTATION::TYPE_STR;
     }
   }
   throw PARSE_ERROR{INVALID_TYPE_ANNOTATION{}};
@@ -1075,196 +1075,6 @@ void Parser::parse() {
       return;
     program.push_back(parse_statement());
   }
-}
-
-std::size_t get_iatom(DECL_FUNCTION &decl) {
-  switch (decl.identifier.index()) {
-  case EXPRV_STRING:
-    return std::get<EXPRV_STRING>(decl.identifier).atom_sh;
-  case EXPRV_IDENTI:
-    return std::get<EXPRV_IDENTI>(decl.identifier).atom_sh;
-  default:
-    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
-  }
-}
-
-void Language::operator()(std::int64_t num) {
-  scope_stack.top().command_vec.push_back(I64_PUSH{num});
-  regfile_type.push_back(DATATYPE_I64);
-}
-
-void Language::operator()(EXPR_NUMBER expr) { expr.alt.visit(*this); }
-
-std::pair<std::size_t, FUNCTION_IR::LOCAL_VAR>
-Language::find_local(std::size_t atom_sh) {
-  auto local_it{scope_stack.top().local_vec.begin()};
-  std::size_t offset{};
-  while (1) {
-    if (local_it == scope_stack.top().local_vec.end())
-      throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::VOID_IDENTIF};
-    if (local_it->identifier == atom_sh)
-      break;
-    ++local_it;
-    ++offset;
-  }
-  return {offset, *local_it};
-}
-
-void Language::operator()(TOK_IDENTI identifier) {
-  auto [offset, local_var] = find_local(identifier.atom_sh);
-  switch (local_var.datatype) {
-  case DATATYPE_I32:
-    scope_stack.top().command_vec.push_back(LOC_LOAD{offset});
-    regfile_type.push_back(DATATYPE_I32);
-    return;
-  default:
-    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
-  }
-}
-
-void Language::operator()(TOK_STRING token_str) {
-  if (not static_umap.contains(token_str.atom_sh)) {
-    std::string_view body_view{token_str.atom_sh >= (1 << 15)
-                                   ? atom_deq[token_str.atom_sh >> 16]
-                                   : S_ATOM_ARR[token_str.atom_sh]};
-    std::size_t body_length{body_view.size() >> 3};
-    body_length += (body_view.size() & 0b111) > 0;
-    std::vector<std::uint64_t> appendix{std::from_range,
-                                        std::ranges::single_view{body_length}};
-    for (auto chunk_view : std::ranges::chunk_view{body_view, 8}) {
-      std::inplace_vector<char, 8> chunk_vec{std::from_range, chunk_view};
-      std::uint64_t encoded{};
-      std::memcpy(&encoded, chunk_vec.data(), chunk_vec.size());
-      appendix.push_back(encoded);
-    }
-    std::size_t offset{machine.static_pool.size()};
-    machine.static_pool.append_range(appendix);
-    static_umap[token_str.atom_sh] = STATIC_ENTRY{offset, appendix.size()};
-  }
-  STATIC_ENTRY entry{static_umap[token_str.atom_sh]};
-  scope_stack.top().command_vec.push_back(
-      PIN_STATIC{entry.offset, entry.length});
-  regfile_type.push_back(DATATYPE_STR);
-}
-
-void Language::operator()(EXPR_BINARY &expr) {
-  expr.left.visit(*this);
-  expr.right.visit(*this);
-  bool matched{1};
-  do {
-    if (regfile_type.at(regfile_type.size() - 2) == DATATYPE_I64) {
-      if (expr.op == TOKEN{U'+'} &&
-          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I64) {
-        scope_stack.top().command_vec.push_back(I64_ADD{});
-        break;
-      }
-      if (expr.op == TOKEN{U'+'} &&
-          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I32) {
-        scope_stack.top().command_vec.push_back(I32_TO_I64{0});
-        scope_stack.top().command_vec.push_back(I64_ADD{});
-        break;
-      }
-      if (expr.op == TOKEN{U'-'} &&
-          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I32) {
-        scope_stack.top().command_vec.push_back(I32_TO_I64{0});
-        scope_stack.top().command_vec.push_back(I64_SUB{});
-        break;
-      }
-    }
-    if (regfile_type.at(regfile_type.size() - 2) == DATATYPE_I32) {
-      if (expr.op == TOKEN{U'+'} &&
-          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I64) {
-        scope_stack.top().command_vec.push_back(I32_TO_I64{1});
-        scope_stack.top().command_vec.push_back(I64_ADD{});
-        break;
-      }
-      if (expr.op == TOKEN{U'-'} &&
-          regfile_type.at(regfile_type.size() - 1) == DATATYPE_I64) {
-        scope_stack.top().command_vec.push_back(I32_TO_I64{1});
-        scope_stack.top().command_vec.push_back(I64_SUB{});
-        break;
-      }
-    }
-    matched = 0;
-  } while (0);
-  if (matched) {
-    regfile_type.pop_back();
-    return;
-  }
-  throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
-}
-
-void Language::operator()(EXPR_CALL &expr) {
-  do {
-    EXPR_PTR *callee_ptr{std::get_if<EXPR_PTR>(&expr.callee)};
-    if (not callee_ptr)
-      break;
-    EXPR_MEMBER *member_expr{
-        std::get_if<EXPR_MEMBER>(&expr_vec[callee_ptr->expr_idx])};
-    if (not member_expr)
-      break;
-  } while (0);
-  throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
-}
-
-void Language::operator()(EXPR_PTR expr_ptr) {
-  expr_vec[expr_ptr.expr_idx].visit(*this);
-}
-
-MACHINE_CMD Language::make_cast(bool is_implicit, std::uint8_t adv,
-                                std::size_t from, std::size_t to) {
-  std::optional<MACHINE_CMD> cmd{};
-  if (from == DATATYPE_I64 && to == DATATYPE_I32)
-    cmd = I64_TO_I32{};
-  else if (from == DATATYPE_U64 && to == DATATYPE_I32)
-    cmd = U64_TO_I32{};
-  else if (from == DATATYPE_I32 && to == DATATYPE_I64)
-    cmd = I32_TO_I64{adv};
-  if (cmd) {
-    regfile_type.back() = to;
-    return *cmd;
-  }
-  throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::TYPE_MISMATCH};
-}
-
-void Language::operator()(STMT_RETURN ret_stmt) {
-  ret_stmt.argument.visit(*this);
-  if (regfile_type.back() != scope_stack.top().return_type) {
-    MACHINE_CMD cast_cmd{
-        make_cast(true, 0, regfile_type.back(), scope_stack.top().return_type)};
-    scope_stack.top().command_vec.push_back(cast_cmd);
-  }
-}
-
-void Language::operator()(DECL_VARIABLE &decl) {
-  decl.initializer.visit(*this);
-  if (regfile_type.back() != decl.datatype) {
-    MACHINE_CMD cast_cmd{
-        make_cast(true, 0, regfile_type.back(), decl.datatype)};
-    scope_stack.top().command_vec.push_back(cast_cmd);
-  }
-  scope_stack.top().command_vec.push_back(LOC_APPEND{});
-  scope_stack.top().local_vec.push_back(
-      {decl.datatype, decl.identifier.atom_sh});
-  regfile_type.pop_back();
-}
-
-void Language::operator()(DECL_FUNCTION &decl) {
-  std::size_t atom_sh{get_iatom(decl)};
-  if (is_reserved(atom_sh))
-    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::RESERVED_WORD};
-  scope_stack.push(FUNCTION_IR{.return_type = decl.return_type});
-  std::string_view func_name{atom_deq[atom_sh >> 16]};
-  for (STATEMENT &func_stmt : decl.subprogram)
-    func_stmt.visit(*this);
-  std::size_t func_idx{machine.function_vec.size()};
-  machine.funcname_umap.insert(std::make_pair(func_name, func_idx));
-  machine.function_vec.emplace_back(std::move(scope_stack.top().command_vec));
-  scope_stack.pop();
-}
-
-void Language::operator()(STMT_PTR stmt_ptr) {
-  stmt_vec[stmt_ptr.stmt_idx].visit(*this);
 }
 
 void Language::compile() {

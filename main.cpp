@@ -40,7 +40,6 @@ int main(int argc, char *argv[]) {
     std::println(std::cout, "Error: {}", compile_error.what());
     return 1;
   }
-  language.machine(0);
 
   return 0;
 }
