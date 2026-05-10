@@ -11,7 +11,6 @@
 #include <variant>
 #include <vector>
 
-#include "expected_task.hpp"
 #include "machine.hpp"
 
 namespace Manadrain {
@@ -28,20 +27,28 @@ struct MISSING_FROM_CLAUSE {};
 struct MISSING_STRING_LITERAL {};
 struct MISSING_FORMAL_PARAMETER {};
 struct MISSING_TYPE_ANNOTATION {};
-struct UNEXPECTED_PUNCT {
+struct MISSING_PUNCT {
   char32_t must_be;
 };
 struct UNEXPECTED_RESERVED_WORD {};
 struct UNEXPECTED_STRING_END {};
 struct UNEXPECTED_COMMENT_END {};
 struct UNEXPECTED_TOKEN {};
-using PARSE_ERR = std::variant<
-    INVALID_NUMBER_LITERAL, INVALID_BIGINT_LITERAL, INVALID_PROPERTY_NAME,
-    INVALID_BACKSLASH_ESCAPE, INVALID_TYPE_ANNOTATION, MISSING_FIELD_NAME,
-    MISSING_VARIABLE_NAME, MISSING_FUNCTION_NAME, MISSING_IDENTIFIER,
-    MISSING_FROM_CLAUSE, MISSING_STRING_LITERAL, MISSING_FORMAL_PARAMETER,
-    MISSING_TYPE_ANNOTATION, UNEXPECTED_PUNCT, UNEXPECTED_RESERVED_WORD,
-    UNEXPECTED_STRING_END, UNEXPECTED_COMMENT_END, UNEXPECTED_TOKEN>;
+class PARSE_ERROR : public std::exception {
+public:
+  using MESSAGE = std::variant<
+      INVALID_NUMBER_LITERAL, INVALID_BIGINT_LITERAL, INVALID_PROPERTY_NAME,
+      INVALID_BACKSLASH_ESCAPE, INVALID_TYPE_ANNOTATION, MISSING_FIELD_NAME,
+      MISSING_VARIABLE_NAME, MISSING_FUNCTION_NAME, MISSING_IDENTIFIER,
+      MISSING_FROM_CLAUSE, MISSING_STRING_LITERAL, MISSING_FORMAL_PARAMETER,
+      MISSING_TYPE_ANNOTATION, MISSING_PUNCT, UNEXPECTED_RESERVED_WORD,
+      UNEXPECTED_STRING_END, UNEXPECTED_COMMENT_END, UNEXPECTED_TOKEN>;
+  explicit PARSE_ERROR(MESSAGE msg) : message{msg} {}
+  const char *what() const noexcept override { return "parse error!"; }
+
+private:
+  MESSAGE message;
+};
 
 struct TOK_STRING {
   char32_t separator;
@@ -194,7 +201,7 @@ private:
 enum class TOK_0PREFIX { ZERO_X, ZERO_B, ZERO_O, ZERO };
 class TokNumber : public Scanner {
 protected:
-  std::expected<TOKEN, PARSE_ERR> tokenize(char32_t leading);
+  std::expected<TOKEN, PARSE_ERROR::MESSAGE> tokenize(char32_t leading);
 
 private:
   std::vector<mpz_class> bigint_vec;
@@ -228,7 +235,7 @@ private:
   std::optional<char32_t> decode_string_xseq();
   std::optional<char32_t> decode_string_uni();
 
-  std::generator<std::expected<char32_t, PARSE_ERR>>
+  std::generator<std::expected<char32_t, PARSE_ERROR::MESSAGE>>
   traverse_string(char32_t separator);
   std::generator<std::optional<char32_t>> traverse_identif(bool &has_escape);
 
@@ -236,14 +243,15 @@ protected:
   std::unordered_map<std::string_view, std::size_t> atom_umap;
   std::deque<std::string> atom_deq{};
 
-  std::expected<TOKEN, PARSE_ERR> tokenize_string(char32_t separator);
-  std::expected<TOKEN, PARSE_ERR> tokenize_identif(char32_t leading);
+  std::expected<TOKEN, PARSE_ERROR::MESSAGE>
+  tokenize_string(char32_t separator);
+  std::expected<TOKEN, PARSE_ERROR::MESSAGE> tokenize_identif(char32_t leading);
   std::optional<char32_t> decode_identif_uni();
 };
 
 class Tokenizer : public TokAtom {
 protected:
-  std::expected<TOKEN, PARSE_ERR> tokenize();
+  std::expected<TOKEN, PARSE_ERROR::MESSAGE> tokenize();
   bool newlineSeen() { return newline_seen; }
 
 private:
@@ -253,7 +261,7 @@ private:
 class Parser : public Tokenizer {
 public:
   std::vector<STATEMENT> program;
-  expected_task<void, PARSE_ERR> parse();
+  void parse();
 
 protected:
   std::vector<STMT_NODE> stmt_vec;
@@ -263,34 +271,33 @@ protected:
 private:
   TOKEN my_token;
 
-  std::expected<void, PARSE_ERR> tokenize();
-  expected_task<void, PARSE_ERR> expect_statement_end();
-  std::expected<void, PARSE_ERR> expect_punct(char32_t punct);
+  void tokenize();
+  void expect_statement_end();
+  void expect_punct(char32_t punct);
 
-  expected_task<EXPRESSION, PARSE_ERR> parse_assign_expr();
-  expected_task<EXPRESSION, PARSE_ERR> parse_equality_expr();
-  expected_task<EXPRESSION, PARSE_ERR> parse_relation_expr();
-  expected_task<EXPRESSION, PARSE_ERR> parse_additive_expr();
-  expected_task<EXPRESSION, PARSE_ERR> parse_postfix_expr();
-  std::expected<EXPRESSION, PARSE_ERR> parse_primary_expr();
-  expected_task<EXPRESSION, PARSE_ERR> parse_call_expr(EXPRESSION callee_expr);
-  expected_task<EXPRESSION, PARSE_ERR> parse_member_expr(EXPRESSION obj_expr);
-  expected_task<EXPRESSION, PARSE_ERR> parse_access_expr(EXPRESSION obj_expr);
-  expected_task<EXPRESSION, PARSE_ERR> parse_object_literal();
-  expected_task<EXPRESSION, PARSE_ERR> parse_logical_conjunct();
-  expected_task<EXPRESSION, PARSE_ERR> parse_logical_disjunct();
-  expected_task<EXPRESSION, PARSE_ERR> parse_paren_expr();
+  EXPRESSION parse_assign_expr();
+  EXPRESSION parse_equality_expr();
+  EXPRESSION parse_relation_expr();
+  EXPRESSION parse_additive_expr();
+  EXPRESSION parse_postfix_expr();
+  EXPRESSION parse_primary_expr();
+  EXPRESSION parse_call_expr(EXPRESSION callee_expr);
+  EXPRESSION parse_member_expr(EXPRESSION obj_expr);
+  EXPRESSION parse_access_expr(EXPRESSION obj_expr);
+  EXPRESSION parse_object_literal();
+  EXPRESSION parse_logical_conjunct();
+  EXPRESSION parse_logical_disjunct();
+  EXPRESSION parse_paren_expr();
 
-  expected_task<std::size_t, PARSE_ERR> parse_type_annotation();
+  std::size_t parse_type_annotation();
 
-  expected_task<STATEMENT, PARSE_ERR> parse_import();
-  expected_task<STATEMENT, PARSE_ERR> parse_variable_decl();
-  expected_task<STATEMENT, PARSE_ERR>
-  parse_function_decl(EXPRESSION identifier);
-  expected_task<STATEMENT, PARSE_ERR> parse_stmt_expression();
-  expected_task<STATEMENT, PARSE_ERR> parse_ident_statement();
-  expected_task<STATEMENT, PARSE_ERR> parse_punct_statement();
-  std::expected<STATEMENT, PARSE_ERR> parse_statement();
+  STATEMENT parse_import();
+  STATEMENT parse_variable_decl();
+  STATEMENT parse_function_decl(EXPRESSION identifier);
+  STATEMENT parse_stmt_expression();
+  STATEMENT parse_ident_statement();
+  STATEMENT parse_punct_statement();
+  STATEMENT parse_statement();
 };
 
 struct FUNCTION_IR {
@@ -303,12 +310,21 @@ struct FUNCTION_IR {
   std::vector<MACHINE_CMD> command_vec;
 };
 
-enum class COMPILE_ERR {
-  UNSUPPORTED,
-  RESERVED_WORD,
-  TYPE_MISMATCH,
-  VOID_IDENTIF
+class COMPILE_ERROR : public std::exception {
+public:
+  enum class MESSAGE {
+    UNSUPPORTED,
+    RESERVED_WORD,
+    TYPE_MISMATCH,
+    VOID_IDENTIF
+  };
+  explicit COMPILE_ERROR(MESSAGE msg) : message{msg} {}
+  const char *what() const noexcept override { return "compile error!"; }
+
+private:
+  MESSAGE message;
 };
+
 class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
@@ -316,28 +332,26 @@ private:
 
 public:
   Machine machine;
-  expected_task<void, COMPILE_ERR> compile();
-  std::expected<MACHINE_CMD, COMPILE_ERR> make_cast(bool is_implicit,
-                                                    std::uint8_t adv,
-                                                    std::size_t from,
-                                                    std::size_t to);
+  void compile();
+  MACHINE_CMD make_cast(bool is_implicit, std::uint8_t adv, std::size_t from,
+                        std::size_t to);
 
-  expected_task<void, COMPILE_ERR> operator()(std::int64_t num);
-  expected_task<void, COMPILE_ERR> operator()(EXPR_NUMBER expr);
-  expected_task<void, COMPILE_ERR> operator()(TOK_IDENTI identifier);
-  expected_task<void, COMPILE_ERR> operator()(TOK_STRING token_str);
+  void operator()(std::int64_t num);
+  void operator()(EXPR_NUMBER expr);
+  void operator()(TOK_IDENTI identifier);
+  void operator()(TOK_STRING token_str);
 
-  expected_task<void, COMPILE_ERR> operator()(EXPR_BINARY &expr);
-  expected_task<void, COMPILE_ERR> operator()(EXPR_PTR expr_ptr);
+  void operator()(EXPR_BINARY &expr);
+  void operator()(EXPR_PTR expr_ptr);
 
-  expected_task<void, COMPILE_ERR> operator()(DECL_VARIABLE &decl);
-  expected_task<void, COMPILE_ERR> operator()(DECL_FUNCTION &decl);
+  void operator()(DECL_VARIABLE &decl);
+  void operator()(DECL_FUNCTION &decl);
 
-  expected_task<void, COMPILE_ERR> operator()(STMT_RETURN ret_stmt);
-  expected_task<void, COMPILE_ERR> operator()(STMT_PTR stmt_ptr);
+  void operator()(STMT_RETURN ret_stmt);
+  void operator()(STMT_PTR stmt_ptr);
 
-  template <typename T> expected_task<void, COMPILE_ERR> operator()(T &stmt) {
-    co_return std::unexpected{COMPILE_ERR::UNSUPPORTED};
+  template <typename T> void operator()(T &stmt) {
+    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
   }
 };
 } // namespace Manadrain
