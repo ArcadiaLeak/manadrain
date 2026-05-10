@@ -335,11 +335,14 @@ private:
   };
   std::unordered_map<std::size_t, STATIC_ENTRY> static_umap;
 
+  MACHINE_CMD make_cast(bool is_implicit, std::uint8_t adv, std::size_t from,
+                        std::size_t to);
+  std::pair<std::size_t, FUNCTION_IR::LOCAL_VAR>
+  find_local(std::size_t atom_sh);
+
 public:
   Machine machine;
   void compile();
-  MACHINE_CMD make_cast(bool is_implicit, std::uint8_t adv, std::size_t from,
-                        std::size_t to);
 
   void operator()(std::int64_t num);
   void operator()(EXPR_NUMBER expr);
@@ -347,6 +350,7 @@ public:
   void operator()(TOK_STRING token_str);
 
   void operator()(EXPR_BINARY &expr);
+  void operator()(EXPR_CALL &expr);
   void operator()(EXPR_PTR expr_ptr);
 
   void operator()(DECL_VARIABLE &decl);

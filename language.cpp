@@ -1095,18 +1095,24 @@ void Language::operator()(std::int64_t num) {
 
 void Language::operator()(EXPR_NUMBER expr) { expr.alt.visit(*this); }
 
-void Language::operator()(TOK_IDENTI identifier) {
+std::pair<std::size_t, FUNCTION_IR::LOCAL_VAR>
+Language::find_local(std::size_t atom_sh) {
   auto local_it{scope_stack.top().local_vec.begin()};
   std::size_t offset{};
   while (1) {
     if (local_it == scope_stack.top().local_vec.end())
       throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::VOID_IDENTIF};
-    if (local_it->identifier == identifier.atom_sh)
+    if (local_it->identifier == atom_sh)
       break;
     ++local_it;
     ++offset;
   }
-  switch (local_it->datatype) {
+  return {offset, *local_it};
+}
+
+void Language::operator()(TOK_IDENTI identifier) {
+  auto [offset, local_var] = find_local(identifier.atom_sh);
+  switch (local_var.datatype) {
   case DATATYPE_I32:
     scope_stack.top().command_vec.push_back(LOC_LOAD{offset});
     regfile_type.push_back(DATATYPE_I32);
@@ -1185,6 +1191,19 @@ void Language::operator()(EXPR_BINARY &expr) {
     regfile_type.pop_back();
     return;
   }
+  throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
+}
+
+void Language::operator()(EXPR_CALL &expr) {
+  do {
+    EXPR_PTR *callee_ptr{std::get_if<EXPR_PTR>(&expr.callee)};
+    if (not callee_ptr)
+      break;
+    EXPR_MEMBER *member_expr{
+        std::get_if<EXPR_MEMBER>(&expr_vec[callee_ptr->expr_idx])};
+    if (not member_expr)
+      break;
+  } while (0);
   throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
 }
 
