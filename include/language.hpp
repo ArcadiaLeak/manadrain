@@ -329,6 +329,11 @@ class Language : public Parser {
 private:
   std::stack<FUNCTION_IR> scope_stack;
   std::inplace_vector<std::size_t, 32> regfile_type;
+  struct STATIC_ENTRY {
+    std::size_t offset;
+    std::size_t length;
+  };
+  std::unordered_map<std::size_t, STATIC_ENTRY> static_umap;
 
 public:
   Machine machine;

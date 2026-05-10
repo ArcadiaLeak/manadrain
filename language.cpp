@@ -1116,7 +1116,20 @@ void Language::operator()(TOK_IDENTI identifier) {
   }
 }
 
-void Language::operator()(TOK_STRING token_str) { return; }
+void Language::operator()(TOK_STRING token_str) {
+  if (not static_umap.contains(token_str.atom_sh)) {
+    std::string_view str_view{token_str.atom_sh >= (1 << 15)
+                                  ? atom_deq[token_str.atom_sh >> 16]
+                                  : S_ATOM_ARR[token_str.atom_sh]};
+    std::size_t offset{machine.static_pool.size()};
+    std::size_t length{str_view.size() >> 3};
+    length += (str_view.size() & 0b111) > 0;
+    machine.static_pool.resize(offset + length);
+    std::memcpy(machine.static_pool.data() + offset, str_view.data(),
+                str_view.size());
+    static_umap[token_str.atom_sh] = STATIC_ENTRY{offset, length};
+  }
+}
 
 void Language::operator()(EXPR_BINARY &expr) {
   expr.left.visit(*this);
