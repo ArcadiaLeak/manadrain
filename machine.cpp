@@ -36,20 +36,6 @@ void Machine::operator()(I64_SUB cmd) {
   register_file.back() = std::bit_cast<std::uint64_t>(lhs - rhs);
 }
 
-void Machine::operator()(LOC_LOAD cmd) {
-  register_file.push_back(local_heap[cmd.offset]);
-}
-
-void Machine::operator()(LOC_STORE cmd) {
-  local_heap[cmd.offset] = register_file.back();
-  register_file.pop_back();
-}
-
-void Machine::operator()(LOC_APPEND cmd) {
-  local_heap.push_back(register_file.back());
-  register_file.pop_back();
-}
-
 void Machine::operator()(I32_PUSH cmd) {
   register_file.push_back(std::bit_cast<std::uint32_t>(cmd.val));
 }
@@ -77,10 +63,30 @@ void Machine::operator()(I32_TO_I64 cmd) {
   *src_it = static_cast<std::int64_t>(src);
 }
 
+void Machine::operator()(LOC_LOAD cmd) {
+  register_file.push_back(local_heap[cmd.offset]);
+}
+
+void Machine::operator()(LOC_STORE cmd) {
+  local_heap[cmd.offset] = register_file.back();
+  register_file.pop_back();
+}
+
+void Machine::operator()(LOC_APPEND cmd) {
+  local_heap.push_back(register_file.back());
+  register_file.pop_back();
+}
+
+void Machine::operator()(PIN_STATIC cmd) {
+  std::size_t heap_ptr{heap_alloc()};
+  global_heap[heap_ptr] =
+      std::span{static_pool.data() + cmd.offset, cmd.length};
+  register_file.push_back(~heap_ptr);
+}
+
 void Machine::operator()(std::size_t func_idx) {
-  for (MACHINE_CMD cmd : function_vec[func_idx].command_vec) {
+  for (MACHINE_CMD cmd : function_vec[func_idx].command_vec)
     cmd.visit(*this);
-  }
 }
 
 std::size_t Machine::heap_alloc() {

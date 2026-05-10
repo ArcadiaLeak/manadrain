@@ -1118,17 +1118,27 @@ void Language::operator()(TOK_IDENTI identifier) {
 
 void Language::operator()(TOK_STRING token_str) {
   if (not static_umap.contains(token_str.atom_sh)) {
-    std::string_view str_view{token_str.atom_sh >= (1 << 15)
-                                  ? atom_deq[token_str.atom_sh >> 16]
-                                  : S_ATOM_ARR[token_str.atom_sh]};
+    std::string_view body_view{token_str.atom_sh >= (1 << 15)
+                                   ? atom_deq[token_str.atom_sh >> 16]
+                                   : S_ATOM_ARR[token_str.atom_sh]};
+    std::size_t body_length{body_view.size() >> 3};
+    body_length += (body_view.size() & 0b111) > 0;
+    std::vector<std::uint64_t> appendix{std::from_range,
+                                        std::ranges::single_view{body_length}};
+    for (auto chunk_view : std::ranges::chunk_view{body_view, 8}) {
+      std::inplace_vector<char, 8> chunk_vec{std::from_range, chunk_view};
+      std::uint64_t encoded{};
+      std::memcpy(&encoded, chunk_vec.data(), chunk_vec.size());
+      appendix.push_back(encoded);
+    }
     std::size_t offset{machine.static_pool.size()};
-    std::size_t length{str_view.size() >> 3};
-    length += (str_view.size() & 0b111) > 0;
-    machine.static_pool.resize(offset + length);
-    std::memcpy(machine.static_pool.data() + offset, str_view.data(),
-                str_view.size());
-    static_umap[token_str.atom_sh] = STATIC_ENTRY{offset, length};
+    machine.static_pool.append_range(appendix);
+    static_umap[token_str.atom_sh] = STATIC_ENTRY{offset, appendix.size()};
   }
+  STATIC_ENTRY entry{static_umap[token_str.atom_sh]};
+  scope_stack.top().command_vec.push_back(
+      PIN_STATIC{entry.offset, entry.length});
+  regfile_type.push_back(DATATYPE_STR);
 }
 
 void Language::operator()(EXPR_BINARY &expr) {

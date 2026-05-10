@@ -31,6 +31,11 @@ struct I64_PUSH {
 struct U64_PUSH {
   std::uint64_t val;
 };
+struct I64_TO_I32 {};
+struct U64_TO_I32 {};
+struct I32_TO_I64 {
+  std::uint8_t adv;
+};
 struct LOC_LOAD {
   std::size_t offset;
 };
@@ -38,14 +43,14 @@ struct LOC_STORE {
   std::size_t offset;
 };
 struct LOC_APPEND {};
-struct I64_TO_I32 {};
-struct U64_TO_I32 {};
-struct I32_TO_I64 {
-  std::uint8_t adv;
+struct PIN_STATIC {
+  std::size_t offset;
+  std::size_t length;
 };
-using MACHINE_CMD = std::variant<I32_ADD, I64_ADD, F32_ADD, I64_SUB, LOC_LOAD,
-                                 LOC_STORE, LOC_APPEND, I32_PUSH, I64_PUSH,
-                                 U64_PUSH, I64_TO_I32, U64_TO_I32, I32_TO_I64>;
+using MACHINE_CMD =
+    std::variant<I32_ADD, I64_ADD, F32_ADD, I64_SUB, I32_PUSH, I64_PUSH,
+                 U64_PUSH, I64_TO_I32, U64_TO_I32, I32_TO_I64, LOC_LOAD,
+                 LOC_STORE, LOC_APPEND, PIN_STATIC>;
 
 struct HEAP_TOMBSTONE {};
 struct HEAP_VACANCY {
@@ -81,15 +86,16 @@ struct Machine {
   void operator()(I64_ADD cmd);
   void operator()(F32_ADD cmd);
   void operator()(I64_SUB cmd);
-  void operator()(LOC_LOAD cmd);
-  void operator()(LOC_STORE cmd);
-  void operator()(LOC_APPEND cmd);
   void operator()(I32_PUSH cmd);
   void operator()(I64_PUSH cmd);
   void operator()(U64_PUSH cmd);
   void operator()(I64_TO_I32 cmd);
   void operator()(U64_TO_I32 cmd);
   void operator()(I32_TO_I64 cmd);
+  void operator()(LOC_LOAD cmd);
+  void operator()(LOC_STORE cmd);
+  void operator()(LOC_APPEND cmd);
+  void operator()(PIN_STATIC cmd);
   void operator()(std::size_t func_idx);
 };
 } // namespace Manadrain
