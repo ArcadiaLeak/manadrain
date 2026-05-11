@@ -25,21 +25,5 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Language language{};
-  language.populate(std::ranges::istream_view<std::uint8_t>{file} |
-                    std::ranges::to<std::vector<std::uint8_t>>());
-  try {
-    language.parse();
-  } catch (const Manadrain::PARSE_ERROR &parse_error) {
-    std::println(std::cout, "Error: {}", parse_error.what());
-    return 1;
-  }
-  try {
-    language.compile();
-  } catch (const Manadrain::COMPILE_ERROR &compile_error) {
-    std::println(std::cout, "Error: {}", compile_error.what());
-    return 1;
-  }
-
   return 0;
 }
