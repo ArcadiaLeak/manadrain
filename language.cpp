@@ -1101,8 +1101,8 @@ void FunctionIR::operator()(TOK_STRING token_str) {
   }
   std::size_t const_idx{const_umap[token_str.atom_sh]};
   inst_vec.push_back(Machine::LOAD_IMMEDIATE{
-      static_cast<std::uint8_t>(lang->regfile_type.size()), const_idx});
-  lang->regfile_type.push_back(Language::LITERAL_STR);
+      static_cast<std::uint8_t>(regfile_type.size()), const_idx});
+  regfile_type.push_back(Language::LITERAL_STR);
 }
 
 void FunctionIR::operator()(DECL_VARIABLE declaration) {

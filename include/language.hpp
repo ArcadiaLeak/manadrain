@@ -316,18 +316,18 @@ private:
 class Language;
 
 struct FunctionIR {
-  Language *lang;
-
-  std::unordered_map<std::size_t, std::size_t> const_umap;
-  std::vector<std::vector<std::uint64_t>> const_pool;
-
   struct LOCAL_VAR {
     std::size_t datatype;
     std::size_t identifier;
   };
   std::vector<LOCAL_VAR> local_vec;
-  std::size_t return_type;
 
+  Language *lang;
+  std::inplace_vector<std::size_t, 32> regfile_type;
+  std::size_t return_type;
+  std::unordered_map<std::size_t, std::size_t> const_umap;
+
+  std::vector<std::vector<std::uint64_t>> const_pool;
   std::vector<Machine::INSTRUCTION> inst_vec;
 
   void operator()(TOK_STRING token_str);
@@ -353,7 +353,6 @@ public:
   void compile();
 
 private:
-  std::inplace_vector<std::size_t, 32> regfile_type;
   friend struct FunctionIR;
 };
 } // namespace Manadrain
