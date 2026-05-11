@@ -329,16 +329,23 @@ struct FUNCTION_IR {
 };
 
 class Language : public Parser {
-private:
-  std::stack<FUNCTION_IR> scope_stack;
-  std::inplace_vector<std::size_t, 32> regfile_type;
-
 public:
+  enum TYPEID { TYPEID_STR = 0x10 };
+
+  void operator()(DECL_VARIABLE declaration);
+
+  void operator()(DECL_FUNCTION &decl);
+  void operator()(STMT_PTR stmt_ptr);
+
+  template <typename T> void operator()(T &visitee) {
+    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
+  }
+
   Machine machine;
   void compile();
 
-  template <typename T> void operator()(T &stmt) {
-    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
-  }
+private:
+  std::stack<FUNCTION_IR> scope_stack;
+  std::inplace_vector<std::size_t, 32> regfile_type;
 };
 } // namespace Manadrain

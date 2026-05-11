@@ -1081,4 +1081,44 @@ void Language::compile() {
   for (STATEMENT &statement : program)
     statement.visit(*this);
 }
+
+void Language::operator()(DECL_VARIABLE declaration) { std::unreachable(); }
+
+std::size_t get_iatom(DECL_FUNCTION &decl) {
+  switch (decl.identifier.index()) {
+  case EXPRV_STRING:
+    return std::get<EXPRV_STRING>(decl.identifier).atom_sh;
+  case EXPRV_IDENTI:
+    return std::get<EXPRV_IDENTI>(decl.identifier).atom_sh;
+  default:
+    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
+  }
+}
+
+std::size_t get_machine_type(TYPE_ANNOTATION annot) {
+  switch (annot) {
+  case TYPE_ANNOTATION::I32T:
+    return Machine::I32T;
+  case TYPE_ANNOTATION::I64T:
+    return Machine::I64T;
+  case TYPE_ANNOTATION::U32T:
+    return Machine::U32T;
+  case TYPE_ANNOTATION::U64T:
+    return Machine::U64T;
+  case TYPE_ANNOTATION::F32T:
+    return Machine::F32T;
+  case TYPE_ANNOTATION::F64T:
+    return Machine::F64T;
+  case TYPE_ANNOTATION::TYPE_STR:
+    return Language::TYPEID_STR;
+  }
+  std::unreachable();
+}
+
+void Language::operator()(DECL_FUNCTION &decl) { std::unreachable(); }
+
+void Language::operator()(STMT_PTR stmt_ptr) {
+  stmt_vec[stmt_ptr.stmt_idx].visit(*this);
+}
+
 } // namespace Manadrain

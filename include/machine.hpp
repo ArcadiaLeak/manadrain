@@ -8,12 +8,7 @@
 
 namespace Manadrain {
 struct Machine {
-  static constexpr std::size_t I32T{0};
-  static constexpr std::size_t I64T{1};
-  static constexpr std::size_t F32T{2};
-  static constexpr std::size_t F64T{3};
-  static constexpr std::size_t U32T{4};
-  static constexpr std::size_t U64T{5};
+  enum TYPEID { I32T, I64T, F32T, F64T, U32T, U64T };
 
   using INSTRUCTION = std::variant<std::monostate>;
   struct FUNCTION {
