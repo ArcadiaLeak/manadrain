@@ -303,16 +303,6 @@ private:
   STATEMENT parse_statement();
 };
 
-struct FUNCTION_IR {
-  struct LOCAL_VAR {
-    std::size_t datatype;
-    std::size_t identifier;
-  };
-  std::vector<LOCAL_VAR> local_vec;
-  std::size_t return_type;
-  std::vector<Machine::INSTRUCTION> inst_vec;
-};
-
 class COMPILE_ERROR : public std::exception {
 public:
   enum class MESSAGE {
@@ -326,6 +316,16 @@ public:
 
 private:
   MESSAGE message;
+};
+
+struct FUNCTION_IR {
+  struct LOCAL_VAR {
+    std::size_t datatype;
+    std::size_t identifier;
+  };
+  std::vector<LOCAL_VAR> local_vec;
+  std::size_t return_type;
+  std::vector<Machine::INSTRUCTION> inst_vec;
 };
 
 class Language : public Parser {
