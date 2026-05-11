@@ -313,24 +313,34 @@ private:
   MESSAGE message;
 };
 
-struct FUNCTION_IR {
+class Language;
+
+struct FunctionIR {
+  Language *lang;
+
+  std::unordered_map<std::size_t, std::size_t> const_umap;
+  std::vector<std::vector<std::uint64_t>> const_pool;
+
   struct LOCAL_VAR {
     std::size_t datatype;
     std::size_t identifier;
   };
   std::vector<LOCAL_VAR> local_vec;
   std::size_t return_type;
+
   std::vector<Machine::INSTRUCTION> inst_vec;
-  std::vector<std::vector<std::uint64_t>> const_pool;
-  std::unordered_map<std::size_t, std::size_t> const_umap;
+
+  void operator()(TOK_STRING token_str);
+  void operator()(DECL_VARIABLE declaration);
+
+  template <typename T> void operator()(T &visitee) {
+    throw COMPILE_ERROR{COMPILE_ERROR::UNSUPPORTED};
+  }
 };
 
 class Language : public Parser {
 public:
   enum TYPEID { I32T, I64T, F32T, F64T, U32T, U64T, HEAP_STR, LITERAL_STR };
-
-  void operator()(TOK_STRING token_str);
-  void operator()(DECL_VARIABLE declaration);
 
   void operator()(DECL_FUNCTION &decl);
   void operator()(STMT_PTR stmt_ptr);
@@ -343,7 +353,7 @@ public:
   void compile();
 
 private:
-  std::stack<FUNCTION_IR> scope_stack;
   std::inplace_vector<std::size_t, 32> regfile_type;
+  friend struct FunctionIR;
 };
 } // namespace Manadrain

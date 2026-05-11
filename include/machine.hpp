@@ -17,6 +17,7 @@ struct Machine {
   struct FUNCTION {
     std::vector<INSTRUCTION> inst_vec;
     const std::vector<std::vector<std::uint64_t>> const_pool;
+    std::vector<std::uint64_t> static_heap;
   };
   std::vector<FUNCTION> function_vec;
   std::unordered_map<std::string, std::size_t> funcname_umap;

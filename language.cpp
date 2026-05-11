@@ -1082,10 +1082,10 @@ void Language::compile() {
     statement.visit(*this);
 }
 
-void Language::operator()(TOK_STRING token_str) {
-  if (not scope_stack.top().const_umap.contains(token_str.atom_sh)) {
+void FunctionIR::operator()(TOK_STRING token_str) {
+  if (not const_umap.contains(token_str.atom_sh)) {
     std::string_view body_view{token_str.atom_sh >= (1 << 15)
-                                   ? atom_deq[token_str.atom_sh >> 16]
+                                   ? lang->atom_deq[token_str.atom_sh >> 16]
                                    : S_ATOM_ARR[token_str.atom_sh]};
     std::vector<std::uint64_t> appendix{
         std::from_range, std::ranges::single_view{body_view.size()}};
@@ -1095,18 +1095,17 @@ void Language::operator()(TOK_STRING token_str) {
       std::memcpy(&encoded, chunk_vec.data(), chunk_vec.size());
       appendix.push_back(encoded);
     }
-    auto appendix_it = scope_stack.top().const_pool.insert(
-        scope_stack.top().const_pool.end(), std::move(appendix));
-    scope_stack.top().const_umap[token_str.atom_sh] =
-        std::distance(scope_stack.top().const_pool.begin(), appendix_it);
+    auto appendix_it = const_pool.insert(const_pool.end(), std::move(appendix));
+    const_umap[token_str.atom_sh] =
+        std::distance(const_pool.begin(), appendix_it);
   }
-  std::size_t const_idx{scope_stack.top().const_umap[token_str.atom_sh]};
-  scope_stack.top().inst_vec.push_back(Machine::LOAD_IMMEDIATE{
-      static_cast<std::uint8_t>(regfile_type.size()), const_idx});
-  regfile_type.push_back(LITERAL_STR);
+  std::size_t const_idx{const_umap[token_str.atom_sh]};
+  inst_vec.push_back(Machine::LOAD_IMMEDIATE{
+      static_cast<std::uint8_t>(lang->regfile_type.size()), const_idx});
+  lang->regfile_type.push_back(Language::LITERAL_STR);
 }
 
-void Language::operator()(DECL_VARIABLE declaration) {
+void FunctionIR::operator()(DECL_VARIABLE declaration) {
   declaration.initializer.visit(*this);
   throw COMPILE_ERROR{COMPILE_ERROR::UNSUPPORTED};
 }
@@ -1146,15 +1145,15 @@ void Language::operator()(DECL_FUNCTION &decl) {
   std::size_t atom_sh{get_funcname_atom(decl)};
   if (is_reserved(atom_sh))
     throw COMPILE_ERROR{COMPILE_ERROR::RESERVED_WORD};
-  scope_stack.push(
-      FUNCTION_IR{.return_type = get_machine_type(decl.return_type)});
+  FunctionIR func_ir{.lang = this,
+                     .return_type = get_machine_type(decl.return_type)};
   std::string_view func_name{atom_deq[atom_sh >> 16]};
   for (STATEMENT &func_stmt : decl.subprogram)
-    func_stmt.visit(*this);
+    func_stmt.visit(func_ir);
   std::size_t func_idx{machine.function_vec.size()};
   machine.funcname_umap.insert(std::make_pair(func_name, func_idx));
-  machine.function_vec.emplace_back(std::move(scope_stack.top().inst_vec));
-  scope_stack.pop();
+  machine.function_vec.emplace_back(std::move(func_ir.inst_vec),
+                                    std::move(func_ir.const_pool));
 }
 
 void Language::operator()(STMT_PTR stmt_ptr) {
