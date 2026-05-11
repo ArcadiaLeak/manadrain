@@ -305,12 +305,7 @@ private:
 
 class COMPILE_ERROR : public std::exception {
 public:
-  enum class MESSAGE {
-    UNSUPPORTED,
-    RESERVED_WORD,
-    TYPE_MISMATCH,
-    VOID_IDENTIF
-  };
+  enum MESSAGE { UNSUPPORTED, RESERVED_WORD, TYPE_MISMATCH, VOID_IDENTIF };
   explicit COMPILE_ERROR(MESSAGE msg) : message{msg} {}
   const char *what() const noexcept override { return "compile error!"; }
 
@@ -326,19 +321,22 @@ struct FUNCTION_IR {
   std::vector<LOCAL_VAR> local_vec;
   std::size_t return_type;
   std::vector<Machine::INSTRUCTION> inst_vec;
+  std::vector<std::vector<std::uint64_t>> const_pool;
+  std::unordered_map<std::size_t, std::size_t> const_umap;
 };
 
 class Language : public Parser {
 public:
-  enum TYPEID { TYPEID_STR = 0x10 };
+  enum TYPEID { I32T, I64T, F32T, F64T, U32T, U64T, HEAP_STR, LITERAL_STR };
 
+  void operator()(TOK_STRING token_str);
   void operator()(DECL_VARIABLE declaration);
 
   void operator()(DECL_FUNCTION &decl);
   void operator()(STMT_PTR stmt_ptr);
 
   template <typename T> void operator()(T &visitee) {
-    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
+    throw COMPILE_ERROR{COMPILE_ERROR::UNSUPPORTED};
   }
 
   Machine machine;

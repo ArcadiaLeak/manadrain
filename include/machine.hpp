@@ -8,11 +8,15 @@
 
 namespace Manadrain {
 struct Machine {
-  enum TYPEID { I32T, I64T, F32T, F64T, U32T, U64T };
+  struct LOAD_IMMEDIATE {
+    std::uint8_t dest;
+    std::uint64_t val;
+  };
+  using INSTRUCTION = std::variant<LOAD_IMMEDIATE>;
 
-  using INSTRUCTION = std::variant<std::monostate>;
   struct FUNCTION {
     std::vector<INSTRUCTION> inst_vec;
+    const std::vector<std::vector<std::uint64_t>> const_pool;
   };
   std::vector<FUNCTION> function_vec;
   std::unordered_map<std::string, std::size_t> funcname_umap;

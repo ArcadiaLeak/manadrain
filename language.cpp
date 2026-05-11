@@ -1082,40 +1082,80 @@ void Language::compile() {
     statement.visit(*this);
 }
 
-void Language::operator()(DECL_VARIABLE declaration) { std::unreachable(); }
+void Language::operator()(TOK_STRING token_str) {
+  if (not scope_stack.top().const_umap.contains(token_str.atom_sh)) {
+    std::string_view body_view{token_str.atom_sh >= (1 << 15)
+                                   ? atom_deq[token_str.atom_sh >> 16]
+                                   : S_ATOM_ARR[token_str.atom_sh]};
+    std::vector<std::uint64_t> appendix{
+        std::from_range, std::ranges::single_view{body_view.size()}};
+    for (auto chunk_view : std::ranges::chunk_view{body_view, 8}) {
+      std::inplace_vector<char, 8> chunk_vec{std::from_range, chunk_view};
+      std::uint64_t encoded{};
+      std::memcpy(&encoded, chunk_vec.data(), chunk_vec.size());
+      appendix.push_back(encoded);
+    }
+    auto appendix_it = scope_stack.top().const_pool.insert(
+        scope_stack.top().const_pool.end(), std::move(appendix));
+    scope_stack.top().const_umap[token_str.atom_sh] =
+        std::distance(scope_stack.top().const_pool.begin(), appendix_it);
+  }
+  std::size_t const_idx{scope_stack.top().const_umap[token_str.atom_sh]};
+  scope_stack.top().inst_vec.push_back(Machine::LOAD_IMMEDIATE{
+      static_cast<std::uint8_t>(regfile_type.size()), const_idx});
+  regfile_type.push_back(LITERAL_STR);
+}
 
-std::size_t get_iatom(DECL_FUNCTION &decl) {
+void Language::operator()(DECL_VARIABLE declaration) {
+  declaration.initializer.visit(*this);
+  throw COMPILE_ERROR{COMPILE_ERROR::UNSUPPORTED};
+}
+
+std::size_t get_funcname_atom(DECL_FUNCTION &decl) {
   switch (decl.identifier.index()) {
   case EXPRV_STRING:
     return std::get<EXPRV_STRING>(decl.identifier).atom_sh;
   case EXPRV_IDENTI:
     return std::get<EXPRV_IDENTI>(decl.identifier).atom_sh;
   default:
-    throw COMPILE_ERROR{COMPILE_ERROR::MESSAGE::UNSUPPORTED};
+    throw COMPILE_ERROR{COMPILE_ERROR::UNSUPPORTED};
   }
 }
 
 std::size_t get_machine_type(TYPE_ANNOTATION annot) {
   switch (annot) {
   case TYPE_ANNOTATION::I32T:
-    return Machine::I32T;
+    return Language::I32T;
   case TYPE_ANNOTATION::I64T:
-    return Machine::I64T;
+    return Language::I64T;
   case TYPE_ANNOTATION::U32T:
-    return Machine::U32T;
+    return Language::U32T;
   case TYPE_ANNOTATION::U64T:
-    return Machine::U64T;
+    return Language::U64T;
   case TYPE_ANNOTATION::F32T:
-    return Machine::F32T;
+    return Language::F32T;
   case TYPE_ANNOTATION::F64T:
-    return Machine::F64T;
+    return Language::F64T;
   case TYPE_ANNOTATION::TYPE_STR:
-    return Language::TYPEID_STR;
+    return Language::HEAP_STR;
   }
   std::unreachable();
 }
 
-void Language::operator()(DECL_FUNCTION &decl) { std::unreachable(); }
+void Language::operator()(DECL_FUNCTION &decl) {
+  std::size_t atom_sh{get_funcname_atom(decl)};
+  if (is_reserved(atom_sh))
+    throw COMPILE_ERROR{COMPILE_ERROR::RESERVED_WORD};
+  scope_stack.push(
+      FUNCTION_IR{.return_type = get_machine_type(decl.return_type)});
+  std::string_view func_name{atom_deq[atom_sh >> 16]};
+  for (STATEMENT &func_stmt : decl.subprogram)
+    func_stmt.visit(*this);
+  std::size_t func_idx{machine.function_vec.size()};
+  machine.funcname_umap.insert(std::make_pair(func_name, func_idx));
+  machine.function_vec.emplace_back(std::move(scope_stack.top().inst_vec));
+  scope_stack.pop();
+}
 
 void Language::operator()(STMT_PTR stmt_ptr) {
   stmt_vec[stmt_ptr.stmt_idx].visit(*this);
