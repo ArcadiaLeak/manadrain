@@ -54,7 +54,23 @@ void Language::backward(std::size_t N) {
     backward();
 }
 
+bool has_code_point(std::optional<char32_t> point_opt) {
+  return point_opt.has_value();
+}
+
 IDENTIFIER Language::tokenize_identifier(char32_t leading) {
-  return IDENTIFIER{""};
+  std::ranges::concat_view identifier_view{
+      std::ranges::single_view{leading},
+      traverse() | std::views::take_while(has_code_point) | std::views::join |
+          std::views::take_while(uc_is_property_xid_continue)};
+  backward();
+  std::string identifier_str{};
+  for (char32_t code_point : identifier_view)
+    identifier_str.append_range(traverse_ucs4(code_point));
+  auto reserved_it = reserved_words.find(identifier_str);
+  if (reserved_it != reserved_words.end())
+    return IDENTIFIER{*reserved_it};
+  auto insertion_ret = string_pool.insert(std::move(identifier_str));
+  return IDENTIFIER{*insertion_ret.first};
 }
 } // namespace Manadrain
