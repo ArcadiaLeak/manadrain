@@ -58,27 +58,13 @@ public:
 
   std::vector<std::uint8_t> text_input;
   std::size_t position;
-  std::stack<int> backtrace;
+  std::stack<std::optional<char32_t>> backtrace;
 
-  void prev();
-  std::int32_t next();
-  void backtrack(std::size_t N);
-
-  IDENTIFIER tokenize_identifier(std::int32_t leading);
-  STRING_LITERAL tokenize_string_literal(char32_t separator);
-
-  TOKEN tokenize();
-
-private:
-  void skip_lf();
-  std::optional<char32_t> decode_string_escape(std::int32_t ahead);
-  struct DEDUP_RET {
-    std::size_t pool_idx;
-    bool is_wellknown;
-  };
-  DEDUP_RET deduplicate_string(std::string potential_copy);
+  std::optional<char32_t> forward();
+  std::optional<char32_t> backtrack();
   std::generator<char32_t> traverse();
 
+private:
   std::map<std::string, std::size_t> string_dedup;
   std::vector<std::string_view> string_pool;
 };
