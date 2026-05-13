@@ -47,8 +47,8 @@ struct STRING_LITERAL {
   std::string_view pool_view;
   char32_t separator;
 };
-using TOKEN = std::variant<std::monostate, char32_t, double, std::int64_t,
-                           RESERVED, IDENTIFIER, STRING_LITERAL>;
+using TOKEN = std::variant<char32_t, double, std::int64_t, RESERVED, IDENTIFIER,
+                           STRING_LITERAL>;
 
 enum class TYPE_ANNOTATION {
   T_I32,
@@ -101,12 +101,13 @@ public:
   std::stack<std::optional<char32_t>> backtrace;
   std::set<std::string> string_pool;
 
-  std::generator<std::optional<char32_t>> traverse();
+  std::generator<std::optional<char32_t>> traverse_text();
   std::optional<char32_t> forward();
   void backward();
   void backward(std::size_t N);
 
   TOKEN tokenize();
+  std::generator<TOKEN> traverse_tokens();
   void compile_text();
 
 private:
@@ -116,6 +117,19 @@ private:
 class ParseDeclaration {
 public:
   explicit ParseDeclaration(Language *l) : lang{l} {}
+
+  void operator()(RESERVED reserved);
+  template <typename T> void operator()(T visitee) {
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
+  Language *lang;
+};
+
+class ParseStatement {
+public:
+  explicit ParseStatement(Language *l) : lang{l} {}
 
   void operator()(RESERVED reserved);
   template <typename T> void operator()(T visitee) {
@@ -142,7 +156,29 @@ public:
   }
 
 private:
-  Language *lang;
+  enum STAGE { STAGE_I, STAGE_II, STAGE_III, STAGE_IV, STAGE_V, STAGE_VI };
   int stage;
+  Language *lang;
+};
+
+class ParseVariableDecl {
+public:
+  explicit ParseVariableDecl(Language *l) : lang{l} {}
+
+  std::string_view variable_name;
+  TYPE_ANNOTATION variable_type;
+
+  void operator()(IDENTIFIER identifier);
+  void operator()(char32_t punct);
+  void operator()(RESERVED punct);
+
+  template <typename T> void operator()(T visitee) {
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
+  enum STAGE { STAGE_I, STAGE_II, STAGE_III, STAGE_IV, STAGE_V, STAGE_VI };
+  int stage;
+  Language *lang;
 };
 } // namespace Manadrain

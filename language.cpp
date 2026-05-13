@@ -39,7 +39,7 @@ std::optional<char32_t> Language::forward() {
   return backtrace.top();
 }
 
-std::generator<std::optional<char32_t>> Language::traverse() {
+std::generator<std::optional<char32_t>> Language::traverse_text() {
   while (1)
     co_yield forward();
 }
@@ -64,15 +64,14 @@ void Language::backward(std::size_t N) {
     backward();
 }
 
-bool has_code_point(std::optional<char32_t> point_opt) {
-  return point_opt.has_value();
-}
+bool has_code_point(std::optional<char32_t> opt) { return opt.has_value(); }
+bool has_token(std::optional<TOKEN> opt) { return opt.has_value(); }
 
 TOKEN Language::tokenize_word(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_ucs4(leading)};
   auto xid_continue_view =
-      traverse() | std::views::take_while(has_code_point) | std::views::join |
-      std::views::take_while(uc_is_property_xid_continue) |
+      traverse_text() | std::views::take_while(has_code_point) |
+      std::views::join | std::views::take_while(uc_is_property_xid_continue) |
       std::views::transform(traverse_ucs4) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
@@ -83,16 +82,23 @@ TOKEN Language::tokenize_word(char32_t leading) {
   return IDENTIFIER{*insertion_ret.first};
 }
 
-TOKEN Language::tokenize() {
-  for (char32_t leading :
-       traverse() | std::views::take_while(has_code_point) | std::views::join) {
+std::generator<TOKEN> Language::traverse_tokens() {
+  for (char32_t leading : traverse_text() |
+                              std::views::take_while(has_code_point) |
+                              std::views::join) {
     if (uc_is_property_white_space(leading))
       continue;
-    if (uc_is_property_xid_start(leading) || leading == '_')
-      return tokenize_word(leading);
-    return leading;
+    else if (uc_is_property_xid_start(leading) || leading == '_')
+      co_yield tokenize_word(leading);
+    else
+      co_yield leading;
   }
-  return std::monostate{};
+}
+
+TOKEN Language::tokenize() {
+  for (TOKEN token : traverse_tokens())
+    return token;
+  throw LanguageError{UNEXPECTED_TOKEN{}};
 }
 
 void Language::compile_text() { tokenize().visit(ParseDeclaration{this}); }
@@ -109,7 +115,7 @@ void ParseDeclaration::operator()(RESERVED reserved) {
 
 void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
-  case 0:
+  case STAGE_I:
     funcname = identifier.pool_view;
     ++stage;
     lang->tokenize().visit(*this);
@@ -120,17 +126,26 @@ void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
 }
 
 void ParseFunctionDecl::operator()(char32_t punct) {
-  if (stage == 1 && punct == '(') {
+  if (stage == STAGE_II && punct == '(') {
     ++stage;
     lang->tokenize().visit(*this);
     return;
   }
-  if (stage == 2 && punct == ')') {
+  if (stage == STAGE_III && punct == ')') {
     ++stage;
     lang->tokenize().visit(*this);
     return;
   }
-  if (stage == 3 && punct == ':') {
+  if (stage == STAGE_IV && punct == ':') {
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  }
+  if (stage == STAGE_VI && punct == '{') {
+    for (TOKEN token : lang->traverse_tokens()) {
+      ParseStatement visitor{lang};
+      token.visit(visitor);
+    }
     ++stage;
     lang->tokenize().visit(*this);
     return;
@@ -142,6 +157,8 @@ TYPE_ANNOTATION parse_type_annotation(RESERVED reserved) {
   switch (reserved) {
   case RESERVED::W_INT:
     return TYPE_ANNOTATION::T_I32;
+  case RESERVED::W_STRING:
+    return TYPE_ANNOTATION::T_STRING;
   default:
     throw LanguageError{INVALID_TYPE_ANNOTATION{}};
   }
@@ -149,8 +166,56 @@ TYPE_ANNOTATION parse_type_annotation(RESERVED reserved) {
 
 void ParseFunctionDecl::operator()(RESERVED reserved) {
   switch (stage) {
-  case 4:
+  case STAGE_V:
     return_type = parse_type_annotation(reserved);
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  default:
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+}
+
+void ParseStatement::operator()(RESERVED reserved) {
+  switch (reserved) {
+  case RESERVED::W_LET:
+    lang->tokenize().visit(ParseVariableDecl{lang});
+    return;
+  default:
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+}
+
+void ParseVariableDecl::operator()(IDENTIFIER identifier) {
+  switch (stage) {
+  case STAGE_I:
+    variable_name = identifier.pool_view;
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  default:
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+}
+
+void ParseVariableDecl::operator()(char32_t punct) {
+  if (stage == STAGE_II && punct == ':') {
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  }
+  if (stage == STAGE_IV && punct == '=') {
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  }
+  throw LanguageError{UNEXPECTED_TOKEN{}};
+}
+
+void ParseVariableDecl::operator()(RESERVED reserved) {
+  switch (stage) {
+  case STAGE_III:
+    variable_type = parse_type_annotation(reserved);
     ++stage;
     lang->tokenize().visit(*this);
     return;
