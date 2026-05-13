@@ -68,43 +68,91 @@ bool has_code_point(std::optional<char32_t> point_opt) {
   return point_opt.has_value();
 }
 
-TOKEN Language::tokenize_word() {
-  std::string identifier_str{};
-  for (char32_t leading :
-       forward() | std::views::take_while(uc_is_property_xid_start)) {
-    identifier_str.append_range(traverse_ucs4(leading));
-    auto xid_continue_view =
-        traverse() | std::views::take_while(has_code_point) | std::views::join |
-        std::views::take_while(uc_is_property_xid_continue) |
-        std::views::transform(traverse_ucs4) | std::views::join;
-    identifier_str.append_range(xid_continue_view);
-    backward();
-    auto reserved_it = reserved_umap.find(identifier_str);
-    if (reserved_it != reserved_umap.end())
-      return reserved_it->second;
-    auto insertion_ret = string_pool.insert(std::move(identifier_str));
-    return IDENTIFIER{*insertion_ret.first};
-  }
-  throw LanguageError{MISSING_IDENTIFIER{}};
+TOKEN Language::tokenize_word(char32_t leading) {
+  std::string identifier_str{std::from_range, traverse_ucs4(leading)};
+  auto xid_continue_view =
+      traverse() | std::views::take_while(has_code_point) | std::views::join |
+      std::views::take_while(uc_is_property_xid_continue) |
+      std::views::transform(traverse_ucs4) | std::views::join;
+  identifier_str.append_range(xid_continue_view);
+  backward();
+  auto reserved_it = reserved_umap.find(identifier_str);
+  if (reserved_it != reserved_umap.end())
+    return reserved_it->second;
+  auto insertion_ret = string_pool.insert(std::move(identifier_str));
+  return IDENTIFIER{*insertion_ret.first};
 }
 
-TOKEN Language::tokenize() { return std::monostate{}; }
+TOKEN Language::tokenize() {
+  for (char32_t leading :
+       traverse() | std::views::take_while(has_code_point) | std::views::join) {
+    if (uc_is_property_white_space(leading))
+      continue;
+    if (uc_is_property_xid_start(leading) || leading == '_')
+      return tokenize_word(leading);
+    return leading;
+  }
+  return std::monostate{};
+}
 
 void Language::compile_text() { tokenize().visit(ParseDeclaration{this}); }
 
 void ParseDeclaration::operator()(RESERVED reserved) {
   switch (reserved) {
   case RESERVED::W_FUNCTION:
-    lang->tokenize().visit(ParseFunctionDeclaration{lang});
+    lang->tokenize().visit(ParseFunctionDecl{lang});
     return;
   default:
     throw LanguageError{UNEXPECTED_TOKEN{}};
   }
 }
 
-void ParseFunctionDeclaration::operator()(IDENTIFIER identifier) {
+void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
   case 0:
+    funcname = identifier.pool_view;
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  default:
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+}
+
+void ParseFunctionDecl::operator()(char32_t punct) {
+  if (stage == 1 && punct == '(') {
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  }
+  if (stage == 2 && punct == ')') {
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  }
+  if (stage == 3 && punct == ':') {
+    ++stage;
+    lang->tokenize().visit(*this);
+    return;
+  }
+  throw LanguageError{UNEXPECTED_TOKEN{}};
+}
+
+TYPE_ANNOTATION parse_type_annotation(RESERVED reserved) {
+  switch (reserved) {
+  case RESERVED::W_INT:
+    return TYPE_ANNOTATION::T_I32;
+  default:
+    throw LanguageError{INVALID_TYPE_ANNOTATION{}};
+  }
+}
+
+void ParseFunctionDecl::operator()(RESERVED reserved) {
+  switch (stage) {
+  case 4:
+    return_type = parse_type_annotation(reserved);
+    ++stage;
+    lang->tokenize().visit(*this);
     return;
   default:
     throw LanguageError{UNEXPECTED_TOKEN{}};

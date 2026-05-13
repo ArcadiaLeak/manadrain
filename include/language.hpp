@@ -50,6 +50,16 @@ struct STRING_LITERAL {
 using TOKEN = std::variant<std::monostate, char32_t, double, std::int64_t,
                            RESERVED, IDENTIFIER, STRING_LITERAL>;
 
+enum class TYPE_ANNOTATION {
+  T_I32,
+  T_I64,
+  T_F32,
+  T_F64,
+  T_U32,
+  T_U64,
+  T_STRING
+};
+
 struct INVALID_NUMBER_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
 struct INVALID_BACKSLASH_ESCAPE {};
@@ -100,7 +110,7 @@ public:
   void compile_text();
 
 private:
-  TOKEN tokenize_word();
+  TOKEN tokenize_word(char32_t leading);
 };
 
 class ParseDeclaration {
@@ -116,11 +126,17 @@ private:
   Language *lang;
 };
 
-class ParseFunctionDeclaration {
+class ParseFunctionDecl {
 public:
-  explicit ParseFunctionDeclaration(Language *l) : lang{l} {}
+  explicit ParseFunctionDecl(Language *l) : lang{l} {}
+
+  std::string_view funcname;
+  TYPE_ANNOTATION return_type;
 
   void operator()(IDENTIFIER identifier);
+  void operator()(char32_t punct);
+  void operator()(RESERVED punct);
+
   template <typename T> void operator()(T visitee) {
     throw LanguageError{UNEXPECTED_TOKEN{}};
   }
