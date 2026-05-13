@@ -112,6 +112,7 @@ public:
 
 private:
   TOKEN tokenize_word(char32_t leading);
+  STRING_LITERAL tokenize_string_literal(char32_t separator);
 };
 
 class ParseDeclaration {
@@ -156,7 +157,14 @@ public:
   }
 
 private:
-  enum STAGE { STAGE_I, STAGE_II, STAGE_III, STAGE_IV, STAGE_V, STAGE_VI };
+  enum {
+    FUNCTION_I,
+    FUNCTION_II,
+    FUNCTION_III,
+    FUNCTION_IV,
+    FUNCTION_V,
+    FUNCTION_VI
+  };
   int stage;
   Language *lang;
 };
@@ -177,8 +185,22 @@ public:
   }
 
 private:
-  enum STAGE { STAGE_I, STAGE_II, STAGE_III, STAGE_IV, STAGE_V, STAGE_VI };
+  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III, VARIABLE_IV };
   int stage;
+  Language *lang;
+};
+
+class ParseExpression {
+public:
+  explicit ParseExpression(Language *l) : lang{l} {}
+
+  void operator()(STRING_LITERAL string_literal);
+
+  template <typename T> void operator()(T visitee) {
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
   Language *lang;
 };
 } // namespace Manadrain

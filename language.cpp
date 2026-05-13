@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cassert>
 #include <inplace_vector>
 #include <unordered_map>
@@ -82,12 +83,50 @@ TOKEN Language::tokenize_word(char32_t leading) {
   return IDENTIFIER{*insertion_ret.first};
 }
 
+std::int32_t code_point_to_int(std::optional<char32_t> code_point) {
+  if (not code_point)
+    return -1;
+  return *code_point;
+}
+
+STRING_LITERAL Language::tokenize_string_literal(char32_t separator) {
+  std::string literal_str{};
+  auto not_ended = [separator](auto code_point) {
+    return code_point != separator;
+  };
+  auto literal_view = traverse_text() |
+                      std::views::transform(code_point_to_int) |
+                      std::views::take_while(not_ended);
+  for (std::int32_t leading : literal_view) {
+    switch (leading) {
+    case '\r':
+      if (forward() != '\n')
+        backward();
+      [[fallthrough]];
+    case '\n':
+      if (separator != '`')
+        throw LanguageError{UNEXPECTED_STRING_END{}};
+      literal_str.push_back('\n');
+      break;
+    default:
+      literal_str.append_range(traverse_ucs4(leading));
+      break;
+    }
+  }
+  auto insertion_ret = string_pool.insert(std::move(literal_str));
+  return STRING_LITERAL{*insertion_ret.first, separator};
+}
+
 std::generator<TOKEN> Language::traverse_tokens() {
   for (char32_t leading : traverse_text() |
                               std::views::take_while(has_code_point) |
                               std::views::join) {
     if (uc_is_property_white_space(leading))
       continue;
+    else if (std::ranges::any_of(
+                 std::to_array({'`', '\'', '"'}),
+                 [leading](char quote) { return leading == quote; }))
+      co_yield tokenize_string_literal(leading);
     else if (uc_is_property_xid_start(leading) || leading == '_')
       co_yield tokenize_word(leading);
     else
@@ -115,7 +154,7 @@ void ParseDeclaration::operator()(RESERVED reserved) {
 
 void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
-  case STAGE_I:
+  case FUNCTION_I:
     funcname = identifier.pool_view;
     ++stage;
     lang->tokenize().visit(*this);
@@ -126,22 +165,22 @@ void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
 }
 
 void ParseFunctionDecl::operator()(char32_t punct) {
-  if (stage == STAGE_II && punct == '(') {
+  if (stage == FUNCTION_II && punct == '(') {
     ++stage;
     lang->tokenize().visit(*this);
     return;
   }
-  if (stage == STAGE_III && punct == ')') {
+  if (stage == FUNCTION_III && punct == ')') {
     ++stage;
     lang->tokenize().visit(*this);
     return;
   }
-  if (stage == STAGE_IV && punct == ':') {
+  if (stage == FUNCTION_IV && punct == ':') {
     ++stage;
     lang->tokenize().visit(*this);
     return;
   }
-  if (stage == STAGE_VI && punct == '{') {
+  if (stage == FUNCTION_VI && punct == '{') {
     for (TOKEN token : lang->traverse_tokens()) {
       ParseStatement visitor{lang};
       token.visit(visitor);
@@ -166,7 +205,7 @@ TYPE_ANNOTATION parse_type_annotation(RESERVED reserved) {
 
 void ParseFunctionDecl::operator()(RESERVED reserved) {
   switch (stage) {
-  case STAGE_V:
+  case FUNCTION_V:
     return_type = parse_type_annotation(reserved);
     ++stage;
     lang->tokenize().visit(*this);
@@ -188,7 +227,7 @@ void ParseStatement::operator()(RESERVED reserved) {
 
 void ParseVariableDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
-  case STAGE_I:
+  case VARIABLE_I:
     variable_name = identifier.pool_view;
     ++stage;
     lang->tokenize().visit(*this);
@@ -199,14 +238,14 @@ void ParseVariableDecl::operator()(IDENTIFIER identifier) {
 }
 
 void ParseVariableDecl::operator()(char32_t punct) {
-  if (stage == STAGE_II && punct == ':') {
+  if (stage == VARIABLE_II && punct == ':') {
     ++stage;
     lang->tokenize().visit(*this);
     return;
   }
-  if (stage == STAGE_IV && punct == '=') {
+  if (stage == VARIABLE_IV && punct == '=') {
     ++stage;
-    lang->tokenize().visit(*this);
+    lang->tokenize().visit(ParseExpression{lang});
     return;
   }
   throw LanguageError{UNEXPECTED_TOKEN{}};
@@ -214,7 +253,7 @@ void ParseVariableDecl::operator()(char32_t punct) {
 
 void ParseVariableDecl::operator()(RESERVED reserved) {
   switch (stage) {
-  case STAGE_III:
+  case VARIABLE_III:
     variable_type = parse_type_annotation(reserved);
     ++stage;
     lang->tokenize().visit(*this);
@@ -222,5 +261,9 @@ void ParseVariableDecl::operator()(RESERVED reserved) {
   default:
     throw LanguageError{UNEXPECTED_TOKEN{}};
   }
+}
+
+void ParseExpression::operator()(STRING_LITERAL string_literal) {
+  throw LanguageError{UNEXPECTED_TOKEN{}};
 }
 } // namespace Manadrain
