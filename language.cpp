@@ -58,19 +58,23 @@ bool has_code_point(std::optional<char32_t> point_opt) {
   return point_opt.has_value();
 }
 
-IDENTIFIER Language::tokenize_identifier(char32_t leading) {
-  std::ranges::concat_view identifier_view{
-      std::ranges::single_view{leading},
-      traverse() | std::views::take_while(has_code_point) | std::views::join |
-          std::views::take_while(uc_is_property_xid_continue)};
-  backward();
+IDENTIFIER Language::tokenize_identifier() {
   std::string identifier_str{};
-  for (char32_t code_point : identifier_view)
-    identifier_str.append_range(traverse_ucs4(code_point));
-  auto reserved_it = reserved_words.find(identifier_str);
-  if (reserved_it != reserved_words.end())
-    return IDENTIFIER{*reserved_it};
-  auto insertion_ret = string_pool.insert(std::move(identifier_str));
-  return IDENTIFIER{*insertion_ret.first};
+  for (char32_t leading :
+       forward() | std::views::take_while(uc_is_property_xid_start)) {
+    identifier_str.append_range(traverse_ucs4(leading));
+    auto xid_continue_view =
+        traverse() | std::views::take_while(has_code_point) | std::views::join |
+        std::views::take_while(uc_is_property_xid_continue) |
+        std::views::transform(traverse_ucs4) | std::views::join;
+    identifier_str.append_range(xid_continue_view);
+    backward();
+    auto reserved_it = reserved_words.find(identifier_str);
+    if (reserved_it != reserved_words.end())
+      return IDENTIFIER{*reserved_it};
+    auto insertion_ret = string_pool.insert(std::move(identifier_str));
+    return IDENTIFIER{*insertion_ret.first};
+  }
+  throw LanguageError{MISSING_IDENTIFIER{}};
 }
 } // namespace Manadrain

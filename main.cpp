@@ -25,5 +25,10 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
+  Manadrain::Language lang{};
+  lang.text_input = std::ranges::istream_view<std::uint8_t>{file} |
+                    std::ranges::to<std::vector<std::uint8_t>>();
+  Manadrain::IDENTIFIER identifier{lang.tokenize_identifier()};
+
   return 0;
 }

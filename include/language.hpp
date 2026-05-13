@@ -36,7 +36,7 @@ struct UNEXPECTED_RESERVED_WORD {};
 struct UNEXPECTED_STRING_END {};
 struct UNEXPECTED_COMMENT_END {};
 struct UNEXPECTED_TOKEN {};
-class LangError : public std::exception {
+class LanguageError : public std::exception {
 public:
   using MESSAGE = std::variant<
       INVALID_NUMBER_LITERAL, INVALID_PROPERTY_NAME, INVALID_BACKSLASH_ESCAPE,
@@ -47,7 +47,7 @@ public:
       UNEXPECTED_TOKEN>;
   MESSAGE message;
 
-  explicit LangError(MESSAGE msg) : message{msg} {}
+  explicit LanguageError(MESSAGE msg) : message{msg} {}
   const char *what() const noexcept override { return "language exception!"; }
 };
 
@@ -56,7 +56,6 @@ public:
   std::vector<std::uint8_t> text_input;
   std::size_t position;
 
-private:
   std::stack<std::optional<char32_t>> backtrace;
   std::set<std::string> string_pool;
 
@@ -65,6 +64,6 @@ private:
   void backward();
   void backward(std::size_t N);
 
-  IDENTIFIER tokenize_identifier(char32_t leading);
+  IDENTIFIER tokenize_identifier();
 };
 } // namespace Manadrain
