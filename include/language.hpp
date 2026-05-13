@@ -1,9 +1,11 @@
 #include <cstdint>
 #include <generator>
+#include <inplace_vector>
 #include <optional>
 #include <ranges>
 #include <set>
 #include <stack>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -50,15 +52,7 @@ struct STRING_LITERAL {
 using TOKEN = std::variant<char32_t, double, std::int64_t, RESERVED, IDENTIFIER,
                            STRING_LITERAL>;
 
-enum class TYPE_ANNOTATION {
-  T_I32,
-  T_I64,
-  T_F32,
-  T_F64,
-  T_U32,
-  T_U64,
-  T_STRING
-};
+enum class DATATYPE { T_I32, T_I64, T_F32, T_F64, T_U32, T_U64, T_STRING };
 
 struct INVALID_NUMBER_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
@@ -79,7 +73,7 @@ struct UNEXPECTED_STRING_END {};
 struct UNEXPECTED_COMMENT_END {};
 struct UNEXPECTED_TOKEN {};
 struct UNEXPECTED_END_OF_FILE {};
-class LanguageError : public std::exception {
+class ScriptError : public std::exception {
 public:
   using MESSAGE = std::variant<
       INVALID_NUMBER_LITERAL, INVALID_PROPERTY_NAME, INVALID_BACKSLASH_ESCAPE,
@@ -90,17 +84,20 @@ public:
       UNEXPECTED_TOKEN, UNEXPECTED_END_OF_FILE>;
   MESSAGE message;
 
-  explicit LanguageError(MESSAGE msg) : message{msg} {}
-  const char *what() const noexcept override { return "language exception!"; }
+  explicit ScriptError(MESSAGE msg) : message{msg} {}
+  const char *what() const noexcept override { return "script error!"; }
 };
 
-class Language {
+class Script {
 public:
-  std::vector<std::uint8_t> text_input;
+  std::vector<std::uint8_t> text_source;
   std::size_t position;
 
   std::stack<std::optional<char32_t>> backtrace;
   std::set<std::string> string_pool;
+
+  std::vector<std::vector<std::uint64_t>> const_pool;
+  std::unordered_map<std::string_view, std::size_t> str_to_const;
 
   std::generator<std::optional<char32_t>> traverse_text();
   std::optional<char32_t> forward();
@@ -118,43 +115,37 @@ private:
 
 class ParseDeclaration {
 public:
-  explicit ParseDeclaration(Language *l) : lang{l} {}
+  explicit ParseDeclaration(Script *s) : script{s} {}
 
   void operator()(RESERVED reserved);
   template <typename T> void operator()(T visitee) {
-    throw LanguageError{UNEXPECTED_TOKEN{}};
+    throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 
 private:
-  Language *lang;
+  Script *script;
 };
 
-class ParseStatement {
-public:
-  explicit ParseStatement(Language *l) : lang{l} {}
-
-  void operator()(RESERVED reserved);
-  template <typename T> void operator()(T visitee) {
-    throw LanguageError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Language *lang;
+struct HEAP_ALLOC {
+  std::uint8_t dest;
+  std::size_t const_idx;
 };
+using INSTRUCTION = std::variant<HEAP_ALLOC>;
 
 class ParseFunctionDecl {
 public:
-  explicit ParseFunctionDecl(Language *l) : lang{l} {}
+  explicit ParseFunctionDecl(Script *s) : script{s} {}
 
   std::string_view funcname;
-  TYPE_ANNOTATION return_type;
+  DATATYPE return_type;
+  std::vector<INSTRUCTION> instruct_vec;
 
   void operator()(IDENTIFIER identifier);
   void operator()(char32_t punct);
   void operator()(RESERVED punct);
 
   template <typename T> void operator()(T visitee) {
-    throw LanguageError{UNEXPECTED_TOKEN{}};
+    throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 
 private:
@@ -167,41 +158,66 @@ private:
     FUNCTION_VI
   };
   int stage;
-  Language *lang;
+  Script *script;
+};
+
+class ParseStatement {
+public:
+  explicit ParseStatement(ParseFunctionDecl *f, Script *s)
+      : func{f}, script{s} {}
+
+  std::inplace_vector<DATATYPE, 32> reflection;
+
+  void operator()(RESERVED reserved);
+  template <typename T> void operator()(T visitee) {
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
+  ParseFunctionDecl *func;
+  Script *script;
 };
 
 class ParseVariableDecl {
 public:
-  explicit ParseVariableDecl(Language *l) : lang{l} {}
+  explicit ParseVariableDecl(ParseStatement *ps, ParseFunctionDecl *f,
+                             Script *s)
+      : stmt{ps}, func{f}, script{s} {}
 
   std::string_view variable_name;
-  TYPE_ANNOTATION variable_type;
+  DATATYPE variable_type;
 
   void operator()(IDENTIFIER identifier);
   void operator()(char32_t punct);
   void operator()(RESERVED punct);
 
   template <typename T> void operator()(T visitee) {
-    throw LanguageError{UNEXPECTED_TOKEN{}};
+    throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 
 private:
   enum { VARIABLE_I, VARIABLE_II, VARIABLE_III, VARIABLE_IV };
   int stage;
-  Language *lang;
+
+  ParseStatement *stmt;
+  ParseFunctionDecl *func;
+  Script *script;
 };
 
 class ParseExpression {
 public:
-  explicit ParseExpression(Language *l) : lang{l} {}
+  explicit ParseExpression(ParseStatement *ps, ParseFunctionDecl *f, Script *s)
+      : stmt{ps}, func{f}, script{s} {}
 
   void operator()(STRING_LITERAL string_literal);
 
   template <typename T> void operator()(T visitee) {
-    throw LanguageError{UNEXPECTED_TOKEN{}};
+    throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 
 private:
-  Language *lang;
+  ParseStatement *stmt;
+  ParseFunctionDecl *func;
+  Script *script;
 };
 } // namespace Manadrain
