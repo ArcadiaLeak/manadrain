@@ -96,6 +96,37 @@ public:
   void backward();
   void backward(std::size_t N);
 
+  TOKEN tokenize();
+  void compile_text();
+
+private:
   TOKEN tokenize_word();
+};
+
+class ParseDeclaration {
+public:
+  explicit ParseDeclaration(Language *l) : lang{l} {}
+
+  void operator()(RESERVED reserved);
+  template <typename T> void operator()(T visitee) {
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
+  Language *lang;
+};
+
+class ParseFunctionDeclaration {
+public:
+  explicit ParseFunctionDeclaration(Language *l) : lang{l} {}
+
+  void operator()(IDENTIFIER identifier);
+  template <typename T> void operator()(T visitee) {
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
+  Language *lang;
+  int stage;
 };
 } // namespace Manadrain

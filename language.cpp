@@ -87,4 +87,27 @@ TOKEN Language::tokenize_word() {
   }
   throw LanguageError{MISSING_IDENTIFIER{}};
 }
+
+TOKEN Language::tokenize() { return std::monostate{}; }
+
+void Language::compile_text() { tokenize().visit(ParseDeclaration{this}); }
+
+void ParseDeclaration::operator()(RESERVED reserved) {
+  switch (reserved) {
+  case RESERVED::W_FUNCTION:
+    lang->tokenize().visit(ParseFunctionDeclaration{lang});
+    return;
+  default:
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+}
+
+void ParseFunctionDeclaration::operator()(IDENTIFIER identifier) {
+  switch (stage) {
+  case 0:
+    return;
+  default:
+    throw LanguageError{UNEXPECTED_TOKEN{}};
+  }
+}
 } // namespace Manadrain

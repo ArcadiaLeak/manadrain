@@ -25,10 +25,10 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Language lang{};
-  lang.text_input = std::ranges::istream_view<std::uint8_t>{file} |
-                    std::ranges::to<std::vector<std::uint8_t>>();
-  Manadrain::TOKEN word{lang.tokenize_word()};
+  Manadrain::Language language{};
+  language.text_input = std::ranges::istream_view<std::uint8_t>{file} |
+                        std::ranges::to<std::vector<std::uint8_t>>();
+  language.compile_text();
 
   return 0;
 }
