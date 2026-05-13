@@ -1,6 +1,6 @@
 #include <cassert>
 #include <inplace_vector>
-#include <unordered_set>
+#include <unordered_map>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -8,12 +8,22 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_set<std::string_view> reserved_words{
-    "const",  "let",    "var",   "class",    "function", "return",
-    "import", "export", "from",  "as",       "default",  "undefined",
-    "null",   "true",   "false", "if",       "else",     "while",
-    "for",    "do",     "break", "continue", "switch",   "int",
-    "long",   "uint",   "ulong", "float",    "double",   "string"};
+static const std::unordered_map<std::string_view, RESERVED> reserved_umap{
+    {"const", RESERVED::W_CONST},       {"let", RESERVED::W_LET},
+    {"var", RESERVED::W_VAR},           {"class", RESERVED::W_CLASS},
+    {"function", RESERVED::W_FUNCTION}, {"return", RESERVED::W_RETURN},
+    {"import", RESERVED::W_IMPORT},     {"export", RESERVED::W_EXPORT},
+    {"from", RESERVED::W_FROM},         {"as", RESERVED::W_AS},
+    {"default", RESERVED::W_DEFAULT},   {"undefined", RESERVED::W_UNDEFINED},
+    {"null", RESERVED::W_NULL},         {"true", RESERVED::W_TRUE},
+    {"false", RESERVED::W_FALSE},       {"if", RESERVED::W_IF},
+    {"else", RESERVED::W_ELSE},         {"while", RESERVED::W_WHILE},
+    {"for", RESERVED::W_FOR},           {"do", RESERVED::W_DO},
+    {"break", RESERVED::W_BREAK},       {"continue", RESERVED::W_CONTINUE},
+    {"switch", RESERVED::W_SWITCH},     {"int", RESERVED::W_INT},
+    {"long", RESERVED::W_LONG},         {"uint", RESERVED::W_UINT},
+    {"ulong", RESERVED::W_ULONG},       {"float", RESERVED::W_FLOAT},
+    {"double", RESERVED::W_DOUBLE},     {"string", RESERVED::W_STRING}};
 
 std::optional<char32_t> Language::forward() {
   if (position >= text_input.size())
@@ -58,7 +68,7 @@ bool has_code_point(std::optional<char32_t> point_opt) {
   return point_opt.has_value();
 }
 
-IDENTIFIER Language::tokenize_identifier() {
+TOKEN Language::tokenize_word() {
   std::string identifier_str{};
   for (char32_t leading :
        forward() | std::views::take_while(uc_is_property_xid_start)) {
@@ -69,9 +79,9 @@ IDENTIFIER Language::tokenize_identifier() {
         std::views::transform(traverse_ucs4) | std::views::join;
     identifier_str.append_range(xid_continue_view);
     backward();
-    auto reserved_it = reserved_words.find(identifier_str);
-    if (reserved_it != reserved_words.end())
-      return IDENTIFIER{*reserved_it};
+    auto reserved_it = reserved_umap.find(identifier_str);
+    if (reserved_it != reserved_umap.end())
+      return reserved_it->second;
     auto insertion_ret = string_pool.insert(std::move(identifier_str));
     return IDENTIFIER{*insertion_ret.first};
   }

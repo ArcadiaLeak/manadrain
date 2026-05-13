@@ -8,6 +8,38 @@
 #include <vector>
 
 namespace Manadrain {
+enum class RESERVED {
+  W_CONST,
+  W_LET,
+  W_VAR,
+  W_CLASS,
+  W_FUNCTION,
+  W_RETURN,
+  W_IMPORT,
+  W_EXPORT,
+  W_FROM,
+  W_AS,
+  W_DEFAULT,
+  W_UNDEFINED,
+  W_NULL,
+  W_TRUE,
+  W_FALSE,
+  W_IF,
+  W_ELSE,
+  W_WHILE,
+  W_FOR,
+  W_DO,
+  W_BREAK,
+  W_CONTINUE,
+  W_SWITCH,
+  W_INT,
+  W_LONG,
+  W_UINT,
+  W_ULONG,
+  W_FLOAT,
+  W_DOUBLE,
+  W_STRING
+};
 struct IDENTIFIER {
   std::string_view pool_view;
 };
@@ -16,7 +48,7 @@ struct STRING_LITERAL {
   char32_t separator;
 };
 using TOKEN = std::variant<std::monostate, char32_t, double, std::int64_t,
-                           IDENTIFIER, STRING_LITERAL>;
+                           RESERVED, IDENTIFIER, STRING_LITERAL>;
 
 struct INVALID_NUMBER_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
@@ -64,6 +96,6 @@ public:
   void backward();
   void backward(std::size_t N);
 
-  IDENTIFIER tokenize_identifier();
+  TOKEN tokenize_word();
 };
 } // namespace Manadrain

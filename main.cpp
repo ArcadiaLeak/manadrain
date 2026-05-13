@@ -28,7 +28,7 @@ int main(int argc, char *argv[]) {
   Manadrain::Language lang{};
   lang.text_input = std::ranges::istream_view<std::uint8_t>{file} |
                     std::ranges::to<std::vector<std::uint8_t>>();
-  Manadrain::IDENTIFIER identifier{lang.tokenize_identifier()};
+  Manadrain::TOKEN word{lang.tokenize_word()};
 
   return 0;
 }
