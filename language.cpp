@@ -117,7 +117,7 @@ STRING_LITERAL Language::tokenize_string_literal(char32_t separator) {
   return STRING_LITERAL{*insertion_ret.first, separator};
 }
 
-std::generator<TOKEN> Language::traverse_tokens() {
+TOKEN Language::tokenize() {
   for (char32_t leading : traverse_text() |
                               std::views::take_while(has_code_point) |
                               std::views::join) {
@@ -126,18 +126,21 @@ std::generator<TOKEN> Language::traverse_tokens() {
     else if (std::ranges::any_of(
                  std::to_array({'`', '\'', '"'}),
                  [leading](char quote) { return leading == quote; }))
-      co_yield tokenize_string_literal(leading);
+      return tokenize_string_literal(leading);
     else if (uc_is_property_xid_start(leading) || leading == '_')
-      co_yield tokenize_word(leading);
-    else
-      co_yield leading;
+      return tokenize_word(leading);
+    else if (std::ranges::any_of(
+                 std::to_array({'(', ')', ':', '{', '}', '='}),
+                 [leading](char punct) { return leading == punct; }))
+      return leading;
+    throw LanguageError{UNEXPECTED_TOKEN{}};
   }
+  throw LanguageError{UNEXPECTED_END_OF_FILE{}};
 }
 
-TOKEN Language::tokenize() {
-  for (TOKEN token : traverse_tokens())
-    return token;
-  throw LanguageError{UNEXPECTED_TOKEN{}};
+std::generator<TOKEN> Language::traverse_tokens() {
+  while (1)
+    co_yield tokenize();
 }
 
 void Language::compile_text() { tokenize().visit(ParseDeclaration{this}); }
