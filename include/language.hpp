@@ -49,12 +49,13 @@ struct STRING_LITERAL {
   std::string_view pool_view;
   char32_t separator;
 };
-using TOKEN = std::variant<char32_t, double, std::int64_t, RESERVED, IDENTIFIER,
+using NUMERIC_LITERAL = std::variant<std::int32_t, std::int64_t, double>;
+using TOKEN = std::variant<char32_t, NUMERIC_LITERAL, RESERVED, IDENTIFIER,
                            STRING_LITERAL>;
 
 enum class DATATYPE { T_I32, T_I64, T_F32, T_F64, T_U32, T_U64, T_STRING };
 
-struct INVALID_NUMBER_LITERAL {};
+struct INVALID_NUMERIC_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
 struct INVALID_BACKSLASH_ESCAPE {};
 struct INVALID_TYPE_ANNOTATION {};
@@ -76,7 +77,7 @@ struct UNEXPECTED_END_OF_FILE {};
 class ScriptError : public std::exception {
 public:
   using MESSAGE = std::variant<
-      INVALID_NUMBER_LITERAL, INVALID_PROPERTY_NAME, INVALID_BACKSLASH_ESCAPE,
+      INVALID_NUMERIC_LITERAL, INVALID_PROPERTY_NAME, INVALID_BACKSLASH_ESCAPE,
       INVALID_TYPE_ANNOTATION, MISSING_FIELD_NAME, MISSING_VARIABLE_NAME,
       MISSING_FUNCTION_NAME, MISSING_IDENTIFIER, MISSING_STRING_LITERAL,
       MISSING_FORMAL_PARAMETER, MISSING_TYPE_ANNOTATION, MISSING_PUNCT,
@@ -85,10 +86,10 @@ public:
   MESSAGE message;
 
   explicit ScriptError(MESSAGE msg) : message{msg} {}
-  const char *what() const noexcept override { return "script error!"; }
+  const char *what() const noexcept override { return "comp error!"; }
 };
 
-class Script {
+class Compilation {
 public:
   std::vector<std::uint8_t> text_source;
   std::size_t position;
@@ -111,11 +112,12 @@ public:
 private:
   TOKEN tokenize_word(char32_t leading);
   STRING_LITERAL tokenize_string_literal(char32_t separator);
+  TOKEN tokenize_numeric_literal(char32_t leading);
 };
 
 class ParseDeclaration {
 public:
-  explicit ParseDeclaration(Script *s) : script{s} {}
+  explicit ParseDeclaration(Compilation *c) : comp{c} {}
 
   void operator()(RESERVED reserved);
   template <typename T> void operator()(T visitee) {
@@ -123,7 +125,7 @@ public:
   }
 
 private:
-  Script *script;
+  Compilation *comp;
 };
 
 struct HEAP_ALLOC {
@@ -134,7 +136,7 @@ using INSTRUCTION = std::variant<HEAP_ALLOC>;
 
 class ParseFunctionDecl {
 public:
-  explicit ParseFunctionDecl(Script *s) : script{s} {}
+  explicit ParseFunctionDecl(Compilation *c) : comp{c} {}
 
   std::string_view funcname;
   DATATYPE return_type;
@@ -158,13 +160,13 @@ private:
     FUNCTION_VI
   };
   int stage;
-  Script *script;
+  Compilation *comp;
 };
 
 class ParseStatement {
 public:
-  explicit ParseStatement(ParseFunctionDecl *f, Script *s)
-      : func{f}, script{s} {}
+  explicit ParseStatement(ParseFunctionDecl *f, Compilation *s)
+      : func{f}, comp{s} {}
 
   std::inplace_vector<DATATYPE, 32> reflection;
 
@@ -175,14 +177,14 @@ public:
 
 private:
   ParseFunctionDecl *func;
-  Script *script;
+  Compilation *comp;
 };
 
 class ParseVariableDecl {
 public:
   explicit ParseVariableDecl(ParseStatement *ps, ParseFunctionDecl *f,
-                             Script *s)
-      : stmt{ps}, func{f}, script{s} {}
+                             Compilation *c)
+      : stmt{ps}, func{f}, comp{c} {}
 
   std::string_view variable_name;
   DATATYPE variable_type;
@@ -196,20 +198,22 @@ public:
   }
 
 private:
-  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III, VARIABLE_IV };
+  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III, VARIABLE_IV, VARIABLE_V };
   int stage;
 
   ParseStatement *stmt;
   ParseFunctionDecl *func;
-  Script *script;
+  Compilation *comp;
 };
 
 class ParseExpression {
 public:
-  explicit ParseExpression(ParseStatement *ps, ParseFunctionDecl *f, Script *s)
-      : stmt{ps}, func{f}, script{s} {}
+  explicit ParseExpression(ParseStatement *ps, ParseFunctionDecl *f,
+                           Compilation *c)
+      : stmt{ps}, func{f}, comp{c} {}
 
   void operator()(STRING_LITERAL string_literal);
+  void operator()(NUMERIC_LITERAL num_literal);
 
   template <typename T> void operator()(T visitee) {
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -218,6 +222,8 @@ public:
 private:
   ParseStatement *stmt;
   ParseFunctionDecl *func;
-  Script *script;
+  Compilation *comp;
 };
+
+class Script {};
 } // namespace Manadrain
