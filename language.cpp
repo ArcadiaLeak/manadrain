@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cassert>
+#include <unordered_map>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -7,7 +8,7 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_map<std::string_view, RESERVED> reserved_umap{
+static const std::unordered_map<std::string_view, RESERVED> keyword_pool{
     {"const", RESERVED::W_CONST},       {"let", RESERVED::W_LET},
     {"var", RESERVED::W_VAR},           {"class", RESERVED::W_CLASS},
     {"function", RESERVED::W_FUNCTION}, {"return", RESERVED::W_RETURN},
@@ -24,21 +25,21 @@ static const std::unordered_map<std::string_view, RESERVED> reserved_umap{
     {"ulong", RESERVED::W_ULONG},       {"float", RESERVED::W_FLOAT},
     {"double", RESERVED::W_DOUBLE},     {"string", RESERVED::W_STRING}};
 
-std::optional<char32_t> Compilation::forward() {
-  if (position >= text_source.size())
+std::optional<char32_t> Tokenizer::forward() {
+  if (script->position >= script->text_source.size())
     backtrace.emplace();
   else {
     ucs4_t ch;
-    int advance{u8_mbtoucr(&ch, text_source.data() + position,
-                           text_source.size() - position)};
+    int advance{u8_mbtoucr(&ch, script->text_source.data() + script->position,
+                           script->text_source.size() - script->position)};
     assert(advance >= 0);
-    position += advance;
+    script->position += advance;
     backtrace.push(ch);
   }
   return backtrace.top();
 }
 
-std::generator<std::optional<char32_t>> Compilation::traverse_text() {
+std::generator<std::optional<char32_t>> Tokenizer::traverse_text() {
   while (1)
     co_yield forward();
 }
@@ -51,14 +52,14 @@ std::generator<char> traverse_ucs4(ucs4_t cp) {
     co_yield buffer[i];
 }
 
-void Compilation::backward() {
+void Tokenizer::backward() {
   std::optional behind{backtrace.top()};
-  position -= std::ranges::distance(
+  script->position -= std::ranges::distance(
       behind | std::views::transform(traverse_ucs4) | std::views::join);
   backtrace.pop();
 }
 
-void Compilation::backward(std::size_t N) {
+void Tokenizer::backward(std::size_t N) {
   for (int i = 0; i < N; ++i)
     backward();
 }
@@ -66,7 +67,7 @@ void Compilation::backward(std::size_t N) {
 bool has_code_point(std::optional<char32_t> opt) { return opt.has_value(); }
 bool has_token(std::optional<TOKEN> opt) { return opt.has_value(); }
 
-TOKEN Compilation::tokenize_word(char32_t leading) {
+TOKEN Tokenizer::tokenize_word(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_ucs4(leading)};
   auto xid_continue_view =
       traverse_text() | std::views::take_while(has_code_point) |
@@ -74,11 +75,20 @@ TOKEN Compilation::tokenize_word(char32_t leading) {
       std::views::transform(traverse_ucs4) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
-  auto reserved_it = reserved_umap.find(identifier_str);
-  if (reserved_it != reserved_umap.end())
-    return reserved_it->second;
-  auto insertion_ret = string_pool.insert(std::move(identifier_str));
-  return IDENTIFIER{*insertion_ret.first};
+  do {
+    auto iter_keyword = keyword_pool.find(identifier_str);
+    if (iter_keyword == keyword_pool.end())
+      break;
+    return iter_keyword->second;
+  } while (0);
+  auto iter_atlas = script->string_atlas.find(identifier_str);
+  if (iter_atlas == script->string_atlas.end()) {
+    auto iter_string = script->string_pool.insert(script->string_pool.end(),
+                                                  std::move(identifier_str));
+    auto insertion_ret = script->string_atlas.insert(*iter_string);
+    iter_atlas = insertion_ret.first;
+  }
+  return IDENTIFIER{*iter_atlas};
 }
 
 std::int32_t code_point_to_int(std::optional<char32_t> code_point) {
@@ -87,7 +97,7 @@ std::int32_t code_point_to_int(std::optional<char32_t> code_point) {
   return *code_point;
 }
 
-STRING_LITERAL Compilation::tokenize_string_literal(char32_t separator) {
+STRING_LITERAL Tokenizer::tokenize_string_literal(char32_t separator) {
   std::string literal_str{};
   auto not_ended = [separator](auto code_point) {
     return code_point != separator;
@@ -111,11 +121,17 @@ STRING_LITERAL Compilation::tokenize_string_literal(char32_t separator) {
       break;
     }
   }
-  auto insertion_ret = string_pool.insert(std::move(literal_str));
-  return STRING_LITERAL{*insertion_ret.first, separator};
+  auto iter_atlas = script->string_atlas.find(literal_str);
+  if (iter_atlas == script->string_atlas.end()) {
+    auto iter_string = script->string_pool.insert(script->string_pool.end(),
+                                                  std::move(literal_str));
+    auto insertion_ret = script->string_atlas.insert(*iter_string);
+    iter_atlas = insertion_ret.first;
+  }
+  return STRING_LITERAL{*iter_atlas, separator};
 }
 
-TOKEN Compilation::tokenize_numeric_literal(char32_t leading) {
+TOKEN Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_ucs4(leading)};
   auto has_digit = [](char32_t code_point) { return std::isdigit(code_point); };
   auto digits_view = traverse_text() | std::views::take_while(has_code_point) |
@@ -129,7 +145,7 @@ TOKEN Compilation::tokenize_numeric_literal(char32_t leading) {
   return NUMERIC_LITERAL{num_literal};
 }
 
-TOKEN Compilation::tokenize() {
+TOKEN Tokenizer::tokenize() {
   for (char32_t leading : traverse_text() |
                               std::views::take_while(has_code_point) |
                               std::views::join) {
@@ -150,25 +166,26 @@ TOKEN Compilation::tokenize() {
       token_ret = tokenize_numeric_literal(leading);
     else
       throw ScriptError{UNEXPECTED_TOKEN{}};
-    std::stack<std::optional<char32_t>> local_backtrace{};
-    local_backtrace.swap(backtrace);
     return token_ret;
   }
   throw ScriptError{UNEXPECTED_END_OF_FILE{}};
 }
 
-std::generator<TOKEN> Compilation::traverse_tokens() {
+std::generator<TOKEN> Tokenizer::traverse_tokens() {
   while (1)
     co_yield tokenize();
 }
 
-void Compilation::compile_text() { tokenize().visit(ParseDeclaration{this}); }
+void Script::compile_text() {
+  Tokenizer tokenizer{this};
+  tokenizer.tokenize().visit(ParseDeclaration{&tokenizer, this});
+}
 
 void ParseDeclaration::operator()(RESERVED reserved) {
   switch (reserved) {
   case RESERVED::W_FUNCTION: {
-    ParseFunctionDecl func_visitor{comp};
-    comp->tokenize().visit(func_visitor);
+    ParseFunctionDecl func_visitor{tokenizer, script};
+    tokenizer->tokenize().visit(func_visitor);
     return;
   }
   default:
@@ -181,7 +198,7 @@ void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
   case FUNCTION_I:
     funcname = identifier.pool_view;
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -191,26 +208,26 @@ void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
 void ParseFunctionDecl::operator()(char32_t punct) {
   if (stage == FUNCTION_II && punct == '(') {
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   }
   if (stage == FUNCTION_III && punct == ')') {
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   }
   if (stage == FUNCTION_IV && punct == ':') {
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   }
   if (stage == FUNCTION_VI && punct == '{') {
-    for (TOKEN token : comp->traverse_tokens()) {
-      ParseStatement visitor{this, comp};
+    for (TOKEN token : tokenizer->traverse_tokens()) {
+      ParseStatement visitor{tokenizer, this, script};
       token.visit(visitor);
     }
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   }
   throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -232,7 +249,7 @@ void ParseFunctionDecl::operator()(RESERVED reserved) {
   case FUNCTION_V:
     return_type = parse_type_annotation(reserved);
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -242,7 +259,8 @@ void ParseFunctionDecl::operator()(RESERVED reserved) {
 void ParseStatement::operator()(RESERVED reserved) {
   switch (reserved) {
   case RESERVED::W_LET:
-    comp->tokenize().visit(ParseVariableDecl{this, func, comp});
+    tokenizer->tokenize().visit(
+        ParseVariableDecl{tokenizer, this, func, script});
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -254,7 +272,7 @@ void ParseVariableDecl::operator()(IDENTIFIER identifier) {
   case VARIABLE_I:
     variable_name = identifier.pool_view;
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -264,13 +282,13 @@ void ParseVariableDecl::operator()(IDENTIFIER identifier) {
 void ParseVariableDecl::operator()(char32_t punct) {
   if (stage == VARIABLE_II && punct == ':') {
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   }
   if (stage == VARIABLE_IV && punct == '=') {
     ++stage;
-    comp->tokenize().visit(ParseExpression{stmt, func, comp});
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(ParseExpression{tokenizer, stmt, func, script});
+    tokenizer->tokenize().visit(*this);
     return;
   }
   if (stage == VARIABLE_V && punct == ';')
@@ -283,7 +301,7 @@ void ParseVariableDecl::operator()(RESERVED reserved) {
   case VARIABLE_III:
     variable_type = parse_type_annotation(reserved);
     ++stage;
-    comp->tokenize().visit(*this);
+    tokenizer->tokenize().visit(*this);
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -291,28 +309,7 @@ void ParseVariableDecl::operator()(RESERVED reserved) {
 }
 
 void ParseExpression::operator()(STRING_LITERAL string_literal) {
-  auto encoded_it = comp->str_to_const.find(string_literal.pool_view);
-  if (encoded_it == comp->str_to_const.end()) {
-    auto encode_slice = [](auto str_slice) {
-      std::inplace_vector<char, 8> mem_slot{std::from_range, str_slice};
-      std::uint64_t dest{};
-      std::memcpy(&dest, mem_slot.data(), mem_slot.size());
-      return dest;
-    };
-    auto encoded_view = string_literal.pool_view | std::views::chunk(8) |
-                        std::views::transform(encode_slice);
-    auto newly_created_it = comp->const_pool.insert(
-        comp->const_pool.end(), {std::from_range, encoded_view});
-    std::size_t newly_created_idx =
-        std::distance(comp->const_pool.begin(), newly_created_it);
-    auto insertion_ret = comp->str_to_const.insert(
-        {string_literal.pool_view, newly_created_idx});
-    encoded_it = insertion_ret.first;
-  }
-  std::uint8_t regfile_idx{static_cast<std::uint8_t>(stmt->reflection.size())};
-  func->instruct_vec.push_back(
-      HEAP_ALLOC{.dest = regfile_idx, .const_idx = encoded_it->second});
-  stmt->reflection.push_back(DATATYPE::T_STRING);
+  throw ScriptError{UNSUPPORTED{}};
 }
 
 void ParseExpression::operator()(NUMERIC_LITERAL num_literal) {

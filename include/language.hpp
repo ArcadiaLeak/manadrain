@@ -1,11 +1,11 @@
 #include <cstdint>
 #include <generator>
 #include <inplace_vector>
+#include <list>
 #include <optional>
 #include <ranges>
-#include <set>
 #include <stack>
-#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -74,6 +74,7 @@ struct UNEXPECTED_STRING_END {};
 struct UNEXPECTED_COMMENT_END {};
 struct UNEXPECTED_TOKEN {};
 struct UNEXPECTED_END_OF_FILE {};
+struct UNSUPPORTED {};
 class ScriptError : public std::exception {
 public:
   using MESSAGE = std::variant<
@@ -82,42 +83,49 @@ public:
       MISSING_FUNCTION_NAME, MISSING_IDENTIFIER, MISSING_STRING_LITERAL,
       MISSING_FORMAL_PARAMETER, MISSING_TYPE_ANNOTATION, MISSING_PUNCT,
       UNEXPECTED_RESERVED_WORD, UNEXPECTED_STRING_END, UNEXPECTED_COMMENT_END,
-      UNEXPECTED_TOKEN, UNEXPECTED_END_OF_FILE>;
+      UNEXPECTED_TOKEN, UNEXPECTED_END_OF_FILE, UNSUPPORTED>;
   MESSAGE message;
 
   explicit ScriptError(MESSAGE msg) : message{msg} {}
-  const char *what() const noexcept override { return "comp error!"; }
+  const char *what() const noexcept override { return "script error!"; }
 };
 
-class Compilation {
+class Script {
 public:
   std::vector<std::uint8_t> text_source;
   std::size_t position;
 
-  std::stack<std::optional<char32_t>> backtrace;
-  std::set<std::string> string_pool;
+  std::list<std::string> string_pool;
+  std::unordered_set<std::string_view> string_atlas;
 
-  std::vector<std::vector<std::uint64_t>> const_pool;
-  std::unordered_map<std::string_view, std::size_t> str_to_const;
+  void compile_text();
+};
+
+class Tokenizer {
+public:
+  explicit Tokenizer(Script *s) : script{s} {}
+
+  TOKEN tokenize();
+  std::generator<TOKEN> traverse_tokens();
+
+private:
+  Script *script;
+  std::stack<std::optional<char32_t>> backtrace;
+
+  TOKEN tokenize_word(char32_t leading);
+  STRING_LITERAL tokenize_string_literal(char32_t separator);
+  TOKEN tokenize_numeric_literal(char32_t leading);
 
   std::generator<std::optional<char32_t>> traverse_text();
   std::optional<char32_t> forward();
   void backward();
   void backward(std::size_t N);
-
-  TOKEN tokenize();
-  std::generator<TOKEN> traverse_tokens();
-  void compile_text();
-
-private:
-  TOKEN tokenize_word(char32_t leading);
-  STRING_LITERAL tokenize_string_literal(char32_t separator);
-  TOKEN tokenize_numeric_literal(char32_t leading);
 };
 
 class ParseDeclaration {
 public:
-  explicit ParseDeclaration(Compilation *c) : comp{c} {}
+  explicit ParseDeclaration(Tokenizer *t, Script *s)
+      : tokenizer{t}, script{s} {}
 
   void operator()(RESERVED reserved);
   template <typename T> void operator()(T visitee) {
@@ -125,7 +133,8 @@ public:
   }
 
 private:
-  Compilation *comp;
+  Tokenizer *tokenizer;
+  Script *script;
 };
 
 struct HEAP_ALLOC {
@@ -136,7 +145,8 @@ using INSTRUCTION = std::variant<HEAP_ALLOC>;
 
 class ParseFunctionDecl {
 public:
-  explicit ParseFunctionDecl(Compilation *c) : comp{c} {}
+  explicit ParseFunctionDecl(Tokenizer *t, Script *s)
+      : tokenizer{t}, script{s} {}
 
   std::string_view funcname;
   DATATYPE return_type;
@@ -151,6 +161,9 @@ public:
   }
 
 private:
+  Tokenizer *tokenizer;
+  Script *script;
+
   enum {
     FUNCTION_I,
     FUNCTION_II,
@@ -160,13 +173,12 @@ private:
     FUNCTION_VI
   };
   int stage;
-  Compilation *comp;
 };
 
 class ParseStatement {
 public:
-  explicit ParseStatement(ParseFunctionDecl *f, Compilation *s)
-      : func{f}, comp{s} {}
+  explicit ParseStatement(Tokenizer *t, ParseFunctionDecl *f, Script *s)
+      : tokenizer{t}, func{f}, script{s} {}
 
   std::inplace_vector<DATATYPE, 32> reflection;
 
@@ -176,15 +188,16 @@ public:
   }
 
 private:
+  Tokenizer *tokenizer;
   ParseFunctionDecl *func;
-  Compilation *comp;
+  Script *script;
 };
 
 class ParseVariableDecl {
 public:
-  explicit ParseVariableDecl(ParseStatement *ps, ParseFunctionDecl *f,
-                             Compilation *c)
-      : stmt{ps}, func{f}, comp{c} {}
+  explicit ParseVariableDecl(Tokenizer *t, ParseStatement *ps,
+                             ParseFunctionDecl *f, Script *s)
+      : tokenizer{t}, stmt{ps}, func{f}, script{s} {}
 
   std::string_view variable_name;
   DATATYPE variable_type;
@@ -198,19 +211,20 @@ public:
   }
 
 private:
-  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III, VARIABLE_IV, VARIABLE_V };
-  int stage;
-
+  Tokenizer *tokenizer;
   ParseStatement *stmt;
   ParseFunctionDecl *func;
-  Compilation *comp;
+  Script *script;
+
+  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III, VARIABLE_IV, VARIABLE_V };
+  int stage;
 };
 
 class ParseExpression {
 public:
-  explicit ParseExpression(ParseStatement *ps, ParseFunctionDecl *f,
-                           Compilation *c)
-      : stmt{ps}, func{f}, comp{c} {}
+  explicit ParseExpression(Tokenizer *t, ParseStatement *ps,
+                           ParseFunctionDecl *f, Script *s)
+      : tokenizer{t}, stmt{ps}, func{f}, script{s} {}
 
   void operator()(STRING_LITERAL string_literal);
   void operator()(NUMERIC_LITERAL num_literal);
@@ -220,10 +234,9 @@ public:
   }
 
 private:
+  Tokenizer *tokenizer;
   ParseStatement *stmt;
   ParseFunctionDecl *func;
-  Compilation *comp;
+  Script *script;
 };
-
-class Script {};
 } // namespace Manadrain
