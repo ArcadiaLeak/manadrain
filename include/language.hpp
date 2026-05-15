@@ -33,14 +33,7 @@ enum class RESERVED {
   W_DO,
   W_BREAK,
   W_CONTINUE,
-  W_SWITCH,
-  W_INT,
-  W_LONG,
-  W_UINT,
-  W_ULONG,
-  W_FLOAT,
-  W_DOUBLE,
-  W_STRING
+  W_SWITCH
 };
 struct IDENTIFIER {
   std::string_view pool_view;
@@ -93,6 +86,15 @@ struct ATOM_REF {
   std::string_view pool_view;
 };
 
+class FunctionDecl;
+
+class VariableDecl {
+public:
+  std::string_view variable_name;
+  std::monostate initializer;
+};
+using Statement = std::variant<std::monostate, FunctionDecl, VariableDecl>;
+
 class Script {
 public:
   std::vector<std::uint8_t> text_source;
@@ -103,6 +105,8 @@ public:
 
   std::vector<std::variant<DYNAMIC>> local_heap;
   std::vector<std::variant<ATOM_REF>> shared_heap;
+
+  std::vector<Statement> script_body;
 
   void compile_text();
 };
@@ -128,34 +132,10 @@ private:
   void backward(std::size_t N);
 };
 
-class ParseDeclaration {
-public:
-  explicit ParseDeclaration(Tokenizer *t, Script *s)
-      : tokenizer{t}, script{s} {}
-
-  void operator()(RESERVED reserved);
-  template <typename T> void operator()(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Tokenizer *tokenizer;
-  Script *script;
-};
-
-struct HEAP_ALLOC {
-  std::uint8_t dest;
-  std::size_t const_idx;
-};
-using INSTRUCTION = std::variant<HEAP_ALLOC>;
-
 class FunctionDecl {
 public:
-  explicit FunctionDecl(Script *s) : script{s} {}
-
-  std::string_view funcname;
-  std::vector<INSTRUCTION> instruct_vec;
-  Script *script;
+  std::string_view function_name;
+  std::vector<Statement> function_body;
 };
 
 class ParseFunctionDecl {
@@ -180,9 +160,7 @@ private:
 
 class ParseStatement {
 public:
-  explicit ParseStatement(Tokenizer *t, FunctionDecl *f)
-      : tokenizer{t}, funcdecl{f} {}
-  int regfile_caret;
+  explicit ParseStatement(Tokenizer *t, Statement *s) : tokenizer{t}, stmt{s} {}
 
   void operator()(RESERVED reserved);
   template <typename T> void operator()(T visitee) {
@@ -191,14 +169,13 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  FunctionDecl *funcdecl;
+  Statement *stmt;
 };
 
 class ParseVariableDecl {
 public:
-  explicit ParseVariableDecl(Tokenizer *t, ParseStatement *ps, FunctionDecl *f)
-      : tokenizer{t}, stmt{ps}, funcdecl{f} {}
-  std::string_view variable_name;
+  explicit ParseVariableDecl(Tokenizer *t, VariableDecl *v)
+      : tokenizer{t}, vardecl{v} {}
 
   void operator()(IDENTIFIER identifier);
   void operator()(char32_t punct);
@@ -209,8 +186,7 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  ParseStatement *stmt;
-  FunctionDecl *funcdecl;
+  VariableDecl *vardecl;
 
   enum { VARIABLE_I, VARIABLE_II, VARIABLE_III };
   int stage;
@@ -218,8 +194,7 @@ private:
 
 class ParseExpression {
 public:
-  explicit ParseExpression(Tokenizer *t, ParseStatement *ps, FunctionDecl *f)
-      : tokenizer{t}, stmt{ps}, funcdecl{f} {}
+  explicit ParseExpression(Tokenizer *t) : tokenizer{t} {}
 
   void operator()(STRING_LITERAL string_literal);
   void operator()(NUMERIC_LITERAL num_literal);
@@ -230,7 +205,5 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  ParseStatement *stmt;
-  FunctionDecl *funcdecl;
 };
 } // namespace Manadrain

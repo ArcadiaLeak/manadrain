@@ -20,10 +20,7 @@ static const std::unordered_map<std::string_view, RESERVED> keyword_pool{
     {"else", RESERVED::W_ELSE},         {"while", RESERVED::W_WHILE},
     {"for", RESERVED::W_FOR},           {"do", RESERVED::W_DO},
     {"break", RESERVED::W_BREAK},       {"continue", RESERVED::W_CONTINUE},
-    {"switch", RESERVED::W_SWITCH},     {"int", RESERVED::W_INT},
-    {"long", RESERVED::W_LONG},         {"uint", RESERVED::W_UINT},
-    {"ulong", RESERVED::W_ULONG},       {"float", RESERVED::W_FLOAT},
-    {"double", RESERVED::W_DOUBLE},     {"string", RESERVED::W_STRING}};
+    {"switch", RESERVED::W_SWITCH}};
 
 std::optional<char32_t> Tokenizer::forward() {
   if (script->position >= script->text_source.size())
@@ -178,26 +175,17 @@ std::generator<TOKEN> Tokenizer::traverse_tokens() {
 
 void Script::compile_text() {
   Tokenizer tokenizer{this};
-  tokenizer.tokenize().visit(ParseDeclaration{&tokenizer, this});
-}
-
-void ParseDeclaration::operator()(RESERVED reserved) {
-  switch (reserved) {
-  case RESERVED::W_FUNCTION: {
-    FunctionDecl funcdecl{script};
-    ParseFunctionDecl func_visitor{tokenizer, &funcdecl};
-    tokenizer->tokenize().visit(func_visitor);
-    return;
-  }
-  default:
-    throw ScriptError{UNEXPECTED_TOKEN{}};
+  for (TOKEN token : tokenizer.traverse_tokens()) {
+    auto stmt_it = script_body.emplace(script_body.end());
+    ParseStatement visitor{&tokenizer, std::to_address(stmt_it)};
+    token.visit(visitor);
   }
 }
 
 void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
   case FUNCTION_I:
-    funcdecl->funcname = identifier.pool_view;
+    funcdecl->function_name = identifier.pool_view;
     ++stage;
     tokenizer->tokenize().visit(*this);
     return;
@@ -219,7 +207,9 @@ void ParseFunctionDecl::operator()(char32_t punct) {
   }
   if (stage == FUNCTION_IV && punct == '{') {
     for (TOKEN token : tokenizer->traverse_tokens()) {
-      ParseStatement visitor{tokenizer, funcdecl};
+      auto stmt_it =
+          funcdecl->function_body.emplace(funcdecl->function_body.end());
+      ParseStatement visitor{tokenizer, std::to_address(stmt_it)};
       token.visit(visitor);
     }
     ++stage;
@@ -231,9 +221,18 @@ void ParseFunctionDecl::operator()(char32_t punct) {
 
 void ParseStatement::operator()(RESERVED reserved) {
   switch (reserved) {
-  case RESERVED::W_LET:
-    tokenizer->tokenize().visit(ParseVariableDecl{tokenizer, this, funcdecl});
+  case RESERVED::W_LET: {
+    *stmt = VariableDecl{};
+    tokenizer->tokenize().visit(
+        ParseVariableDecl{tokenizer, std::get_if<VariableDecl>(stmt)});
     return;
+  }
+  case RESERVED::W_FUNCTION: {
+    FunctionDecl funcdecl{};
+    ParseFunctionDecl func_visitor{tokenizer, &funcdecl};
+    tokenizer->tokenize().visit(func_visitor);
+    return;
+  }
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
   }
@@ -242,7 +241,7 @@ void ParseStatement::operator()(RESERVED reserved) {
 void ParseVariableDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
   case VARIABLE_I:
-    variable_name = identifier.pool_view;
+    vardecl->variable_name = identifier.pool_view;
     ++stage;
     tokenizer->tokenize().visit(*this);
     return;
@@ -254,7 +253,7 @@ void ParseVariableDecl::operator()(IDENTIFIER identifier) {
 void ParseVariableDecl::operator()(char32_t punct) {
   if (stage == VARIABLE_II && punct == '=') {
     ++stage;
-    tokenizer->tokenize().visit(ParseExpression{tokenizer, stmt, funcdecl});
+    tokenizer->tokenize().visit(ParseExpression{tokenizer});
     tokenizer->tokenize().visit(*this);
     return;
   }
