@@ -81,11 +81,11 @@ TOKEN Tokenizer::tokenize_word(char32_t leading) {
       break;
     return iter_keyword->second;
   } while (0);
-  auto iter_atlas = script->string_atlas.find(identifier_str);
-  if (iter_atlas == script->string_atlas.end()) {
-    auto iter_string = script->string_pool.insert(script->string_pool.end(),
-                                                  std::move(identifier_str));
-    auto insertion_ret = script->string_atlas.insert(*iter_string);
+  auto iter_atlas = script->atom_atlas.find(identifier_str);
+  if (iter_atlas == script->atom_atlas.end()) {
+    auto iter_atom = script->atom_pool.insert(script->atom_pool.end(),
+                                              std::move(identifier_str));
+    auto insertion_ret = script->atom_atlas.insert(*iter_atom);
     iter_atlas = insertion_ret.first;
   }
   return IDENTIFIER{*iter_atlas};
@@ -121,11 +121,11 @@ STRING_LITERAL Tokenizer::tokenize_string_literal(char32_t separator) {
       break;
     }
   }
-  auto iter_atlas = script->string_atlas.find(literal_str);
-  if (iter_atlas == script->string_atlas.end()) {
-    auto iter_string = script->string_pool.insert(script->string_pool.end(),
-                                                  std::move(literal_str));
-    auto insertion_ret = script->string_atlas.insert(*iter_string);
+  auto iter_atlas = script->atom_atlas.find(literal_str);
+  if (iter_atlas == script->atom_atlas.end()) {
+    auto iter_atom = script->atom_pool.insert(script->atom_pool.end(),
+                                              std::move(literal_str));
+    auto insertion_ret = script->atom_atlas.insert(*iter_atom);
     iter_atlas = insertion_ret.first;
   }
   return STRING_LITERAL{*iter_atlas, separator};
@@ -184,7 +184,8 @@ void Script::compile_text() {
 void ParseDeclaration::operator()(RESERVED reserved) {
   switch (reserved) {
   case RESERVED::W_FUNCTION: {
-    ParseFunctionDecl func_visitor{tokenizer, script};
+    FunctionDecl funcdecl{script};
+    ParseFunctionDecl func_visitor{tokenizer, &funcdecl};
     tokenizer->tokenize().visit(func_visitor);
     return;
   }
@@ -196,7 +197,7 @@ void ParseDeclaration::operator()(RESERVED reserved) {
 void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
   case FUNCTION_I:
-    funcname = identifier.pool_view;
+    funcdecl->funcname = identifier.pool_view;
     ++stage;
     tokenizer->tokenize().visit(*this);
     return;
@@ -216,14 +217,9 @@ void ParseFunctionDecl::operator()(char32_t punct) {
     tokenizer->tokenize().visit(*this);
     return;
   }
-  if (stage == FUNCTION_IV && punct == ':') {
-    ++stage;
-    tokenizer->tokenize().visit(*this);
-    return;
-  }
-  if (stage == FUNCTION_VI && punct == '{') {
+  if (stage == FUNCTION_IV && punct == '{') {
     for (TOKEN token : tokenizer->traverse_tokens()) {
-      ParseStatement visitor{tokenizer, this, script};
+      ParseStatement visitor{tokenizer, funcdecl};
       token.visit(visitor);
     }
     ++stage;
@@ -233,34 +229,10 @@ void ParseFunctionDecl::operator()(char32_t punct) {
   throw ScriptError{UNEXPECTED_TOKEN{}};
 }
 
-DATATYPE parse_type_annotation(RESERVED reserved) {
-  switch (reserved) {
-  case RESERVED::W_INT:
-    return DATATYPE::T_I32;
-  case RESERVED::W_STRING:
-    return DATATYPE::T_STRING;
-  default:
-    throw ScriptError{INVALID_TYPE_ANNOTATION{}};
-  }
-}
-
-void ParseFunctionDecl::operator()(RESERVED reserved) {
-  switch (stage) {
-  case FUNCTION_V:
-    return_type = parse_type_annotation(reserved);
-    ++stage;
-    tokenizer->tokenize().visit(*this);
-    return;
-  default:
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-}
-
 void ParseStatement::operator()(RESERVED reserved) {
   switch (reserved) {
   case RESERVED::W_LET:
-    tokenizer->tokenize().visit(
-        ParseVariableDecl{tokenizer, this, func, script});
+    tokenizer->tokenize().visit(ParseVariableDecl{tokenizer, this, funcdecl});
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -280,32 +252,15 @@ void ParseVariableDecl::operator()(IDENTIFIER identifier) {
 }
 
 void ParseVariableDecl::operator()(char32_t punct) {
-  if (stage == VARIABLE_II && punct == ':') {
+  if (stage == VARIABLE_II && punct == '=') {
     ++stage;
+    tokenizer->tokenize().visit(ParseExpression{tokenizer, stmt, funcdecl});
     tokenizer->tokenize().visit(*this);
     return;
   }
-  if (stage == VARIABLE_IV && punct == '=') {
-    ++stage;
-    tokenizer->tokenize().visit(ParseExpression{tokenizer, stmt, func, script});
-    tokenizer->tokenize().visit(*this);
-    return;
-  }
-  if (stage == VARIABLE_V && punct == ';')
+  if (stage == VARIABLE_III && punct == ';')
     return;
   throw ScriptError{UNEXPECTED_TOKEN{}};
-}
-
-void ParseVariableDecl::operator()(RESERVED reserved) {
-  switch (stage) {
-  case VARIABLE_III:
-    variable_type = parse_type_annotation(reserved);
-    ++stage;
-    tokenizer->tokenize().visit(*this);
-    return;
-  default:
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
 }
 
 void ParseExpression::operator()(STRING_LITERAL string_literal) {

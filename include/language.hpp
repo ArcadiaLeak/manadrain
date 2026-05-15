@@ -53,8 +53,6 @@ using NUMERIC_LITERAL = std::variant<std::int32_t, std::int64_t, double>;
 using TOKEN = std::variant<char32_t, NUMERIC_LITERAL, RESERVED, IDENTIFIER,
                            STRING_LITERAL>;
 
-enum class DATATYPE { T_I32, T_I64, T_F32, T_F64, T_U32, T_U64, T_STRING };
-
 struct INVALID_NUMERIC_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
 struct INVALID_BACKSLASH_ESCAPE {};
@@ -90,13 +88,21 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
+using DYNAMIC = std::monostate;
+struct ATOM_REF {
+  std::string_view pool_view;
+};
+
 class Script {
 public:
   std::vector<std::uint8_t> text_source;
   std::size_t position;
 
-  std::list<std::string> string_pool;
-  std::unordered_set<std::string_view> string_atlas;
+  std::list<std::string> atom_pool;
+  std::unordered_set<std::string_view> atom_atlas;
+
+  std::vector<std::variant<DYNAMIC>> local_heap;
+  std::vector<std::variant<ATOM_REF>> shared_heap;
 
   void compile_text();
 };
@@ -143,18 +149,22 @@ struct HEAP_ALLOC {
 };
 using INSTRUCTION = std::variant<HEAP_ALLOC>;
 
-class ParseFunctionDecl {
+class FunctionDecl {
 public:
-  explicit ParseFunctionDecl(Tokenizer *t, Script *s)
-      : tokenizer{t}, script{s} {}
+  explicit FunctionDecl(Script *s) : script{s} {}
 
   std::string_view funcname;
-  DATATYPE return_type;
   std::vector<INSTRUCTION> instruct_vec;
+  Script *script;
+};
+
+class ParseFunctionDecl {
+public:
+  explicit ParseFunctionDecl(Tokenizer *t, FunctionDecl *f)
+      : tokenizer{t}, funcdecl{f} {}
 
   void operator()(IDENTIFIER identifier);
   void operator()(char32_t punct);
-  void operator()(RESERVED punct);
 
   template <typename T> void operator()(T visitee) {
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -162,25 +172,17 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  Script *script;
+  FunctionDecl *funcdecl;
 
-  enum {
-    FUNCTION_I,
-    FUNCTION_II,
-    FUNCTION_III,
-    FUNCTION_IV,
-    FUNCTION_V,
-    FUNCTION_VI
-  };
+  enum { FUNCTION_I, FUNCTION_II, FUNCTION_III, FUNCTION_IV };
   int stage;
 };
 
 class ParseStatement {
 public:
-  explicit ParseStatement(Tokenizer *t, ParseFunctionDecl *f, Script *s)
-      : tokenizer{t}, func{f}, script{s} {}
-
-  std::inplace_vector<DATATYPE, 32> reflection;
+  explicit ParseStatement(Tokenizer *t, FunctionDecl *f)
+      : tokenizer{t}, funcdecl{f} {}
+  int regfile_caret;
 
   void operator()(RESERVED reserved);
   template <typename T> void operator()(T visitee) {
@@ -189,22 +191,17 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  ParseFunctionDecl *func;
-  Script *script;
+  FunctionDecl *funcdecl;
 };
 
 class ParseVariableDecl {
 public:
-  explicit ParseVariableDecl(Tokenizer *t, ParseStatement *ps,
-                             ParseFunctionDecl *f, Script *s)
-      : tokenizer{t}, stmt{ps}, func{f}, script{s} {}
-
+  explicit ParseVariableDecl(Tokenizer *t, ParseStatement *ps, FunctionDecl *f)
+      : tokenizer{t}, stmt{ps}, funcdecl{f} {}
   std::string_view variable_name;
-  DATATYPE variable_type;
 
   void operator()(IDENTIFIER identifier);
   void operator()(char32_t punct);
-  void operator()(RESERVED punct);
 
   template <typename T> void operator()(T visitee) {
     throw ScriptError{UNEXPECTED_TOKEN{}};
@@ -213,18 +210,16 @@ public:
 private:
   Tokenizer *tokenizer;
   ParseStatement *stmt;
-  ParseFunctionDecl *func;
-  Script *script;
+  FunctionDecl *funcdecl;
 
-  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III, VARIABLE_IV, VARIABLE_V };
+  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III };
   int stage;
 };
 
 class ParseExpression {
 public:
-  explicit ParseExpression(Tokenizer *t, ParseStatement *ps,
-                           ParseFunctionDecl *f, Script *s)
-      : tokenizer{t}, stmt{ps}, func{f}, script{s} {}
+  explicit ParseExpression(Tokenizer *t, ParseStatement *ps, FunctionDecl *f)
+      : tokenizer{t}, stmt{ps}, funcdecl{f} {}
 
   void operator()(STRING_LITERAL string_literal);
   void operator()(NUMERIC_LITERAL num_literal);
@@ -236,7 +231,6 @@ public:
 private:
   Tokenizer *tokenizer;
   ParseStatement *stmt;
-  ParseFunctionDecl *func;
-  Script *script;
+  FunctionDecl *funcdecl;
 };
 } // namespace Manadrain

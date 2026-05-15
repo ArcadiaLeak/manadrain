@@ -1,5 +1,5 @@
-function helloworld(): int {
-    let s: string = "hello";
-    let i: int = 2 + s.size();
+function helloworld() {
+    let s = "hello";
+    let i = 2 + s.size();
     return i - 4;
 }
