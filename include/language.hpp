@@ -108,7 +108,7 @@ public:
 
   std::vector<Statement> script_body;
 
-  void compile_text();
+  void parse_text();
 };
 
 class Tokenizer {
@@ -140,8 +140,8 @@ public:
 
 class ParseFunctionDecl {
 public:
-  explicit ParseFunctionDecl(Tokenizer *t, FunctionDecl *f)
-      : tokenizer{t}, funcdecl{f} {}
+  explicit ParseFunctionDecl(Tokenizer *t) : tokenizer{t} {}
+  FunctionDecl funcdecl;
 
   void operator()(IDENTIFIER identifier);
   void operator()(char32_t punct);
@@ -152,7 +152,6 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  FunctionDecl *funcdecl;
 
   enum { FUNCTION_I, FUNCTION_II, FUNCTION_III, FUNCTION_IV };
   int stage;
@@ -160,7 +159,8 @@ private:
 
 class ParseStatement {
 public:
-  explicit ParseStatement(Tokenizer *t, Statement *s) : tokenizer{t}, stmt{s} {}
+  explicit ParseStatement(Tokenizer *t) : tokenizer{t} {}
+  Statement stmt;
 
   void operator()(RESERVED reserved);
   template <typename T> void operator()(T visitee) {
@@ -169,13 +169,12 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  Statement *stmt;
 };
 
 class ParseVariableDecl {
 public:
-  explicit ParseVariableDecl(Tokenizer *t, VariableDecl *v)
-      : tokenizer{t}, vardecl{v} {}
+  explicit ParseVariableDecl(Tokenizer *t) : tokenizer{t} {}
+  VariableDecl vardecl;
 
   void operator()(IDENTIFIER identifier);
   void operator()(char32_t punct);
@@ -186,7 +185,6 @@ public:
 
 private:
   Tokenizer *tokenizer;
-  VariableDecl *vardecl;
 
   enum { VARIABLE_I, VARIABLE_II, VARIABLE_III };
   int stage;

@@ -173,19 +173,19 @@ std::generator<TOKEN> Tokenizer::traverse_tokens() {
     co_yield tokenize();
 }
 
-void Script::compile_text() {
+void Script::parse_text() {
   Tokenizer tokenizer{this};
   for (TOKEN token : tokenizer.traverse_tokens()) {
-    auto stmt_it = script_body.emplace(script_body.end());
-    ParseStatement visitor{&tokenizer, std::to_address(stmt_it)};
+    ParseStatement visitor{&tokenizer};
     token.visit(visitor);
+    script_body.push_back(std::move(visitor.stmt));
   }
 }
 
 void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
   case FUNCTION_I:
-    funcdecl->function_name = identifier.pool_view;
+    funcdecl.function_name = identifier.pool_view;
     ++stage;
     tokenizer->tokenize().visit(*this);
     return;
@@ -207,10 +207,9 @@ void ParseFunctionDecl::operator()(char32_t punct) {
   }
   if (stage == FUNCTION_IV && punct == '{') {
     for (TOKEN token : tokenizer->traverse_tokens()) {
-      auto stmt_it =
-          funcdecl->function_body.emplace(funcdecl->function_body.end());
-      ParseStatement visitor{tokenizer, std::to_address(stmt_it)};
+      ParseStatement visitor{tokenizer};
       token.visit(visitor);
+      funcdecl.function_body.push_back(std::move(visitor.stmt));
     }
     ++stage;
     tokenizer->tokenize().visit(*this);
@@ -222,15 +221,15 @@ void ParseFunctionDecl::operator()(char32_t punct) {
 void ParseStatement::operator()(RESERVED reserved) {
   switch (reserved) {
   case RESERVED::W_LET: {
-    *stmt = VariableDecl{};
-    tokenizer->tokenize().visit(
-        ParseVariableDecl{tokenizer, std::get_if<VariableDecl>(stmt)});
+    ParseVariableDecl visitor{tokenizer};
+    tokenizer->tokenize().visit(visitor);
+    stmt = std::move(visitor.vardecl);
     return;
   }
   case RESERVED::W_FUNCTION: {
-    FunctionDecl funcdecl{};
-    ParseFunctionDecl func_visitor{tokenizer, &funcdecl};
-    tokenizer->tokenize().visit(func_visitor);
+    ParseFunctionDecl visitor{tokenizer};
+    tokenizer->tokenize().visit(visitor);
+    stmt = std::move(visitor.funcdecl);
     return;
   }
   default:
@@ -241,7 +240,7 @@ void ParseStatement::operator()(RESERVED reserved) {
 void ParseVariableDecl::operator()(IDENTIFIER identifier) {
   switch (stage) {
   case VARIABLE_I:
-    vardecl->variable_name = identifier.pool_view;
+    vardecl.variable_name = identifier.pool_view;
     ++stage;
     tokenizer->tokenize().visit(*this);
     return;
