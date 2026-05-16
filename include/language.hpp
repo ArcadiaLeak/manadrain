@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <functional>
 #include <generator>
 #include <inplace_vector>
 #include <list>
@@ -11,6 +12,7 @@
 
 namespace Manadrain {
 enum class RESERVED {
+  MONOSTATE,
   W_CONST,
   W_LET,
   W_VAR,
@@ -43,20 +45,18 @@ struct STRING_LITERAL {
   char32_t separator;
 };
 using NUMERIC_LITERAL = std::variant<std::int32_t, std::int64_t, double>;
-using TOKEN = std::variant<char32_t, NUMERIC_LITERAL, RESERVED, IDENTIFIER,
-                           STRING_LITERAL>;
+using TOKEN = std::variant<std::monostate, char32_t, NUMERIC_LITERAL, RESERVED,
+                           IDENTIFIER, STRING_LITERAL>;
 
 struct INVALID_NUMERIC_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
 struct INVALID_BACKSLASH_ESCAPE {};
-struct INVALID_TYPE_ANNOTATION {};
 struct MISSING_FIELD_NAME {};
 struct MISSING_VARIABLE_NAME {};
 struct MISSING_FUNCTION_NAME {};
 struct MISSING_IDENTIFIER {};
 struct MISSING_STRING_LITERAL {};
 struct MISSING_FORMAL_PARAMETER {};
-struct MISSING_TYPE_ANNOTATION {};
 struct MISSING_PUNCT {
   char32_t must_be;
 };
@@ -64,17 +64,15 @@ struct UNEXPECTED_RESERVED_WORD {};
 struct UNEXPECTED_STRING_END {};
 struct UNEXPECTED_COMMENT_END {};
 struct UNEXPECTED_TOKEN {};
-struct UNEXPECTED_END_OF_FILE {};
 struct UNSUPPORTED {};
 class ScriptError : public std::exception {
 public:
   using MESSAGE = std::variant<
       INVALID_NUMERIC_LITERAL, INVALID_PROPERTY_NAME, INVALID_BACKSLASH_ESCAPE,
-      INVALID_TYPE_ANNOTATION, MISSING_FIELD_NAME, MISSING_VARIABLE_NAME,
-      MISSING_FUNCTION_NAME, MISSING_IDENTIFIER, MISSING_STRING_LITERAL,
-      MISSING_FORMAL_PARAMETER, MISSING_TYPE_ANNOTATION, MISSING_PUNCT,
-      UNEXPECTED_RESERVED_WORD, UNEXPECTED_STRING_END, UNEXPECTED_COMMENT_END,
-      UNEXPECTED_TOKEN, UNEXPECTED_END_OF_FILE, UNSUPPORTED>;
+      MISSING_FIELD_NAME, MISSING_VARIABLE_NAME, MISSING_FUNCTION_NAME,
+      MISSING_IDENTIFIER, MISSING_STRING_LITERAL, MISSING_FORMAL_PARAMETER,
+      MISSING_PUNCT, UNEXPECTED_RESERVED_WORD, UNEXPECTED_STRING_END,
+      UNEXPECTED_COMMENT_END, UNEXPECTED_TOKEN, UNSUPPORTED>;
   MESSAGE message;
 
   explicit ScriptError(MESSAGE msg) : message{msg} {}
@@ -84,50 +82,18 @@ public:
 using DYNAMIC = std::variant<std::monostate>;
 using HEAP_SLOT = std::variant<std::monostate>;
 
-class Script;
-class FunctionDecl;
+struct FUNCTION_DECL;
 
-class VariableDecl {
-public:
-  VariableDecl(Script &s) : script{s} {}
-
+struct VARIABLE_DECL {
   std::string_view variable_name;
   std::monostate initializer;
-
-  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III };
-  void parse(int stage, IDENTIFIER identifier);
-  void parse(int stage, char32_t punct);
-  template <typename T> void parse(int stage, T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Script &script;
 };
 
-using Statement = std::variant<std::monostate, FunctionDecl, VariableDecl>;
+using STATEMENT = std::variant<std::monostate, FUNCTION_DECL, VARIABLE_DECL>;
 
-class FunctionDecl {
-public:
-  FunctionDecl(Script &s) : script{s} {}
-
+struct FUNCTION_DECL {
   std::string_view function_name;
-  std::vector<Statement> function_body;
-
-  enum { FUNCTION_I, FUNCTION_II, FUNCTION_III, FUNCTION_IV };
-  void parse(int stage, IDENTIFIER identifier);
-  void parse(int stage, char32_t punct);
-  template <typename T> void parse(int stage, T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-  Statement parse_statement(RESERVED reserved);
-  template <typename T> Statement parse_statement(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Script &script;
+  std::vector<STATEMENT> function_body;
 };
 
 class Script {
@@ -139,28 +105,25 @@ public:
   std::unordered_set<std::string_view> atom_atlas;
   std::vector<HEAP_SLOT> heap;
 
-  std::vector<Statement> script_body;
-
   void parse_text();
-
-  Statement parse_statement(RESERVED reserved);
-  template <typename T> Statement parse_statement(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-  TOKEN tokenize();
-  std::generator<TOKEN> traverse_tokens();
 
 private:
   std::stack<std::optional<char32_t>> backtrace;
-
-  TOKEN tokenize_word(char32_t leading);
-  TOKEN tokenize_string_literal(char32_t separator);
-  TOKEN tokenize_numeric_literal(char32_t leading);
+  std::vector<STATEMENT> script_body;
 
   std::generator<std::optional<char32_t>> traverse_text();
   std::optional<char32_t> forward();
   void backward();
   void backward(std::size_t N);
+
+  TOKEN tokenize();
+  std::generator<TOKEN> traverse_tokens();
+  TOKEN tokenize_word(char32_t leading);
+  TOKEN tokenize_string_literal(char32_t separator);
+  TOKEN tokenize_numeric_literal(char32_t leading);
+
+  std::copyable_function<STATEMENT(TOKEN) const> parse_statement();
+  STATEMENT parse_function_decl();
+  STATEMENT parse_variable_decl();
 };
 } // namespace Manadrain

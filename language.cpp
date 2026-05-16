@@ -166,7 +166,7 @@ TOKEN Script::tokenize() {
     local_backtrace.swap(backtrace);
     return token_ret;
   }
-  throw ScriptError{UNEXPECTED_END_OF_FILE{}};
+  return std::monostate{};
 }
 
 std::generator<TOKEN> Script::traverse_tokens() {
@@ -174,90 +174,73 @@ std::generator<TOKEN> Script::traverse_tokens() {
     co_yield tokenize();
 }
 
+RESERVED extract_reserved(TOKEN token) {
+  RESERVED *alter_ptr = std::get_if<RESERVED>(&token);
+  return alter_ptr ? *alter_ptr : RESERVED{};
+}
+
+std::optional<IDENTIFIER> extract_identifier(TOKEN token) {
+  IDENTIFIER *alter_ptr = std::get_if<IDENTIFIER>(&token);
+  return alter_ptr ? std::make_optional(*alter_ptr) : std::nullopt;
+}
+
+void assert_punct(TOKEN token, char32_t must_be) {
+  char32_t *alter_ptr = std::get_if<char32_t>(&token);
+  if (alter_ptr && *alter_ptr == must_be)
+    return;
+  throw ScriptError{MISSING_PUNCT{must_be}};
+}
+
+std::copyable_function<bool(TOKEN) const> match_punct(char32_t should_be) {
+  return [should_be](TOKEN token) {
+    char32_t *alter_ptr = std::get_if<char32_t>(&token);
+    return alter_ptr && *alter_ptr == should_be;
+  };
+}
+
 void Script::parse_text() {
-  for (TOKEN token : traverse_tokens())
-    script_body.push_back(
-        token.visit([this](auto t) { return parse_statement(t); }));
+  script_body.append_range(
+      traverse_tokens() | std::views::take_while([](TOKEN token) {
+        return !std::holds_alternative<std::monostate>(token);
+      }) |
+      std::views::transform(parse_statement()));
 }
 
-Statement Script::parse_statement(RESERVED reserved) {
-  switch (reserved) {
-  case RESERVED::W_FUNCTION:
-    return tokenize().visit([this](auto token) {
-      FunctionDecl funcdecl{*this};
-      funcdecl.parse(0, token);
-      return funcdecl;
-    });
-  default:
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
+std::copyable_function<STATEMENT(TOKEN) const> Script::parse_statement() {
+  return [this](TOKEN leading) {
+    switch (extract_reserved(leading)) {
+    case RESERVED::W_FUNCTION:
+      return parse_function_decl();
+    case RESERVED::W_LET:
+      return parse_variable_decl();
+    default:
+      throw ScriptError{UNEXPECTED_TOKEN{}};
+    }
+  };
 }
 
-void FunctionDecl::parse(int stage, IDENTIFIER identifier) {
-  switch (stage) {
-  case FUNCTION_I:
-    function_name = identifier.pool_view;
-    script.tokenize().visit(
-        [stage, this](auto token) { parse(stage + 1, token); });
-    return;
-  default:
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
+STATEMENT Script::parse_function_decl() {
+  FUNCTION_DECL function_decl{};
+  std::optional funcname_opt{extract_identifier(tokenize())};
+  if (not funcname_opt)
+    throw ScriptError{MISSING_FUNCTION_NAME{}};
+  function_decl.function_name = funcname_opt->pool_view;
+  assert_punct(tokenize(), '(');
+  assert_punct(tokenize(), ')');
+  assert_punct(tokenize(), '{');
+  function_decl.function_body.append_range(
+      traverse_tokens() |
+      std::views::take_while(std::not_fn(match_punct('}'))) |
+      std::views::transform(parse_statement()));
+  throw ScriptError{UNSUPPORTED{}};
 }
 
-void FunctionDecl::parse(int stage, char32_t punct) {
-  if (stage == FUNCTION_II && punct == '(') {
-    script.tokenize().visit(
-        [stage, this](auto token) { parse(stage + 1, token); });
-    return;
-  }
-  if (stage == FUNCTION_III && punct == ')') {
-    script.tokenize().visit(
-        [stage, this](auto token) { parse(stage + 1, token); });
-    return;
-  }
-  if (stage == FUNCTION_IV && punct == '{') {
-    for (TOKEN token : script.traverse_tokens())
-      function_body.push_back(
-          token.visit([this](auto t) { return parse_statement(t); }));
-    script.tokenize().visit(
-        [stage, this](auto token) { parse(stage + 1, token); });
-    return;
-  }
-  throw ScriptError{UNEXPECTED_TOKEN{}};
-}
-
-Statement FunctionDecl::parse_statement(RESERVED reserved) {
-  switch (reserved) {
-  case RESERVED::W_LET:
-    return script.tokenize().visit([this](auto token) {
-      VariableDecl vardecl{script};
-      vardecl.parse(0, token);
-      return vardecl;
-    });
-  default:
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-}
-
-void VariableDecl::parse(int stage, IDENTIFIER identifier) {
-  switch (stage) {
-  case VARIABLE_I:
-    variable_name = identifier.pool_view;
-    script.tokenize().visit(
-        [stage, this](auto token) { parse(stage + 1, token); });
-    return;
-  default:
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-}
-
-void VariableDecl::parse(int stage, char32_t punct) {
-  if (stage == VARIABLE_II && punct == '=') {
-    return;
-  }
-  if (stage == VARIABLE_III && punct == ';')
-    return;
-  throw ScriptError{UNEXPECTED_TOKEN{}};
+STATEMENT Script::parse_variable_decl() {
+  VARIABLE_DECL variable_decl{};
+  std::optional varname_opt{extract_identifier(tokenize())};
+  if (not varname_opt)
+    throw ScriptError{MISSING_VARIABLE_NAME{}};
+  variable_decl.variable_name = varname_opt->pool_view;
+  throw ScriptError{UNSUPPORTED{}};
 }
 } // namespace Manadrain
