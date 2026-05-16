@@ -44,7 +44,7 @@ struct STRING_LITERAL {
   std::string_view pool_view;
   char32_t separator;
 };
-using NUMERIC_LITERAL = std::variant<std::int32_t, std::int64_t, double>;
+using NUMERIC_LITERAL = std::variant<std::int64_t, double>;
 using TOKEN = std::variant<std::monostate, char32_t, NUMERIC_LITERAL, RESERVED,
                            IDENTIFIER, STRING_LITERAL>;
 
@@ -79,6 +79,8 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
+using EXPRESSION = std::variant<STRING_LITERAL, NUMERIC_LITERAL, IDENTIFIER>;
+
 using DYNAMIC = std::variant<std::monostate>;
 using HEAP_SLOT = std::variant<std::monostate>;
 
@@ -86,7 +88,7 @@ struct FUNCTION_DECL;
 
 struct VARIABLE_DECL {
   std::string_view variable_name;
-  std::monostate initializer;
+  EXPRESSION initializer;
 };
 
 using STATEMENT = std::variant<std::monostate, FUNCTION_DECL, VARIABLE_DECL>;
@@ -122,8 +124,18 @@ private:
   TOKEN tokenize_string_literal(char32_t separator);
   TOKEN tokenize_numeric_literal(char32_t leading);
 
-  std::copyable_function<STATEMENT(TOKEN) const> parse_statement();
+  STATEMENT parse_statement(RESERVED reserved);
+  template <typename T> STATEMENT parse_statement(T visitee) {
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
+  std::generator<STATEMENT> traverse_script_body();
+  std::generator<STATEMENT> traverse_function_body();
   STATEMENT parse_function_decl();
   STATEMENT parse_variable_decl();
+
+  EXPRESSION parse_expression(STRING_LITERAL string_literal);
+  template <typename T> EXPRESSION parse_expression(T visitee) {
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
 };
 } // namespace Manadrain

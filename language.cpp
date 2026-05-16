@@ -174,11 +174,6 @@ std::generator<TOKEN> Script::traverse_tokens() {
     co_yield tokenize();
 }
 
-RESERVED extract_reserved(TOKEN token) {
-  RESERVED *alter_ptr = std::get_if<RESERVED>(&token);
-  return alter_ptr ? *alter_ptr : RESERVED{};
-}
-
 std::optional<IDENTIFIER> extract_identifier(TOKEN token) {
   IDENTIFIER *alter_ptr = std::get_if<IDENTIFIER>(&token);
   return alter_ptr ? std::make_optional(*alter_ptr) : std::nullopt;
@@ -191,32 +186,38 @@ void assert_punct(TOKEN token, char32_t must_be) {
   throw ScriptError{MISSING_PUNCT{must_be}};
 }
 
-std::copyable_function<bool(TOKEN) const> match_punct(char32_t should_be) {
-  return [should_be](TOKEN token) {
-    char32_t *alter_ptr = std::get_if<char32_t>(&token);
-    return alter_ptr && *alter_ptr == should_be;
-  };
+bool match_punct(TOKEN token, char32_t should_be) {
+  char32_t *alter_ptr = std::get_if<char32_t>(&token);
+  return alter_ptr && *alter_ptr == should_be;
 }
 
-void Script::parse_text() {
-  script_body.append_range(
-      traverse_tokens() | std::views::take_while([](TOKEN token) {
-        return !std::holds_alternative<std::monostate>(token);
-      }) |
-      std::views::transform(parse_statement()));
+std::generator<STATEMENT> Script::traverse_script_body() {
+  for (TOKEN token : traverse_tokens()) {
+    if (std::holds_alternative<std::monostate>(token))
+      break;
+    co_yield token.visit([this](auto t) { return parse_statement(t); });
+  }
 }
 
-std::copyable_function<STATEMENT(TOKEN) const> Script::parse_statement() {
-  return [this](TOKEN leading) {
-    switch (extract_reserved(leading)) {
-    case RESERVED::W_FUNCTION:
-      return parse_function_decl();
-    case RESERVED::W_LET:
-      return parse_variable_decl();
-    default:
-      throw ScriptError{UNEXPECTED_TOKEN{}};
-    }
-  };
+std::generator<STATEMENT> Script::traverse_function_body() {
+  for (TOKEN token : traverse_tokens()) {
+    if (match_punct(token, '}'))
+      break;
+    co_yield token.visit([this](auto t) { return parse_statement(t); });
+  }
+}
+
+void Script::parse_text() { script_body.append_range(traverse_script_body()); }
+
+STATEMENT Script::parse_statement(RESERVED reserved) {
+  switch (reserved) {
+  case RESERVED::W_FUNCTION:
+    return parse_function_decl();
+  case RESERVED::W_LET:
+    return parse_variable_decl();
+  default:
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
 }
 
 STATEMENT Script::parse_function_decl() {
@@ -228,10 +229,7 @@ STATEMENT Script::parse_function_decl() {
   assert_punct(tokenize(), '(');
   assert_punct(tokenize(), ')');
   assert_punct(tokenize(), '{');
-  function_decl.function_body.append_range(
-      traverse_tokens() |
-      std::views::take_while(std::not_fn(match_punct('}'))) |
-      std::views::transform(parse_statement()));
+  function_decl.function_body.append_range(traverse_function_body());
   throw ScriptError{UNSUPPORTED{}};
 }
 
@@ -241,6 +239,14 @@ STATEMENT Script::parse_variable_decl() {
   if (not varname_opt)
     throw ScriptError{MISSING_VARIABLE_NAME{}};
   variable_decl.variable_name = varname_opt->pool_view;
-  throw ScriptError{UNSUPPORTED{}};
+  assert_punct(tokenize(), '=');
+  variable_decl.initializer =
+      tokenize().visit([this](auto t) { return parse_expression(t); });
+  assert_punct(tokenize(), ';');
+  return variable_decl;
+}
+
+EXPRESSION Script::parse_expression(STRING_LITERAL string_literal) {
+  return string_literal;
 }
 } // namespace Manadrain
