@@ -22,21 +22,21 @@ static const std::unordered_map<std::string_view, RESERVED> keyword_pool{
     {"break", RESERVED::W_BREAK},       {"continue", RESERVED::W_CONTINUE},
     {"switch", RESERVED::W_SWITCH}};
 
-std::optional<char32_t> Tokenizer::forward() {
-  if (script->position >= script->text_source.size())
+std::optional<char32_t> Script::forward() {
+  if (position >= text_source.size())
     backtrace.emplace();
   else {
     ucs4_t ch;
-    int advance{u8_mbtoucr(&ch, script->text_source.data() + script->position,
-                           script->text_source.size() - script->position)};
+    int advance{u8_mbtoucr(&ch, text_source.data() + position,
+                           text_source.size() - position)};
     assert(advance >= 0);
-    script->position += advance;
+    position += advance;
     backtrace.push(ch);
   }
   return backtrace.top();
 }
 
-std::generator<std::optional<char32_t>> Tokenizer::traverse_text() {
+std::generator<std::optional<char32_t>> Script::traverse_text() {
   while (1)
     co_yield forward();
 }
@@ -49,14 +49,14 @@ std::generator<char> traverse_ucs4(ucs4_t cp) {
     co_yield buffer[i];
 }
 
-void Tokenizer::backward() {
+void Script::backward() {
   std::optional behind{backtrace.top()};
-  script->position -= std::ranges::distance(
+  position -= std::ranges::distance(
       behind | std::views::transform(traverse_ucs4) | std::views::join);
   backtrace.pop();
 }
 
-void Tokenizer::backward(std::size_t N) {
+void Script::backward(std::size_t N) {
   for (int i = 0; i < N; ++i)
     backward();
 }
@@ -64,7 +64,7 @@ void Tokenizer::backward(std::size_t N) {
 bool has_code_point(std::optional<char32_t> opt) { return opt.has_value(); }
 bool has_token(std::optional<TOKEN> opt) { return opt.has_value(); }
 
-TOKEN Tokenizer::tokenize_word(char32_t leading) {
+TOKEN Script::tokenize_word(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_ucs4(leading)};
   auto xid_continue_view =
       traverse_text() | std::views::take_while(has_code_point) |
@@ -78,11 +78,11 @@ TOKEN Tokenizer::tokenize_word(char32_t leading) {
       break;
     return iter_keyword->second;
   } while (0);
-  auto iter_atlas = script->atom_atlas.find(identifier_str);
-  if (iter_atlas == script->atom_atlas.end()) {
-    auto iter_atom = script->atom_pool.insert(script->atom_pool.end(),
-                                              std::move(identifier_str));
-    auto insertion_ret = script->atom_atlas.insert(*iter_atom);
+  auto iter_atlas = atom_atlas.find(identifier_str);
+  if (iter_atlas == atom_atlas.end()) {
+    auto iter_atom =
+        atom_pool.insert(atom_pool.end(), std::move(identifier_str));
+    auto insertion_ret = atom_atlas.insert(*iter_atom);
     iter_atlas = insertion_ret.first;
   }
   return IDENTIFIER{*iter_atlas};
@@ -94,7 +94,7 @@ std::int32_t code_point_to_int(std::optional<char32_t> code_point) {
   return *code_point;
 }
 
-STRING_LITERAL Tokenizer::tokenize_string_literal(char32_t separator) {
+TOKEN Script::tokenize_string_literal(char32_t separator) {
   std::string literal_str{};
   auto not_ended = [separator](auto code_point) {
     return code_point != separator;
@@ -118,17 +118,16 @@ STRING_LITERAL Tokenizer::tokenize_string_literal(char32_t separator) {
       break;
     }
   }
-  auto iter_atlas = script->atom_atlas.find(literal_str);
-  if (iter_atlas == script->atom_atlas.end()) {
-    auto iter_atom = script->atom_pool.insert(script->atom_pool.end(),
-                                              std::move(literal_str));
-    auto insertion_ret = script->atom_atlas.insert(*iter_atom);
+  auto iter_atlas = atom_atlas.find(literal_str);
+  if (iter_atlas == atom_atlas.end()) {
+    auto iter_atom = atom_pool.insert(atom_pool.end(), std::move(literal_str));
+    auto insertion_ret = atom_atlas.insert(*iter_atom);
     iter_atlas = insertion_ret.first;
   }
   return STRING_LITERAL{*iter_atlas, separator};
 }
 
-TOKEN Tokenizer::tokenize_numeric_literal(char32_t leading) {
+TOKEN Script::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_ucs4(leading)};
   auto has_digit = [](char32_t code_point) { return std::isdigit(code_point); };
   auto digits_view = traverse_text() | std::views::take_while(has_code_point) |
@@ -142,7 +141,7 @@ TOKEN Tokenizer::tokenize_numeric_literal(char32_t leading) {
   return NUMERIC_LITERAL{num_literal};
 }
 
-TOKEN Tokenizer::tokenize() {
+TOKEN Script::tokenize() {
   for (char32_t leading : traverse_text() |
                               std::views::take_while(has_code_point) |
                               std::views::join) {
@@ -163,109 +162,102 @@ TOKEN Tokenizer::tokenize() {
       token_ret = tokenize_numeric_literal(leading);
     else
       throw ScriptError{UNEXPECTED_TOKEN{}};
+    std::stack<std::optional<char32_t>> local_backtrace{};
+    local_backtrace.swap(backtrace);
     return token_ret;
   }
   throw ScriptError{UNEXPECTED_END_OF_FILE{}};
 }
 
-std::generator<TOKEN> Tokenizer::traverse_tokens() {
+std::generator<TOKEN> Script::traverse_tokens() {
   while (1)
     co_yield tokenize();
 }
 
 void Script::parse_text() {
-  Tokenizer tokenizer{this};
-  for (TOKEN token : tokenizer.traverse_tokens()) {
-    ParseStatement visitor{&tokenizer};
-    token.visit(visitor);
-    script_body.push_back(std::move(visitor.stmt));
+  for (TOKEN token : traverse_tokens())
+    script_body.push_back(
+        token.visit([this](auto t) { return parse_statement(t); }));
+}
+
+Statement Script::parse_statement(RESERVED reserved) {
+  switch (reserved) {
+  case RESERVED::W_FUNCTION:
+    return tokenize().visit([this](auto token) {
+      FunctionDecl funcdecl{*this};
+      funcdecl.parse(0, token);
+      return funcdecl;
+    });
+  default:
+    throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 }
 
-void ParseFunctionDecl::operator()(IDENTIFIER identifier) {
+void FunctionDecl::parse(int stage, IDENTIFIER identifier) {
   switch (stage) {
   case FUNCTION_I:
-    funcdecl.function_name = identifier.pool_view;
-    ++stage;
-    tokenizer->tokenize().visit(*this);
+    function_name = identifier.pool_view;
+    script.tokenize().visit(
+        [stage, this](auto token) { parse(stage + 1, token); });
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 }
 
-void ParseFunctionDecl::operator()(char32_t punct) {
+void FunctionDecl::parse(int stage, char32_t punct) {
   if (stage == FUNCTION_II && punct == '(') {
-    ++stage;
-    tokenizer->tokenize().visit(*this);
+    script.tokenize().visit(
+        [stage, this](auto token) { parse(stage + 1, token); });
     return;
   }
   if (stage == FUNCTION_III && punct == ')') {
-    ++stage;
-    tokenizer->tokenize().visit(*this);
+    script.tokenize().visit(
+        [stage, this](auto token) { parse(stage + 1, token); });
     return;
   }
   if (stage == FUNCTION_IV && punct == '{') {
-    for (TOKEN token : tokenizer->traverse_tokens()) {
-      ParseStatement visitor{tokenizer};
-      token.visit(visitor);
-      funcdecl.function_body.push_back(std::move(visitor.stmt));
-    }
-    ++stage;
-    tokenizer->tokenize().visit(*this);
+    for (TOKEN token : script.traverse_tokens())
+      function_body.push_back(
+          token.visit([this](auto t) { return parse_statement(t); }));
+    script.tokenize().visit(
+        [stage, this](auto token) { parse(stage + 1, token); });
     return;
   }
   throw ScriptError{UNEXPECTED_TOKEN{}};
 }
 
-void ParseStatement::operator()(RESERVED reserved) {
+Statement FunctionDecl::parse_statement(RESERVED reserved) {
   switch (reserved) {
-  case RESERVED::W_LET: {
-    ParseVariableDecl visitor{tokenizer};
-    tokenizer->tokenize().visit(visitor);
-    stmt = std::move(visitor.vardecl);
-    return;
-  }
-  case RESERVED::W_FUNCTION: {
-    ParseFunctionDecl visitor{tokenizer};
-    tokenizer->tokenize().visit(visitor);
-    stmt = std::move(visitor.funcdecl);
-    return;
-  }
+  case RESERVED::W_LET:
+    return script.tokenize().visit([this](auto token) {
+      VariableDecl vardecl{script};
+      vardecl.parse(0, token);
+      return vardecl;
+    });
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 }
 
-void ParseVariableDecl::operator()(IDENTIFIER identifier) {
+void VariableDecl::parse(int stage, IDENTIFIER identifier) {
   switch (stage) {
   case VARIABLE_I:
-    vardecl.variable_name = identifier.pool_view;
-    ++stage;
-    tokenizer->tokenize().visit(*this);
+    variable_name = identifier.pool_view;
+    script.tokenize().visit(
+        [stage, this](auto token) { parse(stage + 1, token); });
     return;
   default:
     throw ScriptError{UNEXPECTED_TOKEN{}};
   }
 }
 
-void ParseVariableDecl::operator()(char32_t punct) {
+void VariableDecl::parse(int stage, char32_t punct) {
   if (stage == VARIABLE_II && punct == '=') {
-    ++stage;
-    tokenizer->tokenize().visit(ParseExpression{tokenizer});
-    tokenizer->tokenize().visit(*this);
     return;
   }
   if (stage == VARIABLE_III && punct == ';')
     return;
   throw ScriptError{UNEXPECTED_TOKEN{}};
-}
-
-void ParseExpression::operator()(STRING_LITERAL string_literal) {
-  throw ScriptError{UNSUPPORTED{}};
-}
-
-void ParseExpression::operator()(NUMERIC_LITERAL num_literal) {
-  throw ScriptError{INVALID_NUMERIC_LITERAL{}};
 }
 } // namespace Manadrain

@@ -81,19 +81,54 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-using DYNAMIC = std::monostate;
-struct ATOM_REF {
-  std::string_view pool_view;
-};
+using DYNAMIC = std::variant<std::monostate>;
+using HEAP_SLOT = std::variant<std::monostate>;
 
+class Script;
 class FunctionDecl;
 
 class VariableDecl {
 public:
+  VariableDecl(Script &s) : script{s} {}
+
   std::string_view variable_name;
   std::monostate initializer;
+
+  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III };
+  void parse(int stage, IDENTIFIER identifier);
+  void parse(int stage, char32_t punct);
+  template <typename T> void parse(int stage, T visitee) {
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
+  Script &script;
 };
+
 using Statement = std::variant<std::monostate, FunctionDecl, VariableDecl>;
+
+class FunctionDecl {
+public:
+  FunctionDecl(Script &s) : script{s} {}
+
+  std::string_view function_name;
+  std::vector<Statement> function_body;
+
+  enum { FUNCTION_I, FUNCTION_II, FUNCTION_III, FUNCTION_IV };
+  void parse(int stage, IDENTIFIER identifier);
+  void parse(int stage, char32_t punct);
+  template <typename T> void parse(int stage, T visitee) {
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
+
+  Statement parse_statement(RESERVED reserved);
+  template <typename T> Statement parse_statement(T visitee) {
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
+
+private:
+  Script &script;
+};
 
 class Script {
 public:
@@ -102,106 +137,30 @@ public:
 
   std::list<std::string> atom_pool;
   std::unordered_set<std::string_view> atom_atlas;
-
-  std::vector<std::variant<DYNAMIC>> local_heap;
-  std::vector<std::variant<ATOM_REF>> shared_heap;
+  std::vector<HEAP_SLOT> heap;
 
   std::vector<Statement> script_body;
 
   void parse_text();
-};
 
-class Tokenizer {
-public:
-  explicit Tokenizer(Script *s) : script{s} {}
+  Statement parse_statement(RESERVED reserved);
+  template <typename T> Statement parse_statement(T visitee) {
+    throw ScriptError{UNEXPECTED_TOKEN{}};
+  }
 
   TOKEN tokenize();
   std::generator<TOKEN> traverse_tokens();
 
 private:
-  Script *script;
   std::stack<std::optional<char32_t>> backtrace;
 
   TOKEN tokenize_word(char32_t leading);
-  STRING_LITERAL tokenize_string_literal(char32_t separator);
+  TOKEN tokenize_string_literal(char32_t separator);
   TOKEN tokenize_numeric_literal(char32_t leading);
 
   std::generator<std::optional<char32_t>> traverse_text();
   std::optional<char32_t> forward();
   void backward();
   void backward(std::size_t N);
-};
-
-class FunctionDecl {
-public:
-  std::string_view function_name;
-  std::vector<Statement> function_body;
-};
-
-class ParseFunctionDecl {
-public:
-  explicit ParseFunctionDecl(Tokenizer *t) : tokenizer{t} {}
-  FunctionDecl funcdecl;
-
-  void operator()(IDENTIFIER identifier);
-  void operator()(char32_t punct);
-
-  template <typename T> void operator()(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Tokenizer *tokenizer;
-
-  enum { FUNCTION_I, FUNCTION_II, FUNCTION_III, FUNCTION_IV };
-  int stage;
-};
-
-class ParseStatement {
-public:
-  explicit ParseStatement(Tokenizer *t) : tokenizer{t} {}
-  Statement stmt;
-
-  void operator()(RESERVED reserved);
-  template <typename T> void operator()(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Tokenizer *tokenizer;
-};
-
-class ParseVariableDecl {
-public:
-  explicit ParseVariableDecl(Tokenizer *t) : tokenizer{t} {}
-  VariableDecl vardecl;
-
-  void operator()(IDENTIFIER identifier);
-  void operator()(char32_t punct);
-
-  template <typename T> void operator()(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Tokenizer *tokenizer;
-
-  enum { VARIABLE_I, VARIABLE_II, VARIABLE_III };
-  int stage;
-};
-
-class ParseExpression {
-public:
-  explicit ParseExpression(Tokenizer *t) : tokenizer{t} {}
-
-  void operator()(STRING_LITERAL string_literal);
-  void operator()(NUMERIC_LITERAL num_literal);
-
-  template <typename T> void operator()(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-
-private:
-  Tokenizer *tokenizer;
 };
 } // namespace Manadrain
