@@ -26,9 +26,9 @@ int main(int argc, char *argv[]) {
   file >> std::noskipws;
 
   Manadrain::Script script{};
-  script.text_source = std::ranges::istream_view<std::uint8_t>{file} |
-                       std::ranges::to<std::vector<std::uint8_t>>();
-  script.parse_text();
+  std::vector<std::uint8_t> text_source{
+      std::from_range, std::ranges::istream_view<std::uint8_t>{file}};
+  script.parse_text(std::move(text_source));
 
   return 0;
 }

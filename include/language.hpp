@@ -1,5 +1,7 @@
 #include <cstdint>
 #include <generator>
+#include <list>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <stack>
@@ -123,14 +125,33 @@ struct FUNCTION_DECL {
   std::vector<STATEMENT> function_body;
 };
 
-class Script {
+class TokenData {
 public:
+  void text_set(std::vector<std::uint8_t> text) {
+    text_source = std::move(text);
+  }
+
+  std::generator<std::optional<char32_t>> traverse_text();
+  std::optional<char32_t> forward();
+  void backward();
+  void backward(std::size_t N);
+
+  std::optional<TOKEN> revoked_pull();
+  void history_pull();
+  void history_push(TOKEN token);
+
+private:
   std::vector<std::uint8_t> text_source;
   std::size_t position;
-  std::stack<std::optional<char32_t>, std::vector<std::optional<char32_t>>>
-      backtrace;
+  std::vector<std::int32_t> backtrace;
 
-  void parse_text();
+  std::list<TOKEN> token_history;
+  std::list<TOKEN> token_revoked;
+};
+
+class Script {
+public:
+  void parse_text(std::vector<std::uint8_t> source);
 
 private:
   std::unordered_map<std::string, std::size_t> atom_atlas;
@@ -140,16 +161,14 @@ private:
   std::vector<FUNCTION_DECL> func_pool;
   std::vector<STATEMENT> script_body;
 
-  std::generator<std::optional<char32_t>> traverse_text();
-  std::optional<char32_t> forward();
-  void backward();
-  void backward(std::size_t N);
+  std::optional<std::indirect<TokenData>> token_data;
+  TokenData &tokenization() { return *token_data.value(); }
 
-  TOKEN tokenize();
-  std::generator<TOKEN> traverse_tokens();
   TOKEN tokenize_word(char32_t leading);
   TOKEN tokenize_string_literal(char32_t separator);
   TOKEN tokenize_numeric_literal(char32_t leading);
+  std::generator<TOKEN> traverse_tokens();
+  TOKEN tokenize();
 
   EXPRESSION parse_primary_expr();
   EXPRESSION parse_postfix_expr();
@@ -161,5 +180,6 @@ private:
   STATEMENT parse_function_decl();
   STATEMENT parse_variable_decl();
   STATEMENT parse_stmt_return();
+  STATEMENT parse_stmt_expression();
 };
 } // namespace Manadrain
