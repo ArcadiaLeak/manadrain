@@ -1,6 +1,5 @@
 #include <cstdint>
 #include <generator>
-#include <list>
 #include <optional>
 #include <ranges>
 #include <stack>
@@ -36,10 +35,10 @@ enum class RESERVED {
   W_SWITCH
 };
 struct IDENTIFIER {
-  std::string_view pool_view;
+  std::size_t pool_idx;
 };
 struct STRING_LITERAL {
-  std::string_view pool_view;
+  std::size_t pool_idx;
 };
 using NUMERIC_LITERAL = std::variant<std::int64_t, double>;
 enum class OPERATOR {
@@ -89,9 +88,12 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct INDIRECT_EXPR;
+struct EXPR_IDX {
+  std::size_t pool_idx;
+};
 using EXPRESSION = std::variant<std::monostate, STRING_LITERAL, NUMERIC_LITERAL,
-                                IDENTIFIER, std::list<INDIRECT_EXPR>::iterator>;
+                                IDENTIFIER, EXPR_IDX>;
+
 struct EXPR_BINARY {
   EXPRESSION left;
   EXPRESSION right;
@@ -101,22 +103,23 @@ struct EXPR_MEMBER {
   EXPRESSION object;
   IDENTIFIER property;
 };
-struct INDIRECT_EXPR {
-  std::variant<EXPR_BINARY, EXPR_MEMBER> alter;
-};
+using EXPR_NODE = std::variant<EXPR_BINARY, EXPR_MEMBER>;
 
-struct FUNCTION_DECL;
 struct VARIABLE_DECL {
-  std::string_view variable_name;
+  std::size_t variable_name;
   EXPRESSION initializer;
 };
 struct STMT_RETURN {
   EXPRESSION argument;
 };
+struct FUNCTION_IDX {
+  std::size_t pool_idx;
+};
 using STATEMENT =
-    std::variant<std::monostate, FUNCTION_DECL, VARIABLE_DECL, STMT_RETURN>;
+    std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN, FUNCTION_IDX>;
+
 struct FUNCTION_DECL {
-  std::string_view function_name;
+  std::size_t function_name;
   std::vector<STATEMENT> function_body;
 };
 
@@ -124,17 +127,17 @@ class Script {
 public:
   std::vector<std::uint8_t> text_source;
   std::size_t position;
-
-  std::unordered_map<std::string_view, std::list<std::string>::iterator>
-      atom_atlas;
-  std::list<std::string> atom_pool;
-  std::list<INDIRECT_EXPR> expr_pool;
+  std::stack<std::optional<char32_t>, std::vector<std::optional<char32_t>>>
+      backtrace;
 
   void parse_text();
 
 private:
-  std::stack<std::optional<char32_t>, std::vector<std::optional<char32_t>>>
-      backtrace;
+  std::unordered_map<std::string, std::size_t> atom_atlas;
+  std::vector<std::string> atom_pool;
+
+  std::vector<EXPR_NODE> expr_pool;
+  std::vector<FUNCTION_DECL> func_pool;
   std::vector<STATEMENT> script_body;
 
   std::generator<std::optional<char32_t>> traverse_text();

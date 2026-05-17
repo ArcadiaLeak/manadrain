@@ -70,22 +70,14 @@ TOKEN Script::tokenize_word(char32_t leading) {
       std::views::transform(traverse_ucs4) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
-  do {
-    auto iter_reserved = reserved_pool.find(identifier_str);
-    if (iter_reserved == reserved_pool.end())
-      break;
+  auto iter_reserved = reserved_pool.find(identifier_str);
+  if (iter_reserved != reserved_pool.end())
     return iter_reserved->second;
-  } while (0);
-  do {
-    auto iter_atlas = atom_atlas.find(identifier_str);
-    if (iter_atlas != atom_atlas.end())
-      return IDENTIFIER{iter_atlas->first};
-    auto iter_atom =
-        atom_pool.insert(atom_pool.end(), std::move(identifier_str));
-    auto insertion_ret = atom_atlas.insert({*iter_atom, iter_atom});
-    iter_atlas = insertion_ret.first;
-    return IDENTIFIER{iter_atlas->first};
-  } while (0);
+  auto [iter_atlas, did_insert] =
+      atom_atlas.insert({identifier_str, atom_pool.size()});
+  if (did_insert)
+    atom_pool.push_back(std::move(identifier_str));
+  return IDENTIFIER{iter_atlas->second};
 }
 
 TOKEN Script::tokenize_string_literal(char32_t separator) {
@@ -104,15 +96,11 @@ TOKEN Script::tokenize_string_literal(char32_t separator) {
       leading = '\n';
     literal_str.append_range(traverse_ucs4(leading));
   }
-  do {
-    auto iter_atlas = atom_atlas.find(literal_str);
-    if (iter_atlas != atom_atlas.end())
-      return STRING_LITERAL{iter_atlas->first};
-    auto iter_atom = atom_pool.insert(atom_pool.end(), std::move(literal_str));
-    auto insertion_ret = atom_atlas.insert({*iter_atom, iter_atom});
-    iter_atlas = insertion_ret.first;
-    return STRING_LITERAL{iter_atlas->first};
-  } while (0);
+  auto [iter_atlas, did_insert] =
+      atom_atlas.insert({literal_str, atom_pool.size()});
+  if (did_insert)
+    atom_pool.push_back(std::move(literal_str));
+  return STRING_LITERAL{iter_atlas->second};
 }
 
 TOKEN Script::tokenize_numeric_literal(char32_t leading) {
@@ -167,21 +155,11 @@ std::generator<TOKEN> Script::traverse_tokens() {
     co_yield tokenize();
 }
 
-std::optional<IDENTIFIER> extract_identifier(TOKEN token) {
-  IDENTIFIER *alter_ptr = std::get_if<IDENTIFIER>(&token);
-  return alter_ptr ? std::make_optional(*alter_ptr) : std::nullopt;
-}
-
 void assert_punct(TOKEN token, char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
   throw ScriptError{MISSING_PUNCT{must_be}};
-}
-
-bool match_punct(TOKEN token, char32_t should_be) {
-  char32_t *alter_ptr = std::get_if<char32_t>(&token);
-  return alter_ptr && *alter_ptr == should_be;
 }
 
 void Script::parse_text() {
@@ -214,28 +192,37 @@ STATEMENT Script::parse_stmt_return() {
 }
 
 STATEMENT Script::parse_function_decl() {
-  FUNCTION_DECL function_decl{};
-  std::optional funcname_opt{extract_identifier(tokenize())};
-  if (not funcname_opt)
+  auto extract_name = [](auto token) -> std::size_t {
+    if constexpr (std::is_same_v<decltype(token), IDENTIFIER>)
+      return token.pool_idx;
     throw ScriptError{MISSING_FUNCTION_NAME{}};
-  function_decl.function_name = funcname_opt->pool_view;
+  };
+  std::size_t function_name{std::visit(extract_name, tokenize())};
   assert_punct(tokenize(), '(');
   assert_punct(tokenize(), ')');
   assert_punct(tokenize(), '{');
-  for (TOKEN token : traverse_tokens()) {
-    if (match_punct(token, '}'))
-      return function_decl;
-    function_decl.function_body.push_back(parse_statement(token));
+  auto match_function_end = [&](TOKEN token) {
+    char32_t *alter_ptr = std::get_if<char32_t>(&token);
+    return alter_ptr && *alter_ptr == '}';
+  };
+  std::vector<STATEMENT> function_body{};
+  for (TOKEN token :
+       traverse_tokens() | std::views::take_while(match_function_end)) {
+    if (std::holds_alternative<std::monostate>(token))
+      throw ScriptError{MISSING_PUNCT{'}'}};
+    function_body.push_back(parse_statement(token));
   }
-  throw ScriptError{MISSING_PUNCT{'}'}};
+  func_pool.push_back(FUNCTION_DECL{function_name, std::move(function_body)});
+  return FUNCTION_IDX{func_pool.size() - 1};
 }
 
 STATEMENT Script::parse_variable_decl() {
-  VARIABLE_DECL variable_decl{};
-  std::optional varname_opt{extract_identifier(tokenize())};
-  if (not varname_opt)
+  auto extract_name = [](auto token) -> std::size_t {
+    if constexpr (std::is_same_v<decltype(token), IDENTIFIER>)
+      return token.pool_idx;
     throw ScriptError{MISSING_VARIABLE_NAME{}};
-  variable_decl.variable_name = varname_opt->pool_view;
+  };
+  VARIABLE_DECL variable_decl{std::visit(extract_name, tokenize())};
   assert_punct(tokenize(), '=');
   variable_decl.initializer = parse_expression();
   assert_punct(tokenize(), ';');
@@ -287,10 +274,9 @@ EXPRESSION Script::parse_additive_expr() {
     return std::nullopt;
   };
   for (char32_t binary_op : tokenize().visit(match_binary)) {
-    EXPR_BINARY binary_expr{expr_left, parse_postfix_expr(), binary_op};
-    std::list<INDIRECT_EXPR>::iterator expr_it = expr_pool.insert(
-        expr_pool.end(), INDIRECT_EXPR{std::move(binary_expr)});
-    return expr_it;
+    expr_pool.push_back(
+        EXPR_BINARY{expr_left, parse_postfix_expr(), binary_op});
+    return EXPR_IDX{expr_pool.size() - 1};
   }
   backward(backtrace.size());
   return expr_left;
@@ -302,9 +288,7 @@ EXPRESSION Script::parse_member_expr(EXPRESSION obj_expr) {
       return t;
     throw ScriptError{MISSING_FIELD_NAME{}};
   });
-  EXPR_MEMBER member_expr{obj_expr, property};
-  std::list<INDIRECT_EXPR>::iterator expr_it =
-      expr_pool.insert(expr_pool.end(), INDIRECT_EXPR{std::move(member_expr)});
-  return expr_it;
+  expr_pool.push_back(EXPR_MEMBER{obj_expr, property});
+  return EXPR_IDX{expr_pool.size() - 1};
 }
 } // namespace Manadrain

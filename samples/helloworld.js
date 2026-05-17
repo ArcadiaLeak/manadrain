@@ -1,0 +1,6 @@
+function helloworld() {
+  let s = "hello";
+  let i = 2 + s.length;
+  return i - 4;
+}
+console.log(helloworld());
