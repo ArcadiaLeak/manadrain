@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <cassert>
-#include <unordered_map>
+#include <functional>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -8,7 +8,7 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_map<std::string_view, RESERVED> keyword_pool{
+static const std::unordered_map<std::string_view, RESERVED> reserved_pool{
     {"const", RESERVED::W_CONST},       {"let", RESERVED::W_LET},
     {"var", RESERVED::W_VAR},           {"class", RESERVED::W_CLASS},
     {"function", RESERVED::W_FUNCTION}, {"return", RESERVED::W_RETURN},
@@ -61,76 +61,64 @@ void Script::backward(std::size_t N) {
     backward();
 }
 
-bool has_code_point(std::optional<char32_t> opt) { return opt.has_value(); }
-bool has_token(std::optional<TOKEN> opt) { return opt.has_value(); }
-
 TOKEN Script::tokenize_word(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_ucs4(leading)};
+  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
-      traverse_text() | std::views::take_while(has_code_point) |
-      std::views::join | std::views::take_while(uc_is_property_xid_continue) |
+      traverse_text() | std::views::take_while(does_exist) | std::views::join |
+      std::views::take_while(uc_is_property_xid_continue) |
       std::views::transform(traverse_ucs4) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
   do {
-    auto iter_keyword = keyword_pool.find(identifier_str);
-    if (iter_keyword == keyword_pool.end())
+    auto iter_reserved = reserved_pool.find(identifier_str);
+    if (iter_reserved == reserved_pool.end())
       break;
-    return iter_keyword->second;
+    return iter_reserved->second;
   } while (0);
-  auto iter_atlas = atom_atlas.find(identifier_str);
-  if (iter_atlas == atom_atlas.end()) {
+  do {
+    auto iter_atlas = atom_atlas.find(identifier_str);
+    if (iter_atlas != atom_atlas.end())
+      return IDENTIFIER{iter_atlas->first};
     auto iter_atom =
         atom_pool.insert(atom_pool.end(), std::move(identifier_str));
-    auto insertion_ret = atom_atlas.insert(*iter_atom);
+    auto insertion_ret = atom_atlas.insert({*iter_atom, iter_atom});
     iter_atlas = insertion_ret.first;
-  }
-  return IDENTIFIER{*iter_atlas};
-}
-
-std::int32_t code_point_to_int(std::optional<char32_t> code_point) {
-  if (not code_point)
-    return -1;
-  return *code_point;
+    return IDENTIFIER{iter_atlas->first};
+  } while (0);
 }
 
 TOKEN Script::tokenize_string_literal(char32_t separator) {
   std::string literal_str{};
+  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto not_ended = [separator](auto code_point) {
     return code_point != separator;
   };
-  auto literal_view = traverse_text() |
-                      std::views::transform(code_point_to_int) |
-                      std::views::take_while(not_ended);
-  for (std::int32_t leading : literal_view) {
-    switch (leading) {
-    case '\r':
-      if (forward() != '\n')
-        backward();
-      [[fallthrough]];
-    case '\n':
-      if (separator != '`')
-        throw ScriptError{UNEXPECTED_STRING_END{}};
-      literal_str.push_back('\n');
-      break;
-    default:
-      literal_str.append_range(traverse_ucs4(leading));
-      break;
-    }
+  auto literal_view = traverse_text() | std::views::take_while(does_exist) |
+                      std::views::join | std::views::take_while(not_ended);
+  for (char32_t leading : literal_view) {
+    if (leading == '\r' && forward() != '\n')
+      backward();
+    if (leading == '\r')
+      leading = '\n';
+    literal_str.append_range(traverse_ucs4(leading));
   }
-  auto iter_atlas = atom_atlas.find(literal_str);
-  if (iter_atlas == atom_atlas.end()) {
+  do {
+    auto iter_atlas = atom_atlas.find(literal_str);
+    if (iter_atlas != atom_atlas.end())
+      return STRING_LITERAL{iter_atlas->first};
     auto iter_atom = atom_pool.insert(atom_pool.end(), std::move(literal_str));
-    auto insertion_ret = atom_atlas.insert(*iter_atom);
+    auto insertion_ret = atom_atlas.insert({*iter_atom, iter_atom});
     iter_atlas = insertion_ret.first;
-  }
-  return STRING_LITERAL{*iter_atlas, separator};
+    return STRING_LITERAL{iter_atlas->first};
+  } while (0);
 }
 
 TOKEN Script::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_ucs4(leading)};
+  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto has_digit = [](char32_t code_point) { return std::isdigit(code_point); };
-  auto digits_view = traverse_text() | std::views::take_while(has_code_point) |
+  auto digits_view = traverse_text() | std::views::take_while(does_exist) |
                      std::views::join | std::views::take_while(has_digit) |
                      std::views::transform(traverse_ucs4) | std::views::join;
   numeric_str.append_range(digits_view);
@@ -141,9 +129,15 @@ TOKEN Script::tokenize_numeric_literal(char32_t leading) {
   return NUMERIC_LITERAL{num_literal};
 }
 
+static const std::array legal_punct = std::to_array<char32_t>(
+    {'(', ')', '*', '+', '-', '.', '/', ':', ';', '=', '{', '}'});
+
 TOKEN Script::tokenize() {
-  for (char32_t leading : traverse_text() |
-                              std::views::take_while(has_code_point) |
+  std::stack<std::optional<char32_t>, std::vector<std::optional<char32_t>>>
+      local_backtrace{};
+  local_backtrace.swap(backtrace);
+  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
+  for (char32_t leading : traverse_text() | std::views::take_while(does_exist) |
                               std::views::join) {
     TOKEN token_ret{};
     if (uc_is_property_white_space(leading))
@@ -154,16 +148,12 @@ TOKEN Script::tokenize() {
       token_ret = tokenize_string_literal(leading);
     else if (uc_is_property_xid_start(leading) || leading == '_')
       token_ret = tokenize_word(leading);
-    else if (std::ranges::any_of(
-                 std::to_array({'(', ')', ':', '{', '}', '=', ';'}),
-                 [leading](char punct) { return leading == punct; }))
+    else if (std::ranges::binary_search(legal_punct, leading))
       token_ret = leading;
     else if (std::isdigit(leading))
       token_ret = tokenize_numeric_literal(leading);
     else
       throw ScriptError{UNEXPECTED_TOKEN{}};
-    std::stack<std::optional<char32_t>> local_backtrace{};
-    local_backtrace.swap(backtrace);
     return token_ret;
   }
   return std::monostate{};
@@ -191,33 +181,28 @@ bool match_punct(TOKEN token, char32_t should_be) {
   return alter_ptr && *alter_ptr == should_be;
 }
 
-std::generator<STATEMENT> Script::traverse_script_body() {
+void Script::parse_text() {
   for (TOKEN token : traverse_tokens()) {
     if (std::holds_alternative<std::monostate>(token))
       break;
-    co_yield token.visit([this](auto t) { return parse_statement(t); });
+    STATEMENT stmt{parse_statement(token)};
+    script_body.push_back(std::move(stmt));
   }
 }
 
-std::generator<STATEMENT> Script::traverse_function_body() {
-  for (TOKEN token : traverse_tokens()) {
-    if (match_punct(token, '}'))
-      break;
-    co_yield token.visit([this](auto t) { return parse_statement(t); });
-  }
-}
-
-void Script::parse_text() { script_body.append_range(traverse_script_body()); }
-
-STATEMENT Script::parse_statement(RESERVED reserved) {
-  switch (reserved) {
-  case RESERVED::W_FUNCTION:
-    return parse_function_decl();
-  case RESERVED::W_LET:
-    return parse_variable_decl();
-  default:
+STATEMENT Script::parse_statement(TOKEN leading) {
+  return leading.visit([this](auto t) -> STATEMENT {
+    if constexpr (std::is_same_v<decltype(t), RESERVED>)
+      switch (t) {
+      case RESERVED::W_FUNCTION:
+        return parse_function_decl();
+      case RESERVED::W_LET:
+        return parse_variable_decl();
+      default:
+        break;
+      }
     throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
+  });
 }
 
 STATEMENT Script::parse_function_decl() {
@@ -229,7 +214,12 @@ STATEMENT Script::parse_function_decl() {
   assert_punct(tokenize(), '(');
   assert_punct(tokenize(), ')');
   assert_punct(tokenize(), '{');
-  function_decl.function_body.append_range(traverse_function_body());
+  for (TOKEN token : traverse_tokens()) {
+    if (match_punct(token, '}'))
+      break;
+    STATEMENT stmt{parse_statement(token)};
+    function_decl.function_body.push_back(std::move(stmt));
+  }
   throw ScriptError{UNSUPPORTED{}};
 }
 
@@ -240,13 +230,67 @@ STATEMENT Script::parse_variable_decl() {
     throw ScriptError{MISSING_VARIABLE_NAME{}};
   variable_decl.variable_name = varname_opt->pool_view;
   assert_punct(tokenize(), '=');
-  variable_decl.initializer =
-      tokenize().visit([this](auto t) { return parse_expression(t); });
+  variable_decl.initializer = parse_additive_expr();
   assert_punct(tokenize(), ';');
   return variable_decl;
 }
 
-EXPRESSION Script::parse_expression(STRING_LITERAL string_literal) {
-  return string_literal;
+EXPRESSION Script::parse_primary_expr() {
+  return tokenize().visit([](auto t) -> EXPRESSION {
+    if constexpr (std::is_same_v<decltype(t), STRING_LITERAL> ||
+                  std::is_same_v<decltype(t), NUMERIC_LITERAL> ||
+                  std::is_same_v<decltype(t), IDENTIFIER>)
+      return t;
+    throw ScriptError{UNSUPPORTED{}};
+  });
+}
+
+EXPRESSION Script::parse_postfix_expr() {
+  using POSTFIX_REDUCER =
+      std::optional<std::copyable_function<EXPRESSION(EXPRESSION) const>>;
+  auto match_reducer = [this](TOKEN token) -> POSTFIX_REDUCER {
+    return std::nullopt;
+  };
+  auto postfix_fold = [](EXPRESSION postfix_expr, auto postfix_reducer) {
+    return postfix_reducer(postfix_expr);
+  };
+  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
+  auto postfix_reducers = traverse_tokens() |
+                          std::views::transform(match_reducer) |
+                          std::views::take_while(does_exist) | std::views::join;
+  EXPRESSION postfix_expr{std::ranges::fold_left(
+      postfix_reducers, parse_primary_expr(), postfix_fold)};
+  backward(backtrace.size());
+  return postfix_expr;
+}
+
+EXPRESSION Script::parse_additive_expr() {
+  EXPRESSION expr_left{parse_postfix_expr()};
+  auto match_binary = [](auto t) -> std::optional<char32_t> {
+    if constexpr (std::is_same_v<decltype(t), char32_t>)
+      if (t == '+' || t == '-')
+        return t;
+    return std::nullopt;
+  };
+  for (char32_t binary_op : tokenize().visit(match_binary)) {
+    EXPR_BINARY binary_expr{expr_left, parse_postfix_expr(), binary_op};
+    std::list<INDIRECT_EXPR>::iterator expr_it = expr_pool.insert(
+        expr_pool.end(), INDIRECT_EXPR{std::move(binary_expr)});
+    return expr_it;
+  }
+  backward(backtrace.size());
+  return expr_left;
+}
+
+EXPRESSION Script::parse_member_expr(EXPRESSION obj_expr) {
+  auto property = tokenize().visit([](auto t) -> IDENTIFIER {
+    if constexpr (std::is_same_v<decltype(t), IDENTIFIER>)
+      return t;
+    throw ScriptError{MISSING_FIELD_NAME{}};
+  });
+  EXPR_MEMBER member_expr{obj_expr, property};
+  std::list<INDIRECT_EXPR>::iterator expr_it =
+      expr_pool.insert(expr_pool.end(), INDIRECT_EXPR{std::move(member_expr)});
+  return expr_it;
 }
 } // namespace Manadrain

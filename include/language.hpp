@@ -1,12 +1,10 @@
 #include <cstdint>
-#include <functional>
 #include <generator>
-#include <inplace_vector>
 #include <list>
 #include <optional>
 #include <ranges>
 #include <stack>
-#include <unordered_set>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -42,11 +40,23 @@ struct IDENTIFIER {
 };
 struct STRING_LITERAL {
   std::string_view pool_view;
-  char32_t separator;
 };
 using NUMERIC_LITERAL = std::variant<std::int64_t, double>;
-using TOKEN = std::variant<std::monostate, char32_t, NUMERIC_LITERAL, RESERVED,
-                           IDENTIFIER, STRING_LITERAL>;
+enum class OPERATOR {
+  DOUBLE_EQUALS,
+  TRIPLE_EQUALS,
+  BANG_EQUALS,
+  BANG_DOUBLE_EQUALS,
+  DIVIDE_ASSIGN,
+  BITWISE_CONJUNCT_ASSIGN,
+  LOGICAL_CONJUNCT_ASSIGN,
+  LOGICAL_CONJUNCT,
+  BITWISE_DISJUNCT_ASSIGN,
+  LOGICAL_DISJUNCT_ASSIGN,
+  LOGICAL_DISJUNCT
+};
+using TOKEN = std::variant<std::monostate, char32_t, OPERATOR, NUMERIC_LITERAL,
+                           RESERVED, IDENTIFIER, STRING_LITERAL>;
 
 struct INVALID_NUMERIC_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
@@ -79,20 +89,28 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-using EXPRESSION = std::variant<STRING_LITERAL, NUMERIC_LITERAL, IDENTIFIER>;
-
-using DYNAMIC = std::variant<std::monostate>;
-using HEAP_SLOT = std::variant<std::monostate>;
+struct INDIRECT_EXPR;
+using EXPRESSION = std::variant<std::monostate, STRING_LITERAL, NUMERIC_LITERAL,
+                                IDENTIFIER, std::list<INDIRECT_EXPR>::iterator>;
+struct EXPR_BINARY {
+  EXPRESSION left;
+  EXPRESSION right;
+  char32_t op;
+};
+struct EXPR_MEMBER {
+  EXPRESSION object;
+  IDENTIFIER property;
+};
+struct INDIRECT_EXPR {
+  std::variant<EXPR_BINARY, EXPR_MEMBER> alter;
+};
 
 struct FUNCTION_DECL;
-
 struct VARIABLE_DECL {
   std::string_view variable_name;
   EXPRESSION initializer;
 };
-
 using STATEMENT = std::variant<std::monostate, FUNCTION_DECL, VARIABLE_DECL>;
-
 struct FUNCTION_DECL {
   std::string_view function_name;
   std::vector<STATEMENT> function_body;
@@ -103,14 +121,16 @@ public:
   std::vector<std::uint8_t> text_source;
   std::size_t position;
 
+  std::unordered_map<std::string_view, std::list<std::string>::iterator>
+      atom_atlas;
   std::list<std::string> atom_pool;
-  std::unordered_set<std::string_view> atom_atlas;
-  std::vector<HEAP_SLOT> heap;
+  std::list<INDIRECT_EXPR> expr_pool;
 
   void parse_text();
 
 private:
-  std::stack<std::optional<char32_t>> backtrace;
+  std::stack<std::optional<char32_t>, std::vector<std::optional<char32_t>>>
+      backtrace;
   std::vector<STATEMENT> script_body;
 
   std::generator<std::optional<char32_t>> traverse_text();
@@ -124,18 +144,13 @@ private:
   TOKEN tokenize_string_literal(char32_t separator);
   TOKEN tokenize_numeric_literal(char32_t leading);
 
-  STATEMENT parse_statement(RESERVED reserved);
-  template <typename T> STATEMENT parse_statement(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
-  std::generator<STATEMENT> traverse_script_body();
-  std::generator<STATEMENT> traverse_function_body();
+  STATEMENT parse_statement(TOKEN leading);
   STATEMENT parse_function_decl();
   STATEMENT parse_variable_decl();
 
-  EXPRESSION parse_expression(STRING_LITERAL string_literal);
-  template <typename T> EXPRESSION parse_expression(T visitee) {
-    throw ScriptError{UNEXPECTED_TOKEN{}};
-  }
+  EXPRESSION parse_primary_expr();
+  EXPRESSION parse_postfix_expr();
+  EXPRESSION parse_additive_expr();
+  EXPRESSION parse_member_expr(EXPRESSION obj_expr);
 };
 } // namespace Manadrain
