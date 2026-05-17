@@ -90,12 +90,13 @@ TOKEN Script::tokenize_word(char32_t leading) {
 
 TOKEN Script::tokenize_string_literal(char32_t separator) {
   std::string literal_str{};
-  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
-  auto not_ended = [separator](auto code_point) {
+  auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
+  auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
   };
-  auto literal_view = traverse_text() | std::views::take_while(does_exist) |
-                      std::views::join | std::views::take_while(not_ended);
+  auto literal_view = traverse_text() | std::views::take_while(match_nullopt) |
+                      std::views::join |
+                      std::views::take_while(match_literal_end);
   for (char32_t leading : literal_view) {
     if (leading == '\r' && forward() != '\n')
       backward();
@@ -116,12 +117,14 @@ TOKEN Script::tokenize_string_literal(char32_t separator) {
 
 TOKEN Script::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_ucs4(leading)};
-  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
-  auto has_digit = [](char32_t code_point) { return std::isdigit(code_point); };
-  auto digits_view = traverse_text() | std::views::take_while(does_exist) |
-                     std::views::join | std::views::take_while(has_digit) |
-                     std::views::transform(traverse_ucs4) | std::views::join;
-  numeric_str.append_range(digits_view);
+  auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
+  auto match_digit = [](char32_t code_point) {
+    return std::isdigit(code_point);
+  };
+  numeric_str.append_range(
+      traverse_text() | std::views::take_while(match_nullopt) |
+      std::views::join | std::views::take_while(match_digit) |
+      std::views::transform(traverse_ucs4) | std::views::join);
   backward();
   std::int64_t num_literal{};
   std::from_chars(numeric_str.data(), numeric_str.data() + numeric_str.size(),
@@ -192,17 +195,22 @@ void Script::parse_text() {
 
 STATEMENT Script::parse_statement(TOKEN leading) {
   return leading.visit([this](auto t) -> STATEMENT {
-    if constexpr (std::is_same_v<decltype(t), RESERVED>)
-      switch (t) {
-      case RESERVED::W_FUNCTION:
+    if constexpr (std::is_same_v<decltype(t), RESERVED>) {
+      if (t == RESERVED::W_FUNCTION)
         return parse_function_decl();
-      case RESERVED::W_LET:
+      if (t == RESERVED::W_LET)
         return parse_variable_decl();
-      default:
-        break;
-      }
+      if (t == RESERVED::W_RETURN)
+        return parse_stmt_return();
+    }
     throw ScriptError{UNEXPECTED_TOKEN{}};
   });
+}
+
+STATEMENT Script::parse_stmt_return() {
+  STMT_RETURN statement{parse_expression()};
+  assert_punct(tokenize(), ';');
+  return statement;
 }
 
 STATEMENT Script::parse_function_decl() {
@@ -216,11 +224,10 @@ STATEMENT Script::parse_function_decl() {
   assert_punct(tokenize(), '{');
   for (TOKEN token : traverse_tokens()) {
     if (match_punct(token, '}'))
-      break;
-    STATEMENT stmt{parse_statement(token)};
-    function_decl.function_body.push_back(std::move(stmt));
+      return function_decl;
+    function_decl.function_body.push_back(parse_statement(token));
   }
-  throw ScriptError{UNSUPPORTED{}};
+  throw ScriptError{MISSING_PUNCT{'}'}};
 }
 
 STATEMENT Script::parse_variable_decl() {
@@ -230,10 +237,12 @@ STATEMENT Script::parse_variable_decl() {
     throw ScriptError{MISSING_VARIABLE_NAME{}};
   variable_decl.variable_name = varname_opt->pool_view;
   assert_punct(tokenize(), '=');
-  variable_decl.initializer = parse_additive_expr();
+  variable_decl.initializer = parse_expression();
   assert_punct(tokenize(), ';');
   return variable_decl;
 }
+
+EXPRESSION Script::parse_expression() { return parse_additive_expr(); }
 
 EXPRESSION Script::parse_primary_expr() {
   return tokenize().visit([](auto t) -> EXPRESSION {
@@ -248,16 +257,21 @@ EXPRESSION Script::parse_primary_expr() {
 EXPRESSION Script::parse_postfix_expr() {
   using POSTFIX_REDUCER =
       std::optional<std::copyable_function<EXPRESSION(EXPRESSION) const>>;
-  auto match_reducer = [this](TOKEN token) -> POSTFIX_REDUCER {
+  auto match_reducer = [this](auto t) -> POSTFIX_REDUCER {
+    if constexpr (std::is_same_v<decltype(t), char32_t>) {
+      if (t == '.')
+        return [this](EXPRESSION expr) { return parse_member_expr(expr); };
+    }
     return std::nullopt;
   };
   auto postfix_fold = [](EXPRESSION postfix_expr, auto postfix_reducer) {
     return postfix_reducer(postfix_expr);
   };
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
-  auto postfix_reducers = traverse_tokens() |
-                          std::views::transform(match_reducer) |
-                          std::views::take_while(does_exist) | std::views::join;
+  auto postfix_reducers =
+      traverse_tokens() |
+      std::views::transform([&](TOKEN t) { return t.visit(match_reducer); }) |
+      std::views::take_while(does_exist) | std::views::join;
   EXPRESSION postfix_expr{std::ranges::fold_left(
       postfix_reducers, parse_primary_expr(), postfix_fold)};
   backward(backtrace.size());

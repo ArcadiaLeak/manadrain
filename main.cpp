@@ -25,10 +25,10 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Script Script{};
-  Script.text_source = std::ranges::istream_view<std::uint8_t>{file} |
+  Manadrain::Script script{};
+  script.text_source = std::ranges::istream_view<std::uint8_t>{file} |
                        std::ranges::to<std::vector<std::uint8_t>>();
-  Script.parse_text();
+  script.parse_text();
 
   return 0;
 }

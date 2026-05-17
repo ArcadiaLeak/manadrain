@@ -110,7 +110,11 @@ struct VARIABLE_DECL {
   std::string_view variable_name;
   EXPRESSION initializer;
 };
-using STATEMENT = std::variant<std::monostate, FUNCTION_DECL, VARIABLE_DECL>;
+struct STMT_RETURN {
+  EXPRESSION argument;
+};
+using STATEMENT =
+    std::variant<std::monostate, FUNCTION_DECL, VARIABLE_DECL, STMT_RETURN>;
 struct FUNCTION_DECL {
   std::string_view function_name;
   std::vector<STATEMENT> function_body;
@@ -144,13 +148,15 @@ private:
   TOKEN tokenize_string_literal(char32_t separator);
   TOKEN tokenize_numeric_literal(char32_t leading);
 
-  STATEMENT parse_statement(TOKEN leading);
-  STATEMENT parse_function_decl();
-  STATEMENT parse_variable_decl();
-
   EXPRESSION parse_primary_expr();
   EXPRESSION parse_postfix_expr();
   EXPRESSION parse_additive_expr();
   EXPRESSION parse_member_expr(EXPRESSION obj_expr);
+  EXPRESSION parse_expression();
+
+  STATEMENT parse_statement(TOKEN leading);
+  STATEMENT parse_function_decl();
+  STATEMENT parse_variable_decl();
+  STATEMENT parse_stmt_return();
 };
 } // namespace Manadrain
