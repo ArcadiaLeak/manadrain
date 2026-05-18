@@ -1,10 +1,10 @@
 #include <cstdint>
+#include <flat_map>
 #include <generator>
 #include <list>
 #include <memory>
 #include <optional>
 #include <ranges>
-#include <stack>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -39,7 +39,7 @@ enum class RESERVED {
 struct IDENTIFIER {
   std::size_t pool_idx;
 };
-struct STRING_LITERAL {
+struct STRING_HANDLE {
   std::size_t pool_idx;
 };
 using NUMERIC_LITERAL = std::variant<std::int64_t, double>;
@@ -57,11 +57,12 @@ enum class OPERATOR {
   LOGICAL_DISJUNCT
 };
 using TOKEN = std::variant<std::monostate, char32_t, OPERATOR, NUMERIC_LITERAL,
-                           RESERVED, IDENTIFIER, STRING_LITERAL>;
+                           RESERVED, IDENTIFIER, STRING_HANDLE>;
 
 struct INVALID_NUMERIC_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
 struct INVALID_BACKSLASH_ESCAPE {};
+struct INVALID_DECLARATION {};
 struct MISSING_FIELD_NAME {};
 struct MISSING_VARIABLE_NAME {};
 struct MISSING_FUNCTION_NAME {};
@@ -75,26 +76,25 @@ struct UNEXPECTED_RESERVED_WORD {};
 struct UNEXPECTED_STRING_END {};
 struct UNEXPECTED_COMMENT_END {};
 struct UNEXPECTED_TOKEN {};
-struct UNSUPPORTED {};
 class ScriptError : public std::exception {
 public:
   using MESSAGE = std::variant<
       INVALID_NUMERIC_LITERAL, INVALID_PROPERTY_NAME, INVALID_BACKSLASH_ESCAPE,
-      MISSING_FIELD_NAME, MISSING_VARIABLE_NAME, MISSING_FUNCTION_NAME,
-      MISSING_IDENTIFIER, MISSING_STRING_LITERAL, MISSING_FORMAL_PARAMETER,
-      MISSING_PUNCT, UNEXPECTED_RESERVED_WORD, UNEXPECTED_STRING_END,
-      UNEXPECTED_COMMENT_END, UNEXPECTED_TOKEN, UNSUPPORTED>;
+      INVALID_DECLARATION, MISSING_FIELD_NAME, MISSING_VARIABLE_NAME,
+      MISSING_FUNCTION_NAME, MISSING_IDENTIFIER, MISSING_STRING_LITERAL,
+      MISSING_FORMAL_PARAMETER, MISSING_PUNCT, UNEXPECTED_RESERVED_WORD,
+      UNEXPECTED_STRING_END, UNEXPECTED_COMMENT_END, UNEXPECTED_TOKEN>;
   MESSAGE message;
 
   explicit ScriptError(MESSAGE msg) : message{msg} {}
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct EXPR_IDX {
+struct EXPR_HANDLE {
   std::size_t pool_idx;
 };
-using EXPRESSION = std::variant<std::monostate, STRING_LITERAL, NUMERIC_LITERAL,
-                                IDENTIFIER, EXPR_IDX>;
+using EXPRESSION = std::variant<std::monostate, STRING_HANDLE, NUMERIC_LITERAL,
+                                IDENTIFIER, EXPR_HANDLE>;
 
 struct EXPR_BINARY {
   EXPRESSION left;
@@ -118,14 +118,18 @@ struct VARIABLE_DECL {
 struct STMT_RETURN {
   EXPRESSION return_expr;
 };
-struct FUNCTION_IDX {
+struct FUNCTION_HANDLE {
   std::size_t pool_idx;
 };
 using STATEMENT =
-    std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN, FUNCTION_IDX>;
+    std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN, FUNCTION_HANDLE>;
+
+using DYNAMIC = std::optional<
+    std::variant<std::monostate, STRING_HANDLE, std::optional<std::size_t>>>;
 
 struct FUNCTION_DECL {
   std::size_t function_name;
+  std::flat_map<std::size_t, DYNAMIC> function_scope;
   std::vector<STATEMENT> function_body;
 };
 
@@ -164,6 +168,7 @@ private:
 
   std::vector<EXPR_NODE> expr_pool;
   std::vector<FUNCTION_DECL> func_pool;
+  std::flat_map<std::size_t, DYNAMIC> script_scope;
   std::vector<STATEMENT> script_body;
 
   std::optional<std::indirect<TokenData>> token_data;
@@ -182,10 +187,9 @@ private:
   EXPRESSION parse_call_expr(EXPRESSION callee_expr);
   EXPRESSION parse_expression();
 
-  STATEMENT parse_statement(TOKEN leading);
-  STATEMENT parse_function_decl();
-  STATEMENT parse_variable_decl();
-  STATEMENT parse_stmt_return();
-  STATEMENT parse_stmt_expression();
+  void parse_statement(std::flat_map<std::size_t, DYNAMIC> &block_scope,
+                       std::vector<STATEMENT> &body, TOKEN leading);
+  FUNCTION_DECL parse_function_decl();
+  VARIABLE_DECL parse_variable_decl();
 };
 } // namespace Manadrain

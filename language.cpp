@@ -117,7 +117,7 @@ TOKEN Script::tokenize_string_literal(char32_t separator) {
       atom_atlas.insert({literal_str, atom_pool.size()});
   if (did_insert)
     atom_pool.push_back(std::move(literal_str));
-  return STRING_LITERAL{iter_atlas->second};
+  return STRING_HANDLE{iter_atlas->second};
 }
 
 TOKEN Script::tokenize_numeric_literal(char32_t leading) {
@@ -188,42 +188,42 @@ void Script::parse_text(std::vector<std::uint8_t> source) {
   for (TOKEN token : traverse_tokens()) {
     if (std::holds_alternative<std::monostate>(token))
       break;
-    STATEMENT stmt{parse_statement(token)};
-    script_body.push_back(std::move(stmt));
+    parse_statement(script_scope, script_body, token);
   }
   token_data.reset();
 }
 
-STATEMENT Script::parse_statement(TOKEN leading) {
+void Script::parse_statement(std::flat_map<std::size_t, DYNAMIC> &block_scope,
+                             std::vector<STATEMENT> &block_body,
+                             TOKEN leading) {
   auto match_reserved = [](auto t) {
     if constexpr (std::is_same_v<decltype(t), RESERVED>)
       return t;
     return RESERVED::MONOSTATE;
   };
   RESERVED word{leading.visit(match_reserved)};
-  if (word == RESERVED::W_FUNCTION)
-    return parse_function_decl();
-  if (word == RESERVED::W_LET)
-    return parse_variable_decl();
-  if (word == RESERVED::W_RETURN)
-    return parse_stmt_return();
-  tokenization().history_pull();
-  return parse_stmt_expression();
+  STATEMENT statement;
+  if (word == RESERVED::W_FUNCTION) {
+    FUNCTION_HANDLE handle{func_pool.size()};
+    func_pool.push_back(parse_function_decl());
+    block_body.push_back(handle);
+  } else if (word == RESERVED::W_LET) {
+    VARIABLE_DECL declaration{parse_variable_decl()};
+    if (block_scope.contains(declaration.variable_name))
+      throw ScriptError{INVALID_DECLARATION{}};
+    block_scope[declaration.variable_name] = std::nullopt;
+    block_body.push_back(declaration);
+  } else if (word == RESERVED::W_RETURN) {
+    block_body.push_back(parse_expression());
+    assert_punct(tokenize(), ';');
+  } else {
+    tokenization().history_pull();
+    block_body.push_back(parse_expression());
+    assert_punct(tokenize(), ';');
+  }
 }
 
-STATEMENT Script::parse_stmt_return() {
-  STMT_RETURN statement{parse_expression()};
-  assert_punct(tokenize(), ';');
-  return statement;
-}
-
-STATEMENT Script::parse_stmt_expression() {
-  EXPRESSION expression{parse_expression()};
-  assert_punct(tokenize(), ';');
-  return expression;
-}
-
-STATEMENT Script::parse_function_decl() {
+FUNCTION_DECL Script::parse_function_decl() {
   auto extract_name = [](auto token) -> std::size_t {
     if constexpr (std::is_same_v<decltype(token), IDENTIFIER>)
       return token.pool_idx;
@@ -236,18 +236,18 @@ STATEMENT Script::parse_function_decl() {
     char32_t *alter_ptr = std::get_if<char32_t>(&token);
     return !alter_ptr || *alter_ptr != '}';
   };
+  std::flat_map<std::size_t, DYNAMIC> function_scope{};
   std::vector<STATEMENT> function_body{};
   for (TOKEN token :
        traverse_tokens() | std::views::take_while(match_function_end)) {
     if (std::holds_alternative<std::monostate>(token))
       throw ScriptError{MISSING_PUNCT{'}'}};
-    function_body.push_back(parse_statement(token));
+    parse_statement(function_scope, function_body, token);
   }
-  func_pool.push_back(FUNCTION_DECL{function_name, std::move(function_body)});
-  return FUNCTION_IDX{func_pool.size() - 1};
+  return {function_name, std::move(function_scope), std::move(function_body)};
 }
 
-STATEMENT Script::parse_variable_decl() {
+VARIABLE_DECL Script::parse_variable_decl() {
   auto extract_name = [](auto token) -> std::size_t {
     if constexpr (std::is_same_v<decltype(token), IDENTIFIER>)
       return token.pool_idx;
@@ -264,11 +264,11 @@ EXPRESSION Script::parse_expression() { return parse_additive_expr(); }
 
 EXPRESSION Script::parse_primary_expr() {
   return tokenize().visit([](auto t) -> EXPRESSION {
-    if constexpr (std::is_same_v<decltype(t), STRING_LITERAL> ||
+    if constexpr (std::is_same_v<decltype(t), STRING_HANDLE> ||
                   std::is_same_v<decltype(t), NUMERIC_LITERAL> ||
                   std::is_same_v<decltype(t), IDENTIFIER>)
       return t;
-    throw ScriptError{UNSUPPORTED{}};
+    throw ScriptError{UNEXPECTED_TOKEN{}};
   });
 }
 
@@ -309,7 +309,7 @@ EXPRESSION Script::parse_additive_expr() {
   for (char32_t binary_op : tokenize().visit(match_binary)) {
     expr_pool.push_back(
         EXPR_BINARY{expr_left, parse_postfix_expr(), binary_op});
-    return EXPR_IDX{expr_pool.size() - 1};
+    return EXPR_HANDLE{expr_pool.size() - 1};
   }
   tokenization().history_pull();
   return expr_left;
@@ -322,7 +322,7 @@ EXPRESSION Script::parse_member_expr(EXPRESSION obj_expr) {
     throw ScriptError{MISSING_FIELD_NAME{}};
   });
   expr_pool.push_back(EXPR_MEMBER{obj_expr, property});
-  return EXPR_IDX{expr_pool.size() - 1};
+  return EXPR_HANDLE{expr_pool.size() - 1};
 }
 
 EXPRESSION Script::parse_call_expr(EXPRESSION callee_expr) {
@@ -344,7 +344,7 @@ EXPRESSION Script::parse_call_expr(EXPRESSION callee_expr) {
     assert_punct(tokenize(), ',');
   }
   expr_pool.push_back(std::move(expr_call));
-  return EXPR_IDX{expr_pool.size() - 1};
+  return EXPR_HANDLE{expr_pool.size() - 1};
 }
 
 void Script::execute() {}
