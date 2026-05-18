@@ -58,29 +58,6 @@ enum class OPERATOR {
 };
 using TOKEN = std::variant<std::monostate, char32_t, OPERATOR, NUMERIC_LITERAL,
                            RESERVED, IDENTIFIER, STRING_HANDLE>;
-class TokenData {
-public:
-  void text_set(std::vector<std::uint8_t> text) {
-    text_source = std::move(text);
-  }
-
-  std::generator<std::optional<char32_t>> traverse_text();
-  std::optional<char32_t> forward();
-  void backward();
-  void backward(std::size_t N);
-
-  std::optional<TOKEN> revoked_pull();
-  void history_pull();
-  void history_push(TOKEN token);
-
-private:
-  std::vector<std::uint8_t> text_source;
-  std::size_t position;
-  std::vector<std::int32_t> backtrace;
-
-  std::list<TOKEN> token_history;
-  std::list<TOKEN> token_revoked;
-};
 
 struct INVALID_NUMERIC_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
@@ -126,7 +103,7 @@ struct EXPR_BINARY {
 };
 struct EXPR_MEMBER {
   EXPRESSION object;
-  IDENTIFIER property;
+  std::size_t property;
 };
 struct EXPR_CALL {
   EXPRESSION callee;
@@ -149,8 +126,8 @@ struct FUNCTION_HANDLE {
 struct OBJECT_HANDLE {
   std::optional<std::size_t> pool_idx;
 };
-using DYNAMIC = std::optional<std::variant<std::monostate, STRING_HANDLE,
-                                           FUNCTION_HANDLE, OBJECT_HANDLE>>;
+using DYNAMIC =
+    std::variant<std::monostate, STRING_HANDLE, FUNCTION_HANDLE, OBJECT_HANDLE>;
 
 class Script;
 
@@ -165,23 +142,27 @@ struct FUNCTION_DECL {
 class VanillaFunction {
 public:
   std::size_t function_name;
-  std::flat_map<std::size_t, DYNAMIC> function_scope;
+  std::flat_map<std::size_t, std::optional<DYNAMIC>> function_scope;
   std::vector<STATEMENT> function_body;
   DYNAMIC operator()(std::vector<DYNAMIC> parameter_vec, DYNAMIC context,
                      const Script &script);
 };
 
+class Parser;
+
 class Script {
 public:
-  void parse_text(std::vector<std::uint8_t> source);
   void execute();
 
-  std::size_t insert_atom(std::string atom);
-  FUNCTION_HANDLE insert_function(FUNCTION function);
-  OBJECT_HANDLE insert_object(OBJECT object);
-  void pin_global(std::size_t atom_handle, DYNAMIC dynamic);
+  OBJECT_HANDLE insert(OBJECT object);
+  FUNCTION_HANDLE insert(FUNCTION function);
+
+  void attach_atom(std::size_t &atom_hdl, std::string atom_str);
+  void attach_global(std::size_t atom_hdl, DYNAMIC dynamic);
 
 private:
+  friend class Parser;
+
   std::unordered_map<std::string, std::size_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
@@ -190,11 +171,37 @@ private:
   std::vector<FUNCTION> function_pool;
   std::vector<OBJECT> object_pool;
 
-  std::flat_map<std::size_t, DYNAMIC> script_scope;
+  std::flat_map<std::size_t, std::optional<DYNAMIC>> script_scope;
   std::vector<STATEMENT> script_body;
 
-  std::optional<std::indirect<TokenData>> token_data;
-  TokenData &tokenization() { return *token_data.value(); }
+  DYNAMIC reduce(EXPR_CALL &expr_call);
+  DYNAMIC reduce(EXPRESSION expression);
+
+  void execute(STATEMENT statement);
+};
+
+class Parser {
+public:
+  Script script;
+  std::shared_ptr<const std::uint8_t[]> text_buffer;
+  std::size_t text_size;
+  void parse_text();
+
+private:
+  std::size_t position;
+  std::vector<std::int32_t> backtrace;
+
+  std::list<TOKEN> token_history;
+  std::list<TOKEN> token_revoked;
+
+  std::generator<std::optional<char32_t>> traverse_text();
+  std::optional<char32_t> forward();
+  void backward();
+  void backward(std::size_t N);
+
+  std::optional<TOKEN> revoked_pull();
+  void history_pull();
+  void history_push(TOKEN token);
 
   TOKEN tokenize_word(char32_t leading);
   TOKEN tokenize_string_literal(char32_t separator);
@@ -209,14 +216,10 @@ private:
   EXPRESSION parse_call_expr(EXPRESSION callee_expr);
   EXPRESSION parse_expression();
 
-  void parse_statement(std::flat_map<std::size_t, DYNAMIC> &block_scope,
-                       std::vector<STATEMENT> &body, TOKEN leading);
+  void parse_statement(
+      std::flat_map<std::size_t, std::optional<DYNAMIC>> &block_scope,
+      std::vector<STATEMENT> &body, TOKEN leading);
   FUNCTION_DECL parse_function_decl();
   VARIABLE_DECL parse_variable_decl();
-
-  DYNAMIC execute(EXPR_HANDLE expr_handle);
-  DYNAMIC execute(EXPRESSION expression);
-
-  void execute(STATEMENT statement);
 };
 } // namespace Manadrain

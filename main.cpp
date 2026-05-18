@@ -25,25 +25,31 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Script script{};
-  std::vector<std::uint8_t> text_source{
+  Manadrain::Parser parser{};
+  std::vector<std::uint8_t> text_vec{
       std::from_range, std::ranges::istream_view<std::uint8_t>{file}};
-  script.parse_text(std::move(text_source));
+  std::shared_ptr text_buffer{
+      std::make_shared<std::uint8_t[]>(text_vec.size())};
+  std::memcpy(text_buffer.get(), text_vec.data(), text_vec.size());
+  parser.text_buffer = text_buffer;
+  parser.text_size = text_vec.size();
+  parser.parse_text();
 
+  Manadrain::Script script{std::move(parser.script)};
   auto console_log = [](std::vector<Manadrain::DYNAMIC> parameter_vec,
                         Manadrain::DYNAMIC context,
                         const Manadrain::Script &s) {
     return Manadrain::DYNAMIC{};
   };
-  Manadrain::FUNCTION_HANDLE hdl_console_log{
-      script.insert_function(console_log)};
-  std::size_t log_atom{script.insert_atom("log")};
+  std::size_t log_atom{};
+  script.attach_atom(log_atom, "log");
+  Manadrain::FUNCTION_HANDLE hdl_console_log{script.insert(console_log)};
   Manadrain::OBJECT console_obj{
       {log_atom, Manadrain::FUNCTION_HANDLE{hdl_console_log}}};
-  Manadrain::OBJECT_HANDLE hdl_console{
-      script.insert_object(std::move(console_obj))};
-  std::size_t console_atom{script.insert_atom("console")};
-  script.pin_global(console_atom, hdl_console);
+  std::size_t console_atom{};
+  script.attach_atom(console_atom, "console");
+  Manadrain::OBJECT_HANDLE hdl_console{script.insert(std::move(console_obj))};
+  script.attach_global(console_atom, hdl_console);
   script.execute();
 
   return 0;
