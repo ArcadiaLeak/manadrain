@@ -279,6 +279,8 @@ EXPRESSION Script::parse_postfix_expr() {
     if constexpr (std::is_same_v<decltype(t), char32_t>) {
       if (t == '.')
         return [this](EXPRESSION expr) { return parse_member_expr(expr); };
+      if (t == '(')
+        return [this](EXPRESSION expr) { return parse_call_expr(expr); };
     }
     return std::nullopt;
   };
@@ -322,4 +324,29 @@ EXPRESSION Script::parse_member_expr(EXPRESSION obj_expr) {
   expr_pool.push_back(EXPR_MEMBER{obj_expr, property});
   return EXPR_IDX{expr_pool.size() - 1};
 }
+
+EXPRESSION Script::parse_call_expr(EXPRESSION callee_expr) {
+  auto match_rparen = [](auto t) -> bool {
+    if constexpr (std::is_same_v<decltype(t), char32_t>)
+      if (t == ')')
+        return 1;
+    return 0;
+  };
+  EXPR_CALL expr_call{callee_expr};
+  while (1) {
+    if (tokenize().visit(match_rparen))
+      break;
+    tokenization().history_pull();
+    expr_call.param_vec.push_back(parse_expression());
+    if (tokenize().visit(match_rparen))
+      break;
+    tokenization().history_pull();
+    assert_punct(tokenize(), ',');
+  }
+  expr_pool.push_back(std::move(expr_call));
+  return EXPR_IDX{expr_pool.size() - 1};
+}
+
+void Script::execute() {}
+
 } // namespace Manadrain

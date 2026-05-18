@@ -105,14 +105,18 @@ struct EXPR_MEMBER {
   EXPRESSION object;
   IDENTIFIER property;
 };
-using EXPR_NODE = std::variant<EXPR_BINARY, EXPR_MEMBER>;
+struct EXPR_CALL {
+  EXPRESSION callee;
+  std::vector<EXPRESSION> param_vec;
+};
+using EXPR_NODE = std::variant<EXPR_BINARY, EXPR_MEMBER, EXPR_CALL>;
 
 struct VARIABLE_DECL {
   std::size_t variable_name;
   EXPRESSION initializer;
 };
 struct STMT_RETURN {
-  EXPRESSION argument;
+  EXPRESSION return_expr;
 };
 struct FUNCTION_IDX {
   std::size_t pool_idx;
@@ -152,6 +156,7 @@ private:
 class Script {
 public:
   void parse_text(std::vector<std::uint8_t> source);
+  void execute();
 
 private:
   std::unordered_map<std::string, std::size_t> atom_atlas;
@@ -174,6 +179,7 @@ private:
   EXPRESSION parse_postfix_expr();
   EXPRESSION parse_additive_expr();
   EXPRESSION parse_member_expr(EXPRESSION obj_expr);
+  EXPRESSION parse_call_expr(EXPRESSION callee_expr);
   EXPRESSION parse_expression();
 
   STATEMENT parse_statement(TOKEN leading);

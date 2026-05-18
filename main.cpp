@@ -29,6 +29,7 @@ int main(int argc, char *argv[]) {
   std::vector<std::uint8_t> text_source{
       std::from_range, std::ranges::istream_view<std::uint8_t>{file}};
   script.parse_text(std::move(text_source));
+  script.execute();
 
   return 0;
 }
