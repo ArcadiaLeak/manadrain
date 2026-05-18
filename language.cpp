@@ -204,9 +204,10 @@ void Script::parse_statement(std::flat_map<std::size_t, DYNAMIC> &block_scope,
   RESERVED word{leading.visit(match_reserved)};
   STATEMENT statement;
   if (word == RESERVED::W_FUNCTION) {
-    FUNCTION_HANDLE handle{func_pool.size()};
-    func_pool.push_back(parse_function_decl());
-    block_body.push_back(handle);
+    FUNCTION_DECL declaration{parse_function_decl()};
+    if (block_scope.contains(declaration.function_name))
+      throw ScriptError{INVALID_DECLARATION{}};
+    block_scope[declaration.function_name] = declaration.function_handle;
   } else if (word == RESERVED::W_LET) {
     VARIABLE_DECL declaration{parse_variable_decl()};
     if (block_scope.contains(declaration.variable_name))
@@ -244,7 +245,10 @@ FUNCTION_DECL Script::parse_function_decl() {
       throw ScriptError{MISSING_PUNCT{'}'}};
     parse_statement(function_scope, function_body, token);
   }
-  return {function_name, std::move(function_scope), std::move(function_body)};
+  std::size_t function_handle{function_pool.size()};
+  function_pool.push_back(VanillaFunction{
+      function_name, std::move(function_scope), std::move(function_body)});
+  return FUNCTION_DECL{function_name, function_handle};
 }
 
 VARIABLE_DECL Script::parse_variable_decl() {
@@ -347,6 +351,64 @@ EXPRESSION Script::parse_call_expr(EXPRESSION callee_expr) {
   return EXPR_HANDLE{expr_pool.size() - 1};
 }
 
-void Script::execute() {}
+DYNAMIC VanillaFunction::operator()(std::vector<DYNAMIC> parameter_vec,
+                                    DYNAMIC context, const Script &script) {
+  return std::nullopt;
+}
+
+std::size_t Script::insert_atom(std::string atom) {
+  auto [iter_atlas, did_insert] = atom_atlas.insert({atom, atom_pool.size()});
+  if (did_insert)
+    atom_pool.push_back(std::move(atom));
+  return iter_atlas->second;
+}
+
+FUNCTION_HANDLE Script::insert_function(FUNCTION function) {
+  FUNCTION_HANDLE function_handle{function_pool.size()};
+  function_pool.push_back(std::move(function));
+  return function_handle;
+}
+
+OBJECT_HANDLE Script::insert_object(OBJECT object) {
+  OBJECT_HANDLE object_handle{object_pool.size()};
+  object_pool.push_back(std::move(object));
+  return object_handle;
+}
+
+void Script::pin_global(std::size_t atom_handle, DYNAMIC dynamic) {
+  script_scope[atom_handle] = dynamic;
+}
+
+DYNAMIC Script::execute(EXPR_HANDLE expr_handle) {
+  auto executor = [this](auto &node) -> DYNAMIC {
+    if constexpr (std::is_same_v<decltype(node), EXPR_CALL &>)
+      return std::nullopt;
+    assert(0);
+  };
+  return expr_pool[expr_handle.pool_idx].visit(executor);
+}
+
+DYNAMIC Script::execute(EXPRESSION expression) {
+  auto executor = [this](auto expr) -> DYNAMIC {
+    if constexpr (std::is_same_v<decltype(expr), EXPR_HANDLE>)
+      return execute(expr);
+    assert(0);
+  };
+  return expression.visit(executor);
+}
+
+void Script::execute(STATEMENT statement) {
+  auto executor = [this](auto stmt) -> void {
+    if constexpr (std::is_same_v<decltype(stmt), EXPRESSION>)
+      execute(stmt);
+    assert(0);
+  };
+  statement.visit(executor);
+}
+
+void Script::execute() {
+  for (STATEMENT statement : script_body)
+    execute(statement);
+}
 
 } // namespace Manadrain

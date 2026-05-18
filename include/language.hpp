@@ -58,6 +58,29 @@ enum class OPERATOR {
 };
 using TOKEN = std::variant<std::monostate, char32_t, OPERATOR, NUMERIC_LITERAL,
                            RESERVED, IDENTIFIER, STRING_HANDLE>;
+class TokenData {
+public:
+  void text_set(std::vector<std::uint8_t> text) {
+    text_source = std::move(text);
+  }
+
+  std::generator<std::optional<char32_t>> traverse_text();
+  std::optional<char32_t> forward();
+  void backward();
+  void backward(std::size_t N);
+
+  std::optional<TOKEN> revoked_pull();
+  void history_pull();
+  void history_push(TOKEN token);
+
+private:
+  std::vector<std::uint8_t> text_source;
+  std::size_t position;
+  std::vector<std::int32_t> backtrace;
+
+  std::list<TOKEN> token_history;
+  std::list<TOKEN> token_revoked;
+};
 
 struct INVALID_NUMERIC_LITERAL {};
 struct INVALID_PROPERTY_NAME {};
@@ -118,43 +141,34 @@ struct VARIABLE_DECL {
 struct STMT_RETURN {
   EXPRESSION return_expr;
 };
+using STATEMENT = std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN>;
+
 struct FUNCTION_HANDLE {
   std::size_t pool_idx;
 };
-using STATEMENT =
-    std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN, FUNCTION_HANDLE>;
+struct OBJECT_HANDLE {
+  std::optional<std::size_t> pool_idx;
+};
+using DYNAMIC = std::optional<std::variant<std::monostate, STRING_HANDLE,
+                                           FUNCTION_HANDLE, OBJECT_HANDLE>>;
 
-using DYNAMIC = std::optional<
-    std::variant<std::monostate, STRING_HANDLE, std::optional<std::size_t>>>;
+class Script;
+
+using FUNCTION = std::copyable_function<DYNAMIC(
+    std::vector<DYNAMIC> parameter_vec, DYNAMIC context, const Script &script)>;
+using OBJECT = std::flat_map<std::size_t, Manadrain::DYNAMIC>;
 
 struct FUNCTION_DECL {
   std::size_t function_name;
+  FUNCTION_HANDLE function_handle;
+};
+class VanillaFunction {
+public:
+  std::size_t function_name;
   std::flat_map<std::size_t, DYNAMIC> function_scope;
   std::vector<STATEMENT> function_body;
-};
-
-class TokenData {
-public:
-  void text_set(std::vector<std::uint8_t> text) {
-    text_source = std::move(text);
-  }
-
-  std::generator<std::optional<char32_t>> traverse_text();
-  std::optional<char32_t> forward();
-  void backward();
-  void backward(std::size_t N);
-
-  std::optional<TOKEN> revoked_pull();
-  void history_pull();
-  void history_push(TOKEN token);
-
-private:
-  std::vector<std::uint8_t> text_source;
-  std::size_t position;
-  std::vector<std::int32_t> backtrace;
-
-  std::list<TOKEN> token_history;
-  std::list<TOKEN> token_revoked;
+  DYNAMIC operator()(std::vector<DYNAMIC> parameter_vec, DYNAMIC context,
+                     const Script &script);
 };
 
 class Script {
@@ -162,12 +176,20 @@ public:
   void parse_text(std::vector<std::uint8_t> source);
   void execute();
 
+  std::size_t insert_atom(std::string atom);
+  FUNCTION_HANDLE insert_function(FUNCTION function);
+  OBJECT_HANDLE insert_object(OBJECT object);
+  void pin_global(std::size_t atom_handle, DYNAMIC dynamic);
+
 private:
   std::unordered_map<std::string, std::size_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
   std::vector<EXPR_NODE> expr_pool;
-  std::vector<FUNCTION_DECL> func_pool;
+
+  std::vector<FUNCTION> function_pool;
+  std::vector<OBJECT> object_pool;
+
   std::flat_map<std::size_t, DYNAMIC> script_scope;
   std::vector<STATEMENT> script_body;
 
@@ -191,5 +213,10 @@ private:
                        std::vector<STATEMENT> &body, TOKEN leading);
   FUNCTION_DECL parse_function_decl();
   VARIABLE_DECL parse_variable_decl();
+
+  DYNAMIC execute(EXPR_HANDLE expr_handle);
+  DYNAMIC execute(EXPRESSION expression);
+
+  void execute(STATEMENT statement);
 };
 } // namespace Manadrain

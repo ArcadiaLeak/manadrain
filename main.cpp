@@ -29,6 +29,21 @@ int main(int argc, char *argv[]) {
   std::vector<std::uint8_t> text_source{
       std::from_range, std::ranges::istream_view<std::uint8_t>{file}};
   script.parse_text(std::move(text_source));
+
+  auto console_log = [](std::vector<Manadrain::DYNAMIC> parameter_vec,
+                        Manadrain::DYNAMIC context,
+                        const Manadrain::Script &s) {
+    return Manadrain::DYNAMIC{};
+  };
+  Manadrain::FUNCTION_HANDLE hdl_console_log{
+      script.insert_function(console_log)};
+  std::size_t log_atom{script.insert_atom("log")};
+  Manadrain::OBJECT console_obj{
+      {log_atom, Manadrain::FUNCTION_HANDLE{hdl_console_log}}};
+  Manadrain::OBJECT_HANDLE hdl_console{
+      script.insert_object(std::move(console_obj))};
+  std::size_t console_atom{script.insert_atom("console")};
+  script.pin_global(console_atom, hdl_console);
   script.execute();
 
   return 0;
