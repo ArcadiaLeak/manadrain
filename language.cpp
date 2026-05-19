@@ -102,9 +102,9 @@ Token Parser::tokenize_word(char32_t leading) {
   if (iter_reserved != reserved_pool.end())
     return iter_reserved->second;
   auto [iter_atlas, did_insert] =
-      script.atom_atlas.insert({identifier_str, script.atom_pool.size()});
+      atom_atlas.insert({identifier_str, atom_pool.size()});
   if (did_insert)
-    script.atom_pool.push_back(std::move(identifier_str));
+    atom_pool.push_back(std::move(identifier_str));
   return Identifier{iter_atlas->second};
 }
 
@@ -123,9 +123,9 @@ Token Parser::tokenize_string_literal(char32_t separator) {
     literal_str.append_range(traverse_ucs4(*leading));
   }
   auto [iter_atlas, did_insert] =
-      script.atom_atlas.insert({literal_str, script.atom_pool.size()});
+      atom_atlas.insert({literal_str, atom_pool.size()});
   if (did_insert)
-    script.atom_pool.push_back(std::move(literal_str));
+    atom_pool.push_back(std::move(literal_str));
   return StringHandle{iter_atlas->second};
 }
 
@@ -191,17 +191,19 @@ void assert_punct(Token token, char32_t must_be) {
 }
 
 void Parser::parse_text() {
-  for (Token token : traverse_tokens()) {
-    if (std::holds_alternative<std::monostate>(token))
-      break;
-    parse_statement(script.main_function.function_scope,
-                    script.main_function.function_body, token);
-  }
+  FunctionBlueprint blueprint{};
+  auto match_script_end = [](Token token) {
+    return !std::holds_alternative<std::monostate>(token);
+  };
+  for (Token token :
+       traverse_tokens() | std::views::take_while(match_script_end))
+    parse_statement(blueprint, token);
+  std::size_t blueprint_handle{blueprint_pool.size()};
+  blueprint_pool.push_back(std::move(blueprint));
+  main_function = bootstrap(blueprint_handle);
 }
 
-void Parser::parse_statement(
-    std::flat_map<std::size_t, std::optional<Dynamic>> &block_scope,
-    std::vector<Statement> &block_body, Token leading) {
+void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
   auto match_reserved = [](auto t) {
     if constexpr (std::is_same_v<decltype(t), ReservedWord>)
       return t;
@@ -210,27 +212,29 @@ void Parser::parse_statement(
   ReservedWord word{leading.visit(match_reserved)};
   Statement statement;
   if (word == ReservedWord::W_FUNCTION) {
-    FunctionDeclaration declaration{parse_function_decl()};
-    if (block_scope.contains(declaration.function_name))
+    std::size_t blueprint_handle{parse_function_decl()};
+    std::size_t function_name{blueprint_pool[blueprint_handle].function_name};
+    if (blueprint.scope_init.contains(function_name))
       throw ScriptError{InvalidDeclaration{}};
-    block_scope[declaration.function_name] = declaration.function_handle;
+    blueprint.closure_init[function_name] = blueprint_handle;
+    blueprint.scope_init[function_name] = std::nullopt;
   } else if (word == ReservedWord::W_LET) {
     VariableDeclaration declaration{parse_variable_decl()};
-    if (block_scope.contains(declaration.variable_name))
+    if (blueprint.scope_init.contains(declaration.variable_name))
       throw ScriptError{InvalidDeclaration{}};
-    block_scope[declaration.variable_name] = std::nullopt;
-    block_body.push_back(declaration);
+    blueprint.scope_init[declaration.variable_name] = std::nullopt;
+    blueprint.body.push_back(declaration);
   } else if (word == ReservedWord::W_RETURN) {
-    block_body.push_back(parse_expression());
+    blueprint.body.push_back(parse_expression());
     assert_punct(tokenize(), ';');
   } else {
     history_pull();
-    block_body.push_back(parse_expression());
+    blueprint.body.push_back(parse_expression());
     assert_punct(tokenize(), ';');
   }
 }
 
-FunctionDeclaration Parser::parse_function_decl() {
+std::size_t Parser::parse_function_decl() {
   auto extract_name = [](auto token) -> std::size_t {
     if constexpr (std::is_same_v<decltype(token), Identifier>)
       return token.pool_idx;
@@ -243,18 +247,16 @@ FunctionDeclaration Parser::parse_function_decl() {
     char32_t *alter_ptr = std::get_if<char32_t>(&token);
     return !alter_ptr || *alter_ptr != '}';
   };
-  std::flat_map<std::size_t, std::optional<Dynamic>> function_scope{};
-  std::vector<Statement> function_body{};
+  FunctionBlueprint blueprint{function_name};
   for (Token token :
        traverse_tokens() | std::views::take_while(match_function_end)) {
     if (std::holds_alternative<std::monostate>(token))
       throw ScriptError{MissingPunctuation{'}'}};
-    parse_statement(function_scope, function_body, token);
+    parse_statement(blueprint, token);
   }
-  std::size_t function_handle{script.function_pool.size()};
-  script.function_pool.push_back(VanillaFunction{
-      function_name, std::move(function_scope), std::move(function_body)});
-  return FunctionDeclaration{function_name, function_handle};
+  std::size_t blueprint_handle{blueprint_pool.size()};
+  blueprint_pool.push_back(std::move(blueprint));
+  return blueprint_handle;
 }
 
 VariableDeclaration Parser::parse_variable_decl() {
@@ -317,9 +319,9 @@ Expression Parser::parse_additive_expr() {
     return std::nullopt;
   };
   for (char32_t binary_op : tokenize().visit(match_binary)) {
-    script.expr_pool.push_back(
+    expr_pool.push_back(
         BinaryExpression{expr_left, parse_postfix_expr(), binary_op});
-    return ExpressionHandle{script.expr_pool.size() - 1};
+    return ExpressionHandle{expr_pool.size() - 1};
   }
   history_pull();
   return expr_left;
@@ -331,8 +333,8 @@ Expression Parser::parse_member_expr(Expression obj_expr) {
       return t;
     throw ScriptError{MissingFieldName{}};
   });
-  script.expr_pool.push_back(MemberExpression{obj_expr, property.pool_idx});
-  return ExpressionHandle{script.expr_pool.size() - 1};
+  expr_pool.push_back(MemberExpression{obj_expr, property.pool_idx});
+  return ExpressionHandle{expr_pool.size() - 1};
 }
 
 Expression Parser::parse_call_expr(Expression callee_expr) {
@@ -353,9 +355,9 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
     history_pull();
     assert_punct(tokenize(), ',');
   }
-  ExpressionHandle expr_handle{script.expr_pool.size()};
+  ExpressionHandle expr_handle{expr_pool.size()};
   auto bail_function_call = [&]() {
-    script.expr_pool.push_back(
+    expr_pool.push_back(
         FunctionCallExpression{callee_expr, std::move(arguments)});
     return expr_handle;
   };
@@ -363,97 +365,44 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
   if (not callee_hdl)
     return bail_function_call();
   MemberExpression *expr_member{
-      std::get_if<MemberExpression>(&script.expr_pool[callee_hdl->pool_idx])};
+      std::get_if<MemberExpression>(&expr_pool[callee_hdl->pool_idx])};
   if (not expr_member)
     return bail_function_call();
-  script.expr_pool.push_back(MethodCallExpression{
+  expr_pool.push_back(MethodCallExpression{
       expr_member->object, expr_member->property, std::move(arguments)});
   return expr_handle;
 }
 
-Dynamic VanillaFunction::operator()(std::vector<Dynamic> arguments,
-                                    Dynamic context, const Script &script) {
+Dynamic Script::reduce(MethodCallExpression &expr_call) {
   return std::monostate{};
 }
 
-FunctionHandle Script::insert(AbstractFunction function) {
-  FunctionHandle function_handle{function_pool.size()};
-  function_pool.push_back(std::move(function));
-  return function_handle;
-}
-
-ObjectHandle Script::insert(PlainObject object) {
-  ObjectHandle object_handle{object_pool.size()};
-  object_pool.push_back(std::move(object));
-  return object_handle;
-}
-
-std::size_t Script::attach_atom(std::string atom_str) {
-  auto [iter_atlas, did_insert] =
-      atom_atlas.insert({atom_str, atom_pool.size()});
-  if (did_insert)
-    atom_pool.push_back(std::move(atom_str));
-  return iter_atlas->second;
-}
-
-Dynamic Script::reduce(MethodCallExpression &expr_call) {
-  auto reduce_parameter = [this](Expression parameter_expr) {
-    return reduce(parameter_expr);
-  };
-  std::vector<Dynamic> arguments{
-      std::from_range,
-      std::ranges::transform_view{expr_call.arguments, reduce_parameter}};
-  Dynamic context_call{reduce(expr_call.object)};
-  ObjectHandle obj_handle{std::get<ObjectHandle>(context_call)};
-  PlainObject &context_obj{object_pool[obj_handle.pool_idx.value()]};
-  Dynamic method_dynamic{context_obj.at(expr_call.property)};
-  FunctionHandle method_handle{std::get<FunctionHandle>(method_dynamic)};
-  AbstractFunction &function_ref{function_pool[method_handle.pool_idx]};
-  return function_ref(std::move(arguments), obj_handle, *this);
-}
-
 Dynamic Script::reduce(FunctionCallExpression &expr_call) {
-  auto reduce_parameter = [this](Expression parameter_expr) {
-    return reduce(parameter_expr);
-  };
-  std::vector<Dynamic> arguments{
-      std::from_range,
-      std::ranges::transform_view{expr_call.arguments, reduce_parameter}};
-  Dynamic func_dynamic{reduce(expr_call.callee)};
-  FunctionHandle func_handle{std::get<FunctionHandle>(func_dynamic)};
-  AbstractFunction &function_ref{function_pool[func_handle.pool_idx]};
-  return function_ref(std::move(arguments), std::monostate{}, *this);
+  return std::monostate{};
 }
 
-Dynamic Script::reduce(Expression expression) {
-  auto reduce_node = [&](auto &node) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(node), FunctionCallExpression &> ||
-                  std::is_same_v<decltype(node), MethodCallExpression &>)
-      return reduce(node);
-    return std::monostate{};
-  };
-  auto reduce_expr = [&](auto expr) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(expr), ExpressionHandle>)
-      return std::visit(reduce_node, expr_pool[expr.pool_idx]);
-    if constexpr (std::is_same_v<decltype(expr), Identifier>)
-      return script_scope.at(expr.pool_idx).value();
-    return std::monostate{};
-  };
-  return expression.visit(reduce_expr);
-}
+Dynamic Script::reduce(Expression expression) { return std::monostate{}; }
 
-void Script::execute(Statement statement) {
-  auto execute_stmt = [this](auto stmt) -> void {
-    if constexpr (std::is_same_v<decltype(stmt), Expression>)
-      reduce(stmt);
+void Script::execute_stmt(Statement statement) {
+  auto execute_alter = [this](auto alternative) -> void {
+    if constexpr (std::is_same_v<decltype(alternative), Expression>)
+      reduce(alternative);
     assert(0);
   };
-  statement.visit(execute_stmt);
+  statement.visit(execute_alter);
 }
 
-void Script::execute() {
-  for (Statement statement : main_function.function_body)
-    execute(statement);
+FunctionHandle Script::bootstrap(std::size_t blueprint_handle) {
+  FunctionBlueprint &blueprint{blueprint_pool[blueprint_handle]};
+  std::size_t function_handle{function_pool.size()};
+  function_pool.push_back(VanillaFunction{blueprint_handle});
+  return FunctionHandle{function_handle};
 }
 
+void Script::execute_main() {
+  VanillaFunction &function{function_pool[main_function.pool_idx]};
+  FunctionBlueprint &blueprint{blueprint_pool[function.blueprint_handle]};
+  for (Statement statement : blueprint.body)
+    execute_stmt(statement);
+}
 } // namespace Manadrain

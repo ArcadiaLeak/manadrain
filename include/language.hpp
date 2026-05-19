@@ -119,19 +119,6 @@ using ExpressionNode =
     std::variant<BinaryExpression, MemberExpression, FunctionCallExpression,
                  MethodCallExpression>;
 
-struct FunctionHandle {
-  std::size_t pool_idx;
-};
-struct ObjectHandle {
-  std::optional<std::size_t> pool_idx;
-};
-using Dynamic =
-    std::variant<std::monostate, StringHandle, FunctionHandle, ObjectHandle>;
-
-struct FunctionDeclaration {
-  std::size_t function_name;
-  FunctionHandle function_handle;
-};
 struct VariableDeclaration {
   std::size_t variable_name;
   Expression initializer;
@@ -142,48 +129,58 @@ struct ReturnStatement {
 using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-using PlainObject = std::flat_map<std::size_t, Manadrain::Dynamic>;
+enum class IntrinsicHandle { H_CONSOLE };
+struct ObjectHandle {
+  std::size_t pool_idx;
+  bool null_reference;
+};
+struct FunctionHandle {
+  std::size_t pool_idx;
+};
+using Dynamic = std::variant<std::monostate, StringHandle, IntrinsicHandle,
+                             ObjectHandle, FunctionHandle>;
+using PlainObject = std::flat_map<std::size_t, Dynamic>;
 
-class Script;
-using AbstractFunction = std::copyable_function<Dynamic(
-    std::vector<Dynamic> arguments, Dynamic context, const Script &script)>;
-
-using FunctionOwnScope = std::flat_map<std::size_t, std::optional<Dynamic>>;
-class VanillaFunction {
-public:
+struct FunctionBlueprint {
+  using Scope = std::flat_map<std::size_t, std::optional<Dynamic>>;
   std::size_t function_name;
-  const FunctionOwnScope scope_blueprint;
-  std::vector<Statement> function_body;
-  Dynamic operator()(std::vector<Dynamic> arguments, Dynamic context,
-                     const Script &script);
+  Scope scope_init;
+  std::flat_map<std::size_t, std::size_t> closure_init;
+  std::vector<Statement> body;
+};
+struct VanillaFunction {
+  std::size_t blueprint_handle;
+  std::optional<std::size_t> parent_scope;
+  std::size_t own_scope;
 };
 
 class Script {
 public:
+  void execute_main();
+
+protected:
   std::vector<ExpressionNode> expr_pool;
   std::unordered_map<std::string, std::size_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
-  VanillaFunction main_function;
-  std::vector<AbstractFunction> function_pool;
+  PlainObject global_object;
+  FunctionHandle main_function;
+
+  std::vector<VanillaFunction> function_pool;
   std::vector<PlainObject> object_pool;
+  std::vector<FunctionBlueprint::Scope> scope_pool;
+  std::vector<FunctionBlueprint> blueprint_pool;
 
-  ObjectHandle insert(PlainObject object);
-  FunctionHandle insert(AbstractFunction function);
-  std::size_t attach_atom(std::string atom_str);
-  void execute();
-
-private:
   Dynamic reduce(MethodCallExpression &expr_call);
   Dynamic reduce(FunctionCallExpression &expr_call);
   Dynamic reduce(Expression expression);
 
-  void execute(Statement statement);
+  FunctionHandle bootstrap(std::size_t blueprint_handle);
+  void execute_stmt(Statement statement);
 };
 
-class Parser {
+class Parser : public Script {
 public:
-  Script script;
   std::shared_ptr<const std::uint8_t[]> text_buffer;
   std::size_t text_size;
   void parse_text();
@@ -217,10 +214,8 @@ private:
   Expression parse_call_expr(Expression callee_expr);
   Expression parse_expression();
 
-  void parse_statement(
-      std::flat_map<std::size_t, std::optional<Dynamic>> &block_scope,
-      std::vector<Statement> &body, Token leading);
-  FunctionDeclaration parse_function_decl();
+  void parse_statement(FunctionBlueprint &blueprint, Token leading);
+  std::size_t parse_function_decl();
   VariableDeclaration parse_variable_decl();
 };
 } // namespace Manadrain

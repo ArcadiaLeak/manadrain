@@ -35,18 +35,8 @@ int main(int argc, char *argv[]) {
   parser.text_size = text_vec.size();
   parser.parse_text();
 
-  Manadrain::Script script{std::move(parser.script)};
-  auto console_log =
-      [](std::vector<Manadrain::Dynamic> arguments, Manadrain::Dynamic context,
-         const Manadrain::Script &s) { return Manadrain::Dynamic{}; };
-  std::size_t log_atom{script.attach_atom("log")};
-  Manadrain::FunctionHandle hdl_console_log{script.insert(console_log)};
-  Manadrain::PlainObject console_obj{
-      {log_atom, Manadrain::FunctionHandle{hdl_console_log}}};
-  std::size_t console_atom{script.attach_atom("console")};
-  Manadrain::ObjectHandle hdl_console{script.insert(std::move(console_obj))};
-  script.main_function.function_scope[console_atom] = hdl_console;
-  script.execute();
+  Manadrain::Script script{std::move(parser)};
+  script.execute_main();
 
   return 0;
 }
