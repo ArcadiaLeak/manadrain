@@ -185,7 +185,8 @@ void Parser::parse_text() {
   for (TOKEN token : traverse_tokens()) {
     if (std::holds_alternative<std::monostate>(token))
       break;
-    parse_statement(script.script_scope, script.script_body, token);
+    parse_statement(script.main_function.function_scope,
+                    script.main_function.function_body, token);
   }
 }
 
@@ -332,27 +333,41 @@ EXPRESSION Parser::parse_call_expr(EXPRESSION callee_expr) {
         return 1;
     return 0;
   };
-  EXPR_CALL expr_call{callee_expr};
+  std::vector<EXPRESSION> arguments{};
   while (1) {
     if (tokenize().visit(match_rparen))
       break;
     history_pull();
-    expr_call.param_vec.push_back(parse_expression());
+    arguments.push_back(parse_expression());
     if (tokenize().visit(match_rparen))
       break;
     history_pull();
     assert_punct(tokenize(), ',');
   }
-  script.expr_pool.push_back(std::move(expr_call));
-  return EXPR_HANDLE{script.expr_pool.size() - 1};
+  EXPR_HANDLE expr_handle{script.expr_pool.size()};
+  auto bail_function_call = [&]() {
+    script.expr_pool.push_back(
+        EXPR_FUNCTION_CALL{callee_expr, std::move(arguments)});
+    return expr_handle;
+  };
+  EXPR_HANDLE *callee_hdl{std::get_if<EXPR_HANDLE>(&callee_expr)};
+  if (not callee_hdl)
+    return bail_function_call();
+  EXPR_MEMBER *expr_member{
+      std::get_if<EXPR_MEMBER>(&script.expr_pool[callee_hdl->pool_idx])};
+  if (not expr_member)
+    return bail_function_call();
+  script.expr_pool.push_back(EXPR_METHOD_CALL{
+      expr_member->object, expr_member->property, std::move(arguments)});
+  return expr_handle;
 }
 
-DYNAMIC VanillaFunction::operator()(std::vector<DYNAMIC> parameter_vec,
+DYNAMIC VanillaFunction::operator()(std::vector<DYNAMIC> arguments,
                                     DYNAMIC context, const Script &script) {
   return std::monostate{};
 }
 
-FUNCTION_HANDLE Script::insert(FUNCTION function) {
+FUNCTION_HANDLE Script::insert(AbstractFunction function) {
   FUNCTION_HANDLE function_handle{function_pool.size()};
   function_pool.push_back(std::move(function));
   return function_handle;
@@ -364,46 +379,55 @@ OBJECT_HANDLE Script::insert(OBJECT object) {
   return object_handle;
 }
 
-void Script::attach_atom(std::size_t &atom_hdl, std::string atom_str) {
+std::size_t Script::attach_atom(std::string atom_str) {
   auto [iter_atlas, did_insert] =
       atom_atlas.insert({atom_str, atom_pool.size()});
   if (did_insert)
     atom_pool.push_back(std::move(atom_str));
-  atom_hdl = iter_atlas->second;
+  return iter_atlas->second;
 }
 
-void Script::attach_global(std::size_t atom_handle, DYNAMIC dynamic) {
-  script_scope[atom_handle] = dynamic;
-}
-
-DYNAMIC Script::reduce(EXPR_CALL &expr_call) {
-  EXPR_HANDLE expr_handle{std::get<EXPR_HANDLE>(expr_call.callee)};
-  EXPR_MEMBER &expr_member{
-      std::get<EXPR_MEMBER>(expr_pool[expr_handle.pool_idx])};
-  DYNAMIC context_call{reduce(expr_member.object)};
+DYNAMIC Script::reduce(EXPR_METHOD_CALL &expr_call) {
+  auto reduce_parameter = [this](EXPRESSION parameter_expr) {
+    return reduce(parameter_expr);
+  };
+  std::vector<DYNAMIC> arguments{
+      std::from_range,
+      std::ranges::transform_view{expr_call.arguments, reduce_parameter}};
+  DYNAMIC context_call{reduce(expr_call.object)};
   OBJECT_HANDLE obj_handle{std::get<OBJECT_HANDLE>(context_call)};
   OBJECT &context_obj{object_pool[obj_handle.pool_idx.value()]};
-  DYNAMIC dyn_method{context_obj.at(expr_member.property)};
-  FUNCTION_HANDLE method_handle{std::get<FUNCTION_HANDLE>(dyn_method)};
-  FUNCTION &method_function{function_pool[method_handle.pool_idx]};
-  method_function({}, obj_handle, *this);
-  return std::monostate{};
+  DYNAMIC method_dynamic{context_obj.at(expr_call.property)};
+  FUNCTION_HANDLE method_handle{std::get<FUNCTION_HANDLE>(method_dynamic)};
+  AbstractFunction &function_ref{function_pool[method_handle.pool_idx]};
+  return function_ref(std::move(arguments), obj_handle, *this);
+}
+
+DYNAMIC Script::reduce(EXPR_FUNCTION_CALL &expr_call) {
+  auto reduce_parameter = [this](EXPRESSION parameter_expr) {
+    return reduce(parameter_expr);
+  };
+  std::vector<DYNAMIC> arguments{
+      std::from_range,
+      std::ranges::transform_view{expr_call.arguments, reduce_parameter}};
+  DYNAMIC func_dynamic{reduce(expr_call.callee)};
+  FUNCTION_HANDLE func_handle{std::get<FUNCTION_HANDLE>(func_dynamic)};
+  AbstractFunction &function_ref{function_pool[func_handle.pool_idx]};
+  return function_ref(std::move(arguments), std::monostate{}, *this);
 }
 
 DYNAMIC Script::reduce(EXPRESSION expression) {
   auto reduce_node = [&](auto &node) -> DYNAMIC {
-    if constexpr (std::is_same_v<decltype(node), EXPR_CALL &>)
+    if constexpr (std::is_same_v<decltype(node), EXPR_FUNCTION_CALL &> ||
+                  std::is_same_v<decltype(node), EXPR_METHOD_CALL &>)
       return reduce(node);
     return std::monostate{};
   };
   auto reduce_expr = [&](auto expr) -> DYNAMIC {
     if constexpr (std::is_same_v<decltype(expr), EXPR_HANDLE>)
       return std::visit(reduce_node, expr_pool[expr.pool_idx]);
-    if constexpr (std::is_same_v<decltype(expr), IDENTIFIER>) {
-      std::string &atom_view{atom_pool[expr.pool_idx]};
-      std::size_t scope_handle{atom_atlas.at(atom_view)};
-      return script_scope.at(scope_handle).value();
-    }
+    if constexpr (std::is_same_v<decltype(expr), IDENTIFIER>)
+      return script_scope.at(expr.pool_idx).value();
     return std::monostate{};
   };
   return expression.visit(reduce_expr);
@@ -419,7 +443,7 @@ void Script::execute(STATEMENT statement) {
 }
 
 void Script::execute() {
-  for (STATEMENT statement : script_body)
+  for (STATEMENT statement : main_function.function_body)
     execute(statement);
 }
 

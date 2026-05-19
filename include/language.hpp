@@ -105,20 +105,17 @@ struct EXPR_MEMBER {
   EXPRESSION object;
   std::size_t property;
 };
-struct EXPR_CALL {
+struct EXPR_FUNCTION_CALL {
   EXPRESSION callee;
-  std::vector<EXPRESSION> param_vec;
+  std::vector<EXPRESSION> arguments;
 };
-using EXPR_NODE = std::variant<EXPR_BINARY, EXPR_MEMBER, EXPR_CALL>;
-
-struct VARIABLE_DECL {
-  std::size_t variable_name;
-  EXPRESSION initializer;
+struct EXPR_METHOD_CALL {
+  EXPRESSION object;
+  std::size_t property;
+  std::vector<EXPRESSION> arguments;
 };
-struct STMT_RETURN {
-  EXPRESSION return_expr;
-};
-using STATEMENT = std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN>;
+using EXPR_NODE = std::variant<EXPR_BINARY, EXPR_MEMBER, EXPR_FUNCTION_CALL,
+                               EXPR_METHOD_CALL>;
 
 struct FUNCTION_HANDLE {
   std::size_t pool_idx;
@@ -129,52 +126,53 @@ struct OBJECT_HANDLE {
 using DYNAMIC =
     std::variant<std::monostate, STRING_HANDLE, FUNCTION_HANDLE, OBJECT_HANDLE>;
 
-class Script;
-
-using FUNCTION = std::copyable_function<DYNAMIC(
-    std::vector<DYNAMIC> parameter_vec, DYNAMIC context, const Script &script)>;
-using OBJECT = std::flat_map<std::size_t, Manadrain::DYNAMIC>;
-
 struct FUNCTION_DECL {
   std::size_t function_name;
   FUNCTION_HANDLE function_handle;
 };
+struct VARIABLE_DECL {
+  std::size_t variable_name;
+  EXPRESSION initializer;
+};
+struct STMT_RETURN {
+  EXPRESSION return_expr;
+};
+using STATEMENT = std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN>;
+
+using OBJECT = std::flat_map<std::size_t, Manadrain::DYNAMIC>;
+
+class Script;
+using AbstractFunction = std::copyable_function<DYNAMIC(
+    std::vector<DYNAMIC> arguments, DYNAMIC context, const Script &script)>;
+
+using FunctionOwnScope = std::flat_map<std::size_t, std::optional<DYNAMIC>>;
 class VanillaFunction {
 public:
   std::size_t function_name;
-  std::flat_map<std::size_t, std::optional<DYNAMIC>> function_scope;
+  const FunctionOwnScope scope_blueprint;
   std::vector<STATEMENT> function_body;
-  DYNAMIC operator()(std::vector<DYNAMIC> parameter_vec, DYNAMIC context,
+  DYNAMIC operator()(std::vector<DYNAMIC> arguments, DYNAMIC context,
                      const Script &script);
 };
 
-class Parser;
-
 class Script {
 public:
-  void execute();
-
-  OBJECT_HANDLE insert(OBJECT object);
-  FUNCTION_HANDLE insert(FUNCTION function);
-
-  void attach_atom(std::size_t &atom_hdl, std::string atom_str);
-  void attach_global(std::size_t atom_hdl, DYNAMIC dynamic);
-
-private:
-  friend class Parser;
-
+  std::vector<EXPR_NODE> expr_pool;
   std::unordered_map<std::string, std::size_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
-  std::vector<EXPR_NODE> expr_pool;
-
-  std::vector<FUNCTION> function_pool;
+  VanillaFunction main_function;
+  std::vector<AbstractFunction> function_pool;
   std::vector<OBJECT> object_pool;
 
-  std::flat_map<std::size_t, std::optional<DYNAMIC>> script_scope;
-  std::vector<STATEMENT> script_body;
+  OBJECT_HANDLE insert(OBJECT object);
+  FUNCTION_HANDLE insert(AbstractFunction function);
+  std::size_t attach_atom(std::string atom_str);
+  void execute();
 
-  DYNAMIC reduce(EXPR_CALL &expr_call);
+private:
+  DYNAMIC reduce(EXPR_METHOD_CALL &expr_call);
+  DYNAMIC reduce(EXPR_FUNCTION_CALL &expr_call);
   DYNAMIC reduce(EXPRESSION expression);
 
   void execute(STATEMENT statement);
