@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace Manadrain {
-enum class RESERVED {
+enum class ReservedWord {
   MONOSTATE,
   W_CONST,
   W_LET,
@@ -36,14 +36,14 @@ enum class RESERVED {
   W_CONTINUE,
   W_SWITCH
 };
-struct IDENTIFIER {
+struct Identifier {
   std::size_t pool_idx;
 };
-struct STRING_HANDLE {
+struct StringHandle {
   std::size_t pool_idx;
 };
-using NUMERIC_LITERAL = std::variant<std::int64_t, double>;
-enum class OPERATOR {
+using NumericLiteral = std::variant<std::int64_t, double>;
+enum class Operator {
   DOUBLE_EQUALS,
   TRIPLE_EQUALS,
   BANG_EQUALS,
@@ -56,126 +56,129 @@ enum class OPERATOR {
   LOGICAL_DISJUNCT_ASSIGN,
   LOGICAL_DISJUNCT
 };
-using TOKEN = std::variant<std::monostate, char32_t, OPERATOR, NUMERIC_LITERAL,
-                           RESERVED, IDENTIFIER, STRING_HANDLE>;
+using Token = std::variant<std::monostate, char32_t, Operator, NumericLiteral,
+                           ReservedWord, Identifier, StringHandle>;
 
-struct INVALID_NUMERIC_LITERAL {};
-struct INVALID_PROPERTY_NAME {};
-struct INVALID_BACKSLASH_ESCAPE {};
-struct INVALID_DECLARATION {};
-struct MISSING_FIELD_NAME {};
-struct MISSING_VARIABLE_NAME {};
-struct MISSING_FUNCTION_NAME {};
-struct MISSING_IDENTIFIER {};
-struct MISSING_STRING_LITERAL {};
-struct MISSING_FORMAL_PARAMETER {};
-struct MISSING_PUNCT {
+struct InvalidNumericLiteral {};
+struct InvalidPropertyName {};
+struct InvalidBackslashEscape {};
+struct InvalidDeclaration {};
+struct MissingFieldName {};
+struct MissingVariableName {};
+struct MissingFunctionName {};
+struct MissingIdentifier {};
+struct MissingStringLiteral {};
+struct MissingFormalParameter {};
+struct MissingPunctuation {
   char32_t must_be;
 };
-struct UNEXPECTED_RESERVED_WORD {};
-struct UNEXPECTED_STRING_END {};
-struct UNEXPECTED_COMMENT_END {};
-struct UNEXPECTED_TOKEN {};
+struct UnexpectedReservedWord {};
+struct UnexpectedStringEnd {};
+struct UnexpectedCommentEnd {};
+struct UnexpectedToken {};
 class ScriptError : public std::exception {
 public:
-  using MESSAGE = std::variant<
-      INVALID_NUMERIC_LITERAL, INVALID_PROPERTY_NAME, INVALID_BACKSLASH_ESCAPE,
-      INVALID_DECLARATION, MISSING_FIELD_NAME, MISSING_VARIABLE_NAME,
-      MISSING_FUNCTION_NAME, MISSING_IDENTIFIER, MISSING_STRING_LITERAL,
-      MISSING_FORMAL_PARAMETER, MISSING_PUNCT, UNEXPECTED_RESERVED_WORD,
-      UNEXPECTED_STRING_END, UNEXPECTED_COMMENT_END, UNEXPECTED_TOKEN>;
-  MESSAGE message;
+  using Message =
+      std::variant<InvalidNumericLiteral, InvalidPropertyName,
+                   InvalidBackslashEscape, InvalidDeclaration, MissingFieldName,
+                   MissingVariableName, MissingFunctionName, MissingIdentifier,
+                   MissingStringLiteral, MissingFormalParameter,
+                   MissingPunctuation, UnexpectedReservedWord,
+                   UnexpectedStringEnd, UnexpectedCommentEnd, UnexpectedToken>;
+  Message message;
 
-  explicit ScriptError(MESSAGE msg) : message{msg} {}
+  explicit ScriptError(Message msg) : message{msg} {}
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct EXPR_HANDLE {
+struct ExpressionHandle {
   std::size_t pool_idx;
 };
-using EXPRESSION = std::variant<std::monostate, STRING_HANDLE, NUMERIC_LITERAL,
-                                IDENTIFIER, EXPR_HANDLE>;
+using Expression = std::variant<std::monostate, StringHandle, NumericLiteral,
+                                Identifier, ExpressionHandle>;
 
-struct EXPR_BINARY {
-  EXPRESSION left;
-  EXPRESSION right;
+struct BinaryExpression {
+  Expression left;
+  Expression right;
   char32_t op;
 };
-struct EXPR_MEMBER {
-  EXPRESSION object;
+struct MemberExpression {
+  Expression object;
   std::size_t property;
 };
-struct EXPR_FUNCTION_CALL {
-  EXPRESSION callee;
-  std::vector<EXPRESSION> arguments;
+struct FunctionCallExpression {
+  Expression callee;
+  std::vector<Expression> arguments;
 };
-struct EXPR_METHOD_CALL {
-  EXPRESSION object;
+struct MethodCallExpression {
+  Expression object;
   std::size_t property;
-  std::vector<EXPRESSION> arguments;
+  std::vector<Expression> arguments;
 };
-using EXPR_NODE = std::variant<EXPR_BINARY, EXPR_MEMBER, EXPR_FUNCTION_CALL,
-                               EXPR_METHOD_CALL>;
+using ExpressionNode =
+    std::variant<BinaryExpression, MemberExpression, FunctionCallExpression,
+                 MethodCallExpression>;
 
-struct FUNCTION_HANDLE {
+struct FunctionHandle {
   std::size_t pool_idx;
 };
-struct OBJECT_HANDLE {
+struct ObjectHandle {
   std::optional<std::size_t> pool_idx;
 };
-using DYNAMIC =
-    std::variant<std::monostate, STRING_HANDLE, FUNCTION_HANDLE, OBJECT_HANDLE>;
+using Dynamic =
+    std::variant<std::monostate, StringHandle, FunctionHandle, ObjectHandle>;
 
-struct FUNCTION_DECL {
+struct FunctionDeclaration {
   std::size_t function_name;
-  FUNCTION_HANDLE function_handle;
+  FunctionHandle function_handle;
 };
-struct VARIABLE_DECL {
+struct VariableDeclaration {
   std::size_t variable_name;
-  EXPRESSION initializer;
+  Expression initializer;
 };
-struct STMT_RETURN {
-  EXPRESSION return_expr;
+struct ReturnStatement {
+  Expression return_expr;
 };
-using STATEMENT = std::variant<EXPRESSION, VARIABLE_DECL, STMT_RETURN>;
+using Statement =
+    std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-using OBJECT = std::flat_map<std::size_t, Manadrain::DYNAMIC>;
+using PlainObject = std::flat_map<std::size_t, Manadrain::Dynamic>;
 
 class Script;
-using AbstractFunction = std::copyable_function<DYNAMIC(
-    std::vector<DYNAMIC> arguments, DYNAMIC context, const Script &script)>;
+using AbstractFunction = std::copyable_function<Dynamic(
+    std::vector<Dynamic> arguments, Dynamic context, const Script &script)>;
 
-using FunctionOwnScope = std::flat_map<std::size_t, std::optional<DYNAMIC>>;
+using FunctionOwnScope = std::flat_map<std::size_t, std::optional<Dynamic>>;
 class VanillaFunction {
 public:
   std::size_t function_name;
   const FunctionOwnScope scope_blueprint;
-  std::vector<STATEMENT> function_body;
-  DYNAMIC operator()(std::vector<DYNAMIC> arguments, DYNAMIC context,
+  std::vector<Statement> function_body;
+  Dynamic operator()(std::vector<Dynamic> arguments, Dynamic context,
                      const Script &script);
 };
 
 class Script {
 public:
-  std::vector<EXPR_NODE> expr_pool;
+  std::vector<ExpressionNode> expr_pool;
   std::unordered_map<std::string, std::size_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
   VanillaFunction main_function;
   std::vector<AbstractFunction> function_pool;
-  std::vector<OBJECT> object_pool;
+  std::vector<PlainObject> object_pool;
 
-  OBJECT_HANDLE insert(OBJECT object);
-  FUNCTION_HANDLE insert(AbstractFunction function);
+  ObjectHandle insert(PlainObject object);
+  FunctionHandle insert(AbstractFunction function);
   std::size_t attach_atom(std::string atom_str);
   void execute();
 
 private:
-  DYNAMIC reduce(EXPR_METHOD_CALL &expr_call);
-  DYNAMIC reduce(EXPR_FUNCTION_CALL &expr_call);
-  DYNAMIC reduce(EXPRESSION expression);
+  Dynamic reduce(MethodCallExpression &expr_call);
+  Dynamic reduce(FunctionCallExpression &expr_call);
+  Dynamic reduce(Expression expression);
 
-  void execute(STATEMENT statement);
+  void execute(Statement statement);
 };
 
 class Parser {
@@ -189,35 +192,35 @@ private:
   std::size_t position;
   std::vector<std::int32_t> backtrace;
 
-  std::list<TOKEN> token_history;
-  std::list<TOKEN> token_revoked;
+  std::list<Token> token_history;
+  std::list<Token> token_revoked;
 
   std::generator<std::optional<char32_t>> traverse_text();
   std::optional<char32_t> forward();
   void backward();
   void backward(std::size_t N);
 
-  std::optional<TOKEN> revoked_pull();
+  std::optional<Token> revoked_pull();
   void history_pull();
-  void history_push(TOKEN token);
+  void history_push(Token token);
 
-  TOKEN tokenize_word(char32_t leading);
-  TOKEN tokenize_string_literal(char32_t separator);
-  TOKEN tokenize_numeric_literal(char32_t leading);
-  std::generator<TOKEN> traverse_tokens();
-  TOKEN tokenize();
+  Token tokenize_word(char32_t leading);
+  Token tokenize_string_literal(char32_t separator);
+  Token tokenize_numeric_literal(char32_t leading);
+  std::generator<Token> traverse_tokens();
+  Token tokenize();
 
-  EXPRESSION parse_primary_expr();
-  EXPRESSION parse_postfix_expr();
-  EXPRESSION parse_additive_expr();
-  EXPRESSION parse_member_expr(EXPRESSION obj_expr);
-  EXPRESSION parse_call_expr(EXPRESSION callee_expr);
-  EXPRESSION parse_expression();
+  Expression parse_primary_expr();
+  Expression parse_postfix_expr();
+  Expression parse_additive_expr();
+  Expression parse_member_expr(Expression obj_expr);
+  Expression parse_call_expr(Expression callee_expr);
+  Expression parse_expression();
 
   void parse_statement(
-      std::flat_map<std::size_t, std::optional<DYNAMIC>> &block_scope,
-      std::vector<STATEMENT> &body, TOKEN leading);
-  FUNCTION_DECL parse_function_decl();
-  VARIABLE_DECL parse_variable_decl();
+      std::flat_map<std::size_t, std::optional<Dynamic>> &block_scope,
+      std::vector<Statement> &body, Token leading);
+  FunctionDeclaration parse_function_decl();
+  VariableDeclaration parse_variable_decl();
 };
 } // namespace Manadrain

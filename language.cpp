@@ -8,19 +8,30 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_map<std::string_view, RESERVED> reserved_pool{
-    {"const", RESERVED::W_CONST},       {"let", RESERVED::W_LET},
-    {"var", RESERVED::W_VAR},           {"class", RESERVED::W_CLASS},
-    {"function", RESERVED::W_FUNCTION}, {"return", RESERVED::W_RETURN},
-    {"import", RESERVED::W_IMPORT},     {"export", RESERVED::W_EXPORT},
-    {"from", RESERVED::W_FROM},         {"as", RESERVED::W_AS},
-    {"default", RESERVED::W_DEFAULT},   {"undefined", RESERVED::W_UNDEFINED},
-    {"null", RESERVED::W_NULL},         {"true", RESERVED::W_TRUE},
-    {"false", RESERVED::W_FALSE},       {"if", RESERVED::W_IF},
-    {"else", RESERVED::W_ELSE},         {"while", RESERVED::W_WHILE},
-    {"for", RESERVED::W_FOR},           {"do", RESERVED::W_DO},
-    {"break", RESERVED::W_BREAK},       {"continue", RESERVED::W_CONTINUE},
-    {"switch", RESERVED::W_SWITCH}};
+static const std::unordered_map<std::string_view, ReservedWord> reserved_pool{
+    {"const", ReservedWord::W_CONST},
+    {"let", ReservedWord::W_LET},
+    {"var", ReservedWord::W_VAR},
+    {"class", ReservedWord::W_CLASS},
+    {"function", ReservedWord::W_FUNCTION},
+    {"return", ReservedWord::W_RETURN},
+    {"import", ReservedWord::W_IMPORT},
+    {"export", ReservedWord::W_EXPORT},
+    {"from", ReservedWord::W_FROM},
+    {"as", ReservedWord::W_AS},
+    {"default", ReservedWord::W_DEFAULT},
+    {"undefined", ReservedWord::W_UNDEFINED},
+    {"null", ReservedWord::W_NULL},
+    {"true", ReservedWord::W_TRUE},
+    {"false", ReservedWord::W_FALSE},
+    {"if", ReservedWord::W_IF},
+    {"else", ReservedWord::W_ELSE},
+    {"while", ReservedWord::W_WHILE},
+    {"for", ReservedWord::W_FOR},
+    {"do", ReservedWord::W_DO},
+    {"break", ReservedWord::W_BREAK},
+    {"continue", ReservedWord::W_CONTINUE},
+    {"switch", ReservedWord::W_SWITCH}};
 
 std::optional<char32_t> Parser::forward() {
   if (position >= text_size) {
@@ -64,7 +75,7 @@ void Parser::backward(std::size_t N) {
     backward();
 }
 
-std::optional<TOKEN> Parser::revoked_pull() {
+std::optional<Token> Parser::revoked_pull() {
   if (token_revoked.empty())
     return std::nullopt;
   token_history.splice(token_history.begin(), token_revoked,
@@ -72,13 +83,13 @@ std::optional<TOKEN> Parser::revoked_pull() {
   return token_history.front();
 }
 
-void Parser::history_push(TOKEN token) { token_history.push_front(token); }
+void Parser::history_push(Token token) { token_history.push_front(token); }
 void Parser::history_pull() {
   token_revoked.splice(token_revoked.begin(), token_history,
                        token_history.begin());
 }
 
-TOKEN Parser::tokenize_word(char32_t leading) {
+Token Parser::tokenize_word(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_ucs4(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -94,33 +105,31 @@ TOKEN Parser::tokenize_word(char32_t leading) {
       script.atom_atlas.insert({identifier_str, script.atom_pool.size()});
   if (did_insert)
     script.atom_pool.push_back(std::move(identifier_str));
-  return IDENTIFIER{iter_atlas->second};
+  return Identifier{iter_atlas->second};
 }
 
-TOKEN Parser::tokenize_string_literal(char32_t separator) {
+Token Parser::tokenize_string_literal(char32_t separator) {
   std::string literal_str{};
-  auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
   };
-  auto literal_view = traverse_text() | std::views::take_while(match_nullopt) |
-                      std::views::join |
-                      std::views::take_while(match_literal_end);
-  for (char32_t leading : literal_view) {
+  auto literal_view =
+      traverse_text() | std::views::take_while(match_literal_end);
+  for (std::optional<char32_t> leading : literal_view) {
     if (leading == '\r' && forward() != '\n')
       backward();
-    if (leading == '\r')
-      leading = '\n';
-    literal_str.append_range(traverse_ucs4(leading));
+    if (not leading || leading == '\r' || leading == '\n')
+      throw ScriptError{UnexpectedStringEnd{}};
+    literal_str.append_range(traverse_ucs4(*leading));
   }
   auto [iter_atlas, did_insert] =
       script.atom_atlas.insert({literal_str, script.atom_pool.size()});
   if (did_insert)
     script.atom_pool.push_back(std::move(literal_str));
-  return STRING_HANDLE{iter_atlas->second};
+  return StringHandle{iter_atlas->second};
 }
 
-TOKEN Parser::tokenize_numeric_literal(char32_t leading) {
+Token Parser::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_ucs4(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -134,20 +143,20 @@ TOKEN Parser::tokenize_numeric_literal(char32_t leading) {
   std::int64_t num_literal{};
   std::from_chars(numeric_str.data(), numeric_str.data() + numeric_str.size(),
                   num_literal);
-  return NUMERIC_LITERAL{num_literal};
+  return NumericLiteral{num_literal};
 }
 
 static const std::array legal_punct = std::to_array<char32_t>(
     {'(', ')', '*', '+', '-', '.', '/', ':', ';', '=', '{', '}'});
 
-TOKEN Parser::tokenize() {
+Token Parser::tokenize() {
   std::optional revoked_opt{revoked_pull()};
-  for (TOKEN revoked_token : revoked_opt)
+  for (Token revoked_token : revoked_opt)
     return revoked_token;
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   for (char32_t leading : traverse_text() | std::views::take_while(does_exist) |
                               std::views::join) {
-    TOKEN token_ret{};
+    Token token_ret{};
     if (uc_is_property_white_space(leading))
       continue;
     else if (std::ranges::any_of(
@@ -161,7 +170,7 @@ TOKEN Parser::tokenize() {
     else if (std::isdigit(leading))
       token_ret = tokenize_numeric_literal(leading);
     else
-      throw ScriptError{UNEXPECTED_TOKEN{}};
+      throw ScriptError{UnexpectedToken{}};
     history_push(token_ret);
     return token_ret;
   }
@@ -169,20 +178,20 @@ TOKEN Parser::tokenize() {
   return std::monostate{};
 }
 
-std::generator<TOKEN> Parser::traverse_tokens() {
+std::generator<Token> Parser::traverse_tokens() {
   while (1)
     co_yield tokenize();
 }
 
-void assert_punct(TOKEN token, char32_t must_be) {
+void assert_punct(Token token, char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
-  throw ScriptError{MISSING_PUNCT{must_be}};
+  throw ScriptError{MissingPunctuation{must_be}};
 }
 
 void Parser::parse_text() {
-  for (TOKEN token : traverse_tokens()) {
+  for (Token token : traverse_tokens()) {
     if (std::holds_alternative<std::monostate>(token))
       break;
     parse_statement(script.main_function.function_scope,
@@ -191,27 +200,27 @@ void Parser::parse_text() {
 }
 
 void Parser::parse_statement(
-    std::flat_map<std::size_t, std::optional<DYNAMIC>> &block_scope,
-    std::vector<STATEMENT> &block_body, TOKEN leading) {
+    std::flat_map<std::size_t, std::optional<Dynamic>> &block_scope,
+    std::vector<Statement> &block_body, Token leading) {
   auto match_reserved = [](auto t) {
-    if constexpr (std::is_same_v<decltype(t), RESERVED>)
+    if constexpr (std::is_same_v<decltype(t), ReservedWord>)
       return t;
-    return RESERVED::MONOSTATE;
+    return ReservedWord::MONOSTATE;
   };
-  RESERVED word{leading.visit(match_reserved)};
-  STATEMENT statement;
-  if (word == RESERVED::W_FUNCTION) {
-    FUNCTION_DECL declaration{parse_function_decl()};
+  ReservedWord word{leading.visit(match_reserved)};
+  Statement statement;
+  if (word == ReservedWord::W_FUNCTION) {
+    FunctionDeclaration declaration{parse_function_decl()};
     if (block_scope.contains(declaration.function_name))
-      throw ScriptError{INVALID_DECLARATION{}};
+      throw ScriptError{InvalidDeclaration{}};
     block_scope[declaration.function_name] = declaration.function_handle;
-  } else if (word == RESERVED::W_LET) {
-    VARIABLE_DECL declaration{parse_variable_decl()};
+  } else if (word == ReservedWord::W_LET) {
+    VariableDeclaration declaration{parse_variable_decl()};
     if (block_scope.contains(declaration.variable_name))
-      throw ScriptError{INVALID_DECLARATION{}};
+      throw ScriptError{InvalidDeclaration{}};
     block_scope[declaration.variable_name] = std::nullopt;
     block_body.push_back(declaration);
-  } else if (word == RESERVED::W_RETURN) {
+  } else if (word == ReservedWord::W_RETURN) {
     block_body.push_back(parse_expression());
     assert_punct(tokenize(), ';');
   } else {
@@ -221,86 +230,86 @@ void Parser::parse_statement(
   }
 }
 
-FUNCTION_DECL Parser::parse_function_decl() {
+FunctionDeclaration Parser::parse_function_decl() {
   auto extract_name = [](auto token) -> std::size_t {
-    if constexpr (std::is_same_v<decltype(token), IDENTIFIER>)
+    if constexpr (std::is_same_v<decltype(token), Identifier>)
       return token.pool_idx;
-    throw ScriptError{MISSING_FUNCTION_NAME{}};
+    throw ScriptError{MissingFunctionName{}};
   };
   std::size_t function_name{std::visit(extract_name, tokenize())};
   for (char function_punct : std::to_array({'(', ')', '{'}))
     assert_punct(tokenize(), function_punct);
-  auto match_function_end = [&](TOKEN token) {
+  auto match_function_end = [&](Token token) {
     char32_t *alter_ptr = std::get_if<char32_t>(&token);
     return !alter_ptr || *alter_ptr != '}';
   };
-  std::flat_map<std::size_t, std::optional<DYNAMIC>> function_scope{};
-  std::vector<STATEMENT> function_body{};
-  for (TOKEN token :
+  std::flat_map<std::size_t, std::optional<Dynamic>> function_scope{};
+  std::vector<Statement> function_body{};
+  for (Token token :
        traverse_tokens() | std::views::take_while(match_function_end)) {
     if (std::holds_alternative<std::monostate>(token))
-      throw ScriptError{MISSING_PUNCT{'}'}};
+      throw ScriptError{MissingPunctuation{'}'}};
     parse_statement(function_scope, function_body, token);
   }
   std::size_t function_handle{script.function_pool.size()};
   script.function_pool.push_back(VanillaFunction{
       function_name, std::move(function_scope), std::move(function_body)});
-  return FUNCTION_DECL{function_name, function_handle};
+  return FunctionDeclaration{function_name, function_handle};
 }
 
-VARIABLE_DECL Parser::parse_variable_decl() {
+VariableDeclaration Parser::parse_variable_decl() {
   auto extract_name = [](auto token) -> std::size_t {
-    if constexpr (std::is_same_v<decltype(token), IDENTIFIER>)
+    if constexpr (std::is_same_v<decltype(token), Identifier>)
       return token.pool_idx;
-    throw ScriptError{MISSING_VARIABLE_NAME{}};
+    throw ScriptError{MissingVariableName{}};
   };
-  VARIABLE_DECL variable_decl{std::visit(extract_name, tokenize())};
+  VariableDeclaration variable_decl{std::visit(extract_name, tokenize())};
   assert_punct(tokenize(), '=');
   variable_decl.initializer = parse_expression();
   assert_punct(tokenize(), ';');
   return variable_decl;
 }
 
-EXPRESSION Parser::parse_expression() { return parse_additive_expr(); }
+Expression Parser::parse_expression() { return parse_additive_expr(); }
 
-EXPRESSION Parser::parse_primary_expr() {
-  return tokenize().visit([](auto t) -> EXPRESSION {
-    if constexpr (std::is_same_v<decltype(t), STRING_HANDLE> ||
-                  std::is_same_v<decltype(t), NUMERIC_LITERAL> ||
-                  std::is_same_v<decltype(t), IDENTIFIER>)
+Expression Parser::parse_primary_expr() {
+  return tokenize().visit([](auto t) -> Expression {
+    if constexpr (std::is_same_v<decltype(t), StringHandle> ||
+                  std::is_same_v<decltype(t), NumericLiteral> ||
+                  std::is_same_v<decltype(t), Identifier>)
       return t;
-    throw ScriptError{UNEXPECTED_TOKEN{}};
+    throw ScriptError{UnexpectedToken{}};
   });
 }
 
-EXPRESSION Parser::parse_postfix_expr() {
+Expression Parser::parse_postfix_expr() {
   using POSTFIX_REDUCER =
-      std::optional<std::copyable_function<EXPRESSION(EXPRESSION) const>>;
+      std::optional<std::copyable_function<Expression(Expression) const>>;
   auto match_reducer = [this](auto t) -> POSTFIX_REDUCER {
     if constexpr (std::is_same_v<decltype(t), char32_t>) {
       if (t == '.')
-        return [this](EXPRESSION expr) { return parse_member_expr(expr); };
+        return [this](Expression expr) { return parse_member_expr(expr); };
       if (t == '(')
-        return [this](EXPRESSION expr) { return parse_call_expr(expr); };
+        return [this](Expression expr) { return parse_call_expr(expr); };
     }
     return std::nullopt;
   };
-  auto postfix_fold = [](EXPRESSION postfix_expr, auto postfix_reducer) {
+  auto postfix_fold = [](Expression postfix_expr, auto postfix_reducer) {
     return postfix_reducer(postfix_expr);
   };
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto postfix_reducers =
       traverse_tokens() |
-      std::views::transform([&](TOKEN t) { return t.visit(match_reducer); }) |
+      std::views::transform([&](Token t) { return t.visit(match_reducer); }) |
       std::views::take_while(does_exist) | std::views::join;
-  EXPRESSION postfix_expr{std::ranges::fold_left(
+  Expression postfix_expr{std::ranges::fold_left(
       postfix_reducers, parse_primary_expr(), postfix_fold)};
   history_pull();
   return postfix_expr;
 }
 
-EXPRESSION Parser::parse_additive_expr() {
-  EXPRESSION expr_left{parse_postfix_expr()};
+Expression Parser::parse_additive_expr() {
+  Expression expr_left{parse_postfix_expr()};
   auto match_binary = [](auto t) -> std::optional<char32_t> {
     if constexpr (std::is_same_v<decltype(t), char32_t>)
       if (t == '+' || t == '-')
@@ -309,31 +318,31 @@ EXPRESSION Parser::parse_additive_expr() {
   };
   for (char32_t binary_op : tokenize().visit(match_binary)) {
     script.expr_pool.push_back(
-        EXPR_BINARY{expr_left, parse_postfix_expr(), binary_op});
-    return EXPR_HANDLE{script.expr_pool.size() - 1};
+        BinaryExpression{expr_left, parse_postfix_expr(), binary_op});
+    return ExpressionHandle{script.expr_pool.size() - 1};
   }
   history_pull();
   return expr_left;
 }
 
-EXPRESSION Parser::parse_member_expr(EXPRESSION obj_expr) {
-  auto property = tokenize().visit([](auto t) -> IDENTIFIER {
-    if constexpr (std::is_same_v<decltype(t), IDENTIFIER>)
+Expression Parser::parse_member_expr(Expression obj_expr) {
+  auto property = tokenize().visit([](auto t) -> Identifier {
+    if constexpr (std::is_same_v<decltype(t), Identifier>)
       return t;
-    throw ScriptError{MISSING_FIELD_NAME{}};
+    throw ScriptError{MissingFieldName{}};
   });
-  script.expr_pool.push_back(EXPR_MEMBER{obj_expr, property.pool_idx});
-  return EXPR_HANDLE{script.expr_pool.size() - 1};
+  script.expr_pool.push_back(MemberExpression{obj_expr, property.pool_idx});
+  return ExpressionHandle{script.expr_pool.size() - 1};
 }
 
-EXPRESSION Parser::parse_call_expr(EXPRESSION callee_expr) {
+Expression Parser::parse_call_expr(Expression callee_expr) {
   auto match_rparen = [](auto t) -> bool {
     if constexpr (std::is_same_v<decltype(t), char32_t>)
       if (t == ')')
         return 1;
     return 0;
   };
-  std::vector<EXPRESSION> arguments{};
+  std::vector<Expression> arguments{};
   while (1) {
     if (tokenize().visit(match_rparen))
       break;
@@ -344,37 +353,37 @@ EXPRESSION Parser::parse_call_expr(EXPRESSION callee_expr) {
     history_pull();
     assert_punct(tokenize(), ',');
   }
-  EXPR_HANDLE expr_handle{script.expr_pool.size()};
+  ExpressionHandle expr_handle{script.expr_pool.size()};
   auto bail_function_call = [&]() {
     script.expr_pool.push_back(
-        EXPR_FUNCTION_CALL{callee_expr, std::move(arguments)});
+        FunctionCallExpression{callee_expr, std::move(arguments)});
     return expr_handle;
   };
-  EXPR_HANDLE *callee_hdl{std::get_if<EXPR_HANDLE>(&callee_expr)};
+  ExpressionHandle *callee_hdl{std::get_if<ExpressionHandle>(&callee_expr)};
   if (not callee_hdl)
     return bail_function_call();
-  EXPR_MEMBER *expr_member{
-      std::get_if<EXPR_MEMBER>(&script.expr_pool[callee_hdl->pool_idx])};
+  MemberExpression *expr_member{
+      std::get_if<MemberExpression>(&script.expr_pool[callee_hdl->pool_idx])};
   if (not expr_member)
     return bail_function_call();
-  script.expr_pool.push_back(EXPR_METHOD_CALL{
+  script.expr_pool.push_back(MethodCallExpression{
       expr_member->object, expr_member->property, std::move(arguments)});
   return expr_handle;
 }
 
-DYNAMIC VanillaFunction::operator()(std::vector<DYNAMIC> arguments,
-                                    DYNAMIC context, const Script &script) {
+Dynamic VanillaFunction::operator()(std::vector<Dynamic> arguments,
+                                    Dynamic context, const Script &script) {
   return std::monostate{};
 }
 
-FUNCTION_HANDLE Script::insert(AbstractFunction function) {
-  FUNCTION_HANDLE function_handle{function_pool.size()};
+FunctionHandle Script::insert(AbstractFunction function) {
+  FunctionHandle function_handle{function_pool.size()};
   function_pool.push_back(std::move(function));
   return function_handle;
 }
 
-OBJECT_HANDLE Script::insert(OBJECT object) {
-  OBJECT_HANDLE object_handle{object_pool.size()};
+ObjectHandle Script::insert(PlainObject object) {
+  ObjectHandle object_handle{object_pool.size()};
   object_pool.push_back(std::move(object));
   return object_handle;
 }
@@ -387,55 +396,55 @@ std::size_t Script::attach_atom(std::string atom_str) {
   return iter_atlas->second;
 }
 
-DYNAMIC Script::reduce(EXPR_METHOD_CALL &expr_call) {
-  auto reduce_parameter = [this](EXPRESSION parameter_expr) {
+Dynamic Script::reduce(MethodCallExpression &expr_call) {
+  auto reduce_parameter = [this](Expression parameter_expr) {
     return reduce(parameter_expr);
   };
-  std::vector<DYNAMIC> arguments{
+  std::vector<Dynamic> arguments{
       std::from_range,
       std::ranges::transform_view{expr_call.arguments, reduce_parameter}};
-  DYNAMIC context_call{reduce(expr_call.object)};
-  OBJECT_HANDLE obj_handle{std::get<OBJECT_HANDLE>(context_call)};
-  OBJECT &context_obj{object_pool[obj_handle.pool_idx.value()]};
-  DYNAMIC method_dynamic{context_obj.at(expr_call.property)};
-  FUNCTION_HANDLE method_handle{std::get<FUNCTION_HANDLE>(method_dynamic)};
+  Dynamic context_call{reduce(expr_call.object)};
+  ObjectHandle obj_handle{std::get<ObjectHandle>(context_call)};
+  PlainObject &context_obj{object_pool[obj_handle.pool_idx.value()]};
+  Dynamic method_dynamic{context_obj.at(expr_call.property)};
+  FunctionHandle method_handle{std::get<FunctionHandle>(method_dynamic)};
   AbstractFunction &function_ref{function_pool[method_handle.pool_idx]};
   return function_ref(std::move(arguments), obj_handle, *this);
 }
 
-DYNAMIC Script::reduce(EXPR_FUNCTION_CALL &expr_call) {
-  auto reduce_parameter = [this](EXPRESSION parameter_expr) {
+Dynamic Script::reduce(FunctionCallExpression &expr_call) {
+  auto reduce_parameter = [this](Expression parameter_expr) {
     return reduce(parameter_expr);
   };
-  std::vector<DYNAMIC> arguments{
+  std::vector<Dynamic> arguments{
       std::from_range,
       std::ranges::transform_view{expr_call.arguments, reduce_parameter}};
-  DYNAMIC func_dynamic{reduce(expr_call.callee)};
-  FUNCTION_HANDLE func_handle{std::get<FUNCTION_HANDLE>(func_dynamic)};
+  Dynamic func_dynamic{reduce(expr_call.callee)};
+  FunctionHandle func_handle{std::get<FunctionHandle>(func_dynamic)};
   AbstractFunction &function_ref{function_pool[func_handle.pool_idx]};
   return function_ref(std::move(arguments), std::monostate{}, *this);
 }
 
-DYNAMIC Script::reduce(EXPRESSION expression) {
-  auto reduce_node = [&](auto &node) -> DYNAMIC {
-    if constexpr (std::is_same_v<decltype(node), EXPR_FUNCTION_CALL &> ||
-                  std::is_same_v<decltype(node), EXPR_METHOD_CALL &>)
+Dynamic Script::reduce(Expression expression) {
+  auto reduce_node = [&](auto &node) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(node), FunctionCallExpression &> ||
+                  std::is_same_v<decltype(node), MethodCallExpression &>)
       return reduce(node);
     return std::monostate{};
   };
-  auto reduce_expr = [&](auto expr) -> DYNAMIC {
-    if constexpr (std::is_same_v<decltype(expr), EXPR_HANDLE>)
+  auto reduce_expr = [&](auto expr) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(expr), ExpressionHandle>)
       return std::visit(reduce_node, expr_pool[expr.pool_idx]);
-    if constexpr (std::is_same_v<decltype(expr), IDENTIFIER>)
+    if constexpr (std::is_same_v<decltype(expr), Identifier>)
       return script_scope.at(expr.pool_idx).value();
     return std::monostate{};
   };
   return expression.visit(reduce_expr);
 }
 
-void Script::execute(STATEMENT statement) {
+void Script::execute(Statement statement) {
   auto execute_stmt = [this](auto stmt) -> void {
-    if constexpr (std::is_same_v<decltype(stmt), EXPRESSION>)
+    if constexpr (std::is_same_v<decltype(stmt), Expression>)
       reduce(stmt);
     assert(0);
   };
@@ -443,7 +452,7 @@ void Script::execute(STATEMENT statement) {
 }
 
 void Script::execute() {
-  for (STATEMENT statement : main_function.function_body)
+  for (Statement statement : main_function.function_body)
     execute(statement);
 }
 

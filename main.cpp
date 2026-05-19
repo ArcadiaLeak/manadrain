@@ -37,14 +37,14 @@ int main(int argc, char *argv[]) {
 
   Manadrain::Script script{std::move(parser.script)};
   auto console_log =
-      [](std::vector<Manadrain::DYNAMIC> arguments, Manadrain::DYNAMIC context,
-         const Manadrain::Script &s) { return Manadrain::DYNAMIC{}; };
+      [](std::vector<Manadrain::Dynamic> arguments, Manadrain::Dynamic context,
+         const Manadrain::Script &s) { return Manadrain::Dynamic{}; };
   std::size_t log_atom{script.attach_atom("log")};
-  Manadrain::FUNCTION_HANDLE hdl_console_log{script.insert(console_log)};
-  Manadrain::OBJECT console_obj{
-      {log_atom, Manadrain::FUNCTION_HANDLE{hdl_console_log}}};
+  Manadrain::FunctionHandle hdl_console_log{script.insert(console_log)};
+  Manadrain::PlainObject console_obj{
+      {log_atom, Manadrain::FunctionHandle{hdl_console_log}}};
   std::size_t console_atom{script.attach_atom("console")};
-  Manadrain::OBJECT_HANDLE hdl_console{script.insert(std::move(console_obj))};
+  Manadrain::ObjectHandle hdl_console{script.insert(std::move(console_obj))};
   script.main_function.function_scope[console_atom] = hdl_console;
   script.execute();
 
