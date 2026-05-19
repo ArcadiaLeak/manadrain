@@ -36,11 +36,17 @@ enum class ReservedWord {
   W_CONTINUE,
   W_SWITCH
 };
-struct Identifier {
+enum class AnchoredWord { MONOSTATE, W_CONSOLE, W_LOG };
+struct AtomizedWord {
   std::size_t pool_idx;
+  auto operator<=>(const AtomizedWord &) const = default;
+};
+using AbstractWord = std::variant<ReservedWord, AnchoredWord, AtomizedWord>;
+struct Identifier {
+  AbstractWord handle;
 };
 struct StringHandle {
-  std::size_t pool_idx;
+  AbstractWord handle;
 };
 using NumericLiteral = std::variant<std::int64_t, double>;
 enum class Operator {
@@ -104,7 +110,7 @@ struct BinaryExpression {
 };
 struct MemberExpression {
   Expression object;
-  std::size_t property;
+  AbstractWord property;
 };
 struct FunctionCallExpression {
   Expression callee;
@@ -112,7 +118,7 @@ struct FunctionCallExpression {
 };
 struct MethodCallExpression {
   Expression object;
-  std::size_t property;
+  AbstractWord property;
   std::vector<Expression> arguments;
 };
 using ExpressionNode =
@@ -120,7 +126,7 @@ using ExpressionNode =
                  MethodCallExpression>;
 
 struct VariableDeclaration {
-  std::size_t variable_name;
+  AbstractWord variable_name;
   Expression initializer;
 };
 struct ReturnStatement {
@@ -139,13 +145,13 @@ struct FunctionHandle {
 };
 using Dynamic = std::variant<std::monostate, StringHandle, IntrinsicHandle,
                              ObjectHandle, FunctionHandle>;
-using PlainObject = std::flat_map<std::size_t, Dynamic>;
+using PlainObject = std::flat_map<AbstractWord, Dynamic>;
 
 struct FunctionBlueprint {
-  using Scope = std::flat_map<std::size_t, std::optional<Dynamic>>;
-  std::size_t function_name;
+  using Scope = std::flat_map<AbstractWord, std::optional<Dynamic>>;
+  AbstractWord function_name;
   Scope scope_init;
-  std::flat_map<std::size_t, std::size_t> closure_init;
+  std::flat_map<AbstractWord, std::size_t> closure_init;
   std::vector<Statement> body;
 };
 struct VanillaFunction {

@@ -8,7 +8,7 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_map<std::string_view, ReservedWord> reserved_pool{
+static const std::unordered_map<std::string_view, ReservedWord> reserved_atlas{
     {"const", ReservedWord::W_CONST},
     {"let", ReservedWord::W_LET},
     {"var", ReservedWord::W_VAR},
@@ -32,6 +32,15 @@ static const std::unordered_map<std::string_view, ReservedWord> reserved_pool{
     {"break", ReservedWord::W_BREAK},
     {"continue", ReservedWord::W_CONTINUE},
     {"switch", ReservedWord::W_SWITCH}};
+static const std::array reserved_pool{std::to_array<std::string_view>(
+    {"",          "const",  "let",    "var",   "class",    "function",
+     "return",    "import", "export", "from",  "as",       "default",
+     "undefined", "null",   "true",   "false", "if",       "else",
+     "while",     "for",    "do",     "break", "continue", "switch"})};
+static const std::unordered_map<std::string_view, AnchoredWord> anchored_atlas{
+    {"console", AnchoredWord::W_CONSOLE}, {"log", AnchoredWord::W_LOG}};
+static const std::array anchored_pool{
+    std::to_array<std::string_view>({"", "console", "log"})};
 
 std::optional<char32_t> Parser::forward() {
   if (position >= text_size) {
@@ -98,14 +107,14 @@ Token Parser::tokenize_word(char32_t leading) {
       std::views::transform(traverse_ucs4) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
-  auto iter_reserved = reserved_pool.find(identifier_str);
-  if (iter_reserved != reserved_pool.end())
+  auto iter_reserved = reserved_atlas.find(identifier_str);
+  if (iter_reserved != reserved_atlas.end())
     return iter_reserved->second;
   auto [iter_atlas, did_insert] =
       atom_atlas.insert({identifier_str, atom_pool.size()});
   if (did_insert)
     atom_pool.push_back(std::move(identifier_str));
-  return Identifier{iter_atlas->second};
+  return Identifier{AtomizedWord{iter_atlas->second}};
 }
 
 Token Parser::tokenize_string_literal(char32_t separator) {
@@ -122,11 +131,14 @@ Token Parser::tokenize_string_literal(char32_t separator) {
       throw ScriptError{UnexpectedStringEnd{}};
     literal_str.append_range(traverse_ucs4(*leading));
   }
+  auto iter_reserved = reserved_atlas.find(literal_str);
+  if (iter_reserved != reserved_atlas.end())
+    return StringHandle{ReservedWord{iter_reserved->second}};
   auto [iter_atlas, did_insert] =
       atom_atlas.insert({literal_str, atom_pool.size()});
   if (did_insert)
     atom_pool.push_back(std::move(literal_str));
-  return StringHandle{iter_atlas->second};
+  return StringHandle{AtomizedWord{iter_atlas->second}};
 }
 
 Token Parser::tokenize_numeric_literal(char32_t leading) {
@@ -213,7 +225,7 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
   Statement statement;
   if (word == ReservedWord::W_FUNCTION) {
     std::size_t blueprint_handle{parse_function_decl()};
-    std::size_t function_name{blueprint_pool[blueprint_handle].function_name};
+    AbstractWord function_name{blueprint_pool[blueprint_handle].function_name};
     if (blueprint.scope_init.contains(function_name))
       throw ScriptError{InvalidDeclaration{}};
     blueprint.closure_init[function_name] = blueprint_handle;
@@ -235,12 +247,12 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
 }
 
 std::size_t Parser::parse_function_decl() {
-  auto extract_name = [](auto token) -> std::size_t {
+  auto extract_name = [](auto token) -> AbstractWord {
     if constexpr (std::is_same_v<decltype(token), Identifier>)
-      return token.pool_idx;
+      return token.handle;
     throw ScriptError{MissingFunctionName{}};
   };
-  std::size_t function_name{std::visit(extract_name, tokenize())};
+  AbstractWord function_name{std::visit(extract_name, tokenize())};
   for (char function_punct : std::to_array({'(', ')', '{'}))
     assert_punct(tokenize(), function_punct);
   auto match_function_end = [&](Token token) {
@@ -260,9 +272,9 @@ std::size_t Parser::parse_function_decl() {
 }
 
 VariableDeclaration Parser::parse_variable_decl() {
-  auto extract_name = [](auto token) -> std::size_t {
+  auto extract_name = [](auto token) -> AbstractWord {
     if constexpr (std::is_same_v<decltype(token), Identifier>)
-      return token.pool_idx;
+      return token.handle;
     throw ScriptError{MissingVariableName{}};
   };
   VariableDeclaration variable_decl{std::visit(extract_name, tokenize())};
@@ -333,7 +345,7 @@ Expression Parser::parse_member_expr(Expression obj_expr) {
       return t;
     throw ScriptError{MissingFieldName{}};
   });
-  expr_pool.push_back(MemberExpression{obj_expr, property.pool_idx});
+  expr_pool.push_back(MemberExpression{obj_expr, property.handle});
   return ExpressionHandle{expr_pool.size() - 1};
 }
 
