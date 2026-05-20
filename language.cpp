@@ -379,107 +379,150 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
     history_pull();
     assert_punct(tokenize(), ',');
   }
-  ExpressionHandle expr_handle{expr_pool.size()};
   auto bail_function_call = [&]() {
+    ExpressionHandle expr_handle{expr_pool.size()};
     expr_pool.push_back(
         FunctionCallExpression{callee_expr, std::move(arguments)});
     return expr_handle;
   };
-  ExpressionHandle *callee_hdl{std::get_if<ExpressionHandle>(&callee_expr)};
-  if (not callee_hdl)
+  ExpressionHandle *callee_handle{std::get_if<ExpressionHandle>(&callee_expr)};
+  if (not callee_handle)
     return bail_function_call();
   MemberExpression *expr_member{
-      std::get_if<MemberExpression>(&expr_pool[callee_hdl->pool_idx])};
+      std::get_if<MemberExpression>(&expr_pool[callee_handle->pool_idx])};
   if (not expr_member)
     return bail_function_call();
-  expr_pool.push_back(MethodCallExpression{
-      expr_member->object, expr_member->property, std::move(arguments)});
-  return expr_handle;
+  expr_pool[callee_handle->pool_idx] = MethodCallExpression{
+      expr_member->object, expr_member->property, std::move(arguments)};
+  return *callee_handle;
 }
 
-Dynamic Script::reduce(VanillaFunction &function,
-                       MethodCallExpression &expr_call) {
+Dynamic Script::exec_reduce(std::size_t function_handle,
+                            MethodCallExpression &expr_call) {
   auto reduce_argument = [&](Expression arg_expr) {
-    return reduce(function, arg_expr);
+    return exec_reduce(function_handle, arg_expr);
   };
   auto reduced_args =
       expr_call.arguments | std::views::transform(reduce_argument);
   std::vector<Dynamic> arguments{std::from_range, reduced_args};
+  auto reduce_intrinsic_call = [&](auto intrinsic_tag) -> Dynamic {
+    return instrinsic_call(intrinsic_tag, expr_call.property,
+                           std::move(arguments));
+  };
   auto reduce_call = [&](auto dynamic_alt) -> Dynamic {
     if constexpr (std::is_same_v<decltype(dynamic_alt), IntrinsicHandle>)
-      return console_method(expr_call.property, std::move(arguments));
+      return std::visit(reduce_intrinsic_call, dynamic_alt);
     return std::monostate{};
   };
-  reduce(function, expr_call.object).visit(reduce_call);
-  return std::monostate{};
+  return std::visit(reduce_call,
+                    exec_reduce(function_handle, expr_call.object));
 }
 
-Dynamic Script::reduce(VanillaFunction &function,
-                       FunctionCallExpression &expr_call) {
-  return std::monostate{};
+Dynamic Script::exec_reduce(std::size_t function_handle,
+                            FunctionCallExpression &expr_call) {
+  Dynamic dynamic_callee{exec_reduce(function_handle, expr_call.callee)};
+  std::size_t blueprint_handle{function_pool[function_handle].blueprint_handle};
+  for (Statement statement : blueprint_pool[blueprint_handle].body) {
+    exec_reduce(function_handle, statement);
+    if (std::holds_alternative<ReturnStatement>(statement))
+      break;
+  }
+  return function_pool[function_handle].return_val;
 }
 
-Dynamic Script::reduce(VanillaFunction &function, Expression expression) {
+Dynamic Script::exec_reduce(std::size_t function_handle,
+                            Expression expression) {
   auto reduce_node = [&](auto &node) -> Dynamic {
     if constexpr (std::is_same_v<decltype(node), FunctionCallExpression &> ||
                   std::is_same_v<decltype(node), MethodCallExpression &>)
-      return reduce(function, node);
+      return exec_reduce(function_handle, node);
     return std::monostate{};
   };
   auto reduce_expr = [&](auto expr_alt) -> Dynamic {
     if constexpr (std::is_same_v<decltype(expr_alt), ExpressionHandle>)
       return std::visit(reduce_node, expr_pool[expr_alt.pool_idx]);
     if constexpr (std::is_same_v<decltype(expr_alt), Identifier>)
-      return reduce(function, expr_alt);
+      return exec_reduce(function_handle, expr_alt);
     return std::monostate{};
   };
-  return expression.visit(reduce_expr);
+  return std::visit(reduce_expr, expression);
 }
 
-Dynamic Script::reduce(VanillaFunction &function, Identifier identifier) {
-  if (identifier.handle == AbstractWord{AnchoredWord::W_CONSOLE})
-    return IntrinsicHandle::H_CONSOLE;
+Dynamic Script::global_get(AbstractWord word) {
+  if (word == AbstractWord{AnchoredWord::W_CONSOLE})
+    return ConsoleHandle{};
   return std::monostate{};
 }
 
-void Script::execute(VanillaFunction &function, Statement statement) {
-  auto execute_alter = [&](auto alternative) -> void {
-    if constexpr (std::is_same_v<decltype(alternative), Expression>)
-      reduce(function, alternative);
-    assert(0);
-  };
-  statement.visit(execute_alter);
+Dynamic Script::exec_reduce(std::size_t function_handle,
+                            Identifier identifier) {
+  while (1) {
+    std::size_t blueprint_handle{
+        function_pool[function_handle].blueprint_handle};
+    ObjectShape &scope_shape = blueprint_pool[blueprint_handle].scope_shape;
+    auto scope_shape_it =
+        std::ranges::lower_bound(scope_shape, identifier.handle);
+    bool found_in_scope{}, arrived_at_end{scope_shape_it == scope_shape.end()};
+    if (not arrived_at_end)
+      found_in_scope = identifier.handle == *scope_shape_it;
+    std::optional parent_handle{function_pool[function_handle].parent_handle};
+    if (not found_in_scope && not parent_handle)
+      return global_get(identifier.handle);
+    if (not found_in_scope && parent_handle) {
+      function_handle = *parent_handle;
+      continue;
+    }
+    std::size_t scope_idx = scope_shape_it - scope_shape.begin();
+    std::optional dynamic_opt{
+        function_pool[function_handle].own_scope[scope_idx]};
+    if (not dynamic_opt)
+      throw ScriptError{InvalidVariableAccess{}};
+    return *dynamic_opt;
+  }
+}
+
+void Script::exec_reduce(std::size_t function_handle,
+                         VariableDeclaration declaration) {}
+
+void Script::exec_reduce(std::size_t function_handle,
+                         ReturnStatement statement) {
+  exec_reduce(function_handle, statement.argument);
+}
+
+void Script::exec_reduce(std::size_t function_handle, Statement statement) {
+  std::visit(
+      [&](auto alternative) { exec_reduce(function_handle, alternative); },
+      statement);
 }
 
 FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
                                  std::optional<std::size_t> parent_handle) {
-  FunctionBlueprint &blueprint{blueprint_pool[blueprint_handle]};
-  FunctionScope own_scope(blueprint.scope_shape.size());
+  ObjectShape &scope_shape = blueprint_pool[blueprint_handle].scope_shape;
   std::size_t function_handle{function_pool.size()};
-  VanillaFunction &function{function_pool.emplace_back(
-      VanillaFunction{blueprint_handle, parent_handle, std::move(own_scope)})};
-  for (auto [nested_name, nested_handle] : blueprint.nested_blueprint) {
-    auto scope_shape_it =
-        std::ranges::lower_bound(blueprint.scope_shape, nested_name);
-    if (scope_shape_it == blueprint.scope_shape.end() ||
-        *scope_shape_it != nested_name)
+  function_pool.push_back(VanillaFunction{blueprint_handle, parent_handle});
+  function_pool[function_handle].own_scope.resize(scope_shape.size());
+  for (auto [nested_name, nested_blueprint] :
+       blueprint_pool[blueprint_handle].nested_blueprint) {
+    auto scope_shape_it = std::ranges::lower_bound(scope_shape, nested_name);
+    if (scope_shape_it == scope_shape.end() || *scope_shape_it != nested_name)
       assert(0);
-    std::size_t scope_idx =
-        std::distance(blueprint.scope_shape.begin(), scope_shape_it);
-    function.own_scope[scope_idx] = bootstrap(nested_handle, function_handle);
+    std::size_t scope_idx = std::distance(scope_shape.begin(), scope_shape_it);
+    FunctionHandle nested_function{
+        bootstrap(nested_blueprint, function_handle)};
+    function_pool[function_handle].own_scope[scope_idx] = nested_function;
   }
   return FunctionHandle{function_handle};
 }
 
 void Script::execute() {
-  VanillaFunction &function{function_pool[main_function.pool_idx]};
-  FunctionBlueprint &blueprint{blueprint_pool[function.blueprint_handle]};
-  for (Statement statement : blueprint.body)
-    execute(function, statement);
+  std::size_t blueprint_handle{
+      function_pool[main_function.pool_idx].blueprint_handle};
+  for (Statement statement : blueprint_pool[blueprint_handle].body)
+    exec_reduce(main_function.pool_idx, statement);
 }
 
-Dynamic Script::console_method(AbstractWord property,
-                               std::vector<Dynamic> arguments) {
+Dynamic Script::instrinsic_call(ConsoleHandle, AbstractWord property,
+                                std::vector<Dynamic> arguments) {
   if (property == AbstractWord{AnchoredWord::W_LOG})
     std::println("default message!");
   return std::monostate{};

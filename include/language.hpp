@@ -69,6 +69,7 @@ struct InvalidNumericLiteral {};
 struct InvalidPropertyName {};
 struct InvalidBackslashEscape {};
 struct InvalidDeclaration {};
+struct InvalidVariableAccess {};
 struct MissingFieldName {};
 struct MissingVariableName {};
 struct MissingFunctionName {};
@@ -86,11 +87,12 @@ class ScriptError : public std::exception {
 public:
   using Message =
       std::variant<InvalidNumericLiteral, InvalidPropertyName,
-                   InvalidBackslashEscape, InvalidDeclaration, MissingFieldName,
-                   MissingVariableName, MissingFunctionName, MissingIdentifier,
-                   MissingStringLiteral, MissingFormalParameter,
-                   MissingPunctuation, UnexpectedReservedWord,
-                   UnexpectedStringEnd, UnexpectedCommentEnd, UnexpectedToken>;
+                   InvalidBackslashEscape, InvalidDeclaration,
+                   InvalidVariableAccess, MissingFieldName, MissingVariableName,
+                   MissingFunctionName, MissingIdentifier, MissingStringLiteral,
+                   MissingFormalParameter, MissingPunctuation,
+                   UnexpectedReservedWord, UnexpectedStringEnd,
+                   UnexpectedCommentEnd, UnexpectedToken>;
   Message message;
 
   explicit ScriptError(Message msg) : message{msg} {}
@@ -130,12 +132,14 @@ struct VariableDeclaration {
   Expression initializer;
 };
 struct ReturnStatement {
-  Expression return_expr;
+  Expression argument;
 };
 using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-enum class IntrinsicHandle { H_CONSOLE };
+struct ConsoleHandle {};
+using IntrinsicHandle = std::variant<ConsoleHandle>;
+
 struct ObjectHandle {
   std::size_t pool_idx;
   bool null_reference;
@@ -149,7 +153,6 @@ using Dynamic = std::variant<std::monostate, StringHandle, IntrinsicHandle,
 using ObjectShape = std::vector<AbstractWord>;
 using VanillaObject = std::vector<Dynamic>;
 
-using FunctionScope = std::vector<std::optional<Dynamic>>;
 struct FunctionBlueprint {
   AbstractWord function_name;
   ObjectShape scope_shape;
@@ -159,7 +162,8 @@ struct FunctionBlueprint {
 struct VanillaFunction {
   std::size_t blueprint_handle;
   std::optional<std::size_t> parent_handle;
-  FunctionScope own_scope;
+  std::vector<std::optional<Dynamic>> own_scope;
+  Dynamic return_val;
 };
 
 struct ShapeTrie {
@@ -178,7 +182,6 @@ protected:
   std::vector<std::string> atom_pool;
 
   FunctionHandle main_function;
-
   std::vector<FunctionBlueprint> blueprint_pool;
   std::vector<VanillaFunction> function_pool;
 
@@ -189,14 +192,21 @@ protected:
   FunctionHandle bootstrap(std::size_t blueprint_handle,
                            std::optional<std::size_t> parent_scope);
 
-  Dynamic reduce(VanillaFunction &function, MethodCallExpression &expr_call);
-  Dynamic reduce(VanillaFunction &function, FunctionCallExpression &expr_call);
-  Dynamic reduce(VanillaFunction &function, Expression expression);
-  Dynamic reduce(VanillaFunction &function, Identifier identifier);
+  Dynamic global_get(AbstractWord word);
+  Dynamic instrinsic_call(ConsoleHandle, AbstractWord property,
+                          std::vector<Dynamic> arguments);
 
-  Dynamic console_method(AbstractWord property, std::vector<Dynamic> arguments);
+  Dynamic exec_reduce(std::size_t function_handle,
+                      MethodCallExpression &expr_call);
+  Dynamic exec_reduce(std::size_t function_handle,
+                      FunctionCallExpression &expr_call);
+  Dynamic exec_reduce(std::size_t function_handle, Expression expression);
+  Dynamic exec_reduce(std::size_t function_handle, Identifier identifier);
 
-  void execute(VanillaFunction &function, Statement statement);
+  void exec_reduce(std::size_t function_handle,
+                   VariableDeclaration declaration);
+  void exec_reduce(std::size_t function_handle, ReturnStatement statement);
+  void exec_reduce(std::size_t function_handle, Statement statement);
 };
 
 class Parser : public Script {
