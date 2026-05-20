@@ -1,5 +1,4 @@
 #include <cstdint>
-#include <flat_map>
 #include <generator>
 #include <list>
 #include <memory>
@@ -145,44 +144,46 @@ struct FunctionHandle {
 };
 using Dynamic = std::variant<std::monostate, StringHandle, IntrinsicHandle,
                              ObjectHandle, FunctionHandle>;
-using PlainObject = std::flat_map<AbstractWord, Dynamic>;
 
+using FunctionScopeShape = std::vector<AbstractWord>;
+using FunctionScope = std::vector<std::optional<Dynamic>>;
 struct FunctionBlueprint {
-  using Scope = std::flat_map<AbstractWord, std::optional<Dynamic>>;
   AbstractWord function_name;
-  Scope scope_init;
-  std::flat_map<AbstractWord, std::size_t> closure_init;
+  FunctionScopeShape scope_shape;
+  std::vector<std::pair<AbstractWord, std::size_t>> nested_blueprint;
   std::vector<Statement> body;
 };
 struct VanillaFunction {
   std::size_t blueprint_handle;
-  std::optional<std::size_t> parent_scope;
-  std::size_t own_scope;
+  std::optional<std::size_t> parent_handle;
+  FunctionScope own_scope;
 };
 
 class Script {
 public:
-  void execute_main();
+  void execute();
 
 protected:
   std::vector<ExpressionNode> expr_pool;
   std::unordered_map<std::string, std::size_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
-  PlainObject global_object;
   FunctionHandle main_function;
 
   std::vector<VanillaFunction> function_pool;
-  std::vector<PlainObject> object_pool;
-  std::vector<FunctionBlueprint::Scope> scope_pool;
   std::vector<FunctionBlueprint> blueprint_pool;
 
-  Dynamic reduce(MethodCallExpression &expr_call);
-  Dynamic reduce(FunctionCallExpression &expr_call);
-  Dynamic reduce(Expression expression);
+  FunctionHandle bootstrap(std::size_t blueprint_handle,
+                           std::optional<std::size_t> parent_scope);
 
-  FunctionHandle bootstrap(std::size_t blueprint_handle);
-  void execute_stmt(Statement statement);
+  Dynamic reduce(VanillaFunction &function, MethodCallExpression &expr_call);
+  Dynamic reduce(VanillaFunction &function, FunctionCallExpression &expr_call);
+  Dynamic reduce(VanillaFunction &function, Expression expression);
+  Dynamic reduce(VanillaFunction &function, Identifier identifier);
+
+  Dynamic console_method(AbstractWord property, std::vector<Dynamic> arguments);
+
+  void execute(VanillaFunction &function, Statement statement);
 };
 
 class Parser : public Script {

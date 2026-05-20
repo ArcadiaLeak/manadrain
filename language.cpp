@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
+#include <print>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -110,6 +111,9 @@ Token Parser::tokenize_word(char32_t leading) {
   auto iter_reserved = reserved_atlas.find(identifier_str);
   if (iter_reserved != reserved_atlas.end())
     return iter_reserved->second;
+  auto iter_anchored = anchored_atlas.find(identifier_str);
+  if (iter_anchored != anchored_atlas.end())
+    return Identifier{iter_anchored->second};
   auto [iter_atlas, did_insert] =
       atom_atlas.insert({identifier_str, atom_pool.size()});
   if (did_insert)
@@ -133,7 +137,10 @@ Token Parser::tokenize_string_literal(char32_t separator) {
   }
   auto iter_reserved = reserved_atlas.find(literal_str);
   if (iter_reserved != reserved_atlas.end())
-    return StringHandle{ReservedWord{iter_reserved->second}};
+    return StringHandle{iter_reserved->second};
+  auto iter_anchored = anchored_atlas.find(literal_str);
+  if (iter_anchored != anchored_atlas.end())
+    return StringHandle{iter_anchored->second};
   auto [iter_atlas, did_insert] =
       atom_atlas.insert({literal_str, atom_pool.size()});
   if (did_insert)
@@ -212,7 +219,7 @@ void Parser::parse_text() {
     parse_statement(blueprint, token);
   std::size_t blueprint_handle{blueprint_pool.size()};
   blueprint_pool.push_back(std::move(blueprint));
-  main_function = bootstrap(blueprint_handle);
+  main_function = bootstrap(blueprint_handle, std::nullopt);
 }
 
 void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
@@ -226,15 +233,20 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
   if (word == ReservedWord::W_FUNCTION) {
     std::size_t blueprint_handle{parse_function_decl()};
     AbstractWord function_name{blueprint_pool[blueprint_handle].function_name};
-    if (blueprint.scope_init.contains(function_name))
+    if (std::ranges::binary_search(blueprint.scope_shape, function_name))
       throw ScriptError{InvalidDeclaration{}};
-    blueprint.closure_init[function_name] = blueprint_handle;
-    blueprint.scope_init[function_name] = std::nullopt;
+    blueprint.nested_blueprint.push_back({function_name, blueprint_handle});
+    auto scope_shape_it =
+        std::ranges::lower_bound(blueprint.scope_shape, function_name);
+    blueprint.scope_shape.insert(scope_shape_it, function_name);
   } else if (word == ReservedWord::W_LET) {
     VariableDeclaration declaration{parse_variable_decl()};
-    if (blueprint.scope_init.contains(declaration.variable_name))
+    AbstractWord variable_name{declaration.variable_name};
+    if (std::ranges::binary_search(blueprint.scope_shape, variable_name))
       throw ScriptError{InvalidDeclaration{}};
-    blueprint.scope_init[declaration.variable_name] = std::nullopt;
+    auto scope_shape_it =
+        std::ranges::lower_bound(blueprint.scope_shape, variable_name);
+    blueprint.scope_shape.insert(scope_shape_it, variable_name);
     blueprint.body.push_back(declaration);
   } else if (word == ReservedWord::W_RETURN) {
     blueprint.body.push_back(parse_expression());
@@ -385,36 +397,84 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
   return expr_handle;
 }
 
-Dynamic Script::reduce(MethodCallExpression &expr_call) {
+Dynamic Script::reduce(VanillaFunction &function,
+                       MethodCallExpression &expr_call) {
+  auto reduce_argument = [&](Expression arg_expr) {
+    return reduce(function, arg_expr);
+  };
+  auto reduced_args =
+      expr_call.arguments | std::views::transform(reduce_argument);
+  std::vector<Dynamic> arguments{std::from_range, reduced_args};
+  auto reduce_call = [&](auto dynamic_alt) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(dynamic_alt), IntrinsicHandle>)
+      return console_method(expr_call.property, std::move(arguments));
+    return std::monostate{};
+  };
+  reduce(function, expr_call.object).visit(reduce_call);
   return std::monostate{};
 }
 
-Dynamic Script::reduce(FunctionCallExpression &expr_call) {
+Dynamic Script::reduce(VanillaFunction &function,
+                       FunctionCallExpression &expr_call) {
   return std::monostate{};
 }
 
-Dynamic Script::reduce(Expression expression) { return std::monostate{}; }
+Dynamic Script::reduce(VanillaFunction &function, Expression expression) {
+  auto reduce_node = [&](auto &node) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(node), FunctionCallExpression &> ||
+                  std::is_same_v<decltype(node), MethodCallExpression &>)
+      return reduce(function, node);
+    return std::monostate{};
+  };
+  auto reduce_expr = [&](auto expr_alt) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(expr_alt), ExpressionHandle>)
+      return std::visit(reduce_node, expr_pool[expr_alt.pool_idx]);
+    if constexpr (std::is_same_v<decltype(expr_alt), Identifier>)
+      return reduce(function, expr_alt);
+    return std::monostate{};
+  };
+  return expression.visit(reduce_expr);
+}
 
-void Script::execute_stmt(Statement statement) {
-  auto execute_alter = [this](auto alternative) -> void {
+Dynamic Script::reduce(VanillaFunction &function, Identifier identifier) {
+  if (identifier.handle == AbstractWord{AnchoredWord::W_CONSOLE})
+    return IntrinsicHandle::H_CONSOLE;
+  return std::monostate{};
+}
+
+void Script::execute(VanillaFunction &function, Statement statement) {
+  auto execute_alter = [&](auto alternative) -> void {
     if constexpr (std::is_same_v<decltype(alternative), Expression>)
-      reduce(alternative);
+      reduce(function, alternative);
     assert(0);
   };
   statement.visit(execute_alter);
 }
 
-FunctionHandle Script::bootstrap(std::size_t blueprint_handle) {
+FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
+                                 std::optional<std::size_t> parent_scope) {
   FunctionBlueprint &blueprint{blueprint_pool[blueprint_handle]};
+  FunctionScope own_scope(blueprint.scope_shape.size());
+  VanillaFunction function{blueprint_handle, parent_scope,
+                           std::move(own_scope)};
+  for (auto [nested_name, nested_handle] : blueprint.nested_blueprint)
+    scope_pool[own_scope][nested_name] = bootstrap(nested_handle, own_scope);
   std::size_t function_handle{function_pool.size()};
-  function_pool.push_back(VanillaFunction{blueprint_handle});
+  function_pool.push_back(std::move(function));
   return FunctionHandle{function_handle};
 }
 
-void Script::execute_main() {
+void Script::execute() {
   VanillaFunction &function{function_pool[main_function.pool_idx]};
   FunctionBlueprint &blueprint{blueprint_pool[function.blueprint_handle]};
   for (Statement statement : blueprint.body)
-    execute_stmt(statement);
+    execute(function, statement);
+}
+
+Dynamic Script::console_method(AbstractWord property,
+                               std::vector<Dynamic> arguments) {
+  if (property == AbstractWord{AnchoredWord::W_LOG})
+    std::println("default message!");
+  return std::monostate{};
 }
 } // namespace Manadrain
