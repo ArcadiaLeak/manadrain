@@ -236,17 +236,17 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
     if (std::ranges::binary_search(blueprint.scope_shape, function_name))
       throw ScriptError{InvalidDeclaration{}};
     blueprint.nested_blueprint.push_back({function_name, blueprint_handle});
-    auto scope_shape_it =
+    auto lower_bound =
         std::ranges::lower_bound(blueprint.scope_shape, function_name);
-    blueprint.scope_shape.insert(scope_shape_it, function_name);
+    blueprint.scope_shape.insert(lower_bound, function_name);
   } else if (word == ReservedWord::W_LET) {
     VariableDeclaration declaration{parse_variable_decl()};
     AbstractWord variable_name{declaration.variable_name};
     if (std::ranges::binary_search(blueprint.scope_shape, variable_name))
       throw ScriptError{InvalidDeclaration{}};
-    auto scope_shape_it =
+    auto lower_bound =
         std::ranges::lower_bound(blueprint.scope_shape, variable_name);
-    blueprint.scope_shape.insert(scope_shape_it, variable_name);
+    blueprint.scope_shape.insert(lower_bound, variable_name);
     blueprint.body.push_back(declaration);
   } else if (word == ReservedWord::W_RETURN) {
     blueprint.body.push_back(parse_expression());
@@ -421,12 +421,16 @@ Dynamic Script::exec_reduce(std::size_t function_handle,
 Dynamic Script::exec_reduce(std::size_t function_handle,
                             FunctionCallExpression &expr_call) {
   Dynamic dynamic_callee{exec_reduce(function_handle, expr_call.callee)};
-  std::size_t blueprint_handle{function_pool[function_handle].blueprint_handle};
-  for (Statement statement : blueprint_pool[blueprint_handle].body) {
-    exec_reduce(function_handle, statement);
-    if (std::holds_alternative<ReturnStatement>(statement))
-      break;
-  }
+  if (not std::holds_alternative<FunctionHandle>(dynamic_callee))
+    throw ScriptError{InvalidFunctionCall{}};
+  std::size_t callee_handle{std::get<FunctionHandle>(dynamic_callee).pool_idx};
+  std::size_t blueprint_handle{function_pool[callee_handle].blueprint_handle};
+  auto match_function_stop = [](Statement statement) {
+    return !std::holds_alternative<ReturnStatement>(statement);
+  };
+  for (Statement statement : std::ranges::take_while_view{
+           blueprint_pool[blueprint_handle].body, match_function_stop})
+    exec_reduce(callee_handle, statement);
   return function_pool[function_handle].return_val;
 }
 
@@ -454,31 +458,35 @@ Dynamic Script::global_get(AbstractWord word) {
   return std::monostate{};
 }
 
+std::generator<std::size_t>
+Script::traverse_function_closure(std::size_t function_handle) {
+  while (1) {
+    co_yield function_handle;
+    VanillaFunction &function{function_pool[function_handle]};
+    std::optional parent_handle{function.parent_handle};
+    if (not parent_handle)
+      break;
+    function_handle = *parent_handle;
+  }
+}
+
 Dynamic Script::exec_reduce(std::size_t function_handle,
                             Identifier identifier) {
-  while (1) {
+  for (std::size_t current_handle :
+       traverse_function_closure(function_handle)) {
     std::size_t blueprint_handle{
-        function_pool[function_handle].blueprint_handle};
-    ObjectShape &scope_shape = blueprint_pool[blueprint_handle].scope_shape;
-    auto scope_shape_it =
-        std::ranges::lower_bound(scope_shape, identifier.handle);
-    bool found_in_scope{}, arrived_at_end{scope_shape_it == scope_shape.end()};
-    if (not arrived_at_end)
-      found_in_scope = identifier.handle == *scope_shape_it;
-    std::optional parent_handle{function_pool[function_handle].parent_handle};
-    if (not found_in_scope && not parent_handle)
-      return global_get(identifier.handle);
-    if (not found_in_scope && parent_handle) {
-      function_handle = *parent_handle;
+        function_pool[current_handle].blueprint_handle};
+    ObjectShape &scope_shape{blueprint_pool[blueprint_handle].scope_shape};
+    auto lower_bound = std::ranges::lower_bound(scope_shape, identifier.handle);
+    if (lower_bound == scope_shape.end() || *lower_bound != identifier.handle)
       continue;
-    }
-    std::size_t scope_idx = scope_shape_it - scope_shape.begin();
-    std::optional dynamic_opt{
-        function_pool[function_handle].own_scope[scope_idx]};
-    if (not dynamic_opt)
-      throw ScriptError{InvalidVariableAccess{}};
-    return *dynamic_opt;
+    std::size_t scope_idx = std::distance(scope_shape.begin(), lower_bound);
+    FunctionScope &own_scope{function_pool[function_handle].own_scope};
+    for (Dynamic dynamic_local : own_scope[scope_idx])
+      return dynamic_local;
+    throw ScriptError{InvalidVariableAccess{}};
   }
+  return global_get(identifier.handle);
 }
 
 void Script::exec_reduce(std::size_t function_handle,
@@ -503,10 +511,10 @@ FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
   function_pool[function_handle].own_scope.resize(scope_shape.size());
   for (auto [nested_name, nested_blueprint] :
        blueprint_pool[blueprint_handle].nested_blueprint) {
-    auto scope_shape_it = std::ranges::lower_bound(scope_shape, nested_name);
-    if (scope_shape_it == scope_shape.end() || *scope_shape_it != nested_name)
+    auto lower_bound = std::ranges::lower_bound(scope_shape, nested_name);
+    if (lower_bound == scope_shape.end() || *lower_bound != nested_name)
       assert(0);
-    std::size_t scope_idx = std::distance(scope_shape.begin(), scope_shape_it);
+    std::size_t scope_idx = std::distance(scope_shape.begin(), lower_bound);
     FunctionHandle nested_function{
         bootstrap(nested_blueprint, function_handle)};
     function_pool[function_handle].own_scope[scope_idx] = nested_function;

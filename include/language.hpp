@@ -70,6 +70,7 @@ struct InvalidPropertyName {};
 struct InvalidBackslashEscape {};
 struct InvalidDeclaration {};
 struct InvalidVariableAccess {};
+struct InvalidFunctionCall {};
 struct MissingFieldName {};
 struct MissingVariableName {};
 struct MissingFunctionName {};
@@ -88,11 +89,11 @@ public:
   using Message =
       std::variant<InvalidNumericLiteral, InvalidPropertyName,
                    InvalidBackslashEscape, InvalidDeclaration,
-                   InvalidVariableAccess, MissingFieldName, MissingVariableName,
-                   MissingFunctionName, MissingIdentifier, MissingStringLiteral,
-                   MissingFormalParameter, MissingPunctuation,
-                   UnexpectedReservedWord, UnexpectedStringEnd,
-                   UnexpectedCommentEnd, UnexpectedToken>;
+                   InvalidFunctionCall, InvalidVariableAccess, MissingFieldName,
+                   MissingVariableName, MissingFunctionName, MissingIdentifier,
+                   MissingStringLiteral, MissingFormalParameter,
+                   MissingPunctuation, UnexpectedReservedWord,
+                   UnexpectedStringEnd, UnexpectedCommentEnd, UnexpectedToken>;
   Message message;
 
   explicit ScriptError(Message msg) : message{msg} {}
@@ -159,10 +160,11 @@ struct FunctionBlueprint {
   std::vector<std::pair<AbstractWord, std::size_t>> nested_blueprint;
   std::vector<Statement> body;
 };
+using FunctionScope = std::vector<std::optional<Dynamic>>;
 struct VanillaFunction {
   std::size_t blueprint_handle;
   std::optional<std::size_t> parent_handle;
-  std::vector<std::optional<Dynamic>> own_scope;
+  FunctionScope own_scope;
   Dynamic return_val;
 };
 
@@ -191,6 +193,10 @@ protected:
 
   FunctionHandle bootstrap(std::size_t blueprint_handle,
                            std::optional<std::size_t> parent_scope);
+
+private:
+  std::generator<std::size_t>
+  traverse_function_closure(std::size_t function_handle);
 
   Dynamic global_get(AbstractWord word);
   Dynamic instrinsic_call(ConsoleHandle, AbstractWord property,
