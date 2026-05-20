@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <flat_map>
 #include <generator>
 #include <list>
 #include <memory>
@@ -145,11 +146,13 @@ struct FunctionHandle {
 using Dynamic = std::variant<std::monostate, StringHandle, IntrinsicHandle,
                              ObjectHandle, FunctionHandle>;
 
-using FunctionScopeShape = std::vector<AbstractWord>;
+using ObjectShape = std::vector<AbstractWord>;
+using VanillaObject = std::vector<Dynamic>;
+
 using FunctionScope = std::vector<std::optional<Dynamic>>;
 struct FunctionBlueprint {
   AbstractWord function_name;
-  FunctionScopeShape scope_shape;
+  ObjectShape scope_shape;
   std::vector<std::pair<AbstractWord, std::size_t>> nested_blueprint;
   std::vector<Statement> body;
 };
@@ -157,6 +160,12 @@ struct VanillaFunction {
   std::size_t blueprint_handle;
   std::optional<std::size_t> parent_handle;
   FunctionScope own_scope;
+};
+
+struct ShapeTrie {
+  std::flat_map<AbstractWord,
+                std::variant<std::size_t, std::indirect<ShapeTrie>>>
+      children;
 };
 
 class Script {
@@ -170,8 +179,12 @@ protected:
 
   FunctionHandle main_function;
 
-  std::vector<VanillaFunction> function_pool;
   std::vector<FunctionBlueprint> blueprint_pool;
+  std::vector<VanillaFunction> function_pool;
+
+  ShapeTrie shape_trie;
+  std::vector<ObjectShape> shape_pool;
+  std::vector<VanillaObject> object_pool;
 
   FunctionHandle bootstrap(std::size_t blueprint_handle,
                            std::optional<std::size_t> parent_scope);

@@ -452,15 +452,22 @@ void Script::execute(VanillaFunction &function, Statement statement) {
 }
 
 FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
-                                 std::optional<std::size_t> parent_scope) {
+                                 std::optional<std::size_t> parent_handle) {
   FunctionBlueprint &blueprint{blueprint_pool[blueprint_handle]};
   FunctionScope own_scope(blueprint.scope_shape.size());
-  VanillaFunction function{blueprint_handle, parent_scope,
-                           std::move(own_scope)};
-  for (auto [nested_name, nested_handle] : blueprint.nested_blueprint)
-    scope_pool[own_scope][nested_name] = bootstrap(nested_handle, own_scope);
   std::size_t function_handle{function_pool.size()};
-  function_pool.push_back(std::move(function));
+  VanillaFunction &function{function_pool.emplace_back(
+      VanillaFunction{blueprint_handle, parent_handle, std::move(own_scope)})};
+  for (auto [nested_name, nested_handle] : blueprint.nested_blueprint) {
+    auto scope_shape_it =
+        std::ranges::lower_bound(blueprint.scope_shape, nested_name);
+    if (scope_shape_it == blueprint.scope_shape.end() ||
+        *scope_shape_it != nested_name)
+      assert(0);
+    std::size_t scope_idx =
+        std::distance(blueprint.scope_shape.begin(), scope_shape_it);
+    function.own_scope[scope_idx] = bootstrap(nested_handle, function_handle);
+  }
   return FunctionHandle{function_handle};
 }
 
