@@ -48,7 +48,6 @@ struct Identifier {
 struct StringHandle {
   AbstractWord handle;
 };
-using NumericLiteral = std::variant<std::int64_t, double>;
 enum class Operator {
   DOUBLE_EQUALS,
   TRIPLE_EQUALS,
@@ -62,8 +61,8 @@ enum class Operator {
   LOGICAL_DISJUNCT_ASSIGN,
   LOGICAL_DISJUNCT
 };
-using Token = std::variant<std::monostate, char32_t, Operator, NumericLiteral,
-                           ReservedWord, Identifier, StringHandle>;
+using Token = std::variant<std::monostate, char32_t, std::int64_t, double,
+                           Operator, ReservedWord, Identifier, StringHandle>;
 
 struct InvalidNumericLiteral {};
 struct InvalidPropertyName {};
@@ -103,8 +102,8 @@ public:
 struct ExpressionHandle {
   std::size_t pool_idx;
 };
-using Expression = std::variant<std::monostate, StringHandle, NumericLiteral,
-                                Identifier, ExpressionHandle>;
+using Expression = std::variant<std::monostate, StringHandle, std::int64_t,
+                                double, Identifier, ExpressionHandle>;
 
 struct BinaryExpression {
   Expression left;
@@ -203,11 +202,23 @@ private:
                           std::vector<Dynamic> arguments);
 
   Dynamic exec_reduce(std::size_t function_handle,
-                      MethodCallExpression &expr_call);
+                      BinaryExpression &expression);
   Dynamic exec_reduce(std::size_t function_handle,
-                      FunctionCallExpression &expr_call);
+                      MemberExpression &expression);
+  Dynamic exec_reduce(std::size_t function_handle,
+                      MethodCallExpression &expression);
+  Dynamic exec_reduce(std::size_t function_handle,
+                      FunctionCallExpression &expression);
   Dynamic exec_reduce(std::size_t function_handle, Expression expression);
   Dynamic exec_reduce(std::size_t function_handle, Identifier identifier);
+  Dynamic exec_reduce(std::size_t function_handle,
+                      ExpressionHandle expr_handle);
+  Dynamic exec_reduce(std::size_t function_handle, StringHandle string_handle);
+  Dynamic exec_reduce(std::size_t function_handle, std::int64_t number);
+  Dynamic exec_reduce(std::size_t function_handle, double number);
+  Dynamic exec_reduce(std::size_t function_handle, std::monostate) {
+    return {};
+  }
 
   void exec_reduce(std::size_t function_handle,
                    VariableDeclaration declaration);
@@ -237,7 +248,7 @@ private:
   void history_pull();
   void history_push(Token token);
 
-  Token tokenize_word(char32_t leading);
+  Token tokenize_identifier(char32_t leading);
   Token tokenize_string_literal(char32_t separator);
   Token tokenize_numeric_literal(char32_t leading);
   std::generator<Token> traverse_tokens();

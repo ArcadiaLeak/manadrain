@@ -99,7 +99,7 @@ void Parser::history_pull() {
                        token_history.begin());
 }
 
-Token Parser::tokenize_word(char32_t leading) {
+Token Parser::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_ucs4(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -162,7 +162,7 @@ Token Parser::tokenize_numeric_literal(char32_t leading) {
   std::int64_t num_literal{};
   std::from_chars(numeric_str.data(), numeric_str.data() + numeric_str.size(),
                   num_literal);
-  return NumericLiteral{num_literal};
+  return num_literal;
 }
 
 static const std::array legal_punct = std::to_array<char32_t>(
@@ -183,7 +183,7 @@ Token Parser::tokenize() {
                  [leading](char quote) { return leading == quote; }))
       token_ret = tokenize_string_literal(leading);
     else if (uc_is_property_xid_start(leading) || leading == '_')
-      token_ret = tokenize_word(leading);
+      token_ret = tokenize_identifier(leading);
     else if (std::ranges::binary_search(legal_punct, leading))
       token_ret = leading;
     else if (std::isdigit(leading))
@@ -301,8 +301,9 @@ Expression Parser::parse_expression() { return parse_additive_expr(); }
 Expression Parser::parse_primary_expr() {
   return tokenize().visit([](auto t) -> Expression {
     if constexpr (std::is_same_v<decltype(t), StringHandle> ||
-                  std::is_same_v<decltype(t), NumericLiteral> ||
-                  std::is_same_v<decltype(t), Identifier>)
+                  std::is_same_v<decltype(t), Identifier> ||
+                  std::is_same_v<decltype(t), std::int64_t> ||
+                  std::is_same_v<decltype(t), double>)
       return t;
     throw ScriptError{UnexpectedToken{}};
   });
@@ -405,57 +406,78 @@ Dynamic Script::exec_reduce(std::size_t function_handle,
   auto reduced_args =
       expr_call.arguments | std::views::transform(reduce_argument);
   std::vector<Dynamic> arguments{std::from_range, reduced_args};
-  auto reduce_intrinsic_call = [&](auto intrinsic_tag) -> Dynamic {
+  auto reduce_intrinsic_call = [&](auto intrinsic_tag) {
     return instrinsic_call(intrinsic_tag, expr_call.property,
                            std::move(arguments));
   };
-  auto reduce_call = [&](auto dynamic_alt) -> Dynamic {
+  auto reduce_method_call = [&](auto dynamic_alt) -> Dynamic {
     if constexpr (std::is_same_v<decltype(dynamic_alt), IntrinsicHandle>)
-      return std::visit(reduce_intrinsic_call, dynamic_alt);
-    return std::monostate{};
+      return dynamic_alt.visit(reduce_intrinsic_call);
+    return {};
   };
-  return std::visit(reduce_call,
-                    exec_reduce(function_handle, expr_call.object));
+  return exec_reduce(function_handle, expr_call.object)
+      .visit(reduce_method_call);
 }
 
 Dynamic Script::exec_reduce(std::size_t function_handle,
                             FunctionCallExpression &expr_call) {
   Dynamic dynamic_callee{exec_reduce(function_handle, expr_call.callee)};
-  if (not std::holds_alternative<FunctionHandle>(dynamic_callee))
+  auto match_function_handle = [&](auto dynamic_alt) -> std::size_t {
+    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionHandle>)
+      return dynamic_alt.pool_idx;
     throw ScriptError{InvalidFunctionCall{}};
-  std::size_t callee_handle{std::get<FunctionHandle>(dynamic_callee).pool_idx};
-  std::size_t blueprint_handle{function_pool[callee_handle].blueprint_handle};
-  auto match_function_stop = [](Statement statement) {
-    return !std::holds_alternative<ReturnStatement>(statement);
   };
-  for (Statement statement : std::ranges::take_while_view{
-           blueprint_pool[blueprint_handle].body, match_function_stop})
+  std::size_t callee_handle{std::visit(match_function_handle, dynamic_callee)};
+  std::size_t blueprint_handle{function_pool[callee_handle].blueprint_handle};
+  for (Statement statement : blueprint_pool[blueprint_handle].body) {
     exec_reduce(callee_handle, statement);
+    if (std::holds_alternative<ReturnStatement>(statement))
+      break;
+  }
   return function_pool[function_handle].return_val;
 }
 
 Dynamic Script::exec_reduce(std::size_t function_handle,
+                            BinaryExpression &expression) {
+  return {};
+}
+
+Dynamic Script::exec_reduce(std::size_t function_handle,
+                            MemberExpression &expression) {
+  return {};
+}
+
+Dynamic Script::exec_reduce(std::size_t function_handle,
+                            ExpressionHandle expr_handle) {
+  return expr_pool[expr_handle.pool_idx].visit([&](auto &exprnode_alt) {
+    return exec_reduce(function_handle, exprnode_alt);
+  });
+}
+
+Dynamic Script::exec_reduce(std::size_t function_handle,
+                            StringHandle string_handle) {
+  return {};
+}
+
+Dynamic Script::exec_reduce(std::size_t function_handle, std::int64_t number) {
+  return {};
+}
+
+Dynamic Script::exec_reduce(std::size_t function_handle, double number) {
+  return {};
+}
+
+Dynamic Script::exec_reduce(std::size_t function_handle,
                             Expression expression) {
-  auto reduce_node = [&](auto &node) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(node), FunctionCallExpression &> ||
-                  std::is_same_v<decltype(node), MethodCallExpression &>)
-      return exec_reduce(function_handle, node);
-    return std::monostate{};
-  };
-  auto reduce_expr = [&](auto expr_alt) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(expr_alt), ExpressionHandle>)
-      return std::visit(reduce_node, expr_pool[expr_alt.pool_idx]);
-    if constexpr (std::is_same_v<decltype(expr_alt), Identifier>)
-      return exec_reduce(function_handle, expr_alt);
-    return std::monostate{};
-  };
-  return std::visit(reduce_expr, expression);
+  return expression.visit([&](auto &expression_alt) {
+    return exec_reduce(function_handle, expression_alt);
+  });
 }
 
 Dynamic Script::global_get(AbstractWord word) {
   if (word == AbstractWord{AnchoredWord::W_CONSOLE})
     return ConsoleHandle{};
-  return std::monostate{};
+  return {};
 }
 
 std::generator<std::size_t>
@@ -490,7 +512,9 @@ Dynamic Script::exec_reduce(std::size_t function_handle,
 }
 
 void Script::exec_reduce(std::size_t function_handle,
-                         VariableDeclaration declaration) {}
+                         VariableDeclaration declaration) {
+  exec_reduce(function_handle, declaration.initializer);
+}
 
 void Script::exec_reduce(std::size_t function_handle,
                          ReturnStatement statement) {
@@ -512,8 +536,7 @@ FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
   for (auto [nested_name, nested_blueprint] :
        blueprint_pool[blueprint_handle].nested_blueprint) {
     auto lower_bound = std::ranges::lower_bound(scope_shape, nested_name);
-    if (lower_bound == scope_shape.end() || *lower_bound != nested_name)
-      assert(0);
+    assert(lower_bound != scope_shape.end() && *lower_bound == nested_name);
     std::size_t scope_idx = std::distance(scope_shape.begin(), lower_bound);
     FunctionHandle nested_function{
         bootstrap(nested_blueprint, function_handle)};
@@ -533,6 +556,6 @@ Dynamic Script::instrinsic_call(ConsoleHandle, AbstractWord property,
                                 std::vector<Dynamic> arguments) {
   if (property == AbstractWord{AnchoredWord::W_LOG})
     std::println("default message!");
-  return std::monostate{};
+  return {};
 }
 } // namespace Manadrain
