@@ -9,39 +9,38 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_map<std::string_view, ReservedWord> reserved_atlas{
-    {"const", ReservedWord::W_CONST},
-    {"let", ReservedWord::W_LET},
-    {"var", ReservedWord::W_VAR},
-    {"class", ReservedWord::W_CLASS},
-    {"function", ReservedWord::W_FUNCTION},
-    {"return", ReservedWord::W_RETURN},
-    {"import", ReservedWord::W_IMPORT},
-    {"export", ReservedWord::W_EXPORT},
-    {"from", ReservedWord::W_FROM},
-    {"as", ReservedWord::W_AS},
-    {"default", ReservedWord::W_DEFAULT},
-    {"undefined", ReservedWord::W_UNDEFINED},
-    {"null", ReservedWord::W_NULL},
-    {"true", ReservedWord::W_TRUE},
-    {"false", ReservedWord::W_FALSE},
-    {"if", ReservedWord::W_IF},
-    {"else", ReservedWord::W_ELSE},
-    {"while", ReservedWord::W_WHILE},
-    {"for", ReservedWord::W_FOR},
-    {"do", ReservedWord::W_DO},
-    {"break", ReservedWord::W_BREAK},
-    {"continue", ReservedWord::W_CONTINUE},
-    {"switch", ReservedWord::W_SWITCH}};
+static const std::unordered_map<std::string_view, std::int64_t> intrinsic_atlas{
+    {"const", W_CONST},
+    {"let", W_LET},
+    {"var", W_VAR},
+    {"class", W_CLASS},
+    {"function", W_FUNCTION},
+    {"return", W_RETURN},
+    {"import", W_IMPORT},
+    {"export", W_EXPORT},
+    {"from", W_FROM},
+    {"as", W_AS},
+    {"default", W_DEFAULT},
+    {"undefined", W_UNDEFINED},
+    {"null", W_NULL},
+    {"true", W_TRUE},
+    {"false", W_FALSE},
+    {"if", W_IF},
+    {"else", W_ELSE},
+    {"while", W_WHILE},
+    {"for", W_FOR},
+    {"do", W_DO},
+    {"break", W_BREAK},
+    {"continue", W_CONTINUE},
+    {"switch", W_SWITCH},
+    {"console", W_CONSOLE},
+    {"log", W_LOG}};
 static const std::array reserved_pool{std::to_array<std::string_view>(
-    {"",          "const",  "let",    "var",   "class",    "function",
-     "return",    "import", "export", "from",  "as",       "default",
-     "undefined", "null",   "true",   "false", "if",       "else",
-     "while",     "for",    "do",     "break", "continue", "switch"})};
-static const std::unordered_map<std::string_view, AnchoredWord> anchored_atlas{
-    {"console", AnchoredWord::W_CONSOLE}, {"log", AnchoredWord::W_LOG}};
-static const std::array anchored_pool{
-    std::to_array<std::string_view>({"", "console", "log"})};
+    {"const",   "let",       "var",    "class",   "function",
+     "return",  "import",    "export", "from",    "as",
+     "default", "undefined", "null",   "true",    "false",
+     "if",      "else",      "while",  "for",     "do",
+     "break",   "continue",  "switch", "console", "log"})};
 
 std::optional<char32_t> Parser::forward() {
   if (position >= text_size) {
@@ -108,17 +107,18 @@ Token Parser::tokenize_identifier(char32_t leading) {
       std::views::transform(traverse_ucs4) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
-  auto iter_reserved = reserved_atlas.find(identifier_str);
-  if (iter_reserved != reserved_atlas.end())
-    return iter_reserved->second;
-  auto iter_anchored = anchored_atlas.find(identifier_str);
-  if (iter_anchored != anchored_atlas.end())
-    return Identifier{iter_anchored->second};
-  auto [iter_atlas, did_insert] =
-      atom_atlas.insert({identifier_str, atom_pool.size()});
-  if (did_insert)
-    atom_pool.push_back(std::move(identifier_str));
-  return Identifier{AtomizedWord{iter_atlas->second}};
+  auto iter_intrinsic = intrinsic_atlas.find(identifier_str);
+  if (iter_intrinsic != intrinsic_atlas.end())
+    return iter_intrinsic->second < reserved_count
+               ? Token{ReservedWord{iter_intrinsic->second}}
+               : Token{Identifier{~iter_intrinsic->second}};
+  else {
+    auto [iter_atom, did_insert] =
+        atom_atlas.insert({identifier_str, atom_pool.size()});
+    if (did_insert)
+      atom_pool.push_back(std::move(identifier_str));
+    return Identifier{iter_atom->second};
+  }
 }
 
 Token Parser::tokenize_string_literal(char32_t separator) {
@@ -135,17 +135,14 @@ Token Parser::tokenize_string_literal(char32_t separator) {
       throw ScriptError{UnexpectedStringEnd{}};
     literal_str.append_range(traverse_ucs4(*leading));
   }
-  auto iter_reserved = reserved_atlas.find(literal_str);
-  if (iter_reserved != reserved_atlas.end())
-    return StringHandle{iter_reserved->second};
-  auto iter_anchored = anchored_atlas.find(literal_str);
-  if (iter_anchored != anchored_atlas.end())
-    return StringHandle{iter_anchored->second};
-  auto [iter_atlas, did_insert] =
+  auto iter_intrinsic = intrinsic_atlas.find(literal_str);
+  if (iter_intrinsic != intrinsic_atlas.end())
+    return StringHandle{~iter_intrinsic->second};
+  auto [iter_atom, did_insert] =
       atom_atlas.insert({literal_str, atom_pool.size()});
   if (did_insert)
     atom_pool.push_back(std::move(literal_str));
-  return StringHandle{AtomizedWord{iter_atlas->second}};
+  return StringHandle{iter_atom->second};
 }
 
 Token Parser::tokenize_numeric_literal(char32_t leading) {
@@ -226,29 +223,29 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
   auto match_reserved = [](auto t) {
     if constexpr (std::is_same_v<decltype(t), ReservedWord>)
       return t;
-    return ReservedWord::MONOSTATE;
+    return ReservedWord{-1};
   };
   ReservedWord word{leading.visit(match_reserved)};
   Statement statement;
-  if (word == ReservedWord::W_FUNCTION) {
+  if (word.handle == W_FUNCTION) {
     std::size_t blueprint_handle{parse_function_decl()};
-    AbstractWord function_name{blueprint_pool[blueprint_handle].function_name};
+    std::int64_t function_name{blueprint_pool[blueprint_handle].function_name};
     if (std::ranges::binary_search(blueprint.scope_shape, function_name))
       throw ScriptError{InvalidDeclaration{}};
     blueprint.nested_blueprint.push_back({function_name, blueprint_handle});
     auto lower_bound =
         std::ranges::lower_bound(blueprint.scope_shape, function_name);
     blueprint.scope_shape.insert(lower_bound, function_name);
-  } else if (word == ReservedWord::W_LET) {
+  } else if (word.handle == W_LET) {
     VariableDeclaration declaration{parse_variable_decl()};
-    AbstractWord variable_name{declaration.variable_name};
+    std::int64_t variable_name{declaration.variable_name};
     if (std::ranges::binary_search(blueprint.scope_shape, variable_name))
       throw ScriptError{InvalidDeclaration{}};
     auto lower_bound =
         std::ranges::lower_bound(blueprint.scope_shape, variable_name);
     blueprint.scope_shape.insert(lower_bound, variable_name);
     blueprint.body.push_back(declaration);
-  } else if (word == ReservedWord::W_RETURN) {
+  } else if (word.handle == W_RETURN) {
     blueprint.body.push_back(parse_expression());
     assert_punct(tokenize(), ';');
   } else {
@@ -259,12 +256,12 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
 }
 
 std::size_t Parser::parse_function_decl() {
-  auto extract_name = [](auto token) -> AbstractWord {
+  auto extract_name = [](auto token) -> std::int64_t {
     if constexpr (std::is_same_v<decltype(token), Identifier>)
       return token.handle;
     throw ScriptError{MissingFunctionName{}};
   };
-  AbstractWord function_name{std::visit(extract_name, tokenize())};
+  std::int64_t function_name{std::visit(extract_name, tokenize())};
   for (char function_punct : std::to_array({'(', ')', '{'}))
     assert_punct(tokenize(), function_punct);
   auto match_function_end = [&](Token token) {
@@ -284,7 +281,7 @@ std::size_t Parser::parse_function_decl() {
 }
 
 VariableDeclaration Parser::parse_variable_decl() {
-  auto extract_name = [](auto token) -> AbstractWord {
+  auto extract_name = [](auto token) -> std::int64_t {
     if constexpr (std::is_same_v<decltype(token), Identifier>)
       return token.handle;
     throw ScriptError{MissingVariableName{}};
@@ -423,10 +420,11 @@ Dynamic Script::evaluate(std::size_t function_handle,
   Dynamic dynamic_callee{evaluate(function_handle, expr_call.callee)};
   auto match_function_handle = [&](auto dynamic_alt) -> std::size_t {
     if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionHandle>)
-      return dynamic_alt.pool_idx;
+      return dynamic_alt.handle;
     throw ScriptError{InvalidFunctionCall{}};
   };
-  std::size_t callee_handle{std::visit(match_function_handle, dynamic_callee)};
+  std::size_t callee_handle{
+      std::visit(match_function_handle, dynamic_callee.val)};
   std::size_t blueprint_handle{function_pool[callee_handle].blueprint_handle};
   for (Statement statement : blueprint_pool[blueprint_handle].body) {
     evaluate(callee_handle, statement);
@@ -455,13 +453,13 @@ Dynamic Script::evaluate(std::size_t function_handle,
 
 Dynamic Script::evaluate(std::size_t function_handle,
                          StringHandle string_handle) {
-  return string_handle;
+  return Dynamic{string_handle};
 }
 Dynamic Script::evaluate(std::size_t function_handle, std::int64_t number) {
-  return number;
+  return Dynamic{number};
 }
 Dynamic Script::evaluate(std::size_t function_handle, double number) {
-  return number;
+  return Dynamic{number};
 }
 
 Dynamic Script::evaluate(std::size_t function_handle, Expression expression) {
@@ -470,8 +468,8 @@ Dynamic Script::evaluate(std::size_t function_handle, Expression expression) {
   });
 }
 
-Dynamic Script::global_get(AbstractWord word) {
-  if (word == AbstractWord{AnchoredWord::W_CONSOLE})
+Dynamic Script::global_get(std::int64_t word) {
+  if (word == W_CONSOLE)
     return ConsoleHandle{};
   return {};
 }
@@ -489,7 +487,7 @@ Script::traverse_function_closure(std::size_t function_handle) {
 }
 
 std::optional<Dynamic> *Script::chase_variable(std::size_t function_handle,
-                                               AbstractWord var_handle) {
+                                               std::int64_t var_handle) {
   for (std::size_t current_handle :
        traverse_function_closure(function_handle)) {
     std::size_t blueprint_handle{
@@ -539,7 +537,7 @@ void Script::evaluate(std::size_t function_handle, Statement statement) {
 FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
                                  std::optional<std::size_t> parent_handle) {
   ObjectShape &scope_shape = blueprint_pool[blueprint_handle].scope_shape;
-  std::size_t function_handle{function_pool.size()};
+  std::int64_t function_handle = function_pool.size();
   function_pool.push_back(VanillaFunction{blueprint_handle, parent_handle});
   function_pool[function_handle].own_scope.resize(scope_shape.size());
   for (auto [nested_name, nested_blueprint] :
@@ -549,21 +547,22 @@ FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
     std::size_t scope_idx = std::distance(scope_shape.begin(), lower_bound);
     FunctionHandle nested_function{
         bootstrap(nested_blueprint, function_handle)};
-    function_pool[function_handle].own_scope[scope_idx] = nested_function;
+    function_pool[function_handle].own_scope[scope_idx] =
+        Dynamic{nested_function};
   }
   return FunctionHandle{function_handle};
 }
 
 void Script::evaluate() {
   std::size_t blueprint_handle{
-      function_pool[main_function.pool_idx].blueprint_handle};
+      function_pool[main_function.handle].blueprint_handle};
   for (Statement statement : blueprint_pool[blueprint_handle].body)
-    evaluate(main_function.pool_idx, statement);
+    evaluate(main_function.handle, statement);
 }
 
-Dynamic Script::instrinsic_call(ConsoleHandle, AbstractWord property,
+Dynamic Script::instrinsic_call(ConsoleHandle, std::int64_t property,
                                 std::vector<Dynamic> arguments) {
-  if (property == AbstractWord{AnchoredWord::W_LOG})
+  if (property == W_LOG)
     std::println("default message!");
   return {};
 }

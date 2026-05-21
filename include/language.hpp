@@ -10,8 +10,7 @@
 #include <vector>
 
 namespace Manadrain {
-enum class ReservedWord {
-  MONOSTATE,
+enum {
   W_CONST,
   W_LET,
   W_VAR,
@@ -34,19 +33,19 @@ enum class ReservedWord {
   W_DO,
   W_BREAK,
   W_CONTINUE,
-  W_SWITCH
+  W_SWITCH,
+  W_CONSOLE,
+  W_LOG
 };
-enum class AnchoredWord { MONOSTATE, W_CONSOLE, W_LOG };
-struct AtomizedWord {
-  std::size_t pool_idx;
-  auto operator<=>(const AtomizedWord &) const = default;
+inline constexpr std::int64_t reserved_count = W_SWITCH + 1;
+struct ReservedWord {
+  std::int64_t handle;
 };
-using AbstractWord = std::variant<ReservedWord, AnchoredWord, AtomizedWord>;
 struct Identifier {
-  AbstractWord handle;
+  std::int64_t handle;
 };
 struct StringHandle {
-  AbstractWord handle;
+  std::int64_t handle;
 };
 enum class Operator {
   DOUBLE_EQUALS,
@@ -112,7 +111,7 @@ struct BinaryExpression {
 };
 struct MemberExpression {
   Expression object;
-  AbstractWord property;
+  std::int64_t property;
 };
 struct FunctionCallExpression {
   Expression callee;
@@ -127,7 +126,7 @@ using ExpressionNode =
                  MethodCallExpression>;
 
 struct VariableDeclaration {
-  AbstractWord variable_name;
+  std::int64_t variable_name;
   Expression initializer;
 };
 struct ReturnStatement {
@@ -139,23 +138,28 @@ using Statement =
 struct ConsoleHandle {};
 using IntrinsicHandle = std::variant<ConsoleHandle>;
 
+struct Dynamic;
 struct ObjectHandle {
-  std::size_t pool_idx;
+  std::int64_t handle;
   bool null_reference;
 };
 struct FunctionHandle {
-  std::size_t pool_idx;
+  std::int64_t handle;
+  std::optional<std::indirect<Dynamic>> context;
 };
-using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
-                             IntrinsicHandle, ObjectHandle, FunctionHandle>;
+struct Dynamic {
+  std::variant<std::monostate, StringHandle, std::int64_t, double,
+               IntrinsicHandle, ObjectHandle, FunctionHandle>
+      val;
+};
 
-using ObjectShape = std::vector<AbstractWord>;
+using ObjectShape = std::vector<std::int64_t>;
 using VanillaObject = std::vector<Dynamic>;
 
 struct FunctionBlueprint {
-  AbstractWord function_name;
+  std::int64_t function_name;
   ObjectShape scope_shape;
-  std::vector<std::pair<AbstractWord, std::size_t>> nested_blueprint;
+  std::vector<std::pair<std::int64_t, std::size_t>> nested_blueprint;
   std::vector<Statement> body;
 };
 using FunctionScope = std::vector<std::optional<Dynamic>>;
@@ -167,7 +171,7 @@ struct VanillaFunction {
 };
 
 struct ShapeTrie {
-  std::flat_map<AbstractWord,
+  std::flat_map<std::int64_t,
                 std::variant<std::size_t, std::indirect<ShapeTrie>>>
       children;
 };
@@ -178,7 +182,7 @@ public:
 
 protected:
   std::vector<ExpressionNode> expr_pool;
-  std::unordered_map<std::string, std::size_t> atom_atlas;
+  std::unordered_map<std::string, std::int64_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
   FunctionHandle main_function;
@@ -194,12 +198,12 @@ protected:
 
 private:
   std::optional<Dynamic> *chase_variable(std::size_t function_handle,
-                                         AbstractWord var_handle);
+                                         std::int64_t var_handle);
   std::generator<std::size_t>
   traverse_function_closure(std::size_t function_handle);
 
-  Dynamic global_get(AbstractWord word);
-  Dynamic instrinsic_call(ConsoleHandle, AbstractWord property,
+  Dynamic global_get(std::int64_t word);
+  Dynamic instrinsic_call(ConsoleHandle, std::int64_t property,
                           std::vector<Dynamic> arguments);
 
   Dynamic evaluate(std::size_t function_handle, BinaryExpression &expression);
