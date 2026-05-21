@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace Manadrain {
-enum {
+enum IntrinsicWord : std::ptrdiff_t {
   W_CONST,
   W_LET,
   W_VAR,
@@ -37,15 +37,15 @@ enum {
   W_CONSOLE,
   W_LOG
 };
-inline constexpr std::int64_t reserved_count = W_SWITCH + 1;
+inline constexpr std::ptrdiff_t reserved_count = W_SWITCH + 1;
 struct ReservedWord {
-  std::int64_t handle;
+  std::ptrdiff_t handle;
 };
 struct Identifier {
-  std::int64_t handle;
+  std::ptrdiff_t handle;
 };
 struct StringHandle {
-  std::int64_t handle;
+  std::ptrdiff_t handle;
 };
 enum class Operator {
   DOUBLE_EQUALS,
@@ -111,22 +111,17 @@ struct BinaryExpression {
 };
 struct MemberExpression {
   Expression object;
-  std::int64_t property;
+  std::ptrdiff_t property;
 };
 struct FunctionCallExpression {
   Expression callee;
   std::vector<Expression> arguments;
 };
-struct MethodCallExpression {
-  MemberExpression method;
-  std::vector<Expression> arguments;
-};
 using ExpressionNode =
-    std::variant<BinaryExpression, MemberExpression, FunctionCallExpression,
-                 MethodCallExpression>;
+    std::variant<BinaryExpression, MemberExpression, FunctionCallExpression>;
 
 struct VariableDeclaration {
-  std::int64_t variable_name;
+  std::ptrdiff_t variable_name;
   Expression initializer;
 };
 struct ReturnStatement {
@@ -135,61 +130,56 @@ struct ReturnStatement {
 using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-struct ConsoleHandle {};
-using IntrinsicHandle = std::variant<ConsoleHandle>;
+enum IntrinsicHandle : std::ptrdiff_t { H_CONSOLE, H_GLOBAL, H_LOG, H_MAIN };
 
 struct Dynamic;
 struct ObjectHandle {
-  std::int64_t handle;
+  std::ptrdiff_t handle;
   bool null_reference;
 };
 struct FunctionHandle {
-  std::int64_t handle;
+  std::ptrdiff_t handle;
   std::optional<std::indirect<Dynamic>> context;
 };
 struct Dynamic {
-  std::variant<std::monostate, StringHandle, std::int64_t, double,
-               IntrinsicHandle, ObjectHandle, FunctionHandle>
+  std::variant<std::monostate, StringHandle, std::int64_t, double, ObjectHandle,
+               FunctionHandle>
       val;
 };
 
-using ObjectShape = std::vector<std::int64_t>;
-using VanillaObject = std::vector<Dynamic>;
+struct VanillaObject {
+  std::ptrdiff_t shape_handle;
+  std::vector<Dynamic> properties;
+};
+using ObjectShape = std::vector<std::ptrdiff_t>;
 
 struct FunctionBlueprint {
-  std::int64_t function_name;
+  std::ptrdiff_t function_name;
   ObjectShape scope_shape;
-  std::vector<std::pair<std::int64_t, std::size_t>> nested_blueprint;
+  std::vector<std::pair<std::ptrdiff_t, std::size_t>> nested_blueprint;
   std::vector<Statement> body;
 };
-using FunctionScope = std::vector<std::optional<Dynamic>>;
 struct VanillaFunction {
   std::size_t blueprint_handle;
   std::optional<std::size_t> parent_handle;
-  FunctionScope own_scope;
+  std::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
-};
-
-struct ShapeTrie {
-  std::flat_map<std::int64_t,
-                std::variant<std::size_t, std::indirect<ShapeTrie>>>
-      children;
 };
 
 class Script {
 public:
+  Script();
   void evaluate();
 
 protected:
   std::vector<ExpressionNode> expr_pool;
-  std::unordered_map<std::string, std::int64_t> atom_atlas;
+  std::unordered_map<std::string, std::ptrdiff_t> atom_atlas;
   std::vector<std::string> atom_pool;
 
-  FunctionHandle main_function;
+  VanillaFunction main_function;
   std::vector<FunctionBlueprint> blueprint_pool;
   std::vector<VanillaFunction> function_pool;
 
-  ShapeTrie shape_trie;
   std::vector<ObjectShape> shape_pool;
   std::vector<VanillaObject> object_pool;
 
@@ -197,19 +187,18 @@ protected:
                            std::optional<std::size_t> parent_scope);
 
 private:
-  std::optional<Dynamic> *chase_variable(std::size_t function_handle,
-                                         std::int64_t var_handle);
+  VanillaObject console;
+  VanillaObject global_this;
+
   std::generator<std::size_t>
   traverse_function_closure(std::size_t function_handle);
-
-  Dynamic global_get(std::int64_t word);
-  Dynamic instrinsic_call(ConsoleHandle, std::int64_t property,
-                          std::vector<Dynamic> arguments);
+  std::optional<Dynamic> *get_variable(std::size_t function_handle,
+                                       std::ptrdiff_t var_handle);
+  Dynamic *get_property(std::ptrdiff_t object_handle,
+                        std::ptrdiff_t property_handle);
 
   Dynamic evaluate(std::size_t function_handle, BinaryExpression &expression);
   Dynamic evaluate(std::size_t function_handle, MemberExpression &expression);
-  Dynamic evaluate(std::size_t function_handle,
-                   MethodCallExpression &expression);
   Dynamic evaluate(std::size_t function_handle,
                    FunctionCallExpression &expression);
   Dynamic evaluate(std::size_t function_handle, Expression expression);
