@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
   parser.parse_text();
 
   Manadrain::Script script{std::move(parser)};
-  script.execute();
+  script.evaluate();
 
   return 0;
 }

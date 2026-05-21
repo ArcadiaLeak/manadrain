@@ -119,8 +119,7 @@ struct FunctionCallExpression {
   std::vector<Expression> arguments;
 };
 struct MethodCallExpression {
-  Expression object;
-  AbstractWord property;
+  MemberExpression method;
   std::vector<Expression> arguments;
 };
 using ExpressionNode =
@@ -147,8 +146,8 @@ struct ObjectHandle {
 struct FunctionHandle {
   std::size_t pool_idx;
 };
-using Dynamic = std::variant<std::monostate, StringHandle, IntrinsicHandle,
-                             ObjectHandle, FunctionHandle>;
+using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
+                             IntrinsicHandle, ObjectHandle, FunctionHandle>;
 
 using ObjectShape = std::vector<AbstractWord>;
 using VanillaObject = std::vector<Dynamic>;
@@ -175,7 +174,7 @@ struct ShapeTrie {
 
 class Script {
 public:
-  void execute();
+  void evaluate();
 
 protected:
   std::vector<ExpressionNode> expr_pool;
@@ -194,6 +193,8 @@ protected:
                            std::optional<std::size_t> parent_scope);
 
 private:
+  std::optional<Dynamic> *chase_variable(std::size_t function_handle,
+                                         AbstractWord var_handle);
   std::generator<std::size_t>
   traverse_function_closure(std::size_t function_handle);
 
@@ -201,29 +202,23 @@ private:
   Dynamic instrinsic_call(ConsoleHandle, AbstractWord property,
                           std::vector<Dynamic> arguments);
 
-  Dynamic exec_reduce(std::size_t function_handle,
-                      BinaryExpression &expression);
-  Dynamic exec_reduce(std::size_t function_handle,
-                      MemberExpression &expression);
-  Dynamic exec_reduce(std::size_t function_handle,
-                      MethodCallExpression &expression);
-  Dynamic exec_reduce(std::size_t function_handle,
-                      FunctionCallExpression &expression);
-  Dynamic exec_reduce(std::size_t function_handle, Expression expression);
-  Dynamic exec_reduce(std::size_t function_handle, Identifier identifier);
-  Dynamic exec_reduce(std::size_t function_handle,
-                      ExpressionHandle expr_handle);
-  Dynamic exec_reduce(std::size_t function_handle, StringHandle string_handle);
-  Dynamic exec_reduce(std::size_t function_handle, std::int64_t number);
-  Dynamic exec_reduce(std::size_t function_handle, double number);
-  Dynamic exec_reduce(std::size_t function_handle, std::monostate) {
-    return {};
-  }
+  Dynamic evaluate(std::size_t function_handle, BinaryExpression &expression);
+  Dynamic evaluate(std::size_t function_handle, MemberExpression &expression);
+  Dynamic evaluate(std::size_t function_handle,
+                   MethodCallExpression &expression);
+  Dynamic evaluate(std::size_t function_handle,
+                   FunctionCallExpression &expression);
+  Dynamic evaluate(std::size_t function_handle, Expression expression);
+  Dynamic evaluate(std::size_t function_handle, Identifier identifier);
+  Dynamic evaluate(std::size_t function_handle, ExpressionHandle expr_handle);
+  Dynamic evaluate(std::size_t function_handle, StringHandle string_handle);
+  Dynamic evaluate(std::size_t function_handle, std::int64_t number);
+  Dynamic evaluate(std::size_t function_handle, double number);
+  Dynamic evaluate(std::size_t function_handle, std::monostate) { return {}; }
 
-  void exec_reduce(std::size_t function_handle,
-                   VariableDeclaration declaration);
-  void exec_reduce(std::size_t function_handle, ReturnStatement statement);
-  void exec_reduce(std::size_t function_handle, Statement statement);
+  void evaluate(std::size_t function_handle, VariableDeclaration declaration);
+  void evaluate(std::size_t function_handle, ReturnStatement statement);
+  void evaluate(std::size_t function_handle, Statement statement);
 };
 
 class Parser : public Script {
