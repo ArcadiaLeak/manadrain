@@ -1,4 +1,3 @@
-#include <any>
 #include <cstdint>
 #include <flat_map>
 #include <generator>
@@ -113,7 +112,6 @@ struct ObjectHandle {
 };
 struct FunctionHandle {
   std::ptrdiff_t offset;
-  std::any context;
 };
 using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
                              ObjectHandle, FunctionHandle>;
@@ -168,19 +166,51 @@ private:
   Dynamic *get_property(VanillaObject &object,
                         std::string_view property_handle);
 
+  Dynamic evaluate_property(std::string_view property, std::monostate);
+  Dynamic evaluate_property(std::string_view property,
+                            StringHandle string_handle);
+  Dynamic evaluate_property(std::string_view property, std::int64_t number);
+  Dynamic evaluate_property(std::string_view property, double number);
+  Dynamic evaluate_property(std::string_view property,
+                            ObjectHandle object_handle);
+  Dynamic evaluate_property(std::string_view property,
+                            FunctionHandle function_handle);
+
+  std::pair<Dynamic, Dynamic>
+  evaluate_callee(VanillaFunction &function,
+                  const BinaryExpression &expression);
+  std::pair<Dynamic, Dynamic>
+  evaluate_callee(VanillaFunction &function,
+                  const MemberExpression &expression);
+  std::pair<Dynamic, Dynamic>
+  evaluate_callee(VanillaFunction &function,
+                  const FunctionCallExpression &expression);
+  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+                                              Identifier identifier);
+  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+                                              const ExpressionNode *expr_ptr);
+  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+                                              StringHandle string_handle);
+  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+                                              std::int64_t number);
+  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+                                              double number);
+  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+                                              std::monostate);
+
   Dynamic evaluate(VanillaFunction &function,
                    const BinaryExpression &expression);
   Dynamic evaluate(VanillaFunction &function,
                    const MemberExpression &expression);
   Dynamic evaluate(VanillaFunction &function,
                    const FunctionCallExpression &expression);
-  Dynamic evaluate(VanillaFunction &function, Expression expression);
   Dynamic evaluate(VanillaFunction &function, Identifier identifier);
   Dynamic evaluate(VanillaFunction &function, const ExpressionNode *expr_ptr);
   Dynamic evaluate(VanillaFunction &function, StringHandle string_handle);
   Dynamic evaluate(VanillaFunction &function, std::int64_t number);
   Dynamic evaluate(VanillaFunction &function, double number);
   Dynamic evaluate(VanillaFunction &function, std::monostate) { return {}; }
+  Dynamic evaluate(VanillaFunction &function, Expression expression);
 
   void evaluate(VanillaFunction &function, VariableDeclaration declaration);
   void evaluate(VanillaFunction &function, ReturnStatement statement);

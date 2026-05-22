@@ -396,61 +396,6 @@ Script::Script() : console{shape_console}, global_this{shape_global_this} {
       ObjectHandle{~H_CONSOLE};
 }
 
-Dynamic Script::evaluate(VanillaFunction &function,
-                         const FunctionCallExpression &expr_call) {
-  Dynamic dynamic_callee{evaluate(function, expr_call.callee)};
-  auto match_function_handle = [&](auto dynamic_alt) -> std::ptrdiff_t {
-    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionHandle>)
-      return dynamic_alt.offset;
-    throw ScriptError{InvalidFunctionCall{}};
-  };
-  std::optional<std::ptrdiff_t> callee_handle{
-      std::visit(match_function_handle, dynamic_callee)};
-  if (*callee_handle < 0)
-    callee_handle = std::nullopt;
-  VanillaFunction &callee_ref{*function_pool[callee_handle.value()]};
-  const FunctionBlueprint *blueprint_ptr{callee_ref.blueprint_ptr};
-  for (Statement statement : blueprint_ptr->body) {
-    evaluate(callee_ref, statement);
-    if (std::holds_alternative<ReturnStatement>(statement))
-      break;
-  }
-  return callee_ref.return_val;
-}
-
-Dynamic Script::evaluate(VanillaFunction &function,
-                         const BinaryExpression &expression) {
-  return {};
-}
-
-Dynamic Script::evaluate(VanillaFunction &function,
-                         const MemberExpression &expression) {
-  return {};
-}
-
-Dynamic Script::evaluate(VanillaFunction &function,
-                         const ExpressionNode *expr_ptr) {
-  return expr_ptr->alt.visit([&](const auto &exprnode_alt) {
-    return evaluate(function, exprnode_alt);
-  });
-}
-
-Dynamic Script::evaluate(VanillaFunction &function,
-                         StringHandle string_handle) {
-  return Dynamic{string_handle};
-}
-Dynamic Script::evaluate(VanillaFunction &function, std::int64_t number) {
-  return Dynamic{number};
-}
-Dynamic Script::evaluate(VanillaFunction &function, double number) {
-  return Dynamic{number};
-}
-
-Dynamic Script::evaluate(VanillaFunction &function, Expression expression) {
-  return expression.visit(
-      [&](auto &expression_alt) { return evaluate(function, expression_alt); });
-}
-
 std::generator<std::reference_wrapper<VanillaFunction>>
 Script::traverse_function_closure(
     std::reference_wrapper<VanillaFunction> function_ref) {
@@ -494,6 +439,133 @@ Dynamic *Script::get_property(VanillaObject &object,
   std::ptrdiff_t property_distance{
       std::distance(object.object_shape.begin(), lower_bound)};
   return std::next(object.properties.data(), property_distance);
+}
+
+Dynamic Script::evaluate_property(std::string_view property, std::monostate) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(std::string_view property,
+                                  StringHandle string_handle) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(std::string_view property,
+                                  std::int64_t number) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(std::string_view property, double number) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(std::string_view property,
+                                  ObjectHandle object_handle) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(std::string_view property,
+                                  FunctionHandle function_handle) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(VanillaFunction &function,
+                        const BinaryExpression &expression) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(VanillaFunction &function,
+                        const MemberExpression &expression) {
+  Dynamic dynamic_object{evaluate(function, expression.object)};
+  auto visit_object = [&](auto dynamic_alt) {
+    return evaluate_property(expression.property, dynamic_alt);
+  };
+  Dynamic dynamic_property{dynamic_object.visit(visit_object)};
+  return {};
+}
+
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(VanillaFunction &function,
+                        const FunctionCallExpression &expression) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+                                                    Identifier identifier) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(VanillaFunction &function,
+                        const ExpressionNode *expr_ptr) {
+  return expr_ptr->alt.visit([&](const auto &expr_alt) {
+    return evaluate_callee(function, expr_alt);
+  });
+}
+
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(VanillaFunction &function, StringHandle string_handle) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+                                                    std::int64_t number) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+                                                    double number) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+                                                    std::monostate) {
+  return {};
+}
+
+Dynamic Script::evaluate(VanillaFunction &function,
+                         const FunctionCallExpression &expr_call) {
+  auto visit_expression = [&](auto expression_alt) {
+    return evaluate_callee(function, expression_alt);
+  };
+  std::pair dynamic_callee{expr_call.callee.visit(visit_expression)};
+  return {};
+}
+
+Dynamic Script::evaluate(VanillaFunction &function,
+                         const BinaryExpression &expression) {
+  return {};
+}
+
+Dynamic Script::evaluate(VanillaFunction &function,
+                         const MemberExpression &expression) {
+  return {};
+}
+
+Dynamic Script::evaluate(VanillaFunction &function,
+                         const ExpressionNode *expr_ptr) {
+  return expr_ptr->alt.visit(
+      [&](const auto &expr_alt) { return evaluate(function, expr_alt); });
+}
+
+Dynamic Script::evaluate(VanillaFunction &function,
+                         StringHandle string_handle) {
+  return Dynamic{string_handle};
+}
+
+Dynamic Script::evaluate(VanillaFunction &function, std::int64_t number) {
+  return Dynamic{number};
+}
+
+Dynamic Script::evaluate(VanillaFunction &function, double number) {
+  return Dynamic{number};
+}
+
+Dynamic Script::evaluate(VanillaFunction &function, Expression expression) {
+  return expression.visit(
+      [&](auto expression_alt) { return evaluate(function, expression_alt); });
 }
 
 Dynamic Script::evaluate(VanillaFunction &function, Identifier identifier) {
