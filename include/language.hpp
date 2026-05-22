@@ -5,19 +5,24 @@
 #include <memory>
 #include <optional>
 #include <ranges>
-#include <unordered_set>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace Manadrain {
 struct ReservedWord {
-  std::string_view sv;
+  std::size_t offset;
 };
 struct Identifier {
-  std::string_view sv;
+  bool permanent;
+  std::size_t offset;
+  std::size_t size;
+  auto operator<=>(const Identifier &) const = default;
 };
 struct StringHandle {
-  std::string_view sv;
+  bool permanent;
+  std::size_t offset;
+  std::size_t size;
 };
 enum class Operator {
   DOUBLE_EQUALS,
@@ -80,7 +85,7 @@ struct BinaryExpression {
 };
 struct MemberExpression {
   Expression object;
-  std::string_view property;
+  Identifier property;
 };
 struct FunctionCallExpression {
   Expression callee;
@@ -91,7 +96,7 @@ struct ExpressionNode {
 };
 
 struct VariableDeclaration {
-  std::string_view variable_name;
+  Identifier variable_name;
   Expression initializer;
 };
 struct ReturnStatement {
@@ -117,14 +122,14 @@ using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
                              ObjectHandle, FunctionHandle>;
 
 struct VanillaObject {
-  std::span<const char *const> object_shape;
+  std::span<const Identifier> object_shape;
   std::vector<Dynamic> properties;
 };
 
 struct FunctionBlueprint {
-  std::string_view function_name;
-  std::vector<const char *> scope_shape;
-  std::vector<std::pair<std::string_view, const FunctionBlueprint *>>
+  Identifier function_name;
+  std::vector<Identifier> scope_shape;
+  std::vector<std::pair<Identifier, const FunctionBlueprint *>>
       nestedly_declared;
   std::vector<Statement> body;
 };
@@ -141,16 +146,16 @@ public:
   void evaluate();
 
 protected:
-  std::unordered_set<std::string_view> atom_atlas;
+  std::unordered_map<std::string_view, std::size_t> atom_atlas;
   std::vector<std::shared_ptr<const char[]>> atom_pool;
   std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
 
   VanillaFunction main_function;
   std::vector<std::shared_ptr<const FunctionBlueprint>> blueprint_pool;
-  std::vector<std::indirect<VanillaFunction>> function_pool;
+  std::vector<std::unique_ptr<VanillaFunction>> function_pool;
 
-  std::vector<std::shared_ptr<const char *const[]>> shape_pool;
-  std::vector<std::indirect<VanillaObject>> object_pool;
+  std::vector<std::shared_ptr<const Identifier[]>> shape_pool;
+  std::vector<std::unique_ptr<VanillaObject>> object_pool;
 
   void instantiate(FunctionHandle function_handle);
 
@@ -162,18 +167,15 @@ private:
   traverse_function_closure(
       std::reference_wrapper<VanillaFunction> function_ref);
   std::optional<Dynamic> *get_variable(VanillaFunction &function,
-                                       std::string_view var_handle);
-  Dynamic *get_property(VanillaObject &object,
-                        std::string_view property_handle);
+                                       Identifier var_handle);
+  Dynamic *get_property(VanillaObject &object, Identifier property_handle);
 
-  Dynamic evaluate_property(std::string_view property, std::monostate);
-  Dynamic evaluate_property(std::string_view property,
-                            StringHandle string_handle);
-  Dynamic evaluate_property(std::string_view property, std::int64_t number);
-  Dynamic evaluate_property(std::string_view property, double number);
-  Dynamic evaluate_property(std::string_view property,
-                            ObjectHandle object_handle);
-  Dynamic evaluate_property(std::string_view property,
+  Dynamic evaluate_property(Identifier property, std::monostate);
+  Dynamic evaluate_property(Identifier property, StringHandle string_handle);
+  Dynamic evaluate_property(Identifier property, std::int64_t number);
+  Dynamic evaluate_property(Identifier property, double number);
+  Dynamic evaluate_property(Identifier property, ObjectHandle object_handle);
+  Dynamic evaluate_property(Identifier property,
                             FunctionHandle function_handle);
 
   std::pair<Dynamic, Dynamic>
