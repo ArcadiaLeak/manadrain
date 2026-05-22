@@ -1,3 +1,4 @@
+#include <any>
 #include <cstdint>
 #include <flat_map>
 #include <generator>
@@ -5,47 +6,19 @@
 #include <memory>
 #include <optional>
 #include <ranges>
-#include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
 namespace Manadrain {
-enum IntrinsicWord : std::ptrdiff_t {
-  W_CONST,
-  W_LET,
-  W_VAR,
-  W_CLASS,
-  W_FUNCTION,
-  W_RETURN,
-  W_IMPORT,
-  W_EXPORT,
-  W_FROM,
-  W_AS,
-  W_DEFAULT,
-  W_UNDEFINED,
-  W_NULL,
-  W_TRUE,
-  W_FALSE,
-  W_IF,
-  W_ELSE,
-  W_WHILE,
-  W_FOR,
-  W_DO,
-  W_BREAK,
-  W_CONTINUE,
-  W_SWITCH,
-  W_CONSOLE,
-  W_LOG
-};
-inline constexpr std::ptrdiff_t reserved_count = W_SWITCH + 1;
 struct ReservedWord {
-  std::ptrdiff_t handle;
+  std::string_view sv;
 };
 struct Identifier {
-  std::ptrdiff_t handle;
+  std::string_view sv;
 };
 struct StringHandle {
-  std::ptrdiff_t handle;
+  std::string_view sv;
 };
 enum class Operator {
   DOUBLE_EQUALS,
@@ -98,12 +71,9 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct ExpressionHandle {
-  std::size_t pool_idx;
-};
+struct ExpressionNode;
 using Expression = std::variant<std::monostate, StringHandle, std::int64_t,
-                                double, Identifier, ExpressionHandle>;
-
+                                double, Identifier, const ExpressionNode *>;
 struct BinaryExpression {
   Expression left;
   Expression right;
@@ -111,17 +81,18 @@ struct BinaryExpression {
 };
 struct MemberExpression {
   Expression object;
-  std::ptrdiff_t property;
+  std::string_view property;
 };
 struct FunctionCallExpression {
   Expression callee;
   std::vector<Expression> arguments;
 };
-using ExpressionNode =
-    std::variant<BinaryExpression, MemberExpression, FunctionCallExpression>;
+struct ExpressionNode {
+  std::variant<BinaryExpression, MemberExpression, FunctionCallExpression> alt;
+};
 
 struct VariableDeclaration {
-  std::ptrdiff_t variable_name;
+  std::string_view variable_name;
   Expression initializer;
 };
 struct ReturnStatement {
@@ -131,36 +102,30 @@ using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
 enum IntrinsicHandle : std::ptrdiff_t { H_CONSOLE, H_GLOBAL, H_LOG, H_MAIN };
-
-struct Dynamic;
 struct ObjectHandle {
   std::ptrdiff_t handle;
-  bool null_reference;
 };
 struct FunctionHandle {
   std::ptrdiff_t handle;
-  std::optional<std::indirect<Dynamic>> context;
+  std::any context;
 };
-struct Dynamic {
-  std::variant<std::monostate, StringHandle, std::int64_t, double, ObjectHandle,
-               FunctionHandle>
-      val;
-};
+using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
+                             ObjectHandle, FunctionHandle>;
 
 struct VanillaObject {
-  std::ptrdiff_t shape_handle;
+  std::span<const char *const> object_shape;
   std::vector<Dynamic> properties;
 };
-using ObjectShape = std::vector<std::ptrdiff_t>;
 
 struct FunctionBlueprint {
-  std::ptrdiff_t function_name;
-  ObjectShape scope_shape;
-  std::vector<std::pair<std::ptrdiff_t, std::size_t>> nested_blueprint;
+  std::string_view function_name;
+  std::vector<const char *> scope_shape;
+  std::vector<std::pair<std::string_view, const FunctionBlueprint *>>
+      nestedly_declared;
   std::vector<Statement> body;
 };
 struct VanillaFunction {
-  std::size_t blueprint_handle;
+  const FunctionBlueprint *blueprint_handle;
   std::optional<std::size_t> parent_handle;
   std::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
@@ -172,16 +137,16 @@ public:
   void evaluate();
 
 protected:
-  std::vector<ExpressionNode> expr_pool;
-  std::unordered_map<std::string, std::ptrdiff_t> atom_atlas;
-  std::vector<std::string> atom_pool;
+  std::unordered_set<std::string_view> atom_atlas;
+  std::vector<std::shared_ptr<const char[]>> atom_pool;
+  std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
 
   VanillaFunction main_function;
-  std::vector<FunctionBlueprint> blueprint_pool;
-  std::vector<VanillaFunction> function_pool;
+  std::vector<std::shared_ptr<const FunctionBlueprint>> blueprint_pool;
+  std::vector<std::indirect<VanillaFunction>> function_pool;
 
-  std::vector<ObjectShape> shape_pool;
-  std::vector<VanillaObject> object_pool;
+  std::vector<std::shared_ptr<const char *const[]>> shape_pool;
+  std::vector<std::indirect<VanillaObject>> object_pool;
 
   FunctionHandle bootstrap(std::size_t blueprint_handle,
                            std::optional<std::size_t> parent_scope);
@@ -190,28 +155,31 @@ private:
   VanillaObject console;
   VanillaObject global_this;
 
-  std::generator<std::size_t>
-  traverse_function_closure(std::size_t function_handle);
-  std::optional<Dynamic> *get_variable(std::size_t function_handle,
-                                       std::ptrdiff_t var_handle);
-  Dynamic *get_property(std::ptrdiff_t object_handle,
-                        std::ptrdiff_t property_handle);
+  std::generator<std::reference_wrapper<VanillaFunction>>
+  traverse_function_closure(
+      std::reference_wrapper<VanillaFunction> function_ref);
+  std::optional<Dynamic> *get_variable(VanillaFunction &function,
+                                       std::string_view var_handle);
+  Dynamic *get_property(VanillaObject &object,
+                        std::string_view property_handle);
 
-  Dynamic evaluate(std::size_t function_handle, BinaryExpression &expression);
-  Dynamic evaluate(std::size_t function_handle, MemberExpression &expression);
-  Dynamic evaluate(std::size_t function_handle,
-                   FunctionCallExpression &expression);
-  Dynamic evaluate(std::size_t function_handle, Expression expression);
-  Dynamic evaluate(std::size_t function_handle, Identifier identifier);
-  Dynamic evaluate(std::size_t function_handle, ExpressionHandle expr_handle);
-  Dynamic evaluate(std::size_t function_handle, StringHandle string_handle);
-  Dynamic evaluate(std::size_t function_handle, std::int64_t number);
-  Dynamic evaluate(std::size_t function_handle, double number);
-  Dynamic evaluate(std::size_t function_handle, std::monostate) { return {}; }
+  Dynamic evaluate(VanillaFunction &function,
+                   const BinaryExpression &expression);
+  Dynamic evaluate(VanillaFunction &function,
+                   const MemberExpression &expression);
+  Dynamic evaluate(VanillaFunction &function,
+                   const FunctionCallExpression &expression);
+  Dynamic evaluate(VanillaFunction &function, Expression expression);
+  Dynamic evaluate(VanillaFunction &function, Identifier identifier);
+  Dynamic evaluate(VanillaFunction &function, const ExpressionNode *expr_ptr);
+  Dynamic evaluate(VanillaFunction &function, StringHandle string_handle);
+  Dynamic evaluate(VanillaFunction &function, std::int64_t number);
+  Dynamic evaluate(VanillaFunction &function, double number);
+  Dynamic evaluate(VanillaFunction &function, std::monostate) { return {}; }
 
-  void evaluate(std::size_t function_handle, VariableDeclaration declaration);
-  void evaluate(std::size_t function_handle, ReturnStatement statement);
-  void evaluate(std::size_t function_handle, Statement statement);
+  void evaluate(VanillaFunction &function, VariableDeclaration declaration);
+  void evaluate(VanillaFunction &function, ReturnStatement statement);
+  void evaluate(VanillaFunction &function, Statement statement);
 };
 
 class Parser : public Script {
@@ -250,7 +218,7 @@ private:
   Expression parse_expression();
 
   void parse_statement(FunctionBlueprint &blueprint, Token leading);
-  std::size_t parse_function_decl();
+  const FunctionBlueprint *parse_function_decl();
   VariableDeclaration parse_variable_decl();
 };
 } // namespace Manadrain
