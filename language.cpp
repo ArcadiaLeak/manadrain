@@ -192,21 +192,21 @@ void assert_punct(Token token, char32_t must_be) {
 }
 
 void Parser::parse_text() {
-  FunctionBlueprint blueprint{};
+  std::shared_ptr blueprint_ptr{std::make_shared<FunctionBlueprint>()};
+  main_function.blueprint_ptr = blueprint_ptr.get();
   auto match_script_end = [](Token token) {
     return !std::holds_alternative<std::monostate>(token);
   };
   for (Token token :
        traverse_tokens() | std::views::take_while(match_script_end))
-    parse_statement(blueprint, token);
-  blueprint_pool.push_back(
-      std::make_shared<FunctionBlueprint>(std::move(blueprint)));
+    parse_statement(*blueprint_ptr, token);
+  blueprint_pool.push_back(blueprint_ptr);
+  instantiate(FunctionHandle{~H_MAIN});
 }
 
 void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
-  ReservedWord *word{std::get_if<ReservedWord>(&leading)};
-  Statement statement;
-  if (word->sv == "function") {
+  ReservedWord *word_ptr{std::get_if<ReservedWord>(&leading)};
+  if (word_ptr && word_ptr->sv == "function") {
     const FunctionBlueprint *blueprint_ptr{parse_function_decl()};
     std::string_view function_name{blueprint_ptr->function_name};
     if (std::ranges::binary_search(blueprint.scope_shape, function_name.data()))
@@ -216,7 +216,9 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
     auto lower_bound =
         std::ranges::lower_bound(blueprint.scope_shape, function_name.data());
     blueprint.scope_shape.insert(lower_bound, function_name.data());
-  } else if (word->sv == "let") {
+    return;
+  }
+  if (word_ptr && word_ptr->sv == "let") {
     VariableDeclaration declaration{parse_variable_decl()};
     std::string_view variable_name{declaration.variable_name};
     if (std::ranges::binary_search(blueprint.scope_shape, variable_name.data()))
@@ -225,14 +227,16 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
         std::ranges::lower_bound(blueprint.scope_shape, variable_name.data());
     blueprint.scope_shape.insert(lower_bound, variable_name.data());
     blueprint.body.push_back(declaration);
-  } else if (word->sv == "return") {
-    blueprint.body.push_back(parse_expression());
-    assert_punct(tokenize(), ';');
-  } else {
-    history_pull();
-    blueprint.body.push_back(parse_expression());
-    assert_punct(tokenize(), ';');
+    return;
   }
+  if (word_ptr && word_ptr->sv == "return") {
+    blueprint.body.push_back(parse_expression());
+    assert_punct(tokenize(), ';');
+    return;
+  }
+  history_pull();
+  blueprint.body.push_back(parse_expression());
+  assert_punct(tokenize(), ';');
 }
 
 const FunctionBlueprint *Parser::parse_function_decl() {
@@ -378,11 +382,13 @@ static void static_shape_init() {
 
 Script::Script() : console{shape_console}, global_this{shape_global_this} {
   std::call_once(static_shape_flag, static_shape_init);
+  console.properties.resize(shape_console.size());
   console.properties[std::distance(
       shape_console.begin(),
       std::ranges::lower_bound(shape_console,
                                static_cast<const char *>("log")))] =
       FunctionHandle{~H_LOG};
+  global_this.properties.resize(shape_global_this.size());
   global_this.properties[std::distance(
       shape_global_this.begin(),
       std::ranges::lower_bound(shape_global_this,
@@ -395,20 +401,21 @@ Dynamic Script::evaluate(VanillaFunction &function,
   Dynamic dynamic_callee{evaluate(function, expr_call.callee)};
   auto match_function_handle = [&](auto dynamic_alt) -> std::ptrdiff_t {
     if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionHandle>)
-      return dynamic_alt.handle;
+      return dynamic_alt.offset;
     throw ScriptError{InvalidFunctionCall{}};
   };
-  std::ptrdiff_t callee_handle{
+  std::optional<std::ptrdiff_t> callee_handle{
       std::visit(match_function_handle, dynamic_callee)};
-  assert(callee_handle >= 0);
-  const FunctionBlueprint *blueprint_ptr{
-      function_pool[callee_handle]->blueprint_handle};
+  if (*callee_handle < 0)
+    callee_handle = std::nullopt;
+  VanillaFunction &callee_ref{*function_pool[callee_handle.value()]};
+  const FunctionBlueprint *blueprint_ptr{callee_ref.blueprint_ptr};
   for (Statement statement : blueprint_ptr->body) {
-    evaluate(*function_pool[callee_handle], statement);
+    evaluate(callee_ref, statement);
     if (std::holds_alternative<ReturnStatement>(statement))
       break;
   }
-  return function_pool[callee_handle]->return_val;
+  return callee_ref.return_val;
 }
 
 Dynamic Script::evaluate(VanillaFunction &function,
@@ -449,10 +456,15 @@ Script::traverse_function_closure(
     std::reference_wrapper<VanillaFunction> function_ref) {
   while (1) {
     co_yield function_ref;
-    std::optional parent_handle{function_ref.get().parent_handle};
-    if (not parent_handle)
+    std::ptrdiff_t parent_handle{function_ref.get().parent_handle};
+    std::optional<VanillaFunction &> parent_opt{};
+    if (parent_handle >= 0)
+      parent_opt = *function_pool[parent_handle];
+    else if (~parent_handle == H_MAIN)
+      parent_opt = main_function;
+    else if (~parent_handle == H_NIL)
       break;
-    function_ref = *function_pool[*parent_handle];
+    function_ref = parent_opt.value();
   }
 }
 
@@ -460,7 +472,7 @@ std::optional<Dynamic> *Script::get_variable(VanillaFunction &function,
                                              std::string_view var_handle) {
   for (VanillaFunction &current_function :
        traverse_function_closure(function)) {
-    const auto &scope_shape{current_function.blueprint_handle->scope_shape};
+    const auto &scope_shape{current_function.blueprint_ptr->scope_shape};
     auto lower_bound = std::ranges::lower_bound(scope_shape, var_handle);
     if (lower_bound == scope_shape.end() || *lower_bound != var_handle)
       continue;
@@ -512,29 +524,33 @@ void Script::evaluate(VanillaFunction &function, Statement statement) {
              statement);
 }
 
-FunctionHandle Script::bootstrap(std::size_t blueprint_handle,
-                                 std::optional<std::size_t> parent_handle) {
-  ObjectShape &scope_shape = blueprint_pool[blueprint_handle].scope_shape;
-  std::ptrdiff_t function_handle = function_pool.size();
-  function_pool.push_back(VanillaFunction{blueprint_handle, parent_handle});
-  function_pool[function_handle].own_scope.resize(scope_shape.size());
+void Script::instantiate(FunctionHandle function_handle) {
+  std::optional<VanillaFunction &> function_opt{};
+  if (~function_handle.offset == H_MAIN)
+    function_opt = main_function;
+  else if (function_handle.offset >= 0)
+    function_opt = *function_pool[function_handle.offset];
+  VanillaFunction &function_ref{function_opt.value()};
+  const auto &scope_shape = function_ref.blueprint_ptr->scope_shape;
+  function_ref.own_scope.resize(scope_shape.size());
   for (auto [nested_name, nested_blueprint] :
-       blueprint_pool[blueprint_handle].nested_blueprint) {
+       function_ref.blueprint_ptr->nestedly_declared) {
     auto lower_bound = std::ranges::lower_bound(scope_shape, nested_name);
     assert(lower_bound != scope_shape.end() && *lower_bound == nested_name);
     std::size_t scope_idx = std::distance(scope_shape.begin(), lower_bound);
-    FunctionHandle nested_function{
-        bootstrap(nested_blueprint, function_handle)};
-    function_pool[function_handle].own_scope[scope_idx] =
-        Dynamic{nested_function};
+    FunctionHandle nested_handle{
+        static_cast<std::ptrdiff_t>(function_pool.size())};
+    function_pool.resize(function_pool.size() + 1);
+    VanillaFunction &nested_function{*function_pool[nested_handle.offset]};
+    nested_function.blueprint_ptr = nested_blueprint;
+    nested_function.parent_handle = function_handle.offset;
+    instantiate(nested_handle);
+    function_ref.own_scope[scope_idx] = Dynamic{nested_handle};
   }
-  return FunctionHandle{function_handle};
 }
 
 void Script::evaluate() {
-  std::size_t blueprint_handle{
-      function_pool[main_function.handle].blueprint_handle};
-  for (Statement statement : blueprint_pool[blueprint_handle].body)
-    evaluate(main_function.handle, statement);
+  for (Statement statement : main_function.blueprint_ptr->body)
+    evaluate(main_function, statement);
 }
 } // namespace Manadrain

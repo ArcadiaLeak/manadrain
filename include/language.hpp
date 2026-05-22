@@ -101,12 +101,18 @@ struct ReturnStatement {
 using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-enum IntrinsicHandle : std::ptrdiff_t { H_CONSOLE, H_GLOBAL, H_LOG, H_MAIN };
+enum IntrinsicHandle : std::ptrdiff_t {
+  H_NIL,
+  H_CONSOLE,
+  H_GLOBAL,
+  H_LOG,
+  H_MAIN
+};
 struct ObjectHandle {
-  std::ptrdiff_t handle;
+  std::ptrdiff_t offset;
 };
 struct FunctionHandle {
-  std::ptrdiff_t handle;
+  std::ptrdiff_t offset;
   std::any context;
 };
 using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
@@ -125,8 +131,8 @@ struct FunctionBlueprint {
   std::vector<Statement> body;
 };
 struct VanillaFunction {
-  const FunctionBlueprint *blueprint_handle;
-  std::optional<std::size_t> parent_handle;
+  const FunctionBlueprint *blueprint_ptr;
+  std::ptrdiff_t parent_handle{~H_NIL};
   std::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
 };
@@ -148,8 +154,7 @@ protected:
   std::vector<std::shared_ptr<const char *const[]>> shape_pool;
   std::vector<std::indirect<VanillaObject>> object_pool;
 
-  FunctionHandle bootstrap(std::size_t blueprint_handle,
-                           std::optional<std::size_t> parent_scope);
+  void instantiate(FunctionHandle function_handle);
 
 private:
   VanillaObject console;
