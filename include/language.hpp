@@ -44,7 +44,7 @@ using Token = std::variant<std::monostate, char32_t, std::int64_t, double,
 struct InvalidNumericLiteral {};
 struct InvalidPropertyName {};
 struct InvalidBackslashEscape {};
-struct InvalidDeclaration {};
+struct DuplicateDeclaration {};
 struct InvalidVariableAccess {};
 struct InvalidFunctionCall {};
 struct MissingFieldName {};
@@ -64,7 +64,7 @@ class ScriptError : public std::exception {
 public:
   using Message =
       std::variant<InvalidNumericLiteral, InvalidPropertyName,
-                   InvalidBackslashEscape, InvalidDeclaration,
+                   InvalidBackslashEscape, DuplicateDeclaration,
                    InvalidFunctionCall, InvalidVariableAccess, MissingFieldName,
                    MissingVariableName, MissingFunctionName, MissingIdentifier,
                    MissingStringLiteral, MissingFormalParameter,
@@ -124,7 +124,8 @@ struct VanillaObject {
 
 struct FunctionBlueprint {
   Identifier function_name;
-  std::vector<Identifier> scope_shape;
+  std::vector<Identifier> arguments;
+  std::vector<Identifier> local_scope;
   std::vector<std::pair<Identifier, const FunctionBlueprint *>>
       nestedly_declared;
   std::vector<Statement> body;
@@ -156,18 +157,26 @@ protected:
   void instantiate(FunctionHandle function_handle);
 
 private:
-  VanillaObject console{
-      .shape_handle = std::unexpected{IntrinsicSigil::H_CONSOLE},
-      .properties = {FunctionHandle{std::unexpected{IntrinsicSigil::H_LOG}}}};
   VanillaObject global_this{
       .shape_handle = std::unexpected{IntrinsicSigil::H_GLOBAL},
       .properties = {ObjectHandle{std::unexpected{IntrinsicSigil::H_CONSOLE}}}};
+  VanillaObject console{
+      .shape_handle = std::unexpected{IntrinsicSigil::H_CONSOLE},
+      .properties = {FunctionHandle{std::unexpected{IntrinsicSigil::H_LOG}}}};
+  std::vector<std::string> console_messages;
 
   std::generator<VanillaFunction *>
   traverse_function_closure(VanillaFunction *function_ptr);
   std::optional<Dynamic> *get_variable(VanillaFunction &function,
                                        Identifier var_handle);
   Dynamic *get_property(VanillaObject &object, Identifier property_handle);
+
+  std::string evaluate_message(std::monostate);
+  std::string evaluate_message(StringHandle string_handle);
+  std::string evaluate_message(std::int64_t number);
+  std::string evaluate_message(double number);
+  std::string evaluate_message(ObjectHandle object_handle);
+  std::string evaluate_message(FunctionHandle function_handle);
 
   Dynamic evaluate_property(Identifier property, std::monostate);
   Dynamic evaluate_property(Identifier property, StringHandle string_handle);

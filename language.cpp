@@ -1,8 +1,6 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
-#include <mutex>
-#include <print>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -222,22 +220,22 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
   if (word_ptr && permanent_pool[word_ptr->offset] == "function") {
     const FunctionBlueprint *blueprint_ptr{parse_function_decl()};
     Identifier function_name{blueprint_ptr->function_name};
-    if (std::ranges::binary_search(blueprint.scope_shape, function_name))
-      throw ScriptError{InvalidDeclaration{}};
+    if (std::ranges::binary_search(blueprint.local_scope, function_name))
+      throw ScriptError{DuplicateDeclaration{}};
     blueprint.nestedly_declared.push_back({function_name, blueprint_ptr});
     auto lower_bound =
-        std::ranges::lower_bound(blueprint.scope_shape, function_name);
-    blueprint.scope_shape.insert(lower_bound, function_name);
+        std::ranges::lower_bound(blueprint.local_scope, function_name);
+    blueprint.local_scope.insert(lower_bound, function_name);
     return;
   }
   if (word_ptr && permanent_pool[word_ptr->offset] == "let") {
     VariableDeclaration declaration{parse_variable_decl()};
     Identifier variable_name{declaration.variable_name};
-    if (std::ranges::binary_search(blueprint.scope_shape, variable_name))
-      throw ScriptError{InvalidDeclaration{}};
+    if (std::ranges::binary_search(blueprint.local_scope, variable_name))
+      throw ScriptError{DuplicateDeclaration{}};
     auto lower_bound =
-        std::ranges::lower_bound(blueprint.scope_shape, variable_name);
-    blueprint.scope_shape.insert(lower_bound, variable_name);
+        std::ranges::lower_bound(blueprint.local_scope, variable_name);
+    blueprint.local_scope.insert(lower_bound, variable_name);
     blueprint.body.push_back(declaration);
     return;
   }
@@ -398,12 +396,12 @@ Script::traverse_function_closure(VanillaFunction *function_ptr) {
 std::optional<Dynamic> *Script::get_variable(VanillaFunction &function,
                                              Identifier var_handle) {
   for (VanillaFunction *function_ptr : traverse_function_closure(&function)) {
-    const auto &scope_shape{function_ptr->blueprint_ptr->scope_shape};
-    auto lower_bound = std::ranges::lower_bound(scope_shape, var_handle);
-    if (lower_bound == scope_shape.end() || *lower_bound != var_handle)
+    const auto &local_scope{function_ptr->blueprint_ptr->local_scope};
+    auto lower_bound = std::ranges::lower_bound(local_scope, var_handle);
+    if (lower_bound == local_scope.end() || *lower_bound != var_handle)
       continue;
     std::ptrdiff_t own_scope_distance{
-        std::distance(scope_shape.begin(), lower_bound)};
+        std::distance(local_scope.begin(), lower_bound)};
     std::optional<Dynamic> *own_scope_data{function_ptr->own_scope.data()};
     return std::next(own_scope_data, own_scope_distance);
   }
@@ -448,7 +446,17 @@ Dynamic Script::evaluate_property(Identifier property, double number) {
 
 Dynamic Script::evaluate_property(Identifier property,
                                   ObjectHandle object_handle) {
-  return {};
+  VanillaObject *object_ptr{};
+  if (object_handle.offset == std::unexpected{IntrinsicSigil::H_CONSOLE})
+    object_ptr = &console;
+  else {
+    std::size_t object_idx{object_handle.offset.value()};
+    object_ptr = object_pool[object_idx].get();
+  }
+  Dynamic *property_ptr{get_property(*object_ptr, property)};
+  if (not property_ptr)
+    return std::monostate{};
+  return *property_ptr;
 }
 
 Dynamic Script::evaluate_property(Identifier property,
@@ -470,7 +478,7 @@ Script::evaluate_callee(VanillaFunction &function,
     return evaluate_property(expression.property, dynamic_alt);
   };
   Dynamic dynamic_property{dynamic_object.visit(visit_object)};
-  return {};
+  return {dynamic_object, dynamic_property};
 }
 
 std::pair<Dynamic, Dynamic>
@@ -481,7 +489,7 @@ Script::evaluate_callee(VanillaFunction &function,
 
 std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
                                                     Identifier identifier) {
-  return {};
+  return {std::monostate{}, evaluate(function, identifier)};
 }
 
 std::pair<Dynamic, Dynamic>
@@ -512,13 +520,61 @@ std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
   return {};
 }
 
-Dynamic Script::evaluate(VanillaFunction &function,
+std::string Script::evaluate_message(std::monostate) {
+  return "<unimplemented>";
+}
+std::string Script::evaluate_message(StringHandle string_handle) {
+  return "<unimplemented>";
+}
+std::string Script::evaluate_message(std::int64_t number) {
+  return "<unimplemented>";
+}
+std::string Script::evaluate_message(double number) {
+  return "<unimplemented>";
+}
+std::string Script::evaluate_message(ObjectHandle object_handle) {
+  return "<unimplemented>";
+}
+std::string Script::evaluate_message(FunctionHandle function_handle) {
+  return "<unimplemented>";
+}
+
+Dynamic Script::evaluate(VanillaFunction &parent_function,
                          const FunctionCallExpression &expr_call) {
   auto visit_expression = [&](auto expression_alt) {
-    return evaluate_callee(function, expression_alt);
+    return evaluate_callee(parent_function, expression_alt);
   };
-  std::pair dynamic_callee{expr_call.callee.visit(visit_expression)};
-  return {};
+  auto [dynamic_context, dynamic_callee] =
+      expr_call.callee.visit(visit_expression);
+  FunctionHandle *callee_handle{std::get_if<FunctionHandle>(&dynamic_callee)};
+  if (not callee_handle)
+    throw ScriptError{InvalidFunctionCall{}};
+  auto dynamic_arguments =
+      expr_call.arguments | std::views::transform([&](Expression expression) {
+        return evaluate(parent_function, expression);
+      });
+  if (callee_handle->offset == std::unexpected{IntrinsicSigil::H_LOG}) {
+    auto match_message_alt = [&](auto dynamic_alt) {
+      return evaluate_message(dynamic_alt);
+    };
+    auto match_message_arg = [&](Dynamic argument) {
+      return argument.visit(match_message_alt);
+    };
+    auto message_parts = dynamic_arguments |
+                         std::views::transform(match_message_arg) |
+                         std::views::join_with(' ');
+    console_messages.emplace_back(std::from_range, message_parts);
+    return std::monostate{};
+  } else {
+    VanillaFunction &callee{*function_pool[callee_handle->offset.value()]};
+    for (auto [index, argument] : dynamic_arguments | std::views::enumerate) {
+      Identifier identifier{callee.blueprint_ptr->arguments[index]};
+      auto *argument_lvalue{get_variable(callee, identifier)};
+      assert(argument_lvalue != nullptr);
+      *argument_lvalue = argument;
+    }
+    return callee.return_val;
+  }
 }
 
 Dynamic Script::evaluate(VanillaFunction &function,
@@ -556,12 +612,12 @@ Dynamic Script::evaluate(VanillaFunction &function, Expression expression) {
 }
 
 Dynamic Script::evaluate(VanillaFunction &function, Identifier identifier) {
-  std::optional<Dynamic> *local_variable{get_variable(function, identifier)};
-  if (local_variable && *local_variable)
-    return **local_variable;
-  Dynamic *global_property{get_property(global_this, identifier)};
-  if (global_property)
-    return *global_property;
+  std::optional<Dynamic> *from_scope{get_variable(function, identifier)};
+  if (from_scope && *from_scope)
+    return **from_scope;
+  Dynamic *from_globalThis{get_property(global_this, identifier)};
+  if (from_globalThis)
+    return *from_globalThis;
   throw ScriptError{InvalidVariableAccess{}};
 }
 
@@ -584,22 +640,28 @@ void Script::evaluate(VanillaFunction &function, Statement statement) {
 }
 
 void Script::instantiate(FunctionHandle function_handle) {
-  VanillaFunction *function_ptr{
-      function_handle.offset == std::unexpected{IntrinsicSigil::H_MAIN}
-          ? &main_function
-          : function_pool[function_handle.offset.value()].get()};
-  const auto &scope_shape = function_ptr->blueprint_ptr->scope_shape;
-  function_ptr->own_scope.resize(scope_shape.size());
-  for (auto [nested_name, nested_blueprint] :
-       function_ptr->blueprint_ptr->nestedly_declared) {
-    auto lower_bound = std::ranges::lower_bound(scope_shape, nested_name);
-    assert(lower_bound != scope_shape.end() && *lower_bound == nested_name);
-    std::size_t scope_idx = std::distance(scope_shape.begin(), lower_bound);
+  using IndirectFunction = std::expected<VanillaFunction *, IntrinsicSigil>;
+  auto match_function_offset = [&](std::size_t pool_idx) {
+    return function_pool[pool_idx].get();
+  };
+  auto match_function_sigil = [&](IntrinsicSigil sigil) {
+    return sigil == IntrinsicSigil::H_MAIN ? IndirectFunction{&main_function}
+                                           : std::unexpected{sigil};
+  };
+  std::expected function_offset{function_handle.offset};
+  VanillaFunction *function_ptr{function_offset.transform(match_function_offset)
+                                    .or_else(match_function_sigil)
+                                    .value()};
+  const FunctionBlueprint &blueprint{*function_ptr->blueprint_ptr};
+  function_ptr->own_scope.resize(blueprint.local_scope.size());
+  for (auto [nested_name, nested_blueprint] : blueprint.nestedly_declared) {
+    auto *function_lvalue{get_variable(*function_ptr, nested_name)};
+    assert(function_lvalue != nullptr);
     FunctionHandle nested_handle{function_pool.size()};
     function_pool.push_back(std::make_unique<VanillaFunction>(
         nested_blueprint, function_handle.offset));
     instantiate(nested_handle);
-    function_ptr->own_scope[scope_idx] = Dynamic{nested_handle};
+    *function_lvalue = Dynamic{nested_handle};
   }
 }
 
