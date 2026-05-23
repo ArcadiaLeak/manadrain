@@ -25,10 +25,10 @@ static const std::array permanent_pool{std::to_array<std::string_view>(
      "default", "undefined", "null",   "true",    "false",
      "if",      "else",      "while",  "for",     "do",
      "break",   "continue",  "switch", "console", "log"})};
-static std::array shape_console{
-    std::to_array<Identifier>({Identifier{1, 24, 3}})};
-static std::array shape_global_this{
-    std::to_array<Identifier>({Identifier{1, 23, 7}})};
+static const std::array shape_console{std::to_array<Identifier>(
+    {Identifier{1, 24, std::string_view{"log"}.size()}})};
+static const std::array shape_global_this{std::to_array<Identifier>(
+    {Identifier{1, 23, std::string_view{"console"}.size()}})};
 
 std::optional<char32_t> Parser::forward() {
   if (position >= text_size) {
@@ -214,7 +214,7 @@ void Parser::parse_text() {
        traverse_tokens() | std::views::take_while(match_script_end))
     parse_statement(*blueprint_ptr, token);
   blueprint_pool.push_back(blueprint_ptr);
-  instantiate(FunctionHandle{~H_MAIN});
+  instantiate(FunctionHandle{std::unexpected{IntrinsicSigil::H_MAIN}});
 }
 
 void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
@@ -379,39 +379,32 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
   return expr_ptr.get();
 }
 
-Script::Script() : console{shape_console}, global_this{shape_global_this} {
-  console.properties = {FunctionHandle{~H_LOG}};
-  global_this.properties = {ObjectHandle{~H_CONSOLE}};
-}
-
-std::generator<std::reference_wrapper<VanillaFunction>>
-Script::traverse_function_closure(
-    std::reference_wrapper<VanillaFunction> function_ref) {
+std::generator<VanillaFunction *>
+Script::traverse_function_closure(VanillaFunction *function_ptr) {
   while (1) {
-    co_yield function_ref;
-    std::ptrdiff_t parent_handle{function_ref.get().parent_handle};
-    std::optional<VanillaFunction &> parent_opt{};
-    if (parent_handle >= 0)
-      parent_opt = *function_pool[parent_handle];
-    else if (~parent_handle == H_MAIN)
-      parent_opt = main_function;
-    else if (~parent_handle == H_NIL)
+    co_yield function_ptr;
+    std::expected parent_handle{function_ptr->parent_handle};
+    if (parent_handle == std::unexpected{IntrinsicSigil::H_NIL})
       break;
-    function_ref = parent_opt.value();
+    else if (parent_handle == std::unexpected{IntrinsicSigil::H_MAIN})
+      function_ptr = &main_function;
+    else {
+      std::size_t parent_idx{parent_handle.value()};
+      function_ptr = function_pool[parent_idx].get();
+    }
   }
 }
 
 std::optional<Dynamic> *Script::get_variable(VanillaFunction &function,
                                              Identifier var_handle) {
-  for (VanillaFunction &current_function :
-       traverse_function_closure(function)) {
-    const auto &scope_shape{current_function.blueprint_ptr->scope_shape};
+  for (VanillaFunction *function_ptr : traverse_function_closure(&function)) {
+    const auto &scope_shape{function_ptr->blueprint_ptr->scope_shape};
     auto lower_bound = std::ranges::lower_bound(scope_shape, var_handle);
     if (lower_bound == scope_shape.end() || *lower_bound != var_handle)
       continue;
     std::ptrdiff_t own_scope_distance{
         std::distance(scope_shape.begin(), lower_bound)};
-    std::optional<Dynamic> *own_scope_data{current_function.own_scope.data()};
+    std::optional<Dynamic> *own_scope_data{function_ptr->own_scope.data()};
     return std::next(own_scope_data, own_scope_distance);
   }
   return nullptr;
@@ -419,13 +412,20 @@ std::optional<Dynamic> *Script::get_variable(VanillaFunction &function,
 
 Dynamic *Script::get_property(VanillaObject &object,
                               Identifier property_handle) {
-  auto lower_bound =
-      std::ranges::lower_bound(object.object_shape, property_handle);
-  if (lower_bound == object.object_shape.end() ||
-      *lower_bound != property_handle)
+  std::span<const Identifier> object_shape{};
+  if (object.shape_handle == std::unexpected{IntrinsicSigil::H_CONSOLE})
+    object_shape = shape_console;
+  else if (object.shape_handle == std::unexpected{IntrinsicSigil::H_GLOBAL})
+    object_shape = shape_global_this;
+  else {
+    std::shared_ptr<const Identifier[]> &shape_ptr{object.shape_handle.value()};
+    object_shape = {shape_ptr.get(), object.properties.size()};
+  }
+  auto lower_bound = std::ranges::lower_bound(object_shape, property_handle);
+  if (lower_bound == object_shape.end() || *lower_bound != property_handle)
     return nullptr;
   std::ptrdiff_t property_distance{
-      std::distance(object.object_shape.begin(), lower_bound)};
+      std::distance(object_shape.begin(), lower_bound)};
   return std::next(object.properties.data(), property_distance);
 }
 
@@ -584,25 +584,22 @@ void Script::evaluate(VanillaFunction &function, Statement statement) {
 }
 
 void Script::instantiate(FunctionHandle function_handle) {
-  std::optional<VanillaFunction &> function_opt{};
-  if (~function_handle.offset == H_MAIN)
-    function_opt = main_function;
-  else if (function_handle.offset >= 0)
-    function_opt = *function_pool[function_handle.offset];
-  VanillaFunction &function_ref{function_opt.value()};
-  const auto &scope_shape = function_ref.blueprint_ptr->scope_shape;
-  function_ref.own_scope.resize(scope_shape.size());
+  VanillaFunction *function_ptr{
+      function_handle.offset == std::unexpected{IntrinsicSigil::H_MAIN}
+          ? &main_function
+          : function_pool[function_handle.offset.value()].get()};
+  const auto &scope_shape = function_ptr->blueprint_ptr->scope_shape;
+  function_ptr->own_scope.resize(scope_shape.size());
   for (auto [nested_name, nested_blueprint] :
-       function_ref.blueprint_ptr->nestedly_declared) {
+       function_ptr->blueprint_ptr->nestedly_declared) {
     auto lower_bound = std::ranges::lower_bound(scope_shape, nested_name);
     assert(lower_bound != scope_shape.end() && *lower_bound == nested_name);
     std::size_t scope_idx = std::distance(scope_shape.begin(), lower_bound);
-    FunctionHandle nested_handle{
-        static_cast<std::ptrdiff_t>(function_pool.size())};
+    FunctionHandle nested_handle{function_pool.size()};
     function_pool.push_back(std::make_unique<VanillaFunction>(
         nested_blueprint, function_handle.offset));
     instantiate(nested_handle);
-    function_ref.own_scope[scope_idx] = Dynamic{nested_handle};
+    function_ptr->own_scope[scope_idx] = Dynamic{nested_handle};
   }
 }
 

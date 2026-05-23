@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <expected>
 #include <flat_map>
 #include <generator>
 #include <list>
@@ -105,24 +106,19 @@ struct ReturnStatement {
 using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-enum IntrinsicHandle : std::ptrdiff_t {
-  H_NIL,
-  H_CONSOLE,
-  H_GLOBAL,
-  H_LOG,
-  H_MAIN
-};
+enum class IntrinsicSigil { H_NIL, H_CONSOLE, H_GLOBAL, H_LOG, H_MAIN };
 struct ObjectHandle {
-  std::ptrdiff_t offset;
+  std::expected<std::size_t, IntrinsicSigil> offset;
 };
 struct FunctionHandle {
-  std::ptrdiff_t offset;
+  std::expected<std::size_t, IntrinsicSigil> offset;
 };
 using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
                              ObjectHandle, FunctionHandle>;
 
 struct VanillaObject {
-  std::span<const Identifier> object_shape;
+  std::expected<std::shared_ptr<const Identifier[]>, IntrinsicSigil>
+      shape_handle;
   std::vector<Dynamic> properties;
 };
 
@@ -135,14 +131,14 @@ struct FunctionBlueprint {
 };
 struct VanillaFunction {
   const FunctionBlueprint *blueprint_ptr;
-  std::ptrdiff_t parent_handle{~H_NIL};
+  std::expected<std::size_t, IntrinsicSigil> parent_handle{
+      std::unexpect, IntrinsicSigil::H_NIL};
   std::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
 };
 
 class Script {
 public:
-  Script();
   void evaluate();
 
 protected:
@@ -154,18 +150,21 @@ protected:
   std::vector<std::shared_ptr<const FunctionBlueprint>> blueprint_pool;
   std::vector<std::unique_ptr<VanillaFunction>> function_pool;
 
-  std::vector<std::shared_ptr<const Identifier[]>> shape_pool;
+  std::vector<std::weak_ptr<const Identifier[]>> shape_pool;
   std::vector<std::unique_ptr<VanillaObject>> object_pool;
 
   void instantiate(FunctionHandle function_handle);
 
 private:
-  VanillaObject console;
-  VanillaObject global_this;
+  VanillaObject console{
+      .shape_handle = std::unexpected{IntrinsicSigil::H_CONSOLE},
+      .properties = {FunctionHandle{std::unexpected{IntrinsicSigil::H_LOG}}}};
+  VanillaObject global_this{
+      .shape_handle = std::unexpected{IntrinsicSigil::H_GLOBAL},
+      .properties = {ObjectHandle{std::unexpected{IntrinsicSigil::H_CONSOLE}}}};
 
-  std::generator<std::reference_wrapper<VanillaFunction>>
-  traverse_function_closure(
-      std::reference_wrapper<VanillaFunction> function_ref);
+  std::generator<VanillaFunction *>
+  traverse_function_closure(VanillaFunction *function_ptr);
   std::optional<Dynamic> *get_variable(VanillaFunction &function,
                                        Identifier var_handle);
   Dynamic *get_property(VanillaObject &object, Identifier property_handle);
