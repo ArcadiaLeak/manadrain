@@ -25,10 +25,6 @@ static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
     {"console", 0}, {"log", 1}};
 static const std::array permanent_identifiers{
     std::to_array<std::string_view>({"console", "log"})};
-static const std::array shape_console{
-    std::to_array<Identifier>({Identifier{1}})};
-static const std::array shape_global_this{
-    std::to_array<Identifier>({Identifier{0}})};
 
 std::optional<char32_t> Parser::forward() {
   if (position >= text_size) {
@@ -209,7 +205,7 @@ void Parser::parse_text() {
        traverse_tokens() | std::views::take_while(match_script_end))
     parse_statement(*definition, token);
   function_definitions.push_back(definition);
-  instantiate(FunctionHandle{std::unexpected{IntrinsicSigil::H_MAIN}});
+  initialize(main_function);
 }
 
 void Parser::parse_statement(FunctionDefinition &definition, Token leading) {
@@ -219,7 +215,7 @@ void Parser::parse_statement(FunctionDefinition &definition, Token leading) {
     Identifier function_name{nested_definition->function_name};
     if (std::ranges::binary_search(definition.local_scope, function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    definition.nestedly_declared.push_back({function_name, nested_definition});
+    definition.nested_functions.push_back({function_name, nested_definition});
     auto lower_bound =
         std::ranges::lower_bound(definition.local_scope, function_name);
     definition.local_scope.insert(lower_bound, function_name);
@@ -378,15 +374,9 @@ std::generator<FunctionClosure *>
 Script::climb_closure_stack(FunctionClosure *closure_ptr) {
   while (1) {
     co_yield closure_ptr;
-    std::expected parent_handle{closure_ptr->parent_handle};
-    if (parent_handle == std::unexpected{IntrinsicSigil::H_NIL})
+    if (not closure_ptr->parent_closure)
       break;
-    else if (parent_handle == std::unexpected{IntrinsicSigil::H_MAIN})
-      closure_ptr = &main_function;
-    else {
-      std::size_t parent_idx{parent_handle.value()};
-      closure_ptr = function_closures[parent_idx].get();
-    }
+    closure_ptr = closure_ptr->parent_closure;
   }
 }
 
@@ -405,23 +395,15 @@ std::optional<Dynamic> *Script::get_variable(FunctionClosure &function,
   return nullptr;
 }
 
-Dynamic *Script::get_property(VanillaObject &object,
+Dynamic *Script::get_property(ObjectInstance &object_instance,
                               Identifier property_handle) {
-  std::span<const Identifier> object_shape{};
-  if (object.shape_handle == std::unexpected{IntrinsicSigil::H_CONSOLE})
-    object_shape = shape_console;
-  else if (object.shape_handle == std::unexpected{IntrinsicSigil::H_GLOBAL})
-    object_shape = shape_global_this;
-  else {
-    std::shared_ptr<const Identifier[]> &shape_ptr{object.shape_handle.value()};
-    object_shape = {shape_ptr.get(), object.properties.size()};
-  }
+  std::span<const Identifier> object_shape{object_instance.object_shape};
   auto lower_bound = std::ranges::lower_bound(object_shape, property_handle);
   if (lower_bound == object_shape.end() || *lower_bound != property_handle)
     return nullptr;
   std::ptrdiff_t property_distance{
       std::distance(object_shape.begin(), lower_bound)};
-  return std::next(object.properties.data(), property_distance);
+  return std::next(object_instance.properties.data(), property_distance);
 }
 
 Dynamic Script::evaluate_property(Identifier property, std::monostate) {
@@ -441,22 +423,15 @@ Dynamic Script::evaluate_property(Identifier property, double number) {
 }
 
 Dynamic Script::evaluate_property(Identifier property,
-                                  ObjectHandle object_handle) {
-  VanillaObject *object_ptr{};
-  if (object_handle.offset == std::unexpected{IntrinsicSigil::H_CONSOLE})
-    object_ptr = &console;
-  else {
-    std::size_t object_idx{object_handle.offset.value()};
-    object_ptr = object_pool[object_idx].get();
-  }
-  Dynamic *property_ptr{get_property(*object_ptr, property)};
+                                  ObjectInstance *object_instance) {
+  Dynamic *property_ptr{get_property(*object_instance, property)};
   if (not property_ptr)
     return std::monostate{};
   return *property_ptr;
 }
 
 Dynamic Script::evaluate_property(Identifier property,
-                                  FunctionHandle function_handle) {
+                                  FunctionClosure *closure) {
   return {};
 }
 
@@ -527,10 +502,16 @@ std::string Script::evaluate_message(std::int64_t number) {
 std::string Script::evaluate_message(double number) {
   return "<unimplemented>";
 }
-std::string Script::evaluate_message(ObjectHandle object_handle) {
+std::string Script::evaluate_message(FunctionClosure *closure) {
   return "<unimplemented>";
 }
-std::string Script::evaluate_message(FunctionHandle function_handle) {
+std::string Script::evaluate_message(const FunctionDefinition *definition) {
+  return "<unimplemented>";
+}
+std::string Script::evaluate_message(IntrinsicObject intrinsic_object) {
+  return "<unimplemented>";
+}
+std::string Script::evaluate_message(IntrinsicFunction intrinsic_function) {
   return "<unimplemented>";
 }
 
@@ -541,14 +522,14 @@ Dynamic Script::evaluate(FunctionClosure &closure,
   };
   auto [dynamic_context, dynamic_callee] =
       expr_call.callee.visit(visit_expression);
-  FunctionHandle *callee_handle{std::get_if<FunctionHandle>(&dynamic_callee)};
+  ClosureHandle *callee_handle{std::get_if<ClosureHandle>(&dynamic_callee)};
   if (not callee_handle)
     throw ScriptError{InvalidFunctionCall{}};
   auto dynamic_arguments =
       expr_call.arguments | std::views::transform([&](Expression expression) {
         return evaluate(closure, expression);
       });
-  if (callee_handle->offset == std::unexpected{IntrinsicSigil::H_LOG}) {
+  if (*callee_handle == std::unexpected{IntrinsicSigil::H_LOG}) {
     auto match_message_alt = [&](auto dynamic_alt) {
       return evaluate_message(dynamic_alt);
     };
@@ -561,7 +542,7 @@ Dynamic Script::evaluate(FunctionClosure &closure,
     console_messages.emplace_back(std::from_range, message_parts);
     return std::monostate{};
   } else {
-    FunctionClosure &callee{*function_closures[callee_handle->offset.value()]};
+    FunctionClosure &callee{*callee_handle->value()};
     for (auto [index, argument] : dynamic_arguments | std::views::enumerate) {
       Identifier identifier{callee.definition->arguments[index]};
       auto *argument_lvalue{get_variable(callee, identifier)};
@@ -635,29 +616,13 @@ void Script::evaluate(FunctionClosure &closure, Statement statement) {
              statement);
 }
 
-void Script::instantiate(FunctionHandle function_handle) {
-  using IndirectFunction = std::expected<FunctionClosure *, IntrinsicSigil>;
-  auto match_function_offset = [&](std::size_t pool_idx) {
-    return function_closures[pool_idx].get();
-  };
-  auto match_function_sigil = [&](IntrinsicSigil sigil) {
-    return sigil == IntrinsicSigil::H_MAIN ? IndirectFunction{&main_function}
-                                           : std::unexpected{sigil};
-  };
-  std::expected function_offset{function_handle.offset};
-  FunctionClosure *closure_ptr{function_offset.transform(match_function_offset)
-                                   .or_else(match_function_sigil)
-                                   .value()};
-  const FunctionDefinition &definition{*closure_ptr->definition};
-  closure_ptr->own_scope.resize(definition.local_scope.size());
-  for (auto [nested_name, nested_definition] : definition.nestedly_declared) {
-    auto *function_lvalue{get_variable(*closure_ptr, nested_name)};
+void Script::initialize(FunctionClosure &closure) {
+  const FunctionDefinition &definition{*closure.definition};
+  closure.own_scope.resize(definition.local_scope.size());
+  for (auto [nested_name, nested_definition] : definition.nested_functions) {
+    std::optional<Dynamic> *function_lvalue{get_variable(closure, nested_name)};
     assert(function_lvalue != nullptr);
-    FunctionHandle nested_handle{function_closures.size()};
-    function_closures.push_back(std::make_unique<FunctionClosure>(
-        nested_definition, function_handle.offset));
-    instantiate(nested_handle);
-    *function_lvalue = Dynamic{nested_handle};
+    *function_lvalue = nested_definition;
   }
 }
 

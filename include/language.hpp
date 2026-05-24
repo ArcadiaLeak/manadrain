@@ -125,34 +125,30 @@ struct ReturnStatement {
 using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-enum class IntrinsicSigil { H_NIL, H_CONSOLE, H_GLOBAL, H_LOG, H_MAIN };
-struct ObjectHandle {
-  std::expected<std::size_t, IntrinsicSigil> offset;
-};
-struct FunctionHandle {
-  std::expected<std::size_t, IntrinsicSigil> offset;
-};
-using Dynamic = std::variant<std::monostate, ImmuString, std::int64_t, double,
-                             ObjectHandle, FunctionHandle>;
+enum class IntrinsicObject { O_NULL, O_CONSOLE, O_GLOBAL };
+enum class IntrinsicFunction { F_LOG };
 
-using ObjectShape = std::shared_ptr<const Identifier[]>;
-struct VanillaObject {
-  std::expected<ObjectShape, IntrinsicSigil> shape_handle;
-  std::vector<Dynamic> properties;
-};
-
+struct ObjectInstance;
+struct FunctionClosure;
 struct FunctionDefinition {
   Identifier function_name;
   std::vector<Identifier> arguments;
   std::vector<Identifier> local_scope;
   std::vector<std::pair<Identifier, const FunctionDefinition *>>
-      nestedly_declared;
+      nested_functions;
   std::vector<Statement> body;
+};
+using Dynamic =
+    std::variant<std::monostate, ImmuString, std::int64_t, double,
+                 ObjectInstance *, IntrinsicObject, FunctionClosure *,
+                 const FunctionDefinition *, IntrinsicFunction>;
+struct ObjectInstance {
+  std::span<const Identifier> object_shape;
+  std::vector<Dynamic> properties;
 };
 struct FunctionClosure {
   const FunctionDefinition *definition;
-  std::expected<std::size_t, IntrinsicSigil> parent_handle{
-      std::unexpect, IntrinsicSigil::H_NIL};
+  FunctionClosure *parent_closure;
   std::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
 };
@@ -162,54 +158,62 @@ public:
   void evaluate();
 
 protected:
-  std::unordered_map<std::string_view, ImmuString> string_atlas;
-  std::unordered_map<std::string_view, Identifier> atom_atlas;
-  std::vector<ImmuString> atom_pool;
-  std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
-
   FunctionClosure main_function;
+  std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
-  std::vector<std::unique_ptr<FunctionClosure>> function_closures;
-  std::vector<std::unique_ptr<VanillaObject>> object_pool;
+  std::vector<std::shared_ptr<const Identifier[]>> shape_pool;
 
-  void instantiate(FunctionHandle function_handle);
+  std::vector<std::unique_ptr<FunctionClosure>> function_closures;
+  std::vector<std::unique_ptr<ObjectInstance>> object_pool;
+
+  void initialize(FunctionClosure &closure);
 
 private:
-  VanillaObject global_this{
-      .shape_handle = std::unexpected{IntrinsicSigil::H_GLOBAL},
-      .properties = {ObjectHandle{std::unexpected{IntrinsicSigil::H_CONSOLE}}}};
-  VanillaObject console{
-      .shape_handle = std::unexpected{IntrinsicSigil::H_CONSOLE},
-      .properties = {FunctionHandle{std::unexpected{IntrinsicSigil::H_LOG}}}};
+  static inline const std::array shape_console{
+      std::to_array<Identifier>({Identifier{1}})};
+  static inline const std::array shape_global_this{
+      std::to_array<Identifier>({Identifier{0}})};
+
+  ObjectInstance global_this{.object_shape = shape_global_this,
+                             .properties = {IntrinsicObject::O_CONSOLE}};
+  ObjectInstance console{.object_shape = shape_console,
+                         .properties = {IntrinsicFunction::F_LOG}};
   std::vector<std::string> console_messages;
 
   std::generator<FunctionClosure *>
   climb_closure_stack(FunctionClosure *closure_ptr);
   std::optional<Dynamic> *get_variable(FunctionClosure &closure,
                                        Identifier var_handle);
-  Dynamic *get_property(VanillaObject &object, Identifier property_handle);
+  Dynamic *get_property(ObjectInstance &object, Identifier property_handle);
 
   std::string evaluate_message(std::monostate);
   std::string evaluate_message(ImmuString immu_string);
   std::string evaluate_message(std::int64_t number);
   std::string evaluate_message(double number);
-  std::string evaluate_message(ObjectHandle object_handle);
-  std::string evaluate_message(FunctionHandle function_handle);
+  std::string evaluate_message(ObjectInstance *object_instance);
+  std::string evaluate_message(FunctionClosure *closure);
+  std::string evaluate_message(const FunctionDefinition *definition);
+  std::string evaluate_message(IntrinsicObject intrinsic_object);
+  std::string evaluate_message(IntrinsicFunction intrinsic_function);
 
   Dynamic evaluate_property(Identifier property, std::monostate);
   Dynamic evaluate_property(Identifier property, ImmuString immu_string);
   Dynamic evaluate_property(Identifier property, std::int64_t number);
   Dynamic evaluate_property(Identifier property, double number);
-  Dynamic evaluate_property(Identifier property, ObjectHandle object_handle);
   Dynamic evaluate_property(Identifier property,
-                            FunctionHandle function_handle);
+                            ObjectInstance *object_instance);
+  Dynamic evaluate_property(Identifier property, FunctionClosure *closure);
+  Dynamic evaluate_property(Identifier property,
+                            const FunctionDefinition *definition);
+  Dynamic evaluate_property(Identifier property,
+                            IntrinsicObject intrinsic_object);
+  Dynamic evaluate_property(Identifier property,
+                            IntrinsicFunction intrinsic_function);
 
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure,
-                  const BinaryExpression &expression);
+  evaluate_callee(FunctionClosure &closure, const BinaryExpression &expression);
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure,
-                  const MemberExpression &expression);
+  evaluate_callee(FunctionClosure &closure, const MemberExpression &expression);
   std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure,
                   const FunctionCallExpression &expression);
@@ -252,6 +256,10 @@ public:
   void parse_text();
 
 private:
+  std::vector<ImmuString> atom_pool;
+  std::unordered_map<std::string_view, Identifier> atom_atlas;
+  std::unordered_map<std::string_view, ImmuString> string_atlas;
+
   std::size_t position;
   std::vector<std::int32_t> backtrace;
 
