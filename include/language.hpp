@@ -156,6 +156,10 @@ struct FunctionClosure {
   Dynamic return_val;
 };
 
+inline constexpr std::size_t IDENT_console{0};
+inline constexpr std::size_t IDENT_log{1};
+inline constexpr std::size_t IDENT_length{2};
+
 class Script {
 public:
   void evaluate();
@@ -177,9 +181,9 @@ protected:
 
 private:
   static inline const std::array shape_console{
-      std::to_array<Identifier>({Identifier{1}})};
+      std::to_array<Identifier>({Identifier{IDENT_log}})};
   static inline const std::array shape_global_this{
-      std::to_array<Identifier>({Identifier{0}})};
+      std::to_array<Identifier>({Identifier{IDENT_console}})};
 
   ObjectInstance global_this{.object_shape = shape_global_this,
                              .properties = {IntrinsicObject::O_CONSOLE}};
@@ -201,6 +205,115 @@ private:
   std::string evaluate_message(FunctionClosure *closure);
   std::string evaluate_message(IntrinsicObject intrinsic_object);
   std::string evaluate_message(IntrinsicFunction intrinsic_function);
+
+  Dynamic evaluate_operation(char32_t op, std::monostate, std::monostate);
+  Dynamic evaluate_operation(char32_t op, std::monostate, StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, std::monostate, std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, std::monostate, double rhs);
+  Dynamic evaluate_operation(char32_t op, std::monostate, ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, std::monostate, FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, std::monostate, IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, std::monostate,
+                             IntrinsicFunction rhs);
+
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs, std::monostate);
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs,
+                             StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs,
+                             std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs, double rhs);
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs,
+                             ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs,
+                             FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs,
+                             IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, StringInstance *lhs,
+                             IntrinsicFunction rhs);
+
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::monostate);
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs,
+                             StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs, double rhs);
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs,
+                             ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs,
+                             FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs,
+                             IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs,
+                             IntrinsicFunction rhs);
+
+  Dynamic evaluate_operation(char32_t op, double lhs, std::monostate);
+  Dynamic evaluate_operation(char32_t op, double lhs, StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, double lhs, std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, double lhs, double rhs);
+  Dynamic evaluate_operation(char32_t op, double lhs, ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, double lhs, FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, double lhs, IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, double lhs, IntrinsicFunction rhs);
+
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs, std::monostate);
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs,
+                             StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs,
+                             std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs, double rhs);
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs,
+                             ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs,
+                             FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs,
+                             IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, ObjectInstance *lhs,
+                             IntrinsicFunction rhs);
+
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs, std::monostate);
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs,
+                             StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs,
+                             std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs, double rhs);
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs,
+                             ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs,
+                             FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs,
+                             IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, FunctionClosure *lhs,
+                             IntrinsicFunction rhs);
+
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs, std::monostate);
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs,
+                             StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs,
+                             std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs, double rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs,
+                             ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs,
+                             FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs,
+                             IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicObject lhs,
+                             IntrinsicFunction rhs);
+
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                             std::monostate);
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                             StringInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                             std::int64_t rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs, double rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                             ObjectInstance *rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                             FunctionClosure *rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                             IntrinsicObject rhs);
+  Dynamic evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                             IntrinsicFunction rhs);
 
   Dynamic evaluate_property(Identifier property, std::monostate);
   Dynamic evaluate_property(Identifier property,

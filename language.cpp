@@ -23,9 +23,9 @@ static const std::unordered_map<std::string_view, Keyword> keyword_atlas{
     {"break", Keyword::K_BREAK},       {"continue", Keyword::K_CONTINUE},
     {"switch", Keyword::K_SWITCH}};
 static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
-    {"console", 0}, {"log", 1}};
+    {"console", IDENT_console}, {"log", IDENT_log}, {"length", IDENT_length}};
 static const std::array permanent_identifiers{
-    std::to_array<std::string_view>({"console", "log"})};
+    std::to_array<std::string_view>({"console", "log", "length"})};
 
 std::optional<char32_t> Parser::forward() {
   if (position >= text_size)
@@ -395,6 +395,8 @@ Dynamic Script::evaluate_property(Identifier property, std::monostate) {
 
 Dynamic Script::evaluate_property(Identifier property,
                                   StringInstance *string_instance) {
+  if (property == Identifier{IDENT_length})
+    return static_cast<std::int64_t>(string_instance->size);
   return {};
 }
 
@@ -597,6 +599,269 @@ Dynamic Script::evaluate_function_call(FunctionClosure &closure,
   return {};
 }
 
+Dynamic Script::evaluate_operation(char32_t op, std::monostate,
+                                   std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::monostate,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::monostate,
+                                   std::int64_t rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::monostate, double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::monostate,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::monostate,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::monostate,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::monostate,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   std::int64_t rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, StringInstance *lhs,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   std::int64_t rhs) {
+  if (op == '+')
+    return std::int64_t{lhs + rhs};
+  if (op == '-')
+    return std::int64_t{lhs - rhs};
+  std::unreachable();
+}
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs, double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, double lhs, std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, double lhs,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, double lhs, std::int64_t rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, double lhs, double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, double lhs,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, double lhs,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, double lhs,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, double lhs,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   std::int64_t rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, ObjectInstance *lhs,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   std::int64_t rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, FunctionClosure *lhs,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   std::int64_t rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicObject lhs,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   std::monostate) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   StringInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   std::int64_t rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   double rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   ObjectInstance *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   FunctionClosure *rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   IntrinsicObject rhs) {
+  return {};
+}
+Dynamic Script::evaluate_operation(char32_t op, IntrinsicFunction lhs,
+                                   IntrinsicFunction rhs) {
+  return {};
+}
+
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const FunctionCallExpression &expr_call) {
   auto visit_expression = [&](auto expression_alt) {
@@ -613,12 +878,21 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const BinaryExpression &expression) {
-  return {};
+  Dynamic dynamic_lhs{evaluate(closure, expression.left)};
+  Dynamic dynamic_rhs{evaluate(closure, expression.right)};
+  auto visit_operands = [&](auto lhs, auto rhs) {
+    return evaluate_operation(expression.op, lhs, rhs);
+  };
+  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const MemberExpression &expression) {
-  return {};
+  Dynamic dynamic_object{evaluate(closure, expression.object)};
+  auto visit_object = [&](auto dynamic_alt) {
+    return evaluate_property(expression.property, dynamic_alt);
+  };
+  return dynamic_object.visit(visit_object);
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
@@ -629,15 +903,15 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 
 Dynamic Script::evaluate(FunctionClosure &closure,
                          StringInstance *string_instance) {
-  return Dynamic{string_instance};
+  return string_instance;
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure, std::int64_t number) {
-  return Dynamic{number};
+  return number;
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure, double number) {
-  return Dynamic{number};
+  return number;
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure, Expression expression) {
@@ -665,7 +939,7 @@ void Script::evaluate(FunctionClosure &closure,
 }
 
 void Script::evaluate(FunctionClosure &closure, ReturnStatement statement) {
-  evaluate(closure, statement.argument);
+  closure.return_val = evaluate(closure, statement.argument);
 }
 
 void Script::evaluate(FunctionClosure &closure, Statement statement) {
