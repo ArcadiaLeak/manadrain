@@ -27,18 +27,17 @@ static const std::array permanent_identifiers{
     std::to_array<std::string_view>({"console", "log"})};
 
 std::optional<char32_t> Parser::forward() {
-  if (position >= text_size) {
-    backtrace.push_back(-1);
-    return std::nullopt;
-  } else {
+  if (position >= text_size)
+    backtrace.push_back(std::nullopt);
+  else {
     ucs4_t ch;
     int advance{
         u8_mbtoucr(&ch, text_buffer.get() + position, text_size - position)};
     assert(advance >= 0);
     position += advance;
-    backtrace.push_back(std::bit_cast<std::int32_t>(ch));
-    return ch;
+    backtrace.push_back(ch);
   }
+  return backtrace.back();
 }
 
 std::generator<std::optional<char32_t>> Parser::traverse_text() {
@@ -55,9 +54,7 @@ std::generator<char> traverse_ucs4(ucs4_t cp) {
 }
 
 void Parser::backward() {
-  std::optional<char32_t> behind{};
-  if (backtrace.back() > -1)
-    behind = std::bit_cast<char32_t>(backtrace.back());
+  std::optional<char32_t> behind{backtrace.back()};
   position -= std::ranges::distance(
       behind | std::views::transform(traverse_ucs4) | std::views::join);
   backtrace.pop_back();
@@ -102,7 +99,7 @@ Token Parser::tokenize_identifier(char32_t leading) {
         std::make_shared<char[]>(identifier_str.size())};
     std::memcpy(identifier_buf.get(), identifier_str.data(),
                 identifier_str.size());
-    atom_pool.push_back({identifier_buf, identifier_str.size()});
+    atom_pool.push_back(IdentifierAtom{identifier_buf, identifier_str.size()});
     atom_atlas[std::string_view{identifier_buf.get(), identifier_str.size()}] =
         Identifier{permanent_identifiers.size() + atom_pool.size() - 1};
   }
@@ -128,11 +125,11 @@ Token Parser::tokenize_string_literal(char32_t separator) {
     return iter_existing->second;
   std::shared_ptr literal_buf{std::make_shared<char[]>(literal_str.size())};
   std::memcpy(literal_buf.get(), literal_str.data(), literal_str.size());
-  string_pool.push_back(
-      std::make_unique<StringInstance>(literal_buf, literal_str.size()));
+  permanent_strings.emplace_back(
+      new StringInstance{.ptr = literal_buf, .size = literal_str.size()});
   string_atlas[std::string_view{literal_buf.get(), literal_str.size()}] =
-      string_pool.back().get();
-  return string_pool.back().get();
+      permanent_strings.back().get();
+  return permanent_strings.back().get();
 }
 
 Token Parser::tokenize_numeric_literal(char32_t leading) {
@@ -283,7 +280,7 @@ Expression Parser::parse_expression() { return parse_additive_expr(); }
 
 Expression Parser::parse_primary_expr() {
   return tokenize().visit([](auto t) -> Expression {
-    if constexpr (std::is_same_v<decltype(t), StringInstance> ||
+    if constexpr (std::is_same_v<decltype(t), StringInstance *> ||
                   std::is_same_v<decltype(t), Identifier> ||
                   std::is_same_v<decltype(t), std::int64_t> ||
                   std::is_same_v<decltype(t), double>)
@@ -412,7 +409,7 @@ Dynamic Script::evaluate_property(Identifier property, std::monostate) {
 }
 
 Dynamic Script::evaluate_property(Identifier property,
-                                  StringInstance string_instance) {
+                                  StringInstance *string_instance) {
   return {};
 }
 
@@ -434,6 +431,18 @@ Dynamic Script::evaluate_property(Identifier property,
 
 Dynamic Script::evaluate_property(Identifier property,
                                   FunctionClosure *closure) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  IntrinsicObject intrinsic_object) {
+  if (intrinsic_object == IntrinsicObject::O_CONSOLE)
+    return evaluate_property(property, &console);
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  IntrinsicFunction intrinsic_function) {
   return {};
 }
 
@@ -474,7 +483,7 @@ Script::evaluate_callee(FunctionClosure &closure,
 
 std::pair<Dynamic, Dynamic>
 Script::evaluate_callee(FunctionClosure &closure,
-                        StringInstance string_instance) {
+                        StringInstance *string_instance) {
   return {};
 }
 
@@ -496,7 +505,7 @@ std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
 std::string Script::evaluate_message(std::monostate) {
   return "<unimplemented>";
 }
-std::string Script::evaluate_message(StringInstance string_instance) {
+std::string Script::evaluate_message(StringInstance *string_instance) {
   return "<unimplemented>";
 }
 std::string Script::evaluate_message(std::int64_t number) {
@@ -508,7 +517,7 @@ std::string Script::evaluate_message(double number) {
 std::string Script::evaluate_message(FunctionClosure *closure) {
   return "<unimplemented>";
 }
-std::string Script::evaluate_message(const FunctionDefinition *definition) {
+std::string Script::evaluate_message(ObjectInstance *object_instance) {
   return "<unimplemented>";
 }
 std::string Script::evaluate_message(IntrinsicObject intrinsic_object) {
@@ -518,6 +527,91 @@ std::string Script::evaluate_message(IntrinsicFunction intrinsic_function) {
   return "<unimplemented>";
 }
 
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context, std::monostate) {
+  throw ScriptError{InvalidFunctionCall{}};
+}
+
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context,
+                                       StringInstance *string_instance) {
+  throw ScriptError{InvalidFunctionCall{}};
+}
+
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context, std::int64_t number) {
+  throw ScriptError{InvalidFunctionCall{}};
+}
+
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context, double number) {
+  throw ScriptError{InvalidFunctionCall{}};
+}
+
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context,
+                                       ObjectInstance *object_instance) {
+  throw ScriptError{InvalidFunctionCall{}};
+}
+
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context,
+                                       FunctionClosure *callee_ptr) {
+  auto evaluate_argument = [&](Expression expression) {
+    return evaluate(closure, expression);
+  };
+  auto dynamic_arguments = expr_call.arguments |
+                           std::views::transform(evaluate_argument) |
+                           std::views::enumerate;
+  function_closures.emplace_back(new FunctionClosure{*callee_ptr});
+  FunctionClosure *copied_callee_ptr{function_closures.back().get()};
+  initialize(*copied_callee_ptr);
+  for (auto [index, argument] : dynamic_arguments) {
+    Identifier identifier{callee_ptr->definition->arguments[index]};
+    auto *argument_lvalue{get_variable(*copied_callee_ptr, identifier)};
+    assert(argument_lvalue != nullptr);
+    *argument_lvalue = argument;
+  }
+  for (Statement statement : callee_ptr->definition->body)
+    evaluate(*copied_callee_ptr, statement);
+  return copied_callee_ptr->return_val;
+}
+
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context,
+                                       IntrinsicObject intrinsic_object) {
+  throw ScriptError{InvalidFunctionCall{}};
+}
+
+Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+                                       const FunctionCallExpression &expr_call,
+                                       Dynamic context,
+                                       IntrinsicFunction intrinsic_function) {
+  if (intrinsic_function == IntrinsicFunction::F_LOG) {
+    auto match_message_alt = [&](auto dynamic_alt) {
+      return evaluate_message(dynamic_alt);
+    };
+    auto match_message_arg = [&](Dynamic argument) {
+      return argument.visit(match_message_alt);
+    };
+    auto evaluate_argument = [&](Expression expression) {
+      return evaluate(closure, expression);
+    };
+    auto message_parts =
+        expr_call.arguments | std::views::transform(evaluate_argument) |
+        std::views::transform(match_message_arg) | std::views::join_with(' ');
+    console_messages.emplace_back(std::from_range, message_parts);
+  }
+  return {};
+}
+
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const FunctionCallExpression &expr_call) {
   auto visit_expression = [&](auto expression_alt) {
@@ -525,37 +619,11 @@ Dynamic Script::evaluate(FunctionClosure &closure,
   };
   auto [dynamic_context, dynamic_callee] =
       expr_call.callee.visit(visit_expression);
-  ClosureHandle *callee_handle{std::get_if<ClosureHandle>(&dynamic_callee)};
-  if (not callee_handle)
-    throw ScriptError{InvalidFunctionCall{}};
-  auto dynamic_arguments =
-      expr_call.arguments | std::views::transform([&](Expression expression) {
-        return evaluate(closure, expression);
-      });
-  if (*callee_handle == std::unexpected{IntrinsicSigil::H_LOG}) {
-    auto match_message_alt = [&](auto dynamic_alt) {
-      return evaluate_message(dynamic_alt);
-    };
-    auto match_message_arg = [&](Dynamic argument) {
-      return argument.visit(match_message_alt);
-    };
-    auto message_parts = dynamic_arguments |
-                         std::views::transform(match_message_arg) |
-                         std::views::join_with(' ');
-    console_messages.emplace_back(std::from_range, message_parts);
-    return std::monostate{};
-  } else {
-    FunctionClosure &callee{*callee_handle->value()};
-    for (auto [index, argument] : dynamic_arguments | std::views::enumerate) {
-      Identifier identifier{callee.definition->arguments[index]};
-      auto *argument_lvalue{get_variable(callee, identifier)};
-      assert(argument_lvalue != nullptr);
-      *argument_lvalue = argument;
-    }
-    for (Statement statement : callee.definition->body)
-      evaluate(callee, statement);
-    return callee.return_val;
-  }
+  auto visit_dynamic = [&](auto dynamic_alt) {
+    return evaluate_function_call(closure, expr_call, dynamic_context,
+                                  dynamic_alt);
+  };
+  return dynamic_callee.visit(visit_dynamic);
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
@@ -575,7 +643,7 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
-                         StringInstance string_instance) {
+                         StringInstance *string_instance) {
   return Dynamic{string_instance};
 }
 
@@ -624,9 +692,11 @@ void Script::initialize(FunctionClosure &closure) {
   const FunctionDefinition &definition{*closure.definition};
   closure.own_scope.resize(definition.local_scope.size());
   for (auto [nested_name, nested_definition] : definition.nested_functions) {
-    std::optional<Dynamic> *function_lvalue{get_variable(closure, nested_name)};
+    auto *function_lvalue{get_variable(closure, nested_name)};
     assert(function_lvalue != nullptr);
-    *function_lvalue = nested_definition;
+    function_closures.emplace_back(new FunctionClosure{
+        .definition = nested_definition, .parent_closure = &closure});
+    *function_lvalue = function_closures.back().get();
   }
 }
 
