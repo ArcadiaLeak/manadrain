@@ -128,10 +128,11 @@ Token Parser::tokenize_string_literal(char32_t separator) {
     return iter_existing->second;
   std::shared_ptr literal_buf{std::make_shared<char[]>(literal_str.size())};
   std::memcpy(literal_buf.get(), literal_str.data(), literal_str.size());
-  ImmuString immu_string{literal_buf, literal_str.size()};
+  string_pool.push_back(
+      std::make_unique<StringInstance>(literal_buf, literal_str.size()));
   string_atlas[std::string_view{literal_buf.get(), literal_str.size()}] =
-      immu_string;
-  return immu_string;
+      string_pool.back().get();
+  return string_pool.back().get();
 }
 
 Token Parser::tokenize_numeric_literal(char32_t leading) {
@@ -282,7 +283,7 @@ Expression Parser::parse_expression() { return parse_additive_expr(); }
 
 Expression Parser::parse_primary_expr() {
   return tokenize().visit([](auto t) -> Expression {
-    if constexpr (std::is_same_v<decltype(t), ImmuString> ||
+    if constexpr (std::is_same_v<decltype(t), StringInstance> ||
                   std::is_same_v<decltype(t), Identifier> ||
                   std::is_same_v<decltype(t), std::int64_t> ||
                   std::is_same_v<decltype(t), double>)
@@ -410,7 +411,8 @@ Dynamic Script::evaluate_property(Identifier property, std::monostate) {
   return {};
 }
 
-Dynamic Script::evaluate_property(Identifier property, ImmuString immu_string) {
+Dynamic Script::evaluate_property(Identifier property,
+                                  StringInstance string_instance) {
   return {};
 }
 
@@ -470,8 +472,9 @@ Script::evaluate_callee(FunctionClosure &closure,
       [&](const auto &expr_alt) { return evaluate_callee(closure, expr_alt); });
 }
 
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
-                                                    ImmuString immu_string) {
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(FunctionClosure &closure,
+                        StringInstance string_instance) {
   return {};
 }
 
@@ -493,7 +496,7 @@ std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
 std::string Script::evaluate_message(std::monostate) {
   return "<unimplemented>";
 }
-std::string Script::evaluate_message(ImmuString immu_string) {
+std::string Script::evaluate_message(StringInstance string_instance) {
   return "<unimplemented>";
 }
 std::string Script::evaluate_message(std::int64_t number) {
@@ -571,8 +574,9 @@ Dynamic Script::evaluate(FunctionClosure &closure,
       [&](const auto &expr_alt) { return evaluate(closure, expr_alt); });
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure, ImmuString immu_string) {
-  return Dynamic{immu_string};
+Dynamic Script::evaluate(FunctionClosure &closure,
+                         StringInstance string_instance) {
+  return Dynamic{string_instance};
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure, std::int64_t number) {

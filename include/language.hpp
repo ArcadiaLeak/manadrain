@@ -40,7 +40,7 @@ struct Identifier {
   std::size_t offset;
   auto operator<=>(const Identifier &) const = default;
 };
-struct ImmuString {
+struct StringInstance {
   std::shared_ptr<const char[]> ptr;
   std::size_t size;
 };
@@ -58,7 +58,7 @@ enum class Operator {
   LOGICAL_DISJUNCT
 };
 using Token = std::variant<std::monostate, char32_t, std::int64_t, double,
-                           Operator, Keyword, Identifier, ImmuString>;
+                           Operator, Keyword, Identifier, StringInstance *>;
 
 struct InvalidNumericLiteral {};
 struct InvalidPropertyName {};
@@ -96,7 +96,7 @@ public:
 };
 
 struct ExpressionNode;
-using Expression = std::variant<std::monostate, ImmuString, std::int64_t,
+using Expression = std::variant<std::monostate, StringInstance, std::int64_t,
                                 double, Identifier, const ExpressionNode *>;
 struct BinaryExpression {
   Expression left;
@@ -139,7 +139,7 @@ struct FunctionDefinition {
   std::vector<Statement> body;
 };
 using Dynamic =
-    std::variant<std::monostate, ImmuString, std::int64_t, double,
+    std::variant<std::monostate, StringInstance, std::int64_t, double,
                  ObjectInstance *, IntrinsicObject, FunctionClosure *,
                  const FunctionDefinition *, IntrinsicFunction>;
 struct ObjectInstance {
@@ -163,6 +163,7 @@ protected:
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const Identifier[]>> shape_pool;
 
+  std::vector<std::unique_ptr<StringInstance>> string_pool;
   std::vector<std::unique_ptr<FunctionClosure>> function_closures;
   std::vector<std::unique_ptr<ObjectInstance>> object_pool;
 
@@ -187,7 +188,7 @@ private:
   Dynamic *get_property(ObjectInstance &object, Identifier property_handle);
 
   std::string evaluate_message(std::monostate);
-  std::string evaluate_message(ImmuString immu_string);
+  std::string evaluate_message(StringInstance string_instance);
   std::string evaluate_message(std::int64_t number);
   std::string evaluate_message(double number);
   std::string evaluate_message(ObjectInstance *object_instance);
@@ -197,7 +198,8 @@ private:
   std::string evaluate_message(IntrinsicFunction intrinsic_function);
 
   Dynamic evaluate_property(Identifier property, std::monostate);
-  Dynamic evaluate_property(Identifier property, ImmuString immu_string);
+  Dynamic evaluate_property(Identifier property,
+                            StringInstance string_instance);
   Dynamic evaluate_property(Identifier property, std::int64_t number);
   Dynamic evaluate_property(Identifier property, double number);
   Dynamic evaluate_property(Identifier property,
@@ -222,7 +224,7 @@ private:
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               const ExpressionNode *expr_ptr);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
-                                              ImmuString immu_string);
+                                              StringInstance string_instance);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               std::int64_t number);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
@@ -238,7 +240,7 @@ private:
                    const FunctionCallExpression &expression);
   Dynamic evaluate(FunctionClosure &closure, Identifier identifier);
   Dynamic evaluate(FunctionClosure &closure, const ExpressionNode *expr_ptr);
-  Dynamic evaluate(FunctionClosure &closure, ImmuString immu_string);
+  Dynamic evaluate(FunctionClosure &closure, StringInstance string_instance);
   Dynamic evaluate(FunctionClosure &closure, std::int64_t number);
   Dynamic evaluate(FunctionClosure &closure, double number);
   Dynamic evaluate(FunctionClosure &closure, std::monostate) { return {}; }
@@ -256,9 +258,9 @@ public:
   void parse_text();
 
 private:
-  std::vector<ImmuString> atom_pool;
+  std::vector<StringInstance> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
-  std::unordered_map<std::string_view, ImmuString> string_atlas;
+  std::unordered_map<std::string_view, StringInstance *> string_atlas;
 
   std::size_t position;
   std::vector<std::int32_t> backtrace;
