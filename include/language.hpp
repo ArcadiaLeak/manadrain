@@ -1,8 +1,5 @@
 #include <cstdint>
-#include <expected>
-#include <flat_map>
 #include <generator>
-#include <list>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -46,7 +43,7 @@ struct IdentifierAtom {
 };
 struct StringInstance {
   bool garbage;
-  std::shared_ptr<const char[]> ptr;
+  std::shared_ptr<const char16_t[]> ptr;
   std::size_t size;
 };
 enum class Operator {
@@ -295,28 +292,23 @@ public:
 private:
   std::vector<IdentifierAtom> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
-  std::unordered_map<std::string_view, StringInstance *> string_atlas;
+  std::unordered_map<std::u16string_view, StringInstance *> string_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
-
-  std::list<Token> token_history;
-  std::list<Token> token_revoked;
 
   std::generator<std::optional<char32_t>> traverse_text();
   std::optional<char32_t> forward();
   void backward();
   void backward(std::size_t N);
 
-  std::optional<Token> revoked_pull();
-  void history_pull();
-  void history_push(Token token);
-
   Token tokenize_identifier(char32_t leading);
   Token tokenize_string_literal(char32_t separator);
   Token tokenize_numeric_literal(char32_t leading);
-  std::generator<Token> traverse_tokens();
-  Token tokenize();
+
+  Token last_token;
+  void assert_punct(char32_t must_be);
+  void tokenize();
 
   Expression parse_primary_expr();
   Expression parse_postfix_expr();
@@ -325,7 +317,7 @@ private:
   Expression parse_call_expr(Expression callee_expr);
   Expression parse_expression();
 
-  void parse_statement(FunctionDefinition &definition, Token leading);
+  void parse_statement(FunctionDefinition &definition);
   const FunctionDefinition *parse_function_decl();
   VariableDeclaration parse_variable_decl();
 };

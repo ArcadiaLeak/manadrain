@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
+#include <inplace_vector>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -45,18 +46,24 @@ std::generator<std::optional<char32_t>> Parser::traverse_text() {
     co_yield forward();
 }
 
-std::generator<char> traverse_ucs4(ucs4_t cp) {
+std::inplace_vector<char, 6> traverse_u8(ucs4_t cp) {
   std::array<std::uint8_t, 6> buffer{};
   int advance{u8_uctomb(buffer.data(), cp, buffer.size())};
   assert(advance >= 0);
-  for (int i = 0; i < advance; ++i)
-    co_yield buffer[i];
+  return {std::from_range, buffer | std::views::take(advance)};
+}
+
+std::inplace_vector<char16_t, 2> traverse_u16(ucs4_t cp) {
+  std::array<std::uint16_t, 2> buffer{};
+  int advance{u16_uctomb(buffer.data(), cp, buffer.size())};
+  assert(advance >= 0);
+  return {std::from_range, buffer | std::views::take(advance)};
 }
 
 void Parser::backward() {
   std::optional<char32_t> behind{backtrace.back()};
   position -= std::ranges::distance(
-      behind | std::views::transform(traverse_ucs4) | std::views::join);
+      behind | std::views::transform(traverse_u8) | std::views::join);
   backtrace.pop_back();
 }
 
@@ -65,27 +72,13 @@ void Parser::backward(std::size_t N) {
     backward();
 }
 
-std::optional<Token> Parser::revoked_pull() {
-  if (token_revoked.empty())
-    return std::nullopt;
-  token_history.splice(token_history.begin(), token_revoked,
-                       token_revoked.begin());
-  return token_history.front();
-}
-
-void Parser::history_push(Token token) { token_history.push_front(token); }
-void Parser::history_pull() {
-  token_revoked.splice(token_revoked.begin(), token_history,
-                       token_history.begin());
-}
-
 Token Parser::tokenize_identifier(char32_t leading) {
-  std::string identifier_str{std::from_range, traverse_ucs4(leading)};
+  std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
       traverse_text() | std::views::take_while(does_exist) | std::views::join |
       std::views::take_while(uc_is_property_xid_continue) |
-      std::views::transform(traverse_ucs4) | std::views::join;
+      std::views::transform(traverse_u8) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
   auto iter_reserved = keyword_atlas.find(identifier_str);
@@ -107,7 +100,7 @@ Token Parser::tokenize_identifier(char32_t leading) {
 }
 
 Token Parser::tokenize_string_literal(char32_t separator) {
-  std::string literal_str{};
+  std::u16string literal_str{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
   };
@@ -118,22 +111,22 @@ Token Parser::tokenize_string_literal(char32_t separator) {
       backward();
     if (not leading || leading == '\r' || leading == '\n')
       throw ScriptError{UnexpectedStringEnd{}};
-    literal_str.append_range(traverse_ucs4(*leading));
+    literal_str.append_range(traverse_u16(*leading));
   }
   auto iter_existing = string_atlas.find(literal_str);
   if (iter_existing != string_atlas.end())
     return iter_existing->second;
-  std::shared_ptr literal_buf{std::make_shared<char[]>(literal_str.size())};
+  std::shared_ptr literal_buf{std::make_shared<char16_t[]>(literal_str.size())};
   std::memcpy(literal_buf.get(), literal_str.data(), literal_str.size());
   permanent_strings.emplace_back(
       new StringInstance{.ptr = literal_buf, .size = literal_str.size()});
-  string_atlas[std::string_view{literal_buf.get(), literal_str.size()}] =
+  string_atlas[std::u16string_view{literal_buf.get(), literal_str.size()}] =
       permanent_strings.back().get();
   return permanent_strings.back().get();
 }
 
 Token Parser::tokenize_numeric_literal(char32_t leading) {
-  std::string numeric_str{std::from_range, traverse_ucs4(leading)};
+  std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
     return std::isdigit(code_point);
@@ -141,7 +134,7 @@ Token Parser::tokenize_numeric_literal(char32_t leading) {
   numeric_str.append_range(
       traverse_text() | std::views::take_while(match_nullopt) |
       std::views::join | std::views::take_while(match_digit) |
-      std::views::transform(traverse_ucs4) | std::views::join);
+      std::views::transform(traverse_u8) | std::views::join);
   backward();
   std::int64_t num_literal{};
   std::from_chars(numeric_str.data(), numeric_str.data() + numeric_str.size(),
@@ -152,42 +145,31 @@ Token Parser::tokenize_numeric_literal(char32_t leading) {
 static const std::array legal_punct = std::to_array<char32_t>(
     {'(', ')', '*', '+', '-', '.', '/', ':', ';', '=', '{', '}'});
 
-Token Parser::tokenize() {
-  std::optional revoked_opt{revoked_pull()};
-  for (Token revoked_token : revoked_opt)
-    return revoked_token;
+void Parser::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   for (char32_t leading : traverse_text() | std::views::take_while(does_exist) |
                               std::views::join) {
-    Token token_ret{};
     if (uc_is_property_white_space(leading))
       continue;
     else if (std::ranges::any_of(
                  std::to_array({'`', '\'', '"'}),
                  [leading](char quote) { return leading == quote; }))
-      token_ret = tokenize_string_literal(leading);
+      last_token = tokenize_string_literal(leading);
     else if (uc_is_property_xid_start(leading) || leading == '_')
-      token_ret = tokenize_identifier(leading);
+      last_token = tokenize_identifier(leading);
     else if (std::ranges::binary_search(legal_punct, leading))
-      token_ret = leading;
+      last_token = leading;
     else if (std::isdigit(leading))
-      token_ret = tokenize_numeric_literal(leading);
+      last_token = tokenize_numeric_literal(leading);
     else
       throw ScriptError{UnexpectedToken{}};
-    history_push(token_ret);
-    return token_ret;
+    return;
   }
-  history_push(std::monostate{});
-  return std::monostate{};
+  last_token = std::monostate{};
 }
 
-std::generator<Token> Parser::traverse_tokens() {
-  while (1)
-    co_yield tokenize();
-}
-
-void assert_punct(Token token, char32_t must_be) {
-  char32_t *alter_ptr = std::get_if<char32_t>(&token);
+void Parser::assert_punct(char32_t must_be) {
+  char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
   throw ScriptError{MissingPunctuation{must_be}};
@@ -196,18 +178,18 @@ void assert_punct(Token token, char32_t must_be) {
 void Parser::parse_text() {
   std::shared_ptr definition{std::make_shared<FunctionDefinition>()};
   main_function.definition = definition.get();
-  auto match_script_end = [](Token token) {
-    return !std::holds_alternative<std::monostate>(token);
-  };
-  for (Token token :
-       traverse_tokens() | std::views::take_while(match_script_end))
-    parse_statement(*definition, token);
+  while (1) {
+    tokenize();
+    if (std::holds_alternative<std::monostate>(last_token))
+      break;
+    parse_statement(*definition);
+  }
   function_definitions.push_back(definition);
   initialize(main_function);
 }
 
-void Parser::parse_statement(FunctionDefinition &definition, Token leading) {
-  Keyword *word_ptr{std::get_if<Keyword>(&leading)};
+void Parser::parse_statement(FunctionDefinition &definition) {
+  Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
   if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
     const FunctionDefinition *nested_definition{parse_function_decl()};
     Identifier function_name{nested_definition->function_name};
@@ -231,32 +213,34 @@ void Parser::parse_statement(FunctionDefinition &definition, Token leading) {
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_RETURN) {
-    definition.body.push_back(parse_expression());
-    assert_punct(tokenize(), ';');
+    tokenize();
+    ReturnStatement statement{parse_expression()};
+    definition.body.push_back(std::move(statement));
+    assert_punct(';');
     return;
   }
-  history_pull();
   definition.body.push_back(parse_expression());
-  assert_punct(tokenize(), ';');
+  assert_punct(';');
 }
 
 const FunctionDefinition *Parser::parse_function_decl() {
-  Token leading{tokenize()};
-  Identifier *function_name{std::get_if<Identifier>(&leading)};
+  tokenize();
+  Identifier *function_name{std::get_if<Identifier>(&last_token)};
   if (not function_name)
     throw ScriptError{MissingFunctionName{}};
-  for (char function_punct : std::to_array({'(', ')', '{'}))
-    assert_punct(tokenize(), function_punct);
-  auto match_function_end = [&](Token token) {
-    char32_t *alter_ptr = std::get_if<char32_t>(&token);
-    return !alter_ptr || *alter_ptr != '}';
-  };
   FunctionDefinition definition{*function_name};
-  for (Token token :
-       traverse_tokens() | std::views::take_while(match_function_end)) {
-    if (std::holds_alternative<std::monostate>(token))
+  for (char function_punct : std::to_array({'(', ')', '{'})) {
+    tokenize();
+    assert_punct(function_punct);
+  }
+  while (1) {
+    tokenize();
+    if (std::holds_alternative<std::monostate>(last_token))
       throw ScriptError{MissingPunctuation{'}'}};
-    parse_statement(definition, token);
+    char32_t *alter_ptr{std::get_if<char32_t>(&last_token)};
+    if (alter_ptr && *alter_ptr == '}')
+      break;
+    parse_statement(definition);
   }
   std::shared_ptr definition_ptr{
       std::make_shared<FunctionDefinition>(std::move(definition))};
@@ -265,21 +249,23 @@ const FunctionDefinition *Parser::parse_function_decl() {
 }
 
 VariableDeclaration Parser::parse_variable_decl() {
-  Token leading{tokenize()};
-  Identifier *variable_name{std::get_if<Identifier>(&leading)};
+  tokenize();
+  Identifier *variable_name{std::get_if<Identifier>(&last_token)};
   if (not variable_name)
     throw ScriptError{MissingVariableName{}};
   VariableDeclaration variable_decl{*variable_name};
-  assert_punct(tokenize(), '=');
+  tokenize();
+  assert_punct('=');
+  tokenize();
   variable_decl.initializer = parse_expression();
-  assert_punct(tokenize(), ';');
+  assert_punct(';');
   return variable_decl;
 }
 
 Expression Parser::parse_expression() { return parse_additive_expr(); }
 
 Expression Parser::parse_primary_expr() {
-  return tokenize().visit([](auto t) -> Expression {
+  return last_token.visit([](auto t) -> Expression {
     if constexpr (std::is_same_v<decltype(t), StringInstance *> ||
                   std::is_same_v<decltype(t), Identifier> ||
                   std::is_same_v<decltype(t), std::int64_t> ||
@@ -290,9 +276,9 @@ Expression Parser::parse_primary_expr() {
 }
 
 Expression Parser::parse_postfix_expr() {
-  using POSTFIX_REDUCER =
+  using PostfixReducer =
       std::optional<std::copyable_function<Expression(Expression) const>>;
-  auto match_reducer = [this](auto t) -> POSTFIX_REDUCER {
+  auto match_reducer = [this](auto t) -> PostfixReducer {
     if constexpr (std::is_same_v<decltype(t), char32_t>) {
       if (t == '.')
         return [this](Expression expr) { return parse_member_expr(expr); };
@@ -304,14 +290,14 @@ Expression Parser::parse_postfix_expr() {
   auto postfix_fold = [](Expression postfix_expr, auto postfix_reducer) {
     return postfix_reducer(postfix_expr);
   };
-  auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
-  auto postfix_reducers =
-      traverse_tokens() |
-      std::views::transform([&](Token t) { return t.visit(match_reducer); }) |
-      std::views::take_while(does_exist) | std::views::join;
-  Expression postfix_expr{std::ranges::fold_left(
-      postfix_reducers, parse_primary_expr(), postfix_fold)};
-  history_pull();
+  Expression postfix_expr{parse_primary_expr()};
+  while (1) {
+    tokenize();
+    PostfixReducer postfix_reducer{last_token.visit(match_reducer)};
+    if (not postfix_reducer)
+      break;
+    postfix_expr = postfix_fold(postfix_expr, *postfix_reducer);
+  }
   return postfix_expr;
 }
 
@@ -323,19 +309,19 @@ Expression Parser::parse_additive_expr() {
         return t;
     return std::nullopt;
   };
-  for (char32_t binary_op : tokenize().visit(match_binary)) {
-    std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
-        BinaryExpression{expr_left, parse_postfix_expr(), binary_op})};
-    expr_pool.push_back(expr_ptr);
-    return expr_ptr.get();
-  }
-  history_pull();
-  return expr_left;
+  std::optional<char32_t> binary_op{last_token.visit(match_binary)};
+  if (not binary_op)
+    return expr_left;
+  tokenize();
+  std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+      BinaryExpression{expr_left, parse_postfix_expr(), *binary_op})};
+  expr_pool.push_back(expr_ptr);
+  return expr_ptr.get();
 }
 
 Expression Parser::parse_member_expr(Expression obj_expr) {
-  Token leading{tokenize()};
-  Identifier *field_name{std::get_if<Identifier>(&leading)};
+  tokenize();
+  Identifier *field_name{std::get_if<Identifier>(&last_token)};
   if (not field_name)
     throw ScriptError{MissingFieldName{}};
   std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
@@ -353,14 +339,13 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
   };
   std::vector<Expression> arguments{};
   while (1) {
-    if (tokenize().visit(match_rparen))
+    tokenize();
+    if (last_token.visit(match_rparen))
       break;
-    history_pull();
     arguments.push_back(parse_expression());
-    if (tokenize().visit(match_rparen))
+    if (last_token.visit(match_rparen))
       break;
-    history_pull();
-    assert_punct(tokenize(), ',');
+    assert_punct(',');
   }
   std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
       FunctionCallExpression{callee_expr, std::move(arguments)})};
