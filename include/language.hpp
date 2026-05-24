@@ -11,18 +11,37 @@
 #include <vector>
 
 namespace Manadrain {
-struct ReservedWord {
-  std::size_t offset;
+enum class Keyword {
+  K_CONST,
+  K_LET,
+  K_VAR,
+  K_CLASS,
+  K_FUNCTION,
+  K_RETURN,
+  K_IMPORT,
+  K_EXPORT,
+  K_FROM,
+  K_AS,
+  K_DEFAULT,
+  K_UNDEFINED,
+  K_NULL,
+  K_TRUE,
+  K_FALSE,
+  K_IF,
+  K_ELSE,
+  K_WHILE,
+  K_FOR,
+  K_DO,
+  K_BREAK,
+  K_CONTINUE,
+  K_SWITCH
 };
 struct Identifier {
-  bool permanent;
   std::size_t offset;
-  std::size_t size;
   auto operator<=>(const Identifier &) const = default;
 };
-struct StringHandle {
-  bool permanent;
-  std::size_t offset;
+struct ImmuString {
+  std::shared_ptr<const char[]> ptr;
   std::size_t size;
 };
 enum class Operator {
@@ -39,7 +58,7 @@ enum class Operator {
   LOGICAL_DISJUNCT
 };
 using Token = std::variant<std::monostate, char32_t, std::int64_t, double,
-                           Operator, ReservedWord, Identifier, StringHandle>;
+                           Operator, Keyword, Identifier, ImmuString>;
 
 struct InvalidNumericLiteral {};
 struct InvalidPropertyName {};
@@ -77,7 +96,7 @@ public:
 };
 
 struct ExpressionNode;
-using Expression = std::variant<std::monostate, StringHandle, std::int64_t,
+using Expression = std::variant<std::monostate, ImmuString, std::int64_t,
                                 double, Identifier, const ExpressionNode *>;
 struct BinaryExpression {
   Expression left;
@@ -113,7 +132,7 @@ struct ObjectHandle {
 struct FunctionHandle {
   std::expected<std::size_t, IntrinsicSigil> offset;
 };
-using Dynamic = std::variant<std::monostate, StringHandle, std::int64_t, double,
+using Dynamic = std::variant<std::monostate, ImmuString, std::int64_t, double,
                              ObjectHandle, FunctionHandle>;
 
 struct VanillaObject {
@@ -143,8 +162,9 @@ public:
   void evaluate();
 
 protected:
-  std::unordered_map<std::string_view, std::size_t> atom_atlas;
-  std::vector<std::shared_ptr<const char[]>> atom_pool;
+  std::unordered_map<std::string_view, ImmuString> string_atlas;
+  std::unordered_map<std::string_view, Identifier> atom_atlas;
+  std::vector<ImmuString> atom_pool;
   std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
 
   VanillaFunction main_function;
@@ -172,14 +192,14 @@ private:
   Dynamic *get_property(VanillaObject &object, Identifier property_handle);
 
   std::string evaluate_message(std::monostate);
-  std::string evaluate_message(StringHandle string_handle);
+  std::string evaluate_message(ImmuString immu_string);
   std::string evaluate_message(std::int64_t number);
   std::string evaluate_message(double number);
   std::string evaluate_message(ObjectHandle object_handle);
   std::string evaluate_message(FunctionHandle function_handle);
 
   Dynamic evaluate_property(Identifier property, std::monostate);
-  Dynamic evaluate_property(Identifier property, StringHandle string_handle);
+  Dynamic evaluate_property(Identifier property, ImmuString immu_string);
   Dynamic evaluate_property(Identifier property, std::int64_t number);
   Dynamic evaluate_property(Identifier property, double number);
   Dynamic evaluate_property(Identifier property, ObjectHandle object_handle);
@@ -200,7 +220,7 @@ private:
   std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
                                               const ExpressionNode *expr_ptr);
   std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
-                                              StringHandle string_handle);
+                                              ImmuString immu_string);
   std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
                                               std::int64_t number);
   std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
@@ -216,7 +236,7 @@ private:
                    const FunctionCallExpression &expression);
   Dynamic evaluate(VanillaFunction &function, Identifier identifier);
   Dynamic evaluate(VanillaFunction &function, const ExpressionNode *expr_ptr);
-  Dynamic evaluate(VanillaFunction &function, StringHandle string_handle);
+  Dynamic evaluate(VanillaFunction &function, ImmuString immu_string);
   Dynamic evaluate(VanillaFunction &function, std::int64_t number);
   Dynamic evaluate(VanillaFunction &function, double number);
   Dynamic evaluate(VanillaFunction &function, std::monostate) { return {}; }

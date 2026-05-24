@@ -8,25 +8,27 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_map<std::string_view, std::size_t> reserved_atlas{
-    {"const", 0},    {"let", 1},       {"var", 2},      {"class", 3},
-    {"function", 4}, {"return", 5},    {"import", 6},   {"export", 7},
-    {"from", 8},     {"as", 9},        {"default", 10}, {"undefined", 11},
-    {"null", 12},    {"true", 13},     {"false", 14},   {"if", 15},
-    {"else", 16},    {"while", 17},    {"for", 18},     {"do", 19},
-    {"break", 20},   {"continue", 21}, {"switch", 22}};
-static const std::unordered_map<std::string_view, std::size_t> intrinsic_atlas{
-    {"console", 23}, {"log", 24}};
-static const std::array permanent_pool{std::to_array<std::string_view>(
-    {"const",   "let",       "var",    "class",   "function",
-     "return",  "import",    "export", "from",    "as",
-     "default", "undefined", "null",   "true",    "false",
-     "if",      "else",      "while",  "for",     "do",
-     "break",   "continue",  "switch", "console", "log"})};
-static const std::array shape_console{std::to_array<Identifier>(
-    {Identifier{1, 24, std::string_view{"log"}.size()}})};
-static const std::array shape_global_this{std::to_array<Identifier>(
-    {Identifier{1, 23, std::string_view{"console"}.size()}})};
+static const std::unordered_map<std::string_view, Keyword> keyword_atlas{
+    {"const", Keyword::K_CONST},       {"let", Keyword::K_LET},
+    {"var", Keyword::K_VAR},           {"class", Keyword::K_CLASS},
+    {"function", Keyword::K_FUNCTION}, {"return", Keyword::K_RETURN},
+    {"import", Keyword::K_IMPORT},     {"export", Keyword::K_EXPORT},
+    {"from", Keyword::K_FROM},         {"as", Keyword::K_AS},
+    {"default", Keyword::K_DEFAULT},   {"undefined", Keyword::K_UNDEFINED},
+    {"null", Keyword::K_NULL},         {"true", Keyword::K_TRUE},
+    {"false", Keyword::K_FALSE},       {"if", Keyword::K_IF},
+    {"else", Keyword::K_ELSE},         {"while", Keyword::K_WHILE},
+    {"for", Keyword::K_FOR},           {"do", Keyword::K_DO},
+    {"break", Keyword::K_BREAK},       {"continue", Keyword::K_CONTINUE},
+    {"switch", Keyword::K_SWITCH}};
+static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
+    {"console", 0}, {"log", 1}};
+static const std::array permanent_identifiers{
+    std::to_array<std::string_view>({"console", "log"})};
+static const std::array shape_console{
+    std::to_array<Identifier>({Identifier{1}})};
+static const std::array shape_global_this{
+    std::to_array<Identifier>({Identifier{0}})};
 
 std::optional<char32_t> Parser::forward() {
   if (position >= text_size) {
@@ -93,22 +95,22 @@ Token Parser::tokenize_identifier(char32_t leading) {
       std::views::transform(traverse_ucs4) | std::views::join;
   identifier_str.append_range(xid_continue_view);
   backward();
-  auto iter_reserved = reserved_atlas.find(identifier_str);
-  if (iter_reserved != reserved_atlas.end())
-    return ReservedWord{iter_reserved->second};
-  auto iter_intrinsic = intrinsic_atlas.find(identifier_str);
-  if (iter_intrinsic != intrinsic_atlas.end())
-    return Identifier{1, iter_intrinsic->second, identifier_str.size()};
+  auto iter_reserved = keyword_atlas.find(identifier_str);
+  if (iter_reserved != keyword_atlas.end())
+    return iter_reserved->second;
+  auto iter_permanent = identifier_atlas.find(identifier_str);
+  if (iter_permanent != identifier_atlas.end())
+    return Identifier{iter_permanent->second};
   if (not atom_atlas.contains(identifier_str)) {
     std::shared_ptr identifier_buf{
         std::make_shared<char[]>(identifier_str.size())};
     std::memcpy(identifier_buf.get(), identifier_str.data(),
                 identifier_str.size());
-    atom_pool.push_back(identifier_buf);
+    atom_pool.push_back({identifier_buf, identifier_str.size()});
     atom_atlas[std::string_view{identifier_buf.get(), identifier_str.size()}] =
-        atom_pool.size() - 1;
+        Identifier{permanent_identifiers.size() + atom_pool.size() - 1};
   }
-  return Identifier{0, atom_atlas[identifier_str], identifier_str.size()};
+  return atom_atlas[identifier_str];
 }
 
 Token Parser::tokenize_string_literal(char32_t separator) {
@@ -125,20 +127,15 @@ Token Parser::tokenize_string_literal(char32_t separator) {
       throw ScriptError{UnexpectedStringEnd{}};
     literal_str.append_range(traverse_ucs4(*leading));
   }
-  auto iter_reserved = reserved_atlas.find(literal_str);
-  if (iter_reserved != reserved_atlas.end())
-    return StringHandle{1, iter_reserved->second, literal_str.size()};
-  auto iter_intrinsic = intrinsic_atlas.find(literal_str);
-  if (iter_intrinsic != intrinsic_atlas.end())
-    return StringHandle{1, iter_intrinsic->second, literal_str.size()};
-  if (not atom_atlas.contains(literal_str)) {
-    std::shared_ptr literal_buf{std::make_shared<char[]>(literal_str.size())};
-    std::memcpy(literal_buf.get(), literal_str.data(), literal_str.size());
-    atom_pool.push_back(literal_buf);
-    atom_atlas[std::string_view{literal_buf.get(), literal_str.size()}] =
-        atom_pool.size() - 1;
-  }
-  return StringHandle{0, atom_atlas[literal_str], literal_str.size()};
+  auto iter_existing = string_atlas.find(literal_str);
+  if (iter_existing != string_atlas.end())
+    return iter_existing->second;
+  std::shared_ptr literal_buf{std::make_shared<char[]>(literal_str.size())};
+  std::memcpy(literal_buf.get(), literal_str.data(), literal_str.size());
+  ImmuString immu_string{literal_buf, literal_str.size()};
+  string_atlas[std::string_view{literal_buf.get(), literal_str.size()}] =
+      immu_string;
+  return immu_string;
 }
 
 Token Parser::tokenize_numeric_literal(char32_t leading) {
@@ -216,8 +213,8 @@ void Parser::parse_text() {
 }
 
 void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
-  ReservedWord *word_ptr{std::get_if<ReservedWord>(&leading)};
-  if (word_ptr && permanent_pool[word_ptr->offset] == "function") {
+  Keyword *word_ptr{std::get_if<Keyword>(&leading)};
+  if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
     const FunctionBlueprint *blueprint_ptr{parse_function_decl()};
     Identifier function_name{blueprint_ptr->function_name};
     if (std::ranges::binary_search(blueprint.local_scope, function_name))
@@ -228,7 +225,7 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
     blueprint.local_scope.insert(lower_bound, function_name);
     return;
   }
-  if (word_ptr && permanent_pool[word_ptr->offset] == "let") {
+  if (word_ptr && *word_ptr == Keyword::K_LET) {
     VariableDeclaration declaration{parse_variable_decl()};
     Identifier variable_name{declaration.variable_name};
     if (std::ranges::binary_search(blueprint.local_scope, variable_name))
@@ -239,7 +236,7 @@ void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
     blueprint.body.push_back(declaration);
     return;
   }
-  if (word_ptr && permanent_pool[word_ptr->offset] == "return") {
+  if (word_ptr && *word_ptr == Keyword::K_RETURN) {
     blueprint.body.push_back(parse_expression());
     assert_punct(tokenize(), ';');
     return;
@@ -289,7 +286,7 @@ Expression Parser::parse_expression() { return parse_additive_expr(); }
 
 Expression Parser::parse_primary_expr() {
   return tokenize().visit([](auto t) -> Expression {
-    if constexpr (std::is_same_v<decltype(t), StringHandle> ||
+    if constexpr (std::is_same_v<decltype(t), ImmuString> ||
                   std::is_same_v<decltype(t), Identifier> ||
                   std::is_same_v<decltype(t), std::int64_t> ||
                   std::is_same_v<decltype(t), double>)
@@ -431,8 +428,7 @@ Dynamic Script::evaluate_property(Identifier property, std::monostate) {
   return {};
 }
 
-Dynamic Script::evaluate_property(Identifier property,
-                                  StringHandle string_handle) {
+Dynamic Script::evaluate_property(Identifier property, ImmuString immu_string) {
   return {};
 }
 
@@ -500,8 +496,8 @@ Script::evaluate_callee(VanillaFunction &function,
   });
 }
 
-std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(VanillaFunction &function, StringHandle string_handle) {
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+                                                    ImmuString immu_string) {
   return {};
 }
 
@@ -523,7 +519,7 @@ std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
 std::string Script::evaluate_message(std::monostate) {
   return "<unimplemented>";
 }
-std::string Script::evaluate_message(StringHandle string_handle) {
+std::string Script::evaluate_message(ImmuString immu_string) {
   return "<unimplemented>";
 }
 std::string Script::evaluate_message(std::int64_t number) {
@@ -573,6 +569,8 @@ Dynamic Script::evaluate(VanillaFunction &parent_function,
       assert(argument_lvalue != nullptr);
       *argument_lvalue = argument;
     }
+    for (Statement statement : callee.blueprint_ptr->body)
+      evaluate(callee, statement);
     return callee.return_val;
   }
 }
@@ -593,9 +591,8 @@ Dynamic Script::evaluate(VanillaFunction &function,
       [&](const auto &expr_alt) { return evaluate(function, expr_alt); });
 }
 
-Dynamic Script::evaluate(VanillaFunction &function,
-                         StringHandle string_handle) {
-  return Dynamic{string_handle};
+Dynamic Script::evaluate(VanillaFunction &function, ImmuString immu_string) {
+  return Dynamic{immu_string};
 }
 
 Dynamic Script::evaluate(VanillaFunction &function, std::int64_t number) {
