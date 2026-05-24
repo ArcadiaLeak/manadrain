@@ -200,53 +200,53 @@ void assert_punct(Token token, char32_t must_be) {
 }
 
 void Parser::parse_text() {
-  std::shared_ptr blueprint_ptr{std::make_shared<FunctionBlueprint>()};
-  main_function.blueprint_ptr = blueprint_ptr.get();
+  std::shared_ptr definition{std::make_shared<FunctionDefinition>()};
+  main_function.definition = definition.get();
   auto match_script_end = [](Token token) {
     return !std::holds_alternative<std::monostate>(token);
   };
   for (Token token :
        traverse_tokens() | std::views::take_while(match_script_end))
-    parse_statement(*blueprint_ptr, token);
-  blueprint_pool.push_back(blueprint_ptr);
+    parse_statement(*definition, token);
+  function_definitions.push_back(definition);
   instantiate(FunctionHandle{std::unexpected{IntrinsicSigil::H_MAIN}});
 }
 
-void Parser::parse_statement(FunctionBlueprint &blueprint, Token leading) {
+void Parser::parse_statement(FunctionDefinition &definition, Token leading) {
   Keyword *word_ptr{std::get_if<Keyword>(&leading)};
   if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
-    const FunctionBlueprint *blueprint_ptr{parse_function_decl()};
-    Identifier function_name{blueprint_ptr->function_name};
-    if (std::ranges::binary_search(blueprint.local_scope, function_name))
+    const FunctionDefinition *nested_definition{parse_function_decl()};
+    Identifier function_name{nested_definition->function_name};
+    if (std::ranges::binary_search(definition.local_scope, function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    blueprint.nestedly_declared.push_back({function_name, blueprint_ptr});
+    definition.nestedly_declared.push_back({function_name, nested_definition});
     auto lower_bound =
-        std::ranges::lower_bound(blueprint.local_scope, function_name);
-    blueprint.local_scope.insert(lower_bound, function_name);
+        std::ranges::lower_bound(definition.local_scope, function_name);
+    definition.local_scope.insert(lower_bound, function_name);
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
     VariableDeclaration declaration{parse_variable_decl()};
     Identifier variable_name{declaration.variable_name};
-    if (std::ranges::binary_search(blueprint.local_scope, variable_name))
+    if (std::ranges::binary_search(definition.local_scope, variable_name))
       throw ScriptError{DuplicateDeclaration{}};
     auto lower_bound =
-        std::ranges::lower_bound(blueprint.local_scope, variable_name);
-    blueprint.local_scope.insert(lower_bound, variable_name);
-    blueprint.body.push_back(declaration);
+        std::ranges::lower_bound(definition.local_scope, variable_name);
+    definition.local_scope.insert(lower_bound, variable_name);
+    definition.body.push_back(declaration);
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_RETURN) {
-    blueprint.body.push_back(parse_expression());
+    definition.body.push_back(parse_expression());
     assert_punct(tokenize(), ';');
     return;
   }
   history_pull();
-  blueprint.body.push_back(parse_expression());
+  definition.body.push_back(parse_expression());
   assert_punct(tokenize(), ';');
 }
 
-const FunctionBlueprint *Parser::parse_function_decl() {
+const FunctionDefinition *Parser::parse_function_decl() {
   Token leading{tokenize()};
   Identifier *function_name{std::get_if<Identifier>(&leading)};
   if (not function_name)
@@ -257,17 +257,17 @@ const FunctionBlueprint *Parser::parse_function_decl() {
     char32_t *alter_ptr = std::get_if<char32_t>(&token);
     return !alter_ptr || *alter_ptr != '}';
   };
-  FunctionBlueprint blueprint{*function_name};
+  FunctionDefinition definition{*function_name};
   for (Token token :
        traverse_tokens() | std::views::take_while(match_function_end)) {
     if (std::holds_alternative<std::monostate>(token))
       throw ScriptError{MissingPunctuation{'}'}};
-    parse_statement(blueprint, token);
+    parse_statement(definition, token);
   }
-  std::shared_ptr blueprint_ptr{
-      std::make_shared<FunctionBlueprint>(std::move(blueprint))};
-  blueprint_pool.push_back(blueprint_ptr);
-  return blueprint_ptr.get();
+  std::shared_ptr definition_ptr{
+      std::make_shared<FunctionDefinition>(std::move(definition))};
+  function_definitions.push_back(definition_ptr);
+  return definition_ptr.get();
 }
 
 VariableDeclaration Parser::parse_variable_decl() {
@@ -374,32 +374,32 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
   return expr_ptr.get();
 }
 
-std::generator<VanillaFunction *>
-Script::traverse_function_closure(VanillaFunction *function_ptr) {
+std::generator<FunctionClosure *>
+Script::climb_closure_stack(FunctionClosure *closure_ptr) {
   while (1) {
-    co_yield function_ptr;
-    std::expected parent_handle{function_ptr->parent_handle};
+    co_yield closure_ptr;
+    std::expected parent_handle{closure_ptr->parent_handle};
     if (parent_handle == std::unexpected{IntrinsicSigil::H_NIL})
       break;
     else if (parent_handle == std::unexpected{IntrinsicSigil::H_MAIN})
-      function_ptr = &main_function;
+      closure_ptr = &main_function;
     else {
       std::size_t parent_idx{parent_handle.value()};
-      function_ptr = function_pool[parent_idx].get();
+      closure_ptr = function_closures[parent_idx].get();
     }
   }
 }
 
-std::optional<Dynamic> *Script::get_variable(VanillaFunction &function,
+std::optional<Dynamic> *Script::get_variable(FunctionClosure &function,
                                              Identifier var_handle) {
-  for (VanillaFunction *function_ptr : traverse_function_closure(&function)) {
-    const auto &local_scope{function_ptr->blueprint_ptr->local_scope};
+  for (FunctionClosure *closure_ptr : climb_closure_stack(&function)) {
+    const auto &local_scope{closure_ptr->definition->local_scope};
     auto lower_bound = std::ranges::lower_bound(local_scope, var_handle);
     if (lower_bound == local_scope.end() || *lower_bound != var_handle)
       continue;
     std::ptrdiff_t own_scope_distance{
         std::distance(local_scope.begin(), lower_bound)};
-    std::optional<Dynamic> *own_scope_data{function_ptr->own_scope.data()};
+    std::optional<Dynamic> *own_scope_data{closure_ptr->own_scope.data()};
     return std::next(own_scope_data, own_scope_distance);
   }
   return nullptr;
@@ -461,15 +461,15 @@ Dynamic Script::evaluate_property(Identifier property,
 }
 
 std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(VanillaFunction &function,
+Script::evaluate_callee(FunctionClosure &function,
                         const BinaryExpression &expression) {
   return {};
 }
 
 std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(VanillaFunction &function,
+Script::evaluate_callee(FunctionClosure &closure,
                         const MemberExpression &expression) {
-  Dynamic dynamic_object{evaluate(function, expression.object)};
+  Dynamic dynamic_object{evaluate(closure, expression.object)};
   auto visit_object = [&](auto dynamic_alt) {
     return evaluate_property(expression.property, dynamic_alt);
   };
@@ -478,40 +478,39 @@ Script::evaluate_callee(VanillaFunction &function,
 }
 
 std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(VanillaFunction &function,
+Script::evaluate_callee(FunctionClosure &closure,
                         const FunctionCallExpression &expression) {
   return {};
 }
 
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
                                                     Identifier identifier) {
-  return {std::monostate{}, evaluate(function, identifier)};
+  return {std::monostate{}, evaluate(closure, identifier)};
 }
 
 std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(VanillaFunction &function,
+Script::evaluate_callee(FunctionClosure &closure,
                         const ExpressionNode *expr_ptr) {
-  return expr_ptr->alt.visit([&](const auto &expr_alt) {
-    return evaluate_callee(function, expr_alt);
-  });
+  return expr_ptr->alt.visit(
+      [&](const auto &expr_alt) { return evaluate_callee(closure, expr_alt); });
 }
 
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
                                                     ImmuString immu_string) {
   return {};
 }
 
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
                                                     std::int64_t number) {
   return {};
 }
 
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
                                                     double number) {
   return {};
 }
 
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(VanillaFunction &function,
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
                                                     std::monostate) {
   return {};
 }
@@ -535,10 +534,10 @@ std::string Script::evaluate_message(FunctionHandle function_handle) {
   return "<unimplemented>";
 }
 
-Dynamic Script::evaluate(VanillaFunction &parent_function,
+Dynamic Script::evaluate(FunctionClosure &closure,
                          const FunctionCallExpression &expr_call) {
   auto visit_expression = [&](auto expression_alt) {
-    return evaluate_callee(parent_function, expression_alt);
+    return evaluate_callee(closure, expression_alt);
   };
   auto [dynamic_context, dynamic_callee] =
       expr_call.callee.visit(visit_expression);
@@ -547,7 +546,7 @@ Dynamic Script::evaluate(VanillaFunction &parent_function,
     throw ScriptError{InvalidFunctionCall{}};
   auto dynamic_arguments =
       expr_call.arguments | std::views::transform([&](Expression expression) {
-        return evaluate(parent_function, expression);
+        return evaluate(closure, expression);
       });
   if (callee_handle->offset == std::unexpected{IntrinsicSigil::H_LOG}) {
     auto match_message_alt = [&](auto dynamic_alt) {
@@ -562,54 +561,54 @@ Dynamic Script::evaluate(VanillaFunction &parent_function,
     console_messages.emplace_back(std::from_range, message_parts);
     return std::monostate{};
   } else {
-    VanillaFunction &callee{*function_pool[callee_handle->offset.value()]};
+    FunctionClosure &callee{*function_closures[callee_handle->offset.value()]};
     for (auto [index, argument] : dynamic_arguments | std::views::enumerate) {
-      Identifier identifier{callee.blueprint_ptr->arguments[index]};
+      Identifier identifier{callee.definition->arguments[index]};
       auto *argument_lvalue{get_variable(callee, identifier)};
       assert(argument_lvalue != nullptr);
       *argument_lvalue = argument;
     }
-    for (Statement statement : callee.blueprint_ptr->body)
+    for (Statement statement : callee.definition->body)
       evaluate(callee, statement);
     return callee.return_val;
   }
 }
 
-Dynamic Script::evaluate(VanillaFunction &function,
+Dynamic Script::evaluate(FunctionClosure &closure,
                          const BinaryExpression &expression) {
   return {};
 }
 
-Dynamic Script::evaluate(VanillaFunction &function,
+Dynamic Script::evaluate(FunctionClosure &closure,
                          const MemberExpression &expression) {
   return {};
 }
 
-Dynamic Script::evaluate(VanillaFunction &function,
+Dynamic Script::evaluate(FunctionClosure &closure,
                          const ExpressionNode *expr_ptr) {
   return expr_ptr->alt.visit(
-      [&](const auto &expr_alt) { return evaluate(function, expr_alt); });
+      [&](const auto &expr_alt) { return evaluate(closure, expr_alt); });
 }
 
-Dynamic Script::evaluate(VanillaFunction &function, ImmuString immu_string) {
+Dynamic Script::evaluate(FunctionClosure &closure, ImmuString immu_string) {
   return Dynamic{immu_string};
 }
 
-Dynamic Script::evaluate(VanillaFunction &function, std::int64_t number) {
+Dynamic Script::evaluate(FunctionClosure &closure, std::int64_t number) {
   return Dynamic{number};
 }
 
-Dynamic Script::evaluate(VanillaFunction &function, double number) {
+Dynamic Script::evaluate(FunctionClosure &closure, double number) {
   return Dynamic{number};
 }
 
-Dynamic Script::evaluate(VanillaFunction &function, Expression expression) {
+Dynamic Script::evaluate(FunctionClosure &closure, Expression expression) {
   return expression.visit(
-      [&](auto expression_alt) { return evaluate(function, expression_alt); });
+      [&](auto expression_alt) { return evaluate(closure, expression_alt); });
 }
 
-Dynamic Script::evaluate(VanillaFunction &function, Identifier identifier) {
-  std::optional<Dynamic> *from_scope{get_variable(function, identifier)};
+Dynamic Script::evaluate(FunctionClosure &closure, Identifier identifier) {
+  std::optional<Dynamic> *from_scope{get_variable(closure, identifier)};
   if (from_scope && *from_scope)
     return **from_scope;
   Dynamic *from_globalThis{get_property(global_this, identifier)};
@@ -618,52 +617,52 @@ Dynamic Script::evaluate(VanillaFunction &function, Identifier identifier) {
   throw ScriptError{InvalidVariableAccess{}};
 }
 
-void Script::evaluate(VanillaFunction &function,
+void Script::evaluate(FunctionClosure &closure,
                       VariableDeclaration declaration) {
-  Dynamic initializer_dynamic{evaluate(function, declaration.initializer)};
+  Dynamic initializer_dynamic{evaluate(closure, declaration.initializer)};
   std::optional<Dynamic> *variable_lvalue{
-      get_variable(function, declaration.variable_name)};
+      get_variable(closure, declaration.variable_name)};
   assert(variable_lvalue != nullptr);
   *variable_lvalue = initializer_dynamic;
 }
 
-void Script::evaluate(VanillaFunction &function, ReturnStatement statement) {
-  evaluate(function, statement.argument);
+void Script::evaluate(FunctionClosure &closure, ReturnStatement statement) {
+  evaluate(closure, statement.argument);
 }
 
-void Script::evaluate(VanillaFunction &function, Statement statement) {
-  std::visit([&](auto alternative) { evaluate(function, alternative); },
+void Script::evaluate(FunctionClosure &closure, Statement statement) {
+  std::visit([&](auto alternative) { evaluate(closure, alternative); },
              statement);
 }
 
 void Script::instantiate(FunctionHandle function_handle) {
-  using IndirectFunction = std::expected<VanillaFunction *, IntrinsicSigil>;
+  using IndirectFunction = std::expected<FunctionClosure *, IntrinsicSigil>;
   auto match_function_offset = [&](std::size_t pool_idx) {
-    return function_pool[pool_idx].get();
+    return function_closures[pool_idx].get();
   };
   auto match_function_sigil = [&](IntrinsicSigil sigil) {
     return sigil == IntrinsicSigil::H_MAIN ? IndirectFunction{&main_function}
                                            : std::unexpected{sigil};
   };
   std::expected function_offset{function_handle.offset};
-  VanillaFunction *function_ptr{function_offset.transform(match_function_offset)
-                                    .or_else(match_function_sigil)
-                                    .value()};
-  const FunctionBlueprint &blueprint{*function_ptr->blueprint_ptr};
-  function_ptr->own_scope.resize(blueprint.local_scope.size());
-  for (auto [nested_name, nested_blueprint] : blueprint.nestedly_declared) {
-    auto *function_lvalue{get_variable(*function_ptr, nested_name)};
+  FunctionClosure *closure_ptr{function_offset.transform(match_function_offset)
+                                   .or_else(match_function_sigil)
+                                   .value()};
+  const FunctionDefinition &definition{*closure_ptr->definition};
+  closure_ptr->own_scope.resize(definition.local_scope.size());
+  for (auto [nested_name, nested_definition] : definition.nestedly_declared) {
+    auto *function_lvalue{get_variable(*closure_ptr, nested_name)};
     assert(function_lvalue != nullptr);
-    FunctionHandle nested_handle{function_pool.size()};
-    function_pool.push_back(std::make_unique<VanillaFunction>(
-        nested_blueprint, function_handle.offset));
+    FunctionHandle nested_handle{function_closures.size()};
+    function_closures.push_back(std::make_unique<FunctionClosure>(
+        nested_definition, function_handle.offset));
     instantiate(nested_handle);
     *function_lvalue = Dynamic{nested_handle};
   }
 }
 
 void Script::evaluate() {
-  for (Statement statement : main_function.blueprint_ptr->body)
+  for (Statement statement : main_function.definition->body)
     evaluate(main_function, statement);
 }
 } // namespace Manadrain

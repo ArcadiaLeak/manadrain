@@ -135,22 +135,22 @@ struct FunctionHandle {
 using Dynamic = std::variant<std::monostate, ImmuString, std::int64_t, double,
                              ObjectHandle, FunctionHandle>;
 
+using ObjectShape = std::shared_ptr<const Identifier[]>;
 struct VanillaObject {
-  std::expected<std::shared_ptr<const Identifier[]>, IntrinsicSigil>
-      shape_handle;
+  std::expected<ObjectShape, IntrinsicSigil> shape_handle;
   std::vector<Dynamic> properties;
 };
 
-struct FunctionBlueprint {
+struct FunctionDefinition {
   Identifier function_name;
   std::vector<Identifier> arguments;
   std::vector<Identifier> local_scope;
-  std::vector<std::pair<Identifier, const FunctionBlueprint *>>
+  std::vector<std::pair<Identifier, const FunctionDefinition *>>
       nestedly_declared;
   std::vector<Statement> body;
 };
-struct VanillaFunction {
-  const FunctionBlueprint *blueprint_ptr;
+struct FunctionClosure {
+  const FunctionDefinition *definition;
   std::expected<std::size_t, IntrinsicSigil> parent_handle{
       std::unexpect, IntrinsicSigil::H_NIL};
   std::vector<std::optional<Dynamic>> own_scope;
@@ -167,11 +167,9 @@ protected:
   std::vector<ImmuString> atom_pool;
   std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
 
-  VanillaFunction main_function;
-  std::vector<std::shared_ptr<const FunctionBlueprint>> blueprint_pool;
-  std::vector<std::unique_ptr<VanillaFunction>> function_pool;
-
-  std::vector<std::weak_ptr<const Identifier[]>> shape_pool;
+  FunctionClosure main_function;
+  std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
+  std::vector<std::unique_ptr<FunctionClosure>> function_closures;
   std::vector<std::unique_ptr<VanillaObject>> object_pool;
 
   void instantiate(FunctionHandle function_handle);
@@ -185,9 +183,9 @@ private:
       .properties = {FunctionHandle{std::unexpected{IntrinsicSigil::H_LOG}}}};
   std::vector<std::string> console_messages;
 
-  std::generator<VanillaFunction *>
-  traverse_function_closure(VanillaFunction *function_ptr);
-  std::optional<Dynamic> *get_variable(VanillaFunction &function,
+  std::generator<FunctionClosure *>
+  climb_closure_stack(FunctionClosure *closure_ptr);
+  std::optional<Dynamic> *get_variable(FunctionClosure &closure,
                                        Identifier var_handle);
   Dynamic *get_property(VanillaObject &object, Identifier property_handle);
 
@@ -207,44 +205,44 @@ private:
                             FunctionHandle function_handle);
 
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(VanillaFunction &function,
+  evaluate_callee(FunctionClosure &closure,
                   const BinaryExpression &expression);
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(VanillaFunction &function,
+  evaluate_callee(FunctionClosure &closure,
                   const MemberExpression &expression);
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(VanillaFunction &function,
+  evaluate_callee(FunctionClosure &closure,
                   const FunctionCallExpression &expression);
-  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               Identifier identifier);
-  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               const ExpressionNode *expr_ptr);
-  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               ImmuString immu_string);
-  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               std::int64_t number);
-  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               double number);
-  std::pair<Dynamic, Dynamic> evaluate_callee(VanillaFunction &function,
+  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               std::monostate);
 
-  Dynamic evaluate(VanillaFunction &function,
+  Dynamic evaluate(FunctionClosure &closure,
                    const BinaryExpression &expression);
-  Dynamic evaluate(VanillaFunction &function,
+  Dynamic evaluate(FunctionClosure &closure,
                    const MemberExpression &expression);
-  Dynamic evaluate(VanillaFunction &function,
+  Dynamic evaluate(FunctionClosure &closure,
                    const FunctionCallExpression &expression);
-  Dynamic evaluate(VanillaFunction &function, Identifier identifier);
-  Dynamic evaluate(VanillaFunction &function, const ExpressionNode *expr_ptr);
-  Dynamic evaluate(VanillaFunction &function, ImmuString immu_string);
-  Dynamic evaluate(VanillaFunction &function, std::int64_t number);
-  Dynamic evaluate(VanillaFunction &function, double number);
-  Dynamic evaluate(VanillaFunction &function, std::monostate) { return {}; }
-  Dynamic evaluate(VanillaFunction &function, Expression expression);
+  Dynamic evaluate(FunctionClosure &closure, Identifier identifier);
+  Dynamic evaluate(FunctionClosure &closure, const ExpressionNode *expr_ptr);
+  Dynamic evaluate(FunctionClosure &closure, ImmuString immu_string);
+  Dynamic evaluate(FunctionClosure &closure, std::int64_t number);
+  Dynamic evaluate(FunctionClosure &closure, double number);
+  Dynamic evaluate(FunctionClosure &closure, std::monostate) { return {}; }
+  Dynamic evaluate(FunctionClosure &closure, Expression expression);
 
-  void evaluate(VanillaFunction &function, VariableDeclaration declaration);
-  void evaluate(VanillaFunction &function, ReturnStatement statement);
-  void evaluate(VanillaFunction &function, Statement statement);
+  void evaluate(FunctionClosure &closure, VariableDeclaration declaration);
+  void evaluate(FunctionClosure &closure, ReturnStatement statement);
+  void evaluate(FunctionClosure &closure, Statement statement);
 };
 
 class Parser : public Script {
@@ -282,8 +280,8 @@ private:
   Expression parse_call_expr(Expression callee_expr);
   Expression parse_expression();
 
-  void parse_statement(FunctionBlueprint &blueprint, Token leading);
-  const FunctionBlueprint *parse_function_decl();
+  void parse_statement(FunctionDefinition &definition, Token leading);
+  const FunctionDefinition *parse_function_decl();
   VariableDeclaration parse_variable_decl();
 };
 } // namespace Manadrain
