@@ -1,6 +1,8 @@
 #include <cstdint>
 #include <generator>
+#include <list>
 #include <memory>
+#include <memory_resource>
 #include <optional>
 #include <ranges>
 #include <unordered_map>
@@ -88,11 +90,11 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct ExpressionNode;
+struct ReferentialExpression;
 struct FunctionDefinition;
 using Expression =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 Identifier, const ExpressionNode *,
+                 Identifier, const ReferentialExpression *,
                  const FunctionDefinition *>;
 struct BinaryExpression {
   Expression left;
@@ -116,7 +118,7 @@ struct AssignExpression {
   Expression left;
   Expression right;
 };
-struct ExpressionNode {
+struct ReferentialExpression {
   std::variant<BinaryExpression, LogicalExpression, MemberExpression,
                FunctionCallExpression, AssignExpression>
       alt;
@@ -150,12 +152,12 @@ using Dynamic = std::variant<std::monostate, std::u16string_view, std::int64_t,
                              FunctionClosure *, IntrinsicFunction>;
 struct ObjectInstance {
   std::span<const Identifier> object_shape;
-  std::vector<Dynamic> properties;
+  std::pmr::vector<Dynamic> properties;
 };
 struct FunctionClosure {
   const FunctionDefinition *definition;
   FunctionClosure *parent_closure;
-  std::vector<std::optional<Dynamic>> own_scope;
+  std::pmr::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
 };
 
@@ -165,17 +167,20 @@ inline constexpr std::size_t IDENT_length{2};
 
 class Script {
 public:
+  Script();
   void evaluate();
 
 protected:
-  FunctionClosure main_function;
-  std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
+  FunctionClosure *main_function;
+  std::vector<std::shared_ptr<const ReferentialExpression>>
+      referential_expressions;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
-  std::vector<std::shared_ptr<const Identifier[]>> shape_pool;
-
+  std::vector<std::shared_ptr<const std::vector<Identifier>>> object_shapes;
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
-  std::vector<std::unique_ptr<FunctionClosure>> function_closures;
-  std::vector<std::unique_ptr<ObjectInstance>> object_pool;
+
+  std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
+  std::pmr::list<FunctionClosure> function_closures;
+  std::pmr::list<ObjectInstance> object_instances;
 
   void initialize(FunctionClosure &closure);
 
@@ -185,10 +190,8 @@ private:
   static inline const std::array shape_global_this{
       std::to_array<Identifier>({Identifier{IDENT_console}})};
 
-  ObjectInstance global_this{.object_shape = shape_global_this,
-                             .properties = {IntrinsicObject::O_CONSOLE}};
-  ObjectInstance console{.object_shape = shape_console,
-                         .properties = {IntrinsicFunction::F_LOG}};
+  ObjectInstance *global_this;
+  ObjectInstance *console;
   std::vector<std::string> console_messages;
 
   std::generator<FunctionClosure *>
@@ -246,8 +249,9 @@ private:
   std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure,
                   const FunctionDefinition *definition);
-  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
-                                              const ExpressionNode *expr_ptr);
+  std::pair<Dynamic, Dynamic>
+  evaluate_callee(FunctionClosure &closure,
+                  const ReferentialExpression *expr_ptr);
   std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure,
                   std::u16string_view permanent_string);
@@ -271,7 +275,8 @@ private:
   Dynamic evaluate(FunctionClosure &closure, Identifier identifier);
   Dynamic evaluate(FunctionClosure &closure,
                    const FunctionDefinition *definition);
-  Dynamic evaluate(FunctionClosure &closure, const ExpressionNode *expr_ptr);
+  Dynamic evaluate(FunctionClosure &closure,
+                   const ReferentialExpression *expr_ptr);
   Dynamic evaluate(FunctionClosure &closure,
                    std::u16string_view permanent_string);
   Dynamic evaluate(FunctionClosure &closure, std::int64_t number);
@@ -286,8 +291,7 @@ private:
 
 class Parser : public Script {
 public:
-  std::unique_ptr<const std::uint8_t[]> text_buffer;
-  std::size_t text_size;
+  std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
 
 private:

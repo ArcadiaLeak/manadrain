@@ -28,12 +28,12 @@ static const std::array permanent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
 std::optional<char32_t> Parser::forward() {
-  if (position >= text_size)
+  if (position >= text_buffer->size())
     backtrace.push_back(std::nullopt);
   else {
     ucs4_t ch;
-    int advance{
-        u8_mbtoucr(&ch, text_buffer.get() + position, text_size - position)};
+    int advance{u8_mbtoucr(&ch, text_buffer->data() + position,
+                           text_buffer->size() - position)};
     assert(advance >= 0);
     position += advance;
     backtrace.push_back(ch);
@@ -197,7 +197,6 @@ void Parser::assert_punct(char32_t must_be) {
 
 void Parser::parse_text() {
   std::shared_ptr definition{std::make_shared<FunctionDefinition>()};
-  main_function.definition = definition.get();
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
@@ -205,7 +204,9 @@ void Parser::parse_text() {
     parse_statement(*definition);
   }
   function_definitions.push_back(definition);
-  initialize(main_function);
+  main_function->definition = definition.get();
+  main_function->own_scope.resize(definition->local_scope.size());
+  initialize(*main_function);
 }
 
 void Parser::parse_statement(FunctionDefinition &definition) {
@@ -345,9 +346,9 @@ Expression Parser::parse_additive_expr() {
   if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
     char32_t binary_op{std::get<char32_t>(last_token)};
     tokenize();
-    std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+    std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
         BinaryExpression{expr_left, parse_postfix_expr(), binary_op})};
-    expr_pool.push_back(expr_ptr);
+    referential_expressions.push_back(expr_ptr);
     return expr_ptr.get();
   }
   return expr_left;
@@ -358,9 +359,9 @@ Expression Parser::parse_logical_disjunct() {
   while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     Operator op{std::get<Operator>(last_token)};
     tokenize();
-    std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+    std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
         LogicalExpression{expr_left, parse_additive_expr(), op})};
-    expr_pool.push_back(expr_ptr);
+    referential_expressions.push_back(expr_ptr);
     expr_left = expr_ptr.get();
   }
   return expr_left;
@@ -371,9 +372,9 @@ Expression Parser::parse_assign_expr() {
   if (last_token != Token{U'='})
     return lhs_expr;
   tokenize();
-  std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+  std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
       AssignExpression{lhs_expr, parse_assign_expr()})};
-  expr_pool.push_back(expr_ptr);
+  referential_expressions.push_back(expr_ptr);
   return expr_ptr.get();
 }
 
@@ -382,9 +383,9 @@ Expression Parser::parse_member_expr(Expression obj_expr) {
   Identifier *field_name{std::get_if<Identifier>(&last_token)};
   if (not field_name)
     throw ScriptError{MissingFieldName{}};
-  std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+  std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
       MemberExpression{obj_expr, *field_name})};
-  expr_pool.push_back(expr_ptr);
+  referential_expressions.push_back(expr_ptr);
   return expr_ptr.get();
 }
 
@@ -399,10 +400,28 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
       break;
     assert_punct(',');
   }
-  std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+  std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
       FunctionCallExpression{callee_expr, std::move(arguments)})};
-  expr_pool.push_back(expr_ptr);
+  referential_expressions.push_back(expr_ptr);
   return expr_ptr.get();
+}
+
+Script::Script()
+    : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
+      function_closures{resource.get()}, object_instances{resource.get()} {
+  function_closures.push_back(FunctionClosure{
+      .own_scope = std::pmr::vector<std::optional<Dynamic>>(resource.get())});
+  main_function = &function_closures.back();
+  object_instances.push_back(
+      ObjectInstance{.object_shape = shape_global_this,
+                     .properties = std::pmr::vector<Dynamic>(
+                         {IntrinsicObject::O_CONSOLE}, resource.get())});
+  global_this = &object_instances.back();
+  object_instances.push_back(
+      ObjectInstance{.object_shape = shape_console,
+                     .properties = std::pmr::vector<Dynamic>(
+                         {IntrinsicFunction::F_LOG}, resource.get())});
+  console = &object_instances.back();
 }
 
 std::generator<FunctionClosure *>
@@ -476,7 +495,7 @@ Dynamic Script::evaluate_property(Identifier property,
 Dynamic Script::evaluate_property(Identifier property,
                                   IntrinsicObject intrinsic_object) {
   if (intrinsic_object == IntrinsicObject::O_CONSOLE)
-    return evaluate_property(property, &console);
+    return evaluate_property(property, console);
   return {};
 }
 
@@ -533,7 +552,7 @@ Script::evaluate_callee(FunctionClosure &closure,
 
 std::pair<Dynamic, Dynamic>
 Script::evaluate_callee(FunctionClosure &closure,
-                        const ExpressionNode *expr_ptr) {
+                        const ReferentialExpression *expr_ptr) {
   return expr_ptr->alt.visit(
       [&](const auto &expr_alt) { return evaluate_callee(closure, expr_alt); });
 }
@@ -594,8 +613,8 @@ Dynamic Script::evaluate_function_call(FunctionClosure &closure,
   auto dynamic_arguments = expr_call.arguments |
                            std::views::transform(evaluate_argument) |
                            std::views::enumerate;
-  function_closures.emplace_back(new FunctionClosure{*callee_ptr});
-  FunctionClosure *copied_callee_ptr{function_closures.back().get()};
+  function_closures.push_back(FunctionClosure{*callee_ptr});
+  FunctionClosure *copied_callee_ptr{&function_closures.back()};
   initialize(*copied_callee_ptr);
   for (auto [index, argument] : dynamic_arguments) {
     Identifier identifier{callee_ptr->definition->arguments[index]};
@@ -694,7 +713,7 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
-                         const ExpressionNode *expr_ptr) {
+                         const ReferentialExpression *expr_ptr) {
   return expr_ptr->alt.visit(
       [&](const auto &expr_alt) { return evaluate(closure, expr_alt); });
 }
@@ -721,7 +740,7 @@ Dynamic Script::evaluate(FunctionClosure &closure, Identifier identifier) {
   std::optional<Dynamic> *from_scope{get_variable(closure, identifier)};
   if (from_scope && *from_scope)
     return **from_scope;
-  Dynamic *from_globalThis{get_property(global_this, identifier)};
+  Dynamic *from_globalThis{get_property(*global_this, identifier)};
   if (from_globalThis)
     return *from_globalThis;
   throw ScriptError{InvalidVariableAccess{}};
@@ -747,18 +766,20 @@ void Script::evaluate(FunctionClosure &closure, Statement statement) {
 
 void Script::initialize(FunctionClosure &closure) {
   const FunctionDefinition &definition{*closure.definition};
-  closure.own_scope.resize(definition.local_scope.size());
   for (auto [nested_name, nested_definition] : definition.nested_functions) {
     auto *function_lvalue{get_variable(closure, nested_name)};
     assert(function_lvalue != nullptr);
-    function_closures.emplace_back(new FunctionClosure{
-        .definition = nested_definition, .parent_closure = &closure});
-    *function_lvalue = function_closures.back().get();
+    function_closures.push_back(FunctionClosure{
+        .definition = nested_definition,
+        .parent_closure = &closure,
+        .own_scope = std::pmr::vector<std::optional<Dynamic>>(
+            nested_definition->local_scope.size(), resource.get())});
+    *function_lvalue = &function_closures.back();
   }
 }
 
 void Script::evaluate() {
-  for (Statement statement : main_function.definition->body)
-    evaluate(main_function, statement);
+  for (Statement statement : main_function->definition->body)
+    evaluate(*main_function, statement);
 }
 } // namespace Manadrain
