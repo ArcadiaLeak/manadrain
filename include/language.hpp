@@ -97,12 +97,19 @@ public:
 };
 
 struct ExpressionNode;
+struct FunctionDefinition;
 using Expression = std::variant<std::monostate, StringInstance *, std::int64_t,
-                                double, Identifier, const ExpressionNode *>;
+                                double, Identifier, const ExpressionNode *,
+                                const FunctionDefinition *>;
 struct BinaryExpression {
   Expression left;
   Expression right;
   char32_t op;
+};
+struct LogicalExpression {
+  Expression left;
+  Expression right;
+  Operator op;
 };
 struct MemberExpression {
   Expression object;
@@ -112,8 +119,14 @@ struct FunctionCallExpression {
   Expression callee;
   std::vector<Expression> arguments;
 };
+struct AssignExpression {
+  Expression left;
+  Expression right;
+};
 struct ExpressionNode {
-  std::variant<BinaryExpression, MemberExpression, FunctionCallExpression> alt;
+  std::variant<BinaryExpression, LogicalExpression, MemberExpression,
+               FunctionCallExpression, AssignExpression>
+      alt;
 };
 
 struct VariableDeclaration {
@@ -132,7 +145,7 @@ enum class IntrinsicFunction { F_LOG };
 struct ObjectInstance;
 struct FunctionClosure;
 struct FunctionDefinition {
-  Identifier function_name;
+  std::optional<Identifier> function_name;
   std::vector<Identifier> arguments;
   std::vector<Identifier> local_scope;
   std::vector<std::pair<Identifier, const FunctionDefinition *>>
@@ -252,12 +265,20 @@ private:
   std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure, const BinaryExpression &expression);
   std::pair<Dynamic, Dynamic>
+  evaluate_callee(FunctionClosure &closure,
+                  const LogicalExpression &expression);
+  std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure, const MemberExpression &expression);
   std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure,
                   const FunctionCallExpression &expression);
+  std::pair<Dynamic, Dynamic>
+  evaluate_callee(FunctionClosure &closure, const AssignExpression &expression);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               Identifier identifier);
+  std::pair<Dynamic, Dynamic>
+  evaluate_callee(FunctionClosure &closure,
+                  const FunctionDefinition *definition);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               const ExpressionNode *expr_ptr);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
@@ -272,10 +293,16 @@ private:
   Dynamic evaluate(FunctionClosure &closure,
                    const BinaryExpression &expression);
   Dynamic evaluate(FunctionClosure &closure,
+                   const LogicalExpression &expression);
+  Dynamic evaluate(FunctionClosure &closure,
                    const MemberExpression &expression);
   Dynamic evaluate(FunctionClosure &closure,
                    const FunctionCallExpression &expression);
+  Dynamic evaluate(FunctionClosure &closure,
+                   const AssignExpression &expression);
   Dynamic evaluate(FunctionClosure &closure, Identifier identifier);
+  Dynamic evaluate(FunctionClosure &closure,
+                   const FunctionDefinition *definition);
   Dynamic evaluate(FunctionClosure &closure, const ExpressionNode *expr_ptr);
   Dynamic evaluate(FunctionClosure &closure, StringInstance *string_instance);
   Dynamic evaluate(FunctionClosure &closure, std::int64_t number);
@@ -318,6 +345,8 @@ private:
   Expression parse_primary_expr();
   Expression parse_postfix_expr();
   Expression parse_additive_expr();
+  Expression parse_logical_disjunct();
+  Expression parse_assign_expr();
   Expression parse_member_expr(Expression obj_expr);
   Expression parse_call_expr(Expression callee_expr);
   Expression parse_expression();

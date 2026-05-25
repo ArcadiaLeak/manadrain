@@ -153,9 +153,9 @@ void Parser::tokenize() {
                               std::views::join) {
     if (uc_is_property_white_space(leading))
       continue;
-    std::inplace_vector<char32_t, 2> comment_prefix{leading};
-    comment_prefix.append_range(forward());
-    if (std::ranges::equal(comment_prefix, std::to_array({'/', '/'}))) {
+    std::inplace_vector<char32_t, 4> headbuf{leading};
+    headbuf.append_range(forward());
+    if (std::ranges::equal(headbuf, std::to_array({'/', '/'}))) {
       auto comment = traverse_text() | std::views::take_while(match_lineterm) |
                      std::views::join;
       std::ranges::for_each(comment, [](auto) {});
@@ -163,7 +163,14 @@ void Parser::tokenize() {
       continue;
     } else
       backward();
-    if (std::ranges::binary_search(std::to_array({'`', '\'', '"'}), leading)) {
+    headbuf = {leading};
+    headbuf.append_range(forward());
+    if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
+      last_token = Operator::LOGICAL_DISJUNCT;
+      return;
+    } else
+      backward();
+    if (std::ranges::binary_search(std::to_array({'"', '\'', '`'}), leading)) {
       last_token = tokenize_string_literal(leading);
       return;
     }
@@ -183,6 +190,7 @@ void Parser::tokenize() {
     }
     throw ScriptError{UnexpectedToken{}};
   }
+  last_token = std::monostate{};
 }
 
 void Parser::assert_punct(char32_t must_be) {
@@ -209,13 +217,15 @@ void Parser::parse_statement(FunctionDefinition &definition) {
   Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
   if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
     const FunctionDefinition *nested_definition{parse_function_decl()};
-    Identifier function_name{nested_definition->function_name};
-    if (std::ranges::binary_search(definition.local_scope, function_name))
+    std::optional<Identifier> function_name{nested_definition->function_name};
+    if (not function_name)
+      throw ScriptError{MissingFunctionName{}};
+    if (std::ranges::binary_search(definition.local_scope, *function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    definition.nested_functions.push_back({function_name, nested_definition});
+    definition.nested_functions.push_back({*function_name, nested_definition});
     auto lower_bound =
-        std::ranges::lower_bound(definition.local_scope, function_name);
-    definition.local_scope.insert(lower_bound, function_name);
+        std::ranges::lower_bound(definition.local_scope, *function_name);
+    definition.local_scope.insert(lower_bound, *function_name);
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
@@ -243,10 +253,11 @@ void Parser::parse_statement(FunctionDefinition &definition) {
 const FunctionDefinition *Parser::parse_function_decl() {
   tokenize();
   Identifier *function_name{std::get_if<Identifier>(&last_token)};
-  if (not function_name)
-    throw ScriptError{MissingFunctionName{}};
-  FunctionDefinition definition{*function_name};
-  tokenize();
+  FunctionDefinition definition{};
+  if (function_name) {
+    definition.function_name = *function_name;
+    tokenize();
+  }
   assert_punct('(');
   while (1) {
     tokenize();
@@ -292,15 +303,18 @@ VariableDeclaration Parser::parse_variable_decl() {
   return variable_decl;
 }
 
-Expression Parser::parse_expression() { return parse_additive_expr(); }
+Expression Parser::parse_expression() { return parse_assign_expr(); }
 
 Expression Parser::parse_primary_expr() {
-  return last_token.visit([](auto t) -> Expression {
+  return last_token.visit([this](auto t) -> Expression {
     if constexpr (std::is_same_v<decltype(t), StringInstance *> ||
                   std::is_same_v<decltype(t), Identifier> ||
                   std::is_same_v<decltype(t), std::int64_t> ||
                   std::is_same_v<decltype(t), double>)
       return t;
+    if constexpr (std::is_same_v<decltype(t), Keyword>)
+      if (t == Keyword::K_FUNCTION)
+        return parse_function_decl();
     throw ScriptError{UnexpectedToken{}};
   });
 }
@@ -333,18 +347,37 @@ Expression Parser::parse_postfix_expr() {
 
 Expression Parser::parse_additive_expr() {
   Expression expr_left{parse_postfix_expr()};
-  auto match_binary = [](auto t) -> std::optional<char32_t> {
-    if constexpr (std::is_same_v<decltype(t), char32_t>)
-      if (t == '+' || t == '-')
-        return t;
-    return std::nullopt;
-  };
-  std::optional<char32_t> binary_op{last_token.visit(match_binary)};
-  if (not binary_op)
-    return expr_left;
+  if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
+    char32_t binary_op{std::get<char32_t>(last_token)};
+    tokenize();
+    std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+        BinaryExpression{expr_left, parse_postfix_expr(), binary_op})};
+    expr_pool.push_back(expr_ptr);
+    return expr_ptr.get();
+  }
+  return expr_left;
+}
+
+Expression Parser::parse_logical_disjunct() {
+  Expression expr_left{parse_additive_expr()};
+  while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
+    Operator op{std::get<Operator>(last_token)};
+    tokenize();
+    std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
+        LogicalExpression{expr_left, parse_additive_expr(), op})};
+    expr_pool.push_back(expr_ptr);
+    expr_left = expr_ptr.get();
+  }
+  return expr_left;
+}
+
+Expression Parser::parse_assign_expr() {
+  Expression lhs_expr{parse_logical_disjunct()};
+  if (last_token != Token{U'='})
+    return lhs_expr;
   tokenize();
   std::shared_ptr expr_ptr{std::make_shared<ExpressionNode>(
-      BinaryExpression{expr_left, parse_postfix_expr(), *binary_op})};
+      AssignExpression{lhs_expr, parse_assign_expr()})};
   expr_pool.push_back(expr_ptr);
   return expr_ptr.get();
 }
@@ -464,6 +497,18 @@ Script::evaluate_callee(FunctionClosure &function,
 }
 
 std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(FunctionClosure &function,
+                        const LogicalExpression &expression) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(FunctionClosure &closure,
+                        const AssignExpression &expression) {
+  return {};
+}
+
+std::pair<Dynamic, Dynamic>
 Script::evaluate_callee(FunctionClosure &closure,
                         const MemberExpression &expression) {
   Dynamic dynamic_object{evaluate(closure, expression.object)};
@@ -483,6 +528,12 @@ Script::evaluate_callee(FunctionClosure &closure,
 std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
                                                     Identifier identifier) {
   return {std::monostate{}, evaluate(closure, identifier)};
+}
+
+std::pair<Dynamic, Dynamic>
+Script::evaluate_callee(FunctionClosure &closure,
+                        const FunctionDefinition *definition) {
+  return {};
 }
 
 std::pair<Dynamic, Dynamic>
@@ -660,12 +711,27 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
+                         const LogicalExpression &expression) {
+  return {};
+}
+
+Dynamic Script::evaluate(FunctionClosure &closure,
+                         const AssignExpression &expression) {
+  return {};
+}
+
+Dynamic Script::evaluate(FunctionClosure &closure,
                          const MemberExpression &expression) {
   Dynamic dynamic_object{evaluate(closure, expression.object)};
   auto visit_object = [&](auto dynamic_alt) {
     return evaluate_property(expression.property, dynamic_alt);
   };
   return dynamic_object.visit(visit_object);
+}
+
+Dynamic Script::evaluate(FunctionClosure &closure,
+                         const FunctionDefinition *definition) {
+  return {};
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
