@@ -4,6 +4,7 @@
 #include <optional>
 #include <ranges>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -37,15 +38,6 @@ struct Identifier {
   std::size_t offset;
   auto operator<=>(const Identifier &) const = default;
 };
-struct IdentifierAtom {
-  std::shared_ptr<const char[]> ptr;
-  std::size_t size;
-};
-struct StringInstance {
-  bool garbage;
-  std::shared_ptr<const char16_t[]> ptr;
-  std::size_t size;
-};
 enum class Operator {
   DOUBLE_EQUALS,
   TRIPLE_EQUALS,
@@ -60,7 +52,7 @@ enum class Operator {
   LOGICAL_DISJUNCT
 };
 using Token = std::variant<std::monostate, char32_t, std::int64_t, double,
-                           Operator, Keyword, Identifier, StringInstance *>;
+                           Operator, Keyword, Identifier, std::u16string_view>;
 
 struct InvalidNumericLiteral {};
 struct InvalidPropertyName {};
@@ -98,9 +90,10 @@ public:
 
 struct ExpressionNode;
 struct FunctionDefinition;
-using Expression = std::variant<std::monostate, StringInstance *, std::int64_t,
-                                double, Identifier, const ExpressionNode *,
-                                const FunctionDefinition *>;
+using Expression =
+    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
+                 Identifier, const ExpressionNode *,
+                 const FunctionDefinition *>;
 struct BinaryExpression {
   Expression left;
   Expression right;
@@ -152,16 +145,14 @@ struct FunctionDefinition {
       nested_functions;
   std::vector<Statement> body;
 };
-using Dynamic = std::variant<std::monostate, StringInstance *, std::int64_t,
+using Dynamic = std::variant<std::monostate, std::u16string_view, std::int64_t,
                              double, ObjectInstance *, IntrinsicObject,
                              FunctionClosure *, IntrinsicFunction>;
 struct ObjectInstance {
-  bool garbage;
   std::span<const Identifier> object_shape;
   std::vector<Dynamic> properties;
 };
 struct FunctionClosure {
-  bool garbage;
   const FunctionDefinition *definition;
   FunctionClosure *parent_closure;
   std::vector<std::optional<Dynamic>> own_scope;
@@ -177,15 +168,12 @@ public:
   void evaluate();
 
 protected:
-  bool garbage_mark{1};
-
   FunctionClosure main_function;
   std::vector<std::shared_ptr<const ExpressionNode>> expr_pool;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const Identifier[]>> shape_pool;
 
-  std::vector<std::unique_ptr<StringInstance>> permanent_strings;
-  std::vector<std::unique_ptr<StringInstance>> collectible_strings;
+  std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
   std::vector<std::unique_ptr<FunctionClosure>> function_closures;
   std::vector<std::unique_ptr<ObjectInstance>> object_pool;
 
@@ -210,7 +198,7 @@ private:
   Dynamic *get_property(ObjectInstance &object, Identifier property_handle);
 
   std::string evaluate_message(std::monostate);
-  std::string evaluate_message(StringInstance *string_instance);
+  std::string evaluate_message(std::u16string_view permanent_string);
   std::string evaluate_message(std::int64_t number);
   std::string evaluate_message(double number);
   std::string evaluate_message(ObjectInstance *object_instance);
@@ -222,7 +210,7 @@ private:
 
   Dynamic evaluate_property(Identifier property, std::monostate);
   Dynamic evaluate_property(Identifier property,
-                            StringInstance *string_instance);
+                            std::u16string_view permanent_string);
   Dynamic evaluate_property(Identifier property, std::int64_t number);
   Dynamic evaluate_property(Identifier property, double number);
   Dynamic evaluate_property(Identifier property,
@@ -235,28 +223,7 @@ private:
 
   Dynamic evaluate_function_call(FunctionClosure &closure,
                                  const FunctionCallExpression &expr_call,
-                                 Dynamic context, std::monostate);
-  Dynamic evaluate_function_call(FunctionClosure &closure,
-                                 const FunctionCallExpression &expr_call,
-                                 Dynamic context,
-                                 StringInstance *string_instance);
-  Dynamic evaluate_function_call(FunctionClosure &closure,
-                                 const FunctionCallExpression &expr_call,
-                                 Dynamic context, std::int64_t number);
-  Dynamic evaluate_function_call(FunctionClosure &closure,
-                                 const FunctionCallExpression &expr_call,
-                                 Dynamic context, double number);
-  Dynamic evaluate_function_call(FunctionClosure &closure,
-                                 const FunctionCallExpression &expr_call,
-                                 Dynamic context,
-                                 ObjectInstance *object_instance);
-  Dynamic evaluate_function_call(FunctionClosure &closure,
-                                 const FunctionCallExpression &expr_call,
                                  Dynamic context, FunctionClosure *callee_ptr);
-  Dynamic evaluate_function_call(FunctionClosure &closure,
-                                 const FunctionCallExpression &expr_call,
-                                 Dynamic context,
-                                 IntrinsicObject intrinsic_object);
   Dynamic evaluate_function_call(FunctionClosure &closure,
                                  const FunctionCallExpression &expr_call,
                                  Dynamic context,
@@ -281,8 +248,9 @@ private:
                   const FunctionDefinition *definition);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               const ExpressionNode *expr_ptr);
-  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
-                                              StringInstance *string_instance);
+  std::pair<Dynamic, Dynamic>
+  evaluate_callee(FunctionClosure &closure,
+                  std::u16string_view permanent_string);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               std::int64_t number);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
@@ -304,7 +272,8 @@ private:
   Dynamic evaluate(FunctionClosure &closure,
                    const FunctionDefinition *definition);
   Dynamic evaluate(FunctionClosure &closure, const ExpressionNode *expr_ptr);
-  Dynamic evaluate(FunctionClosure &closure, StringInstance *string_instance);
+  Dynamic evaluate(FunctionClosure &closure,
+                   std::u16string_view permanent_string);
   Dynamic evaluate(FunctionClosure &closure, std::int64_t number);
   Dynamic evaluate(FunctionClosure &closure, double number);
   Dynamic evaluate(FunctionClosure &closure, std::monostate) { return {}; }
@@ -317,14 +286,14 @@ private:
 
 class Parser : public Script {
 public:
-  std::shared_ptr<const std::uint8_t[]> text_buffer;
+  std::unique_ptr<const std::uint8_t[]> text_buffer;
   std::size_t text_size;
   void parse_text();
 
 private:
-  std::vector<IdentifierAtom> atom_pool;
+  std::vector<std::unique_ptr<const std::string>> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
-  std::unordered_map<std::u16string_view, StringInstance *> string_atlas;
+  std::unordered_set<std::u16string_view> string_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;

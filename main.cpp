@@ -28,10 +28,10 @@ int main(int argc, char *argv[]) {
   Manadrain::Parser parser{};
   std::vector<std::uint8_t> text_vec{
       std::from_range, std::ranges::istream_view<std::uint8_t>{file}};
-  std::shared_ptr text_buffer{
-      std::make_shared<std::uint8_t[]>(text_vec.size())};
+  std::unique_ptr text_buffer{
+      std::make_unique<std::uint8_t[]>(text_vec.size())};
   std::memcpy(text_buffer.get(), text_vec.data(), text_vec.size());
-  parser.text_buffer = text_buffer;
+  parser.text_buffer = std::move(text_buffer);
   parser.text_size = text_vec.size();
   parser.parse_text();
 
