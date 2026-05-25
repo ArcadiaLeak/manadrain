@@ -142,30 +142,47 @@ Token Parser::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-static const std::array legal_punct = std::to_array<char32_t>(
-    {'(', ')', '*', '+', '-', '.', '/', ':', ';', '=', '{', '}'});
-
 void Parser::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
+  auto match_lineterm = [](std::optional<char32_t> uchar) {
+    static const std::array lineterm{std::to_array<std::optional<char32_t>>(
+        {std::nullopt, '\n', '\r', 0x2028, 0x2029})};
+    return !std::ranges::binary_search(lineterm, uchar);
+  };
   for (char32_t leading : traverse_text() | std::views::take_while(does_exist) |
                               std::views::join) {
     if (uc_is_property_white_space(leading))
       continue;
-    else if (std::ranges::any_of(
-                 std::to_array({'`', '\'', '"'}),
-                 [leading](char quote) { return leading == quote; }))
+    std::inplace_vector<char32_t, 2> comment_prefix{leading};
+    comment_prefix.append_range(forward());
+    if (std::ranges::equal(comment_prefix, std::to_array({'/', '/'}))) {
+      auto comment = traverse_text() | std::views::take_while(match_lineterm) |
+                     std::views::join;
+      std::ranges::for_each(comment, [](auto) {});
+      backward();
+      continue;
+    } else
+      backward();
+    if (std::ranges::binary_search(std::to_array({'`', '\'', '"'}), leading)) {
       last_token = tokenize_string_literal(leading);
-    else if (uc_is_property_xid_start(leading) || leading == '_')
+      return;
+    }
+    if (uc_is_property_xid_start(leading) || leading == '_') {
       last_token = tokenize_identifier(leading);
-    else if (std::ranges::binary_search(legal_punct, leading))
+      return;
+    }
+    static const std::array legal_punct{std::to_array<char32_t>(
+        {'(', ')', '*', '+', '-', '.', '/', ':', ';', '=', '{', '}'})};
+    if (std::ranges::binary_search(legal_punct, leading)) {
       last_token = leading;
-    else if (std::isdigit(leading))
+      return;
+    }
+    if (std::isdigit(leading)) {
       last_token = tokenize_numeric_literal(leading);
-    else
-      throw ScriptError{UnexpectedToken{}};
-    return;
+      return;
+    }
+    throw ScriptError{UnexpectedToken{}};
   }
-  last_token = std::monostate{};
 }
 
 void Parser::assert_punct(char32_t must_be) {
@@ -229,10 +246,23 @@ const FunctionDefinition *Parser::parse_function_decl() {
   if (not function_name)
     throw ScriptError{MissingFunctionName{}};
   FunctionDefinition definition{*function_name};
-  for (char function_punct : std::to_array({'(', ')', '{'})) {
+  tokenize();
+  assert_punct('(');
+  while (1) {
     tokenize();
-    assert_punct(function_punct);
+    if (last_token == Token{U')'})
+      break;
+    Identifier *parameter{std::get_if<Identifier>(&last_token)};
+    if (not parameter)
+      throw ScriptError{MissingFormalParameter{}};
+    definition.arguments.push_back(*parameter);
+    tokenize();
+    if (last_token == Token{U')'})
+      break;
+    assert_punct(',');
   }
+  tokenize();
+  assert_punct('{');
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
@@ -331,19 +361,13 @@ Expression Parser::parse_member_expr(Expression obj_expr) {
 }
 
 Expression Parser::parse_call_expr(Expression callee_expr) {
-  auto match_rparen = [](auto t) -> bool {
-    if constexpr (std::is_same_v<decltype(t), char32_t>)
-      if (t == ')')
-        return 1;
-    return 0;
-  };
   std::vector<Expression> arguments{};
   while (1) {
     tokenize();
-    if (last_token.visit(match_rparen))
+    if (last_token == Token{U')'})
       break;
     arguments.push_back(parse_expression());
-    if (last_token.visit(match_rparen))
+    if (last_token == Token{U')'})
       break;
     assert_punct(',');
   }

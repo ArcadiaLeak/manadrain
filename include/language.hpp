@@ -77,7 +77,6 @@ struct MissingFormalParameter {};
 struct MissingPunctuation {
   char32_t must_be;
 };
-struct UnexpectedReservedWord {};
 struct UnexpectedStringEnd {};
 struct UnexpectedCommentEnd {};
 struct UnexpectedToken {};
@@ -89,8 +88,8 @@ public:
                    InvalidFunctionCall, InvalidVariableAccess, MissingFieldName,
                    MissingVariableName, MissingFunctionName, MissingIdentifier,
                    MissingStringLiteral, MissingFormalParameter,
-                   MissingPunctuation, UnexpectedReservedWord,
-                   UnexpectedStringEnd, UnexpectedCommentEnd, UnexpectedToken>;
+                   MissingPunctuation, UnexpectedStringEnd,
+                   UnexpectedCommentEnd, UnexpectedToken>;
   Message message;
 
   explicit ScriptError(Message msg) : message{msg} {}
