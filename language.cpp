@@ -410,9 +410,7 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
 }
 
 Script::Script()
-    : console_mutex{std::make_unique<std::mutex>()},
-      console_condition{std::make_unique<std::condition_variable_any>()},
-      resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
+    : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
       function_closures{resource.get()}, object_instances{resource.get()} {
   function_closures.push_back(
       FunctionClosure{.own_scope = FunctionScope(resource.get())});
@@ -651,7 +649,8 @@ Dynamic Script::evaluate_function_call(FunctionClosure &closure,
         std::views::transform(match_message_arg) | std::views::join_with(' ');
     {
       std::lock_guard console_lock{*console_mutex};
-      console_messages.emplace_back(std::from_range, message_parts);
+      console_messages.emplace_back(
+          std::u16string{std::from_range, message_parts});
     }
     console_condition->notify_one();
   }
@@ -810,5 +809,29 @@ void Script::initialize(FunctionClosure &closure) {
 void Script::evaluate() {
   for (Statement statement : main_function->definition->body)
     evaluate(*main_function, statement);
+}
+
+void Script::collect_console_messages(std::stop_token stopper,
+                                      std::list<ConsoleMessage> &message_box) {
+  auto check_messages = [&] { return console_messages.size() > 0; };
+  std::unique_lock console_lock{*console_mutex};
+  console_condition->wait(console_lock, stopper, check_messages);
+  console_messages.swap(message_box);
+}
+
+static std::inplace_vector<std::uint8_t, 3>
+encode_u16_for_print(std::uint16_t uchar) {
+  std::array<std::uint8_t, 3> buffer{};
+  std::size_t buffer_len{buffer.size()};
+  uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
+  assert(result != nullptr);
+  return {std::from_range, buffer | std::views::take(buffer_len)};
+}
+
+std::string ConsoleMessage::encode_for_print() const {
+  std::string u8_message{};
+  for (char16_t uchar : content)
+    u8_message.append_range(encode_u16_for_print(uchar));
+  return u8_message;
 }
 } // namespace Manadrain

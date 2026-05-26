@@ -168,14 +168,17 @@ inline constexpr std::size_t IDENT_console{0};
 inline constexpr std::size_t IDENT_log{1};
 inline constexpr std::size_t IDENT_length{2};
 
+struct ConsoleMessage {
+  std::u16string content;
+  std::string encode_for_print() const;
+};
+
 class Script {
 public:
   Script();
 
-  std::list<std::u16string> console_messages;
-  std::unique_ptr<std::mutex> console_mutex;
-  std::unique_ptr<std::condition_variable_any> console_condition;
-
+  void collect_console_messages(std::stop_token stopper,
+                                std::list<ConsoleMessage> &message_box);
   void evaluate();
 
 protected:
@@ -199,7 +202,11 @@ private:
       std::to_array<Identifier>({Identifier{IDENT_console}})};
 
   ObjectInstance *global_this;
+
   ObjectInstance *console;
+  std::indirect<std::mutex> console_mutex;
+  std::indirect<std::condition_variable_any> console_condition;
+  std::list<ConsoleMessage> console_messages;
 
   std::generator<FunctionClosure *>
   climb_closure_stack(FunctionClosure *closure_ptr);
