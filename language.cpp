@@ -341,8 +341,15 @@ Expression Parser::parse_object_literal() {
     tokenize();
   }
   assert_punct('}');
+  auto pluck_identifier = [](const auto &prop_pair) { return prop_pair.first; };
+  std::vector<Identifier> shape_vec{
+      std::from_range, prop_vec | std::views::transform(pluck_identifier)};
+  std::shared_ptr object_shape{
+      std::make_shared<ObjectShape>(std::move(shape_vec))};
+  std::ranges::sort(object_shape->properties);
+  object_shapes.push_back(object_shape);
   std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
-      ObjectExpression{std::move(prop_vec)})};
+      ObjectExpression{object_shape.get(), std::move(prop_vec)})};
   referential_expressions.push_back(expr_ptr);
   return expr_ptr.get();
 }

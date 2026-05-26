@@ -98,6 +98,7 @@ using Expression =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
                  Identifier, const ReferentialExpression *,
                  const FunctionDefinition *>;
+
 struct BinaryExpression {
   Expression left;
   Expression right;
@@ -120,9 +121,16 @@ struct AssignExpression {
   Expression left;
   Expression right;
 };
+
+struct ObjectInstance;
+struct ObjectShape {
+  std::vector<Identifier> properties;
+};
 struct ObjectExpression {
+  const ObjectShape *object_shape;
   std::vector<std::pair<Identifier, Expression>> properties;
 };
+
 struct ReferentialExpression {
   std::variant<BinaryExpression, LogicalExpression, MemberExpression,
                FunctionCallExpression, AssignExpression, ObjectExpression>
@@ -140,11 +148,6 @@ using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
-
-struct ObjectInstance;
-struct ObjectShape {
-  std::vector<Identifier> properties;
-};
 
 struct FunctionClosure;
 struct FunctionDefinition {
