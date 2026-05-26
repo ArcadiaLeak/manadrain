@@ -120,9 +120,12 @@ struct AssignExpression {
   Expression left;
   Expression right;
 };
+struct ObjectExpression {
+  std::vector<std::pair<Expression, Expression>> properties;
+};
 struct ReferentialExpression {
   std::variant<BinaryExpression, LogicalExpression, MemberExpression,
-               FunctionCallExpression, AssignExpression>
+               FunctionCallExpression, AssignExpression, ObjectExpression>
       alt;
 };
 
@@ -248,34 +251,12 @@ private:
                                  IntrinsicFunction intrinsic_function);
 
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure, const BinaryExpression &expression);
-  std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure,
-                  const LogicalExpression &expression);
-  std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure, const MemberExpression &expression);
-  std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure,
-                  const FunctionCallExpression &expression);
-  std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure, const AssignExpression &expression);
   std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
                                               Identifier identifier);
   std::pair<Dynamic, Dynamic>
   evaluate_callee(FunctionClosure &closure,
-                  const FunctionDefinition *definition);
-  std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure,
                   const ReferentialExpression *expr_ptr);
-  std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure,
-                  std::u16string_view permanent_string);
-  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
-                                              std::int64_t number);
-  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
-                                              double number);
-  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
-                                              std::monostate);
 
   Dynamic evaluate(FunctionClosure &closure,
                    const BinaryExpression &expression);
@@ -287,6 +268,8 @@ private:
                    const FunctionCallExpression &expression);
   Dynamic evaluate(FunctionClosure &closure,
                    const AssignExpression &expression);
+  Dynamic evaluate(FunctionClosure &closure,
+                   const ObjectExpression &expression);
   Dynamic evaluate(FunctionClosure &closure, Identifier identifier);
   Dynamic evaluate(FunctionClosure &closure,
                    const FunctionDefinition *definition);
@@ -337,6 +320,7 @@ private:
   Expression parse_assign_expr();
   Expression parse_member_expr(Expression obj_expr);
   Expression parse_call_expr(Expression callee_expr);
+  Expression parse_object_literal();
   Expression parse_expression();
 
   void parse_statement(FunctionDefinition &definition);

@@ -174,7 +174,7 @@ void Parser::tokenize() {
       return;
     }
     static const std::array legal_punct{std::to_array<char32_t>(
-        {'(', ')', '*', '+', '-', '.', '/', ':', ';', '=', '{', '}'})};
+        {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
       last_token = leading;
       return;
@@ -314,8 +314,36 @@ Expression Parser::parse_primary_expr() {
     if constexpr (std::is_same_v<decltype(t), Keyword>)
       if (t == Keyword::K_FUNCTION)
         return parse_function_decl();
+    if constexpr (std::is_same_v<decltype(t), char32_t>)
+      if (t == '{')
+        return parse_object_literal();
     throw ScriptError{UnexpectedToken{}};
   });
+}
+
+Expression Parser::parse_object_literal() {
+  std::vector<std::pair<Expression, Expression>> prop_vec{};
+  tokenize();
+  while (last_token != Token{U'}'}) {
+    Expression prop_key{};
+    if (not std::holds_alternative<Identifier>(last_token))
+      throw ScriptError{InvalidPropertyName{}};
+    prop_key = std::get<Identifier>(last_token);
+    tokenize();
+    if (last_token == Token{U':'}) {
+      tokenize();
+      prop_vec.emplace_back(prop_key, parse_assign_expr());
+    } else
+      prop_vec.emplace_back(prop_key, std::monostate{});
+    if (last_token != Token{U','})
+      break;
+    tokenize();
+  }
+  assert_punct('}');
+  std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
+      ObjectExpression{std::move(prop_vec)})};
+  referential_expressions.push_back(expr_ptr);
+  return expr_ptr.get();
 }
 
 Expression Parser::parse_postfix_expr() {
@@ -507,22 +535,9 @@ Dynamic Script::evaluate_property(Identifier property,
   return {};
 }
 
-std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &function,
-                        const BinaryExpression &expression) {
-  return {};
-}
-
-std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &function,
-                        const LogicalExpression &expression) {
-  return {};
-}
-
-std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &closure,
-                        const AssignExpression &expression) {
-  return {};
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
+                                                    Identifier identifier) {
+  return {std::monostate{}, evaluate(closure, identifier)};
 }
 
 std::pair<Dynamic, Dynamic>
@@ -538,55 +553,19 @@ Script::evaluate_callee(FunctionClosure &closure,
 
 std::pair<Dynamic, Dynamic>
 Script::evaluate_callee(FunctionClosure &closure,
-                        const FunctionCallExpression &expression) {
-  return {};
-}
-
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
-                                                    Identifier identifier) {
-  return {std::monostate{}, evaluate(closure, identifier)};
-}
-
-std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &closure,
-                        const FunctionDefinition *definition) {
-  return {};
-}
-
-std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &closure,
                         const ReferentialExpression *expr_ptr) {
-  return expr_ptr->alt.visit(
-      [&](const auto &expr_alt) { return evaluate_callee(closure, expr_alt); });
-}
-
-std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &closure,
-                        std::u16string_view permanent_string) {
-  return {};
-}
-
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
-                                                    std::int64_t number) {
-  return {};
-}
-
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
-                                                    double number) {
-  return {};
-}
-
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
-                                                    std::monostate) {
-  return {};
+  auto visit_expression = [&](const auto &expr_alt) {
+    if constexpr (std::is_same_v<decltype(expr_alt), const MemberExpression &>)
+      return evaluate_callee(closure, expr_alt);
+    return std::pair<Dynamic, Dynamic>{};
+  };
+  return expr_ptr->alt.visit(visit_expression);
 }
 
 std::u16string Script::evaluate_message(std::monostate) { return u"undefined"; }
-
 std::u16string Script::evaluate_message(std::u16string_view permanent_string) {
   return std::u16string(permanent_string);
 }
-
 std::u16string Script::evaluate_message(std::int64_t number) {
   static constexpr int buffer_size =
       std::numeric_limits<std::int64_t>::digits10 + 2;
@@ -685,7 +664,11 @@ Dynamic Script::evaluate_operation(Operator op, std::int64_t lhs,
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const FunctionCallExpression &expr_call) {
   auto visit_expression = [&](auto expression_alt) {
-    return evaluate_callee(closure, expression_alt);
+    if constexpr (std::is_same_v<decltype(expression_alt), Identifier> ||
+                  std::is_same_v<decltype(expression_alt),
+                                 const ReferentialExpression *>)
+      return evaluate_callee(closure, expression_alt);
+    return std::pair<Dynamic, Dynamic>{};
   };
   auto [dynamic_context, dynamic_callee] =
       expr_call.callee.visit(visit_expression);
@@ -736,6 +719,11 @@ Dynamic Script::evaluate(FunctionClosure &closure,
       assign_expr.left.visit(evaluate_lvalue)};
   assert(assign_lvalue != nullptr);
   *assign_lvalue = evaluate(closure, assign_expr.right);
+  return {};
+}
+
+Dynamic Script::evaluate(FunctionClosure &closure,
+                         const ObjectExpression &expression) {
   return {};
 }
 

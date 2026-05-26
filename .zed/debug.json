@@ -8,7 +8,7 @@
     "label": "language (GDB)",
     "request": "launch",
     "program": "./build/manadrain",
-    "args": ["./samples/create-counter.js"],
+    "args": ["./samples/accumulator-with-reset.js"],
     "stopAtBeginningOfMainSubprogram": true,
     "cwd": "/home/evgenii/manadrain",
   },
