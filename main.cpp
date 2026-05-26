@@ -1,8 +1,13 @@
+#include <cassert>
 #include <filesystem>
 #include <fstream>
+#include <inplace_vector>
 #include <iostream>
 #include <print>
 #include <ranges>
+#include <thread>
+
+#include <unistr.h>
 
 #include "language.hpp"
 
@@ -33,6 +38,33 @@ int main(int argc, char *argv[]) {
 
   Manadrain::Script script{std::move(parser)};
   script.evaluate();
+
+  auto convert_uchar = [](std::uint16_t uchar) {
+    std::array<std::uint8_t, 3> buffer{};
+    std::size_t buffer_len{buffer.size()};
+    uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
+    assert(result != nullptr);
+    auto u8_encoded = buffer | std::views::take(buffer_len);
+    return std::inplace_vector<std::uint8_t, 3>{std::from_range, u8_encoded};
+  };
+  auto convert_message = [&](const std::u16string &message) {
+    auto u8_message =
+        message | std::views::transform(convert_uchar) | std::views::join;
+    return std::string{std::from_range, u8_message};
+  };
+  auto console_printer = [&](std::stop_token stopper) {
+    std::unique_lock console_lock{*script.console_mutex};
+    auto check_messages = [&] { return script.console_messages.size() > 0; };
+    script.console_condition->wait(console_lock, stopper, check_messages);
+    std::list<std::u16string> latest_messages{};
+    script.console_messages.swap(latest_messages);
+    for (const std::string &message :
+         latest_messages | std::views::transform(convert_message))
+      std::println("{}", message);
+    if (stopper.stop_requested())
+      return;
+  };
+  std::jthread console_thread{console_printer};
 
   return 0;
 }

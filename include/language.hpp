@@ -1,8 +1,10 @@
+#include <condition_variable>
 #include <cstdint>
 #include <generator>
 #include <list>
 #include <memory>
 #include <memory_resource>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <unordered_map>
@@ -154,10 +156,11 @@ struct ObjectInstance {
   std::span<const Identifier> object_shape;
   std::pmr::vector<Dynamic> properties;
 };
+using FunctionScope = std::pmr::vector<std::optional<Dynamic>>;
 struct FunctionClosure {
   const FunctionDefinition *definition;
   FunctionClosure *parent_closure;
-  std::pmr::vector<std::optional<Dynamic>> own_scope;
+  FunctionScope own_scope;
   Dynamic return_val;
 };
 
@@ -168,6 +171,11 @@ inline constexpr std::size_t IDENT_length{2};
 class Script {
 public:
   Script();
+
+  std::list<std::u16string> console_messages;
+  std::unique_ptr<std::mutex> console_mutex;
+  std::unique_ptr<std::condition_variable_any> console_condition;
+
   void evaluate();
 
 protected:
@@ -192,7 +200,6 @@ private:
 
   ObjectInstance *global_this;
   ObjectInstance *console;
-  std::vector<std::string> console_messages;
 
   std::generator<FunctionClosure *>
   climb_closure_stack(FunctionClosure *closure_ptr);
@@ -200,16 +207,17 @@ private:
                                        Identifier var_handle);
   Dynamic *get_property(ObjectInstance &object, Identifier property_handle);
 
-  std::string evaluate_message(std::monostate);
-  std::string evaluate_message(std::u16string_view permanent_string);
-  std::string evaluate_message(std::int64_t number);
-  std::string evaluate_message(double number);
-  std::string evaluate_message(ObjectInstance *object_instance);
-  std::string evaluate_message(FunctionClosure *closure);
-  std::string evaluate_message(IntrinsicObject intrinsic_object);
-  std::string evaluate_message(IntrinsicFunction intrinsic_function);
+  std::u16string evaluate_message(std::monostate);
+  std::u16string evaluate_message(std::u16string_view permanent_string);
+  std::u16string evaluate_message(std::int64_t number);
+  std::u16string evaluate_message(double number);
+  std::u16string evaluate_message(ObjectInstance *object_instance);
+  std::u16string evaluate_message(FunctionClosure *closure);
+  std::u16string evaluate_message(IntrinsicObject intrinsic_object);
+  std::u16string evaluate_message(IntrinsicFunction intrinsic_function);
 
   Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
+  Dynamic evaluate_operation(Operator op, std::int64_t lhs, std::int64_t rhs);
 
   Dynamic evaluate_property(Identifier property, std::monostate);
   Dynamic evaluate_property(Identifier property,

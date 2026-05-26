@@ -262,6 +262,9 @@ const FunctionDefinition *Parser::parse_function_decl() {
     Identifier *parameter{std::get_if<Identifier>(&last_token)};
     if (not parameter)
       throw ScriptError{MissingFormalParameter{}};
+    auto lower_bound =
+        std::ranges::lower_bound(definition.local_scope, *parameter);
+    definition.local_scope.insert(lower_bound, *parameter);
     definition.arguments.push_back(*parameter);
     tokenize();
     if (last_token == Token{U')'})
@@ -407,10 +410,12 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
 }
 
 Script::Script()
-    : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
+    : console_mutex{std::make_unique<std::mutex>()},
+      console_condition{std::make_unique<std::condition_variable_any>()},
+      resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
       function_closures{resource.get()}, object_instances{resource.get()} {
-  function_closures.push_back(FunctionClosure{
-      .own_scope = std::pmr::vector<std::optional<Dynamic>>(resource.get())});
+  function_closures.push_back(
+      FunctionClosure{.own_scope = FunctionScope(resource.get())});
   main_function = &function_closures.back();
   object_instances.push_back(
       ObjectInstance{.object_shape = shape_global_this,
@@ -578,29 +583,29 @@ std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
   return {};
 }
 
-std::string Script::evaluate_message(std::monostate) {
-  return "<unimplemented>";
+std::u16string Script::evaluate_message(std::monostate) { return u"undefined"; }
+
+std::u16string Script::evaluate_message(std::u16string_view permanent_string) {
+  return std::u16string(permanent_string);
 }
-std::string Script::evaluate_message(std::u16string_view permanent_string) {
-  return "<unimplemented>";
+
+std::u16string Script::evaluate_message(std::int64_t number) {
+  return u"<unimplemented>";
 }
-std::string Script::evaluate_message(std::int64_t number) {
-  return "<unimplemented>";
+std::u16string Script::evaluate_message(double number) {
+  return u"<unimplemented>";
 }
-std::string Script::evaluate_message(double number) {
-  return "<unimplemented>";
+std::u16string Script::evaluate_message(FunctionClosure *closure) {
+  return u"<unimplemented>";
 }
-std::string Script::evaluate_message(FunctionClosure *closure) {
-  return "<unimplemented>";
+std::u16string Script::evaluate_message(ObjectInstance *object_instance) {
+  return u"<unimplemented>";
 }
-std::string Script::evaluate_message(ObjectInstance *object_instance) {
-  return "<unimplemented>";
+std::u16string Script::evaluate_message(IntrinsicObject intrinsic_object) {
+  return u"<unimplemented>";
 }
-std::string Script::evaluate_message(IntrinsicObject intrinsic_object) {
-  return "<unimplemented>";
-}
-std::string Script::evaluate_message(IntrinsicFunction intrinsic_function) {
-  return "<unimplemented>";
+std::u16string Script::evaluate_message(IntrinsicFunction intrinsic_function) {
+  return u"<unimplemented>";
 }
 
 Dynamic Script::evaluate_function_call(FunctionClosure &closure,
@@ -644,7 +649,11 @@ Dynamic Script::evaluate_function_call(FunctionClosure &closure,
     auto message_parts =
         expr_call.arguments | std::views::transform(evaluate_argument) |
         std::views::transform(match_message_arg) | std::views::join_with(' ');
-    console_messages.emplace_back(std::from_range, message_parts);
+    {
+      std::lock_guard console_lock{*console_mutex};
+      console_messages.emplace_back(std::from_range, message_parts);
+    }
+    console_condition->notify_one();
   }
   return {};
 }
@@ -652,9 +661,16 @@ Dynamic Script::evaluate_function_call(FunctionClosure &closure,
 Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
                                    std::int64_t rhs) {
   if (op == '+')
-    return std::int64_t{lhs + rhs};
+    return lhs + rhs;
   if (op == '-')
-    return std::int64_t{lhs - rhs};
+    return lhs - rhs;
+  std::unreachable();
+}
+
+Dynamic Script::evaluate_operation(Operator op, std::int64_t lhs,
+                                   std::int64_t rhs) {
+  if (op == Operator::LOGICAL_DISJUNCT)
+    return lhs ? lhs : rhs;
   std::unreachable();
 }
 
@@ -690,7 +706,15 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const LogicalExpression &expression) {
-  return {};
+  Dynamic dynamic_lhs{evaluate(closure, expression.left)};
+  Dynamic dynamic_rhs{evaluate(closure, expression.right)};
+  auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
+                  std::is_same_v<decltype(rhs), std::int64_t>)
+      return evaluate_operation(expression.op, lhs, rhs);
+    return {};
+  };
+  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
@@ -709,7 +733,12 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const FunctionDefinition *definition) {
-  return {};
+  function_closures.push_back(
+      FunctionClosure{.definition = definition,
+                      .parent_closure = &closure,
+                      .own_scope = FunctionScope(definition->local_scope.size(),
+                                                 resource.get())});
+  return &function_closures.back();
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
@@ -772,8 +801,8 @@ void Script::initialize(FunctionClosure &closure) {
     function_closures.push_back(FunctionClosure{
         .definition = nested_definition,
         .parent_closure = &closure,
-        .own_scope = std::pmr::vector<std::optional<Dynamic>>(
-            nested_definition->local_scope.size(), resource.get())});
+        .own_scope = FunctionScope(nested_definition->local_scope.size(),
+                                   resource.get())});
     *function_lvalue = &function_closures.back();
   }
 }
