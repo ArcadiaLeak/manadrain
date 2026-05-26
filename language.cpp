@@ -588,7 +588,16 @@ std::u16string Script::evaluate_message(std::u16string_view permanent_string) {
 }
 
 std::u16string Script::evaluate_message(std::int64_t number) {
-  return u"<unimplemented>";
+  static constexpr int buffer_size =
+      std::numeric_limits<std::int64_t>::digits10 + 2;
+  std::array<char, buffer_size> buffer{};
+  auto [ptr, ec] =
+      std::to_chars(buffer.data(), buffer.data() + buffer.size(), number);
+  assert(ec == std::errc{});
+  std::size_t message_size{
+      static_cast<std::size_t>(std::distance(buffer.data(), ptr))};
+  std::string_view message_view{buffer.data(), message_size};
+  return {std::from_range, message_view};
 }
 std::u16string Script::evaluate_message(double number) {
   return u"<unimplemented>";
@@ -717,7 +726,16 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
-                         const AssignExpression &expression) {
+                         const AssignExpression &assign_expr) {
+  auto evaluate_lvalue = [&](auto expression) -> std::optional<Dynamic> * {
+    if constexpr (std::is_same_v<decltype(expression), Identifier>)
+      return get_variable(closure, expression);
+    return nullptr;
+  };
+  std::optional<Dynamic> *assign_lvalue{
+      assign_expr.left.visit(evaluate_lvalue)};
+  assert(assign_lvalue != nullptr);
+  *assign_lvalue = evaluate(closure, assign_expr.right);
   return {};
 }
 
