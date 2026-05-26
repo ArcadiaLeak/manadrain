@@ -23,7 +23,9 @@ static const std::unordered_map<std::string_view, Keyword> keyword_atlas{
     {"break", Keyword::K_BREAK},       {"continue", Keyword::K_CONTINUE},
     {"switch", Keyword::K_SWITCH}};
 static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
-    {"console", IDENT_console}, {"log", IDENT_log}, {"length", IDENT_length}};
+    {"console", OFFSET_console},
+    {"log", OFFSET_log},
+    {"length", OFFSET_length}};
 static const std::array permanent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
@@ -322,13 +324,12 @@ Expression Parser::parse_primary_expr() {
 }
 
 Expression Parser::parse_object_literal() {
-  std::vector<std::pair<Expression, Expression>> prop_vec{};
+  std::vector<std::pair<Identifier, Expression>> prop_vec{};
   tokenize();
   while (last_token != Token{U'}'}) {
-    Expression prop_key{};
     if (not std::holds_alternative<Identifier>(last_token))
       throw ScriptError{InvalidPropertyName{}};
-    prop_key = std::get<Identifier>(last_token);
+    Identifier prop_key{std::get<Identifier>(last_token)};
     tokenize();
     if (last_token == Token{U':'}) {
       tokenize();
@@ -443,16 +444,6 @@ Script::Script()
   function_closures.push_back(
       FunctionClosure{.own_scope = FunctionScope(resource.get())});
   main_function = &function_closures.back();
-  object_instances.push_back(
-      ObjectInstance{.object_shape = shape_global_this,
-                     .properties = std::pmr::vector<Dynamic>(
-                         {IntrinsicObject::O_CONSOLE}, resource.get())});
-  global_this = &object_instances.back();
-  object_instances.push_back(
-      ObjectInstance{.object_shape = shape_console,
-                     .properties = std::pmr::vector<Dynamic>(
-                         {IntrinsicFunction::F_LOG}, resource.get())});
-  console = &object_instances.back();
 }
 
 std::generator<FunctionClosure *>
@@ -480,15 +471,26 @@ std::optional<Dynamic> *Script::get_variable(FunctionClosure &function,
   return nullptr;
 }
 
-Dynamic *Script::get_property(ObjectInstance &object_instance,
-                              Identifier property_handle) {
-  std::span<const Identifier> object_shape{object_instance.object_shape};
-  auto lower_bound = std::ranges::lower_bound(object_shape, property_handle);
-  if (lower_bound == object_shape.end() || *lower_bound != property_handle)
+Dynamic *VanillaObject::get_property(Identifier property) {
+  std::span<const Identifier> shape_view{object_shape->properties};
+  auto lower_bound = std::ranges::lower_bound(shape_view, property);
+  if (lower_bound == shape_view.end() || *lower_bound != property)
     return nullptr;
   std::ptrdiff_t property_distance{
-      std::distance(object_shape.begin(), lower_bound)};
-  return std::next(object_instance.properties.data(), property_distance);
+      std::distance(shape_view.begin(), lower_bound)};
+  return std::next(properties.data(), property_distance);
+}
+
+Dynamic *GlobalObject::get_property(Identifier property) {
+  if (property == Identifier{OFFSET_console})
+    return &console;
+  return {};
+}
+
+Dynamic *ConsoleObject::get_property(Identifier property) {
+  if (property == Identifier{OFFSET_log})
+    return &log;
+  return {};
 }
 
 Dynamic Script::evaluate_property(Identifier property, std::monostate) {
@@ -497,7 +499,7 @@ Dynamic Script::evaluate_property(Identifier property, std::monostate) {
 
 Dynamic Script::evaluate_property(Identifier property,
                                   std::u16string_view permanent_string) {
-  if (property == Identifier{IDENT_length})
+  if (property == Identifier{OFFSET_length})
     return static_cast<std::int64_t>(permanent_string.size());
   return {};
 }
@@ -512,7 +514,7 @@ Dynamic Script::evaluate_property(Identifier property, double number) {
 
 Dynamic Script::evaluate_property(Identifier property,
                                   ObjectInstance *object_instance) {
-  Dynamic *property_ptr{get_property(*object_instance, property)};
+  Dynamic *property_ptr{object_instance->get_property(property)};
   if (not property_ptr)
     return std::monostate{};
   return *property_ptr;
@@ -520,13 +522,6 @@ Dynamic Script::evaluate_property(Identifier property,
 
 Dynamic Script::evaluate_property(Identifier property,
                                   FunctionClosure *closure) {
-  return {};
-}
-
-Dynamic Script::evaluate_property(Identifier property,
-                                  IntrinsicObject intrinsic_object) {
-  if (intrinsic_object == IntrinsicObject::O_CONSOLE)
-    return evaluate_property(property, console);
   return {};
 }
 
@@ -585,9 +580,6 @@ std::u16string Script::evaluate_message(FunctionClosure *closure) {
   return u"<unimplemented>";
 }
 std::u16string Script::evaluate_message(ObjectInstance *object_instance) {
-  return u"<unimplemented>";
-}
-std::u16string Script::evaluate_message(IntrinsicObject intrinsic_object) {
   return u"<unimplemented>";
 }
 std::u16string Script::evaluate_message(IntrinsicFunction intrinsic_function) {
@@ -774,7 +766,7 @@ Dynamic Script::evaluate(FunctionClosure &closure, Identifier identifier) {
   std::optional<Dynamic> *from_scope{get_variable(closure, identifier)};
   if (from_scope && *from_scope)
     return **from_scope;
-  Dynamic *from_globalThis{get_property(*global_this, identifier)};
+  Dynamic *from_globalThis{global_this.get_property(identifier)};
   if (from_globalThis)
     return *from_globalThis;
   throw ScriptError{InvalidVariableAccess{}};

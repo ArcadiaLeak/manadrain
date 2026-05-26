@@ -121,7 +121,7 @@ struct AssignExpression {
   Expression right;
 };
 struct ObjectExpression {
-  std::vector<std::pair<Expression, Expression>> properties;
+  std::vector<std::pair<Identifier, Expression>> properties;
 };
 struct ReferentialExpression {
   std::variant<BinaryExpression, LogicalExpression, MemberExpression,
@@ -139,10 +139,13 @@ struct ReturnStatement {
 using Statement =
     std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
-enum class IntrinsicObject { O_NULL, O_CONSOLE, O_GLOBAL };
 enum class IntrinsicFunction { F_LOG };
 
 struct ObjectInstance;
+struct ObjectShape {
+  std::vector<Identifier> properties;
+};
+
 struct FunctionClosure;
 struct FunctionDefinition {
   std::optional<Identifier> function_name;
@@ -152,13 +155,30 @@ struct FunctionDefinition {
       nested_functions;
   std::vector<Statement> body;
 };
-using Dynamic = std::variant<std::monostate, std::u16string_view, std::int64_t,
-                             double, ObjectInstance *, IntrinsicObject,
-                             FunctionClosure *, IntrinsicFunction>;
+
+using Dynamic =
+    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
+                 ObjectInstance *, FunctionClosure *, IntrinsicFunction>;
+
 struct ObjectInstance {
-  std::span<const Identifier> object_shape;
-  std::pmr::vector<Dynamic> properties;
+  virtual Dynamic *get_property(Identifier property) = 0;
 };
+struct VanillaObject final : ObjectInstance {
+  const ObjectShape *object_shape;
+  std::pmr::vector<Dynamic> properties;
+  Dynamic *get_property(Identifier property) override;
+};
+struct GlobalObject final : ObjectInstance {
+  GlobalObject(Dynamic c) : console{c} {};
+  Dynamic console;
+  Dynamic *get_property(Identifier property) override;
+};
+struct ConsoleObject final : ObjectInstance {
+  ConsoleObject(Dynamic l) : log{l} {};
+  Dynamic log;
+  Dynamic *get_property(Identifier property) override;
+};
+
 using FunctionScope = std::pmr::vector<std::optional<Dynamic>>;
 struct FunctionClosure {
   const FunctionDefinition *definition;
@@ -167,9 +187,9 @@ struct FunctionClosure {
   Dynamic return_val;
 };
 
-inline constexpr std::size_t IDENT_console{0};
-inline constexpr std::size_t IDENT_log{1};
-inline constexpr std::size_t IDENT_length{2};
+inline constexpr std::size_t OFFSET_console{0};
+inline constexpr std::size_t OFFSET_log{1};
+inline constexpr std::size_t OFFSET_length{2};
 
 struct ConsoleMessage {
   std::u16string content;
@@ -189,7 +209,7 @@ protected:
   std::vector<std::shared_ptr<const ReferentialExpression>>
       referential_expressions;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
-  std::vector<std::shared_ptr<const std::vector<Identifier>>> object_shapes;
+  std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
 
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
@@ -200,22 +220,21 @@ protected:
 
 private:
   static inline const std::array shape_console{
-      std::to_array<Identifier>({Identifier{IDENT_log}})};
+      std::to_array<Identifier>({Identifier{OFFSET_log}})};
   static inline const std::array shape_global_this{
-      std::to_array<Identifier>({Identifier{IDENT_console}})};
+      std::to_array<Identifier>({Identifier{OFFSET_console}})};
 
-  ObjectInstance *global_this;
-
-  ObjectInstance *console;
+  ConsoleObject console{IntrinsicFunction::F_LOG};
   std::indirect<std::mutex> console_mutex;
   std::indirect<std::condition_variable_any> console_condition;
   std::list<ConsoleMessage> console_messages;
+
+  GlobalObject global_this{&console};
 
   std::generator<FunctionClosure *>
   climb_closure_stack(FunctionClosure *closure_ptr);
   std::optional<Dynamic> *get_variable(FunctionClosure &closure,
                                        Identifier var_handle);
-  Dynamic *get_property(ObjectInstance &object, Identifier property_handle);
 
   std::u16string evaluate_message(std::monostate);
   std::u16string evaluate_message(std::u16string_view permanent_string);
@@ -223,7 +242,6 @@ private:
   std::u16string evaluate_message(double number);
   std::u16string evaluate_message(ObjectInstance *object_instance);
   std::u16string evaluate_message(FunctionClosure *closure);
-  std::u16string evaluate_message(IntrinsicObject intrinsic_object);
   std::u16string evaluate_message(IntrinsicFunction intrinsic_function);
 
   Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
@@ -237,8 +255,6 @@ private:
   Dynamic evaluate_property(Identifier property,
                             ObjectInstance *object_instance);
   Dynamic evaluate_property(Identifier property, FunctionClosure *closure);
-  Dynamic evaluate_property(Identifier property,
-                            IntrinsicObject intrinsic_object);
   Dynamic evaluate_property(Identifier property,
                             IntrinsicFunction intrinsic_function);
 
