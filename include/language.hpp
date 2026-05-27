@@ -168,7 +168,7 @@ struct ObjectInstance {
   virtual Dynamic *get_property(Identifier property) = 0;
 };
 struct VanillaObject final : ObjectInstance {
-  VanillaObject(const ObjectShape *sh, std::pmr::monotonic_buffer_resource *r);
+  VanillaObject(const ObjectShape *sh, std::pmr::memory_resource *r);
   const ObjectShape *object_shape;
   std::pmr::vector<Dynamic> properties;
   Dynamic *get_property(Identifier property) override;
@@ -185,12 +185,16 @@ struct ConsoleObject final : ObjectInstance {
 };
 
 struct FunctionFrame {
-  FunctionFrame(const FunctionDefinition *d, FunctionFrame *p,
-                std::pmr::monotonic_buffer_resource *r);
+  FunctionFrame(const FunctionDefinition *d, std::pmr::memory_resource *r);
+  FunctionFrame clone() const;
+
   const FunctionDefinition *definition;
-  FunctionFrame *parent_frame;
   std::pmr::vector<std::optional<Dynamic>> own_scope;
+  FunctionFrame *closure;
+  FunctionFrame *caller;
   Dynamic return_val;
+
+  std::optional<Dynamic> *get_variable(Identifier var_handle);
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -211,7 +215,7 @@ public:
   void evaluate();
 
 protected:
-  FunctionFrame *main_function;
+  FunctionFrame *current_frame;
   std::vector<std::shared_ptr<const ReferentialExpression>>
       referential_expressions;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
@@ -222,7 +226,7 @@ protected:
   std::pmr::list<FunctionFrame> function_frames;
   std::pmr::list<VanillaObject> object_instances;
 
-  void initialize(FunctionFrame &frame);
+  void initialize();
 
 private:
   static inline const std::array shape_console{
@@ -236,10 +240,6 @@ private:
   std::list<ConsoleMessage> console_messages;
 
   GlobalObject global_this{&console};
-
-  std::generator<FunctionFrame *> climb_frame_stack(FunctionFrame *frame_ptr);
-  std::optional<Dynamic> *get_variable(FunctionFrame &frame,
-                                       Identifier var_handle);
 
   std::u16string evaluate_message(std::monostate);
   std::u16string evaluate_message(std::u16string_view permanent_string);
@@ -263,42 +263,37 @@ private:
   Dynamic evaluate_property(Identifier property,
                             IntrinsicFunction intrinsic_function);
 
-  Dynamic evaluate_function_call(FunctionFrame &frame,
-                                 const FunctionCallExpression &expr_call,
+  Dynamic evaluate_function_call(const FunctionCallExpression &expr_call,
                                  Dynamic context, FunctionFrame *callee_ptr);
-  Dynamic evaluate_function_call(FunctionFrame &frame,
-                                 const FunctionCallExpression &expr_call,
+  Dynamic evaluate_function_call(const FunctionCallExpression &expr_call,
                                  Dynamic context,
                                  IntrinsicFunction intrinsic_function);
 
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionFrame &frame, const MemberExpression &expression);
-  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionFrame &frame,
-                                              Identifier identifier);
+  evaluate_callee(const MemberExpression &expression);
+  std::pair<Dynamic, Dynamic> evaluate_callee(Identifier identifier);
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionFrame &frame, const ReferentialExpression *expr_ptr);
+  evaluate_callee(const ReferentialExpression *expr_ptr);
 
-  Dynamic evaluate(FunctionFrame &frame, const BinaryExpression &expression);
-  Dynamic evaluate(FunctionFrame &frame, const LogicalExpression &expression);
-  Dynamic evaluate(FunctionFrame &frame, const MemberExpression &expression);
-  Dynamic evaluate(FunctionFrame &frame,
-                   const FunctionCallExpression &expression);
-  Dynamic evaluate(FunctionFrame &frame, const AssignExpression &expression);
-  Dynamic evaluate(FunctionFrame &frame, const ObjectExpression &expression);
-  Dynamic evaluate(FunctionFrame &frame, Identifier identifier);
-  Dynamic evaluate(FunctionFrame &frame, const FunctionDefinition *definition);
-  Dynamic evaluate(FunctionFrame &frame, const ReferentialExpression *expr_ptr);
-  Dynamic evaluate(FunctionFrame &frame, std::u16string_view permanent_string);
-  Dynamic evaluate(FunctionFrame &frame, std::int64_t number);
-  Dynamic evaluate(FunctionFrame &frame, double number);
-  Dynamic evaluate(FunctionFrame &frame, std::monostate) { return {}; }
-  Dynamic evaluate(FunctionFrame &frame, Expression expression);
+  Dynamic evaluate(const BinaryExpression &expression);
+  Dynamic evaluate(const LogicalExpression &expression);
+  Dynamic evaluate(const MemberExpression &expression);
+  Dynamic evaluate(const FunctionCallExpression &expression);
+  Dynamic evaluate(const AssignExpression &expression);
+  Dynamic evaluate(const ObjectExpression &expression);
+  Dynamic evaluate(Identifier identifier);
+  Dynamic evaluate(const FunctionDefinition *definition);
+  Dynamic evaluate(const ReferentialExpression *expr_ptr);
+  Dynamic evaluate(std::u16string_view permanent_string);
+  Dynamic evaluate(std::int64_t number);
+  Dynamic evaluate(double number);
+  Dynamic evaluate(std::monostate) { return {}; }
+  Dynamic evaluate(Expression expression);
 
-  void evaluate_statement(FunctionFrame &frame, Expression expression);
-  void evaluate_statement(FunctionFrame &frame,
-                          VariableDeclaration declaration);
-  void evaluate_statement(FunctionFrame &frame, ReturnStatement statement);
-  void evaluate(FunctionFrame &frame, Statement statement);
+  void evaluate_statement(Expression expression);
+  void evaluate_statement(VariableDeclaration declaration);
+  void evaluate_statement(ReturnStatement statement);
+  void evaluate(Statement statement);
 };
 
 class Parser : public Script {
