@@ -198,65 +198,71 @@ void Parser::assert_punct(char32_t must_be) {
 }
 
 void Parser::parse_text() {
-  std::shared_ptr definition{std::make_shared<FunctionDefinition>()};
+  FunctionDefinition *definition{new FunctionDefinition{}};
+  current_function = definition;
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
       break;
-    definition->body.append_range(parse_statement(*definition));
+    parse_statement();
   }
-  function_definitions.push_back(definition);
+  function_definitions.emplace_back(definition);
   FunctionFrame &frame{function_frames.emplace_back()};
-  frame.definition = definition.get();
+  frame.definition = definition;
   frame.own_scope =
       function_scopes.emplace_back(definition->local_scope.size());
   current_frame = &frame;
   initialize();
 }
 
-std::optional<Statement>
-Parser::parse_statement(FunctionDefinition &definition) {
+void Parser::parse_statement() {
   Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
   if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
     const FunctionDefinition *nested_definition{parse_function_decl()};
     std::optional<Identifier> function_name{nested_definition->function_name};
     if (not function_name)
       throw ScriptError{MissingFunctionName{}};
-    if (std::ranges::binary_search(definition.local_scope, *function_name))
+    if (std::ranges::binary_search(current_function->local_scope,
+                                   *function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    definition.nested_functions.push_back({*function_name, nested_definition});
+    current_function->nested_functions.push_back(
+        {*function_name, nested_definition});
     auto lower_bound =
-        std::ranges::lower_bound(definition.local_scope, *function_name);
-    definition.local_scope.insert(lower_bound, *function_name);
-    return std::nullopt;
+        std::ranges::lower_bound(current_function->local_scope, *function_name);
+    current_function->local_scope.insert(lower_bound, *function_name);
+    return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
-    WriteVariable declaration{parse_variable_decl()};
-    Identifier variable_name{declaration.variable_name};
-    if (std::ranges::binary_search(definition.local_scope, variable_name))
+    WriteVariable statement{parse_variable_decl()};
+    Identifier variable_name{statement.variable_name};
+    if (std::ranges::binary_search(current_function->local_scope,
+                                   variable_name))
       throw ScriptError{DuplicateDeclaration{}};
     auto lower_bound =
-        std::ranges::lower_bound(definition.local_scope, variable_name);
-    definition.local_scope.insert(lower_bound, variable_name);
-    return declaration;
+        std::ranges::lower_bound(current_function->local_scope, variable_name);
+    current_function->local_scope.insert(lower_bound, variable_name);
+    current_function->body.push_back(statement);
+    return;
   }
   if (word_ptr && *word_ptr == Keyword::K_RETURN) {
     tokenize();
     ReturnStatement statement{parse_expression()};
     assert_punct(';');
-    return statement;
+    current_function->body.push_back(statement);
+    return;
   }
   Expression expression{parse_expression()};
   assert_punct(';');
-  return expression;
+  current_function->body.push_back(expression);
+  return;
 }
 
 const FunctionDefinition *Parser::parse_function_decl() {
   tokenize();
   Identifier *function_name{std::get_if<Identifier>(&last_token)};
-  FunctionDefinition definition{};
+  FunctionDefinition *definition{new FunctionDefinition{}};
   if (function_name) {
-    definition.function_name = *function_name;
+    definition->function_name = *function_name;
     tokenize();
   }
   assert_punct('(');
@@ -268,9 +274,9 @@ const FunctionDefinition *Parser::parse_function_decl() {
     if (not parameter)
       throw ScriptError{MissingFormalParameter{}};
     auto lower_bound =
-        std::ranges::lower_bound(definition.local_scope, *parameter);
-    definition.local_scope.insert(lower_bound, *parameter);
-    definition.arguments.push_back(*parameter);
+        std::ranges::lower_bound(definition->local_scope, *parameter);
+    definition->local_scope.insert(lower_bound, *parameter);
+    definition->arguments.push_back(*parameter);
     tokenize();
     if (last_token == Token{U')'})
       break;
@@ -278,6 +284,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
   }
   tokenize();
   assert_punct('{');
+  std::swap(current_function, definition);
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
@@ -285,12 +292,11 @@ const FunctionDefinition *Parser::parse_function_decl() {
     char32_t *alter_ptr{std::get_if<char32_t>(&last_token)};
     if (alter_ptr && *alter_ptr == '}')
       break;
-    definition.body.append_range(parse_statement(definition));
+    parse_statement();
   }
-  std::shared_ptr definition_ptr{
-      std::make_shared<FunctionDefinition>(std::move(definition))};
-  function_definitions.push_back(definition_ptr);
-  return definition_ptr.get();
+  std::swap(current_function, definition);
+  function_definitions.emplace_back(definition);
+  return definition;
 }
 
 WriteVariable Parser::parse_variable_decl() {

@@ -339,7 +339,8 @@ private:
   Expression parse_paren_expr();
   Expression parse_expression();
 
-  std::optional<Statement> parse_statement(FunctionDefinition &definition);
+  FunctionDefinition *current_function;
+  void parse_statement();
   const FunctionDefinition *parse_function_decl();
   WriteVariable parse_variable_decl();
 };
