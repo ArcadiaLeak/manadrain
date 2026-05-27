@@ -36,7 +36,8 @@ enum class Keyword {
   K_DO,
   K_BREAK,
   K_CONTINUE,
-  K_SWITCH
+  K_SWITCH,
+  K_TYPEOF
 };
 struct Identifier {
   std::size_t offset;
@@ -144,8 +145,18 @@ struct VariableDeclaration {
 struct ReturnStatement {
   Expression argument;
 };
-using Statement =
-    std::variant<Expression, VariableDeclaration, ReturnStatement>;
+struct ReferentialStatement;
+using Statement = std::variant<Expression, VariableDeclaration, ReturnStatement,
+                               const ReferentialStatement *>;
+
+struct IfStatement {
+  Expression condition;
+  Statement consequent;
+  Statement alternate;
+};
+struct ReferentialStatement {
+  std::variant<IfStatement> alt;
+};
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -167,6 +178,7 @@ struct ObjectInstance {
   virtual Dynamic *get_property(Identifier property) = 0;
 };
 struct VanillaObject final : ObjectInstance {
+  VanillaObject(const ObjectShape *sh, std::pmr::monotonic_buffer_resource *r);
   const ObjectShape *object_shape;
   std::pmr::vector<Dynamic> properties;
   Dynamic *get_property(Identifier property) override;
@@ -182,11 +194,12 @@ struct ConsoleObject final : ObjectInstance {
   Dynamic *get_property(Identifier property) override;
 };
 
-using FunctionScope = std::pmr::vector<std::optional<Dynamic>>;
 struct FunctionClosure {
+  FunctionClosure(const FunctionDefinition *d, FunctionClosure *p,
+                  std::pmr::monotonic_buffer_resource *r);
   const FunctionDefinition *definition;
   FunctionClosure *parent_closure;
-  FunctionScope own_scope;
+  std::pmr::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
 };
 
@@ -211,13 +224,15 @@ protected:
   FunctionClosure *main_function;
   std::vector<std::shared_ptr<const ReferentialExpression>>
       referential_expressions;
+  std::vector<std::shared_ptr<const ReferentialStatement>>
+      referential_statements;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
 
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
   std::pmr::list<FunctionClosure> function_closures;
-  std::pmr::list<ObjectInstance> object_instances;
+  std::pmr::list<VanillaObject> object_instances;
 
   void initialize(FunctionClosure &closure);
 
@@ -340,9 +355,10 @@ private:
   Expression parse_member_expr(Expression obj_expr);
   Expression parse_call_expr(Expression callee_expr);
   Expression parse_object_literal();
+  Expression parse_paren_expr();
   Expression parse_expression();
 
-  void parse_statement(FunctionDefinition &definition);
+  std::optional<Statement> parse_statement(FunctionDefinition &definition);
   const FunctionDefinition *parse_function_decl();
   VariableDeclaration parse_variable_decl();
 };

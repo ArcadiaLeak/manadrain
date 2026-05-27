@@ -21,7 +21,7 @@ static const std::unordered_map<std::string_view, Keyword> keyword_atlas{
     {"else", Keyword::K_ELSE},         {"while", Keyword::K_WHILE},
     {"for", Keyword::K_FOR},           {"do", Keyword::K_DO},
     {"break", Keyword::K_BREAK},       {"continue", Keyword::K_CONTINUE},
-    {"switch", Keyword::K_SWITCH}};
+    {"switch", Keyword::K_SWITCH},     {"typeof", Keyword::K_TYPEOF}};
 static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
     {"console", OFFSET_console},
     {"log", OFFSET_log},
@@ -203,15 +203,17 @@ void Parser::parse_text() {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
       break;
-    parse_statement(*definition);
+    definition->body.append_range(parse_statement(*definition));
   }
   function_definitions.push_back(definition);
-  main_function->definition = definition.get();
-  main_function->own_scope.resize(definition->local_scope.size());
+  function_closures.push_back(
+      FunctionClosure{definition.get(), nullptr, resource.get()});
+  main_function = &function_closures.back();
   initialize(*main_function);
 }
 
-void Parser::parse_statement(FunctionDefinition &definition) {
+std::optional<Statement>
+Parser::parse_statement(FunctionDefinition &definition) {
   Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
   if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
     const FunctionDefinition *nested_definition{parse_function_decl()};
@@ -224,7 +226,7 @@ void Parser::parse_statement(FunctionDefinition &definition) {
     auto lower_bound =
         std::ranges::lower_bound(definition.local_scope, *function_name);
     definition.local_scope.insert(lower_bound, *function_name);
-    return;
+    return std::nullopt;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
     VariableDeclaration declaration{parse_variable_decl()};
@@ -234,18 +236,23 @@ void Parser::parse_statement(FunctionDefinition &definition) {
     auto lower_bound =
         std::ranges::lower_bound(definition.local_scope, variable_name);
     definition.local_scope.insert(lower_bound, variable_name);
-    definition.body.push_back(declaration);
-    return;
+    return declaration;
   }
   if (word_ptr && *word_ptr == Keyword::K_RETURN) {
     tokenize();
     ReturnStatement statement{parse_expression()};
-    definition.body.push_back(std::move(statement));
     assert_punct(';');
-    return;
+    return statement;
   }
-  definition.body.push_back(parse_expression());
+  if (word_ptr && *word_ptr == Keyword::K_IF) {
+    tokenize();
+    referential_statements.push_back(std::make_shared<ReferentialStatement>(
+        IfStatement{parse_paren_expr(), parse_statement(definition).value()}));
+    return referential_statements.back().get();
+  }
+  Expression expression{parse_expression()};
   assert_punct(';');
+  return expression;
 }
 
 const FunctionDefinition *Parser::parse_function_decl() {
@@ -282,7 +289,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
     char32_t *alter_ptr{std::get_if<char32_t>(&last_token)};
     if (alter_ptr && *alter_ptr == '}')
       break;
-    parse_statement(definition);
+    definition.body.append_range(parse_statement(definition));
   }
   std::shared_ptr definition_ptr{
       std::make_shared<FunctionDefinition>(std::move(definition))};
@@ -323,6 +330,15 @@ Expression Parser::parse_primary_expr() {
   });
 }
 
+Expression Parser::parse_paren_expr() {
+  assert_punct('(');
+  tokenize();
+  Expression expression{parse_expression()};
+  assert_punct(')');
+  tokenize();
+  return expression;
+}
+
 Expression Parser::parse_object_literal() {
   std::vector<std::pair<Identifier, Expression>> prop_vec{};
   tokenize();
@@ -333,7 +349,7 @@ Expression Parser::parse_object_literal() {
     tokenize();
     if (last_token == Token{U':'}) {
       tokenize();
-      prop_vec.emplace_back(prop_key, parse_assign_expr());
+      prop_vec.emplace_back(prop_key, parse_expression());
     } else
       prop_vec.emplace_back(prop_key, std::monostate{});
     if (last_token != Token{U','})
@@ -447,11 +463,7 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
 
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
-      function_closures{resource.get()}, object_instances{resource.get()} {
-  function_closures.push_back(
-      FunctionClosure{.own_scope = FunctionScope(resource.get())});
-  main_function = &function_closures.back();
-}
+      function_closures{resource.get()}, object_instances{resource.get()} {}
 
 std::generator<FunctionClosure *>
 Script::climb_closure_stack(FunctionClosure *closure_ptr) {
@@ -477,6 +489,16 @@ std::optional<Dynamic> *Script::get_variable(FunctionClosure &function,
   }
   return nullptr;
 }
+
+FunctionClosure::FunctionClosure(const FunctionDefinition *d,
+                                 FunctionClosure *p,
+                                 std::pmr::monotonic_buffer_resource *r)
+    : definition{d}, parent_closure{p},
+      own_scope{definition->local_scope.size(), r} {};
+
+VanillaObject::VanillaObject(const ObjectShape *sh,
+                             std::pmr::monotonic_buffer_resource *r)
+    : object_shape{sh}, properties{sh->properties.size(), r} {};
 
 Dynamic *VanillaObject::get_property(Identifier property) {
   std::span<const Identifier> shape_view{object_shape->properties};
@@ -722,8 +744,15 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
-                         const ObjectExpression &expression) {
-  return {};
+                         const ObjectExpression &object_expr) {
+  object_instances.push_back(
+      VanillaObject{object_expr.object_shape, resource.get()});
+  VanillaObject *object_ptr{&object_instances.back()};
+  for (auto [identifier, expression] : object_expr.properties) {
+    Dynamic *property_ptr{object_ptr->get_property(identifier)};
+    *property_ptr = evaluate(closure, expression);
+  }
+  return object_ptr;
 }
 
 Dynamic Script::evaluate(FunctionClosure &closure,
@@ -738,10 +767,7 @@ Dynamic Script::evaluate(FunctionClosure &closure,
 Dynamic Script::evaluate(FunctionClosure &closure,
                          const FunctionDefinition *definition) {
   function_closures.push_back(
-      FunctionClosure{.definition = definition,
-                      .parent_closure = &closure,
-                      .own_scope = FunctionScope(definition->local_scope.size(),
-                                                 resource.get())});
+      FunctionClosure{definition, &closure, resource.get()});
   return &function_closures.back();
 }
 
@@ -793,8 +819,7 @@ void Script::evaluate(FunctionClosure &closure, ReturnStatement statement) {
 }
 
 void Script::evaluate(FunctionClosure &closure, Statement statement) {
-  std::visit([&](auto alternative) { evaluate(closure, alternative); },
-             statement);
+  statement.visit([&](auto alternative) { evaluate(closure, alternative); });
 }
 
 void Script::initialize(FunctionClosure &closure) {
@@ -802,11 +827,8 @@ void Script::initialize(FunctionClosure &closure) {
   for (auto [nested_name, nested_definition] : definition.nested_functions) {
     auto *function_lvalue{get_variable(closure, nested_name)};
     assert(function_lvalue != nullptr);
-    function_closures.push_back(FunctionClosure{
-        .definition = nested_definition,
-        .parent_closure = &closure,
-        .own_scope = FunctionScope(nested_definition->local_scope.size(),
-                                   resource.get())});
+    function_closures.push_back(
+        FunctionClosure{nested_definition, &closure, resource.get()});
     *function_lvalue = &function_closures.back();
   }
 }
