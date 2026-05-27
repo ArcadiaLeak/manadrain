@@ -244,12 +244,6 @@ Parser::parse_statement(FunctionDefinition &definition) {
     assert_punct(';');
     return statement;
   }
-  if (word_ptr && *word_ptr == Keyword::K_IF) {
-    tokenize();
-    referential_statements.push_back(std::make_shared<ReferentialStatement>(
-        IfStatement{parse_paren_expr(), parse_statement(definition).value()}));
-    return referential_statements.back().get();
-  }
   Expression expression{parse_expression()};
   assert_punct(';');
   return expression;
@@ -800,7 +794,12 @@ Dynamic Script::evaluate(FunctionFrame &frame, Identifier identifier) {
   throw ScriptError{InvalidVariableAccess{}};
 }
 
-void Script::evaluate(FunctionFrame &frame, VariableDeclaration declaration) {
+void Script::evaluate_statement(FunctionFrame &frame, Expression expression) {
+  evaluate(frame, expression);
+}
+
+void Script::evaluate_statement(FunctionFrame &frame,
+                                VariableDeclaration declaration) {
   Dynamic initializer_dynamic{evaluate(frame, declaration.initializer)};
   std::optional<Dynamic> *variable_lvalue{
       get_variable(frame, declaration.variable_name)};
@@ -808,12 +807,14 @@ void Script::evaluate(FunctionFrame &frame, VariableDeclaration declaration) {
   *variable_lvalue = initializer_dynamic;
 }
 
-void Script::evaluate(FunctionFrame &frame, ReturnStatement statement) {
+void Script::evaluate_statement(FunctionFrame &frame,
+                                ReturnStatement statement) {
   frame.return_val = evaluate(frame, statement.argument);
 }
 
 void Script::evaluate(FunctionFrame &frame, Statement statement) {
-  statement.visit([&](auto alternative) { evaluate(frame, alternative); });
+  statement.visit(
+      [&](auto alternative) { evaluate_statement(frame, alternative); });
 }
 
 void Script::initialize(FunctionFrame &frame) {

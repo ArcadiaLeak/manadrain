@@ -145,18 +145,8 @@ struct VariableDeclaration {
 struct ReturnStatement {
   Expression argument;
 };
-struct ReferentialStatement;
-using Statement = std::variant<Expression, VariableDeclaration, ReturnStatement,
-                               const ReferentialStatement *>;
-
-struct IfStatement {
-  Expression condition;
-  Statement consequent;
-  Statement alternate;
-};
-struct ReferentialStatement {
-  std::variant<IfStatement> alt;
-};
+using Statement =
+    std::variant<Expression, VariableDeclaration, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -224,8 +214,6 @@ protected:
   FunctionFrame *main_function;
   std::vector<std::shared_ptr<const ReferentialExpression>>
       referential_expressions;
-  std::vector<std::shared_ptr<const ReferentialStatement>>
-      referential_statements;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
@@ -306,8 +294,10 @@ private:
   Dynamic evaluate(FunctionFrame &frame, std::monostate) { return {}; }
   Dynamic evaluate(FunctionFrame &frame, Expression expression);
 
-  void evaluate(FunctionFrame &frame, VariableDeclaration declaration);
-  void evaluate(FunctionFrame &frame, ReturnStatement statement);
+  void evaluate_statement(FunctionFrame &frame, Expression expression);
+  void evaluate_statement(FunctionFrame &frame,
+                          VariableDeclaration declaration);
+  void evaluate_statement(FunctionFrame &frame, ReturnStatement statement);
   void evaluate(FunctionFrame &frame, Statement statement);
 };
 
