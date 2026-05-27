@@ -231,7 +231,7 @@ Parser::parse_statement(FunctionDefinition &definition) {
     return std::nullopt;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
-    VariableDeclaration declaration{parse_variable_decl()};
+    WriteVariable declaration{parse_variable_decl()};
     Identifier variable_name{declaration.variable_name};
     if (std::ranges::binary_search(definition.local_scope, variable_name))
       throw ScriptError{DuplicateDeclaration{}};
@@ -293,16 +293,16 @@ const FunctionDefinition *Parser::parse_function_decl() {
   return definition_ptr.get();
 }
 
-VariableDeclaration Parser::parse_variable_decl() {
+WriteVariable Parser::parse_variable_decl() {
   tokenize();
   Identifier *variable_name{std::get_if<Identifier>(&last_token)};
   if (not variable_name)
     throw ScriptError{MissingVariableName{}};
-  VariableDeclaration variable_decl{*variable_name};
+  WriteVariable variable_decl{*variable_name};
   tokenize();
   assert_punct('=');
   tokenize();
-  variable_decl.initializer = parse_expression();
+  variable_decl.rvalue = parse_expression();
   assert_punct(';');
   return variable_decl;
 }
@@ -771,12 +771,17 @@ Dynamic Script::evaluate(Identifier identifier) {
 
 void Script::evaluate_statement(Expression expression) { evaluate(expression); }
 
-void Script::evaluate_statement(VariableDeclaration declaration) {
-  Dynamic initializer_dynamic{evaluate(declaration.initializer)};
+void Script::evaluate_statement(WriteInterim statement) {
+  Dynamic rvalue_dynamic{evaluate(statement.rvalue)};
+  current_frame->interim[statement.level] = rvalue_dynamic;
+}
+
+void Script::evaluate_statement(WriteVariable statement) {
+  Dynamic rvalue_dynamic{evaluate(statement.rvalue)};
   std::optional<Dynamic> *variable_lvalue{
-      current_frame->get_variable(declaration.variable_name)};
+      current_frame->get_variable(statement.variable_name)};
   assert(variable_lvalue != nullptr);
-  *variable_lvalue = initializer_dynamic;
+  *variable_lvalue = rvalue_dynamic;
 }
 
 void Script::evaluate_statement(ReturnStatement statement) {

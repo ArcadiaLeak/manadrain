@@ -138,15 +138,19 @@ struct ReferentialExpression {
       alt;
 };
 
-struct VariableDeclaration {
+struct WriteInterim {
+  std::size_t level;
+  Expression rvalue;
+};
+struct WriteVariable {
   Identifier variable_name;
-  Expression initializer;
+  Expression rvalue;
 };
 struct ReturnStatement {
   Expression argument;
 };
 using Statement =
-    std::variant<Expression, VariableDeclaration, ReturnStatement>;
+    std::variant<Expression, WriteInterim, WriteVariable, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -292,7 +296,8 @@ private:
   Dynamic evaluate(Expression expression);
 
   void evaluate_statement(Expression expression);
-  void evaluate_statement(VariableDeclaration declaration);
+  void evaluate_statement(WriteInterim statement);
+  void evaluate_statement(WriteVariable statement);
   void evaluate_statement(ReturnStatement statement);
   void evaluate(Statement statement);
 };
@@ -336,6 +341,6 @@ private:
 
   std::optional<Statement> parse_statement(FunctionDefinition &definition);
   const FunctionDefinition *parse_function_decl();
-  VariableDeclaration parse_variable_decl();
+  WriteVariable parse_variable_decl();
 };
 } // namespace Manadrain
