@@ -160,7 +160,7 @@ struct ReferentialStatement {
 
 enum class IntrinsicFunction { F_LOG };
 
-struct FunctionClosure;
+struct FunctionFrame;
 struct FunctionDefinition {
   std::optional<Identifier> function_name;
   std::vector<Identifier> arguments;
@@ -172,7 +172,7 @@ struct FunctionDefinition {
 
 using Dynamic =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 ObjectInstance *, FunctionClosure *, IntrinsicFunction>;
+                 ObjectInstance *, FunctionFrame *, IntrinsicFunction>;
 
 struct ObjectInstance {
   virtual Dynamic *get_property(Identifier property) = 0;
@@ -194,11 +194,11 @@ struct ConsoleObject final : ObjectInstance {
   Dynamic *get_property(Identifier property) override;
 };
 
-struct FunctionClosure {
-  FunctionClosure(const FunctionDefinition *d, FunctionClosure *p,
-                  std::pmr::monotonic_buffer_resource *r);
+struct FunctionFrame {
+  FunctionFrame(const FunctionDefinition *d, FunctionFrame *p,
+                std::pmr::monotonic_buffer_resource *r);
   const FunctionDefinition *definition;
-  FunctionClosure *parent_closure;
+  FunctionFrame *parent_frame;
   std::pmr::vector<std::optional<Dynamic>> own_scope;
   Dynamic return_val;
 };
@@ -221,7 +221,7 @@ public:
   void evaluate();
 
 protected:
-  FunctionClosure *main_function;
+  FunctionFrame *main_function;
   std::vector<std::shared_ptr<const ReferentialExpression>>
       referential_expressions;
   std::vector<std::shared_ptr<const ReferentialStatement>>
@@ -231,10 +231,10 @@ protected:
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
 
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
-  std::pmr::list<FunctionClosure> function_closures;
+  std::pmr::list<FunctionFrame> function_frames;
   std::pmr::list<VanillaObject> object_instances;
 
-  void initialize(FunctionClosure &closure);
+  void initialize(FunctionFrame &frame);
 
 private:
   static inline const std::array shape_console{
@@ -249,9 +249,8 @@ private:
 
   GlobalObject global_this{&console};
 
-  std::generator<FunctionClosure *>
-  climb_closure_stack(FunctionClosure *closure_ptr);
-  std::optional<Dynamic> *get_variable(FunctionClosure &closure,
+  std::generator<FunctionFrame *> climb_frame_stack(FunctionFrame *frame_ptr);
+  std::optional<Dynamic> *get_variable(FunctionFrame &frame,
                                        Identifier var_handle);
 
   std::u16string evaluate_message(std::monostate);
@@ -259,7 +258,7 @@ private:
   std::u16string evaluate_message(std::int64_t number);
   std::u16string evaluate_message(double number);
   std::u16string evaluate_message(ObjectInstance *object_instance);
-  std::u16string evaluate_message(FunctionClosure *closure);
+  std::u16string evaluate_message(FunctionFrame *frame);
   std::u16string evaluate_message(IntrinsicFunction intrinsic_function);
 
   Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
@@ -272,53 +271,44 @@ private:
   Dynamic evaluate_property(Identifier property, double number);
   Dynamic evaluate_property(Identifier property,
                             ObjectInstance *object_instance);
-  Dynamic evaluate_property(Identifier property, FunctionClosure *closure);
+  Dynamic evaluate_property(Identifier property, FunctionFrame *frame);
   Dynamic evaluate_property(Identifier property,
                             IntrinsicFunction intrinsic_function);
 
-  Dynamic evaluate_function_call(FunctionClosure &closure,
+  Dynamic evaluate_function_call(FunctionFrame &frame,
                                  const FunctionCallExpression &expr_call,
-                                 Dynamic context, FunctionClosure *callee_ptr);
-  Dynamic evaluate_function_call(FunctionClosure &closure,
+                                 Dynamic context, FunctionFrame *callee_ptr);
+  Dynamic evaluate_function_call(FunctionFrame &frame,
                                  const FunctionCallExpression &expr_call,
                                  Dynamic context,
                                  IntrinsicFunction intrinsic_function);
 
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure, const MemberExpression &expression);
-  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionClosure &closure,
+  evaluate_callee(FunctionFrame &frame, const MemberExpression &expression);
+  std::pair<Dynamic, Dynamic> evaluate_callee(FunctionFrame &frame,
                                               Identifier identifier);
   std::pair<Dynamic, Dynamic>
-  evaluate_callee(FunctionClosure &closure,
-                  const ReferentialExpression *expr_ptr);
+  evaluate_callee(FunctionFrame &frame, const ReferentialExpression *expr_ptr);
 
-  Dynamic evaluate(FunctionClosure &closure,
-                   const BinaryExpression &expression);
-  Dynamic evaluate(FunctionClosure &closure,
-                   const LogicalExpression &expression);
-  Dynamic evaluate(FunctionClosure &closure,
-                   const MemberExpression &expression);
-  Dynamic evaluate(FunctionClosure &closure,
+  Dynamic evaluate(FunctionFrame &frame, const BinaryExpression &expression);
+  Dynamic evaluate(FunctionFrame &frame, const LogicalExpression &expression);
+  Dynamic evaluate(FunctionFrame &frame, const MemberExpression &expression);
+  Dynamic evaluate(FunctionFrame &frame,
                    const FunctionCallExpression &expression);
-  Dynamic evaluate(FunctionClosure &closure,
-                   const AssignExpression &expression);
-  Dynamic evaluate(FunctionClosure &closure,
-                   const ObjectExpression &expression);
-  Dynamic evaluate(FunctionClosure &closure, Identifier identifier);
-  Dynamic evaluate(FunctionClosure &closure,
-                   const FunctionDefinition *definition);
-  Dynamic evaluate(FunctionClosure &closure,
-                   const ReferentialExpression *expr_ptr);
-  Dynamic evaluate(FunctionClosure &closure,
-                   std::u16string_view permanent_string);
-  Dynamic evaluate(FunctionClosure &closure, std::int64_t number);
-  Dynamic evaluate(FunctionClosure &closure, double number);
-  Dynamic evaluate(FunctionClosure &closure, std::monostate) { return {}; }
-  Dynamic evaluate(FunctionClosure &closure, Expression expression);
+  Dynamic evaluate(FunctionFrame &frame, const AssignExpression &expression);
+  Dynamic evaluate(FunctionFrame &frame, const ObjectExpression &expression);
+  Dynamic evaluate(FunctionFrame &frame, Identifier identifier);
+  Dynamic evaluate(FunctionFrame &frame, const FunctionDefinition *definition);
+  Dynamic evaluate(FunctionFrame &frame, const ReferentialExpression *expr_ptr);
+  Dynamic evaluate(FunctionFrame &frame, std::u16string_view permanent_string);
+  Dynamic evaluate(FunctionFrame &frame, std::int64_t number);
+  Dynamic evaluate(FunctionFrame &frame, double number);
+  Dynamic evaluate(FunctionFrame &frame, std::monostate) { return {}; }
+  Dynamic evaluate(FunctionFrame &frame, Expression expression);
 
-  void evaluate(FunctionClosure &closure, VariableDeclaration declaration);
-  void evaluate(FunctionClosure &closure, ReturnStatement statement);
-  void evaluate(FunctionClosure &closure, Statement statement);
+  void evaluate(FunctionFrame &frame, VariableDeclaration declaration);
+  void evaluate(FunctionFrame &frame, ReturnStatement statement);
+  void evaluate(FunctionFrame &frame, Statement statement);
 };
 
 class Parser : public Script {

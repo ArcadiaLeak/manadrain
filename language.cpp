@@ -206,9 +206,9 @@ void Parser::parse_text() {
     definition->body.append_range(parse_statement(*definition));
   }
   function_definitions.push_back(definition);
-  function_closures.push_back(
-      FunctionClosure{definition.get(), nullptr, resource.get()});
-  main_function = &function_closures.back();
+  function_frames.push_back(
+      FunctionFrame{definition.get(), nullptr, resource.get()});
+  main_function = &function_frames.back();
   initialize(*main_function);
 }
 
@@ -463,37 +463,36 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
 
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
-      function_closures{resource.get()}, object_instances{resource.get()} {}
+      function_frames{resource.get()}, object_instances{resource.get()} {}
 
-std::generator<FunctionClosure *>
-Script::climb_closure_stack(FunctionClosure *closure_ptr) {
+std::generator<FunctionFrame *>
+Script::climb_frame_stack(FunctionFrame *frame_ptr) {
   while (1) {
-    co_yield closure_ptr;
-    if (not closure_ptr->parent_closure)
+    co_yield frame_ptr;
+    if (not frame_ptr->parent_frame)
       break;
-    closure_ptr = closure_ptr->parent_closure;
+    frame_ptr = frame_ptr->parent_frame;
   }
 }
 
-std::optional<Dynamic> *Script::get_variable(FunctionClosure &function,
+std::optional<Dynamic> *Script::get_variable(FunctionFrame &function,
                                              Identifier var_handle) {
-  for (FunctionClosure *closure_ptr : climb_closure_stack(&function)) {
-    const auto &local_scope{closure_ptr->definition->local_scope};
+  for (FunctionFrame *frame_ptr : climb_frame_stack(&function)) {
+    const auto &local_scope{frame_ptr->definition->local_scope};
     auto lower_bound = std::ranges::lower_bound(local_scope, var_handle);
     if (lower_bound == local_scope.end() || *lower_bound != var_handle)
       continue;
     std::ptrdiff_t own_scope_distance{
         std::distance(local_scope.begin(), lower_bound)};
-    std::optional<Dynamic> *own_scope_data{closure_ptr->own_scope.data()};
+    std::optional<Dynamic> *own_scope_data{frame_ptr->own_scope.data()};
     return std::next(own_scope_data, own_scope_distance);
   }
   return nullptr;
 }
 
-FunctionClosure::FunctionClosure(const FunctionDefinition *d,
-                                 FunctionClosure *p,
-                                 std::pmr::monotonic_buffer_resource *r)
-    : definition{d}, parent_closure{p},
+FunctionFrame::FunctionFrame(const FunctionDefinition *d, FunctionFrame *p,
+                             std::pmr::monotonic_buffer_resource *r)
+    : definition{d}, parent_frame{p},
       own_scope{definition->local_scope.size(), r} {};
 
 VanillaObject::VanillaObject(const ObjectShape *sh,
@@ -549,8 +548,7 @@ Dynamic Script::evaluate_property(Identifier property,
   return *property_ptr;
 }
 
-Dynamic Script::evaluate_property(Identifier property,
-                                  FunctionClosure *closure) {
+Dynamic Script::evaluate_property(Identifier property, FunctionFrame *frame) {
   return {};
 }
 
@@ -559,15 +557,15 @@ Dynamic Script::evaluate_property(Identifier property,
   return {};
 }
 
-std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionClosure &closure,
+std::pair<Dynamic, Dynamic> Script::evaluate_callee(FunctionFrame &frame,
                                                     Identifier identifier) {
-  return {std::monostate{}, evaluate(closure, identifier)};
+  return {std::monostate{}, evaluate(frame, identifier)};
 }
 
 std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &closure,
+Script::evaluate_callee(FunctionFrame &frame,
                         const MemberExpression &expression) {
-  Dynamic dynamic_object{evaluate(closure, expression.object)};
+  Dynamic dynamic_object{evaluate(frame, expression.object)};
   auto visit_object = [&](auto dynamic_alt) {
     return evaluate_property(expression.property, dynamic_alt);
   };
@@ -576,11 +574,11 @@ Script::evaluate_callee(FunctionClosure &closure,
 }
 
 std::pair<Dynamic, Dynamic>
-Script::evaluate_callee(FunctionClosure &closure,
+Script::evaluate_callee(FunctionFrame &frame,
                         const ReferentialExpression *expr_ptr) {
   auto visit_expression = [&](const auto &expr_alt) {
     if constexpr (std::is_same_v<decltype(expr_alt), const MemberExpression &>)
-      return evaluate_callee(closure, expr_alt);
+      return evaluate_callee(frame, expr_alt);
     return std::pair<Dynamic, Dynamic>{};
   };
   return expr_ptr->alt.visit(visit_expression);
@@ -605,7 +603,7 @@ std::u16string Script::evaluate_message(std::int64_t number) {
 std::u16string Script::evaluate_message(double number) {
   return u"<unimplemented>";
 }
-std::u16string Script::evaluate_message(FunctionClosure *closure) {
+std::u16string Script::evaluate_message(FunctionFrame *frame) {
   return u"<unimplemented>";
 }
 std::u16string Script::evaluate_message(ObjectInstance *object_instance) {
@@ -615,18 +613,18 @@ std::u16string Script::evaluate_message(IntrinsicFunction intrinsic_function) {
   return u"<unimplemented>";
 }
 
-Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+Dynamic Script::evaluate_function_call(FunctionFrame &frame,
                                        const FunctionCallExpression &expr_call,
                                        Dynamic context,
-                                       FunctionClosure *callee_ptr) {
+                                       FunctionFrame *callee_ptr) {
   auto evaluate_argument = [&](Expression expression) {
-    return evaluate(closure, expression);
+    return evaluate(frame, expression);
   };
   auto dynamic_arguments = expr_call.arguments |
                            std::views::transform(evaluate_argument) |
                            std::views::enumerate;
-  function_closures.push_back(FunctionClosure{*callee_ptr});
-  FunctionClosure *copied_callee_ptr{&function_closures.back()};
+  function_frames.push_back(FunctionFrame{*callee_ptr});
+  FunctionFrame *copied_callee_ptr{&function_frames.back()};
   initialize(*copied_callee_ptr);
   for (auto [index, argument] : dynamic_arguments) {
     Identifier identifier{callee_ptr->definition->arguments[index]};
@@ -639,7 +637,7 @@ Dynamic Script::evaluate_function_call(FunctionClosure &closure,
   return copied_callee_ptr->return_val;
 }
 
-Dynamic Script::evaluate_function_call(FunctionClosure &closure,
+Dynamic Script::evaluate_function_call(FunctionFrame &frame,
                                        const FunctionCallExpression &expr_call,
                                        Dynamic context,
                                        IntrinsicFunction intrinsic_function) {
@@ -651,7 +649,7 @@ Dynamic Script::evaluate_function_call(FunctionClosure &closure,
       return argument.visit(match_message_alt);
     };
     auto evaluate_argument = [&](Expression expression) {
-      return evaluate(closure, expression);
+      return evaluate(frame, expression);
     };
     auto message_parts =
         expr_call.arguments | std::views::transform(evaluate_argument) |
@@ -682,31 +680,31 @@ Dynamic Script::evaluate_operation(Operator op, std::int64_t lhs,
   std::unreachable();
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const FunctionCallExpression &expr_call) {
   auto visit_expression = [&](auto expression_alt) {
     if constexpr (std::is_same_v<decltype(expression_alt), Identifier> ||
                   std::is_same_v<decltype(expression_alt),
                                  const ReferentialExpression *>)
-      return evaluate_callee(closure, expression_alt);
+      return evaluate_callee(frame, expression_alt);
     return std::pair<Dynamic, Dynamic>{};
   };
   auto [dynamic_context, dynamic_callee] =
       expr_call.callee.visit(visit_expression);
   auto visit_dynamic = [&](auto dynamic_alt) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionClosure *> ||
+    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionFrame *> ||
                   std::is_same_v<decltype(dynamic_alt), IntrinsicFunction>)
-      return evaluate_function_call(closure, expr_call, dynamic_context,
+      return evaluate_function_call(frame, expr_call, dynamic_context,
                                     dynamic_alt);
     throw ScriptError{InvalidFunctionCall{}};
   };
   return dynamic_callee.visit(visit_dynamic);
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const BinaryExpression &expression) {
-  Dynamic dynamic_lhs{evaluate(closure, expression.left)};
-  Dynamic dynamic_rhs{evaluate(closure, expression.right)};
+  Dynamic dynamic_lhs{evaluate(frame, expression.left)};
+  Dynamic dynamic_rhs{evaluate(frame, expression.right)};
   auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
     if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
                   std::is_same_v<decltype(rhs), std::int64_t>)
@@ -716,10 +714,10 @@ Dynamic Script::evaluate(FunctionClosure &closure,
   return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const LogicalExpression &expression) {
-  Dynamic dynamic_lhs{evaluate(closure, expression.left)};
-  Dynamic dynamic_rhs{evaluate(closure, expression.right)};
+  Dynamic dynamic_lhs{evaluate(frame, expression.left)};
+  Dynamic dynamic_rhs{evaluate(frame, expression.right)};
   auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
     if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
                   std::is_same_v<decltype(rhs), std::int64_t>)
@@ -729,74 +727,71 @@ Dynamic Script::evaluate(FunctionClosure &closure,
   return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const AssignExpression &assign_expr) {
   auto evaluate_lvalue = [&](auto expression) -> std::optional<Dynamic> * {
     if constexpr (std::is_same_v<decltype(expression), Identifier>)
-      return get_variable(closure, expression);
+      return get_variable(frame, expression);
     return nullptr;
   };
   std::optional<Dynamic> *assign_lvalue{
       assign_expr.left.visit(evaluate_lvalue)};
   assert(assign_lvalue != nullptr);
-  *assign_lvalue = evaluate(closure, assign_expr.right);
+  *assign_lvalue = evaluate(frame, assign_expr.right);
   return {};
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const ObjectExpression &object_expr) {
   object_instances.push_back(
       VanillaObject{object_expr.object_shape, resource.get()});
   VanillaObject *object_ptr{&object_instances.back()};
   for (auto [identifier, expression] : object_expr.properties) {
     Dynamic *property_ptr{object_ptr->get_property(identifier)};
-    *property_ptr = evaluate(closure, expression);
+    *property_ptr = evaluate(frame, expression);
   }
   return object_ptr;
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const MemberExpression &expression) {
-  Dynamic dynamic_object{evaluate(closure, expression.object)};
+  Dynamic dynamic_object{evaluate(frame, expression.object)};
   auto visit_object = [&](auto dynamic_alt) {
     return evaluate_property(expression.property, dynamic_alt);
   };
   return dynamic_object.visit(visit_object);
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const FunctionDefinition *definition) {
-  function_closures.push_back(
-      FunctionClosure{definition, &closure, resource.get()});
-  return &function_closures.back();
+  function_frames.push_back(FunctionFrame{definition, &frame, resource.get()});
+  return &function_frames.back();
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          const ReferentialExpression *expr_ptr) {
   return expr_ptr->alt.visit(
-      [&](const auto &expr_alt) { return evaluate(closure, expr_alt); });
+      [&](const auto &expr_alt) { return evaluate(frame, expr_alt); });
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure,
+Dynamic Script::evaluate(FunctionFrame &frame,
                          std::u16string_view permanent_string) {
   return permanent_string;
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure, std::int64_t number) {
+Dynamic Script::evaluate(FunctionFrame &frame, std::int64_t number) {
   return number;
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure, double number) {
-  return number;
-}
+Dynamic Script::evaluate(FunctionFrame &frame, double number) { return number; }
 
-Dynamic Script::evaluate(FunctionClosure &closure, Expression expression) {
+Dynamic Script::evaluate(FunctionFrame &frame, Expression expression) {
   return expression.visit(
-      [&](auto expression_alt) { return evaluate(closure, expression_alt); });
+      [&](auto expression_alt) { return evaluate(frame, expression_alt); });
 }
 
-Dynamic Script::evaluate(FunctionClosure &closure, Identifier identifier) {
-  std::optional<Dynamic> *from_scope{get_variable(closure, identifier)};
+Dynamic Script::evaluate(FunctionFrame &frame, Identifier identifier) {
+  std::optional<Dynamic> *from_scope{get_variable(frame, identifier)};
   if (from_scope && *from_scope)
     return **from_scope;
   Dynamic *from_globalThis{global_this.get_property(identifier)};
@@ -805,31 +800,30 @@ Dynamic Script::evaluate(FunctionClosure &closure, Identifier identifier) {
   throw ScriptError{InvalidVariableAccess{}};
 }
 
-void Script::evaluate(FunctionClosure &closure,
-                      VariableDeclaration declaration) {
-  Dynamic initializer_dynamic{evaluate(closure, declaration.initializer)};
+void Script::evaluate(FunctionFrame &frame, VariableDeclaration declaration) {
+  Dynamic initializer_dynamic{evaluate(frame, declaration.initializer)};
   std::optional<Dynamic> *variable_lvalue{
-      get_variable(closure, declaration.variable_name)};
+      get_variable(frame, declaration.variable_name)};
   assert(variable_lvalue != nullptr);
   *variable_lvalue = initializer_dynamic;
 }
 
-void Script::evaluate(FunctionClosure &closure, ReturnStatement statement) {
-  closure.return_val = evaluate(closure, statement.argument);
+void Script::evaluate(FunctionFrame &frame, ReturnStatement statement) {
+  frame.return_val = evaluate(frame, statement.argument);
 }
 
-void Script::evaluate(FunctionClosure &closure, Statement statement) {
-  statement.visit([&](auto alternative) { evaluate(closure, alternative); });
+void Script::evaluate(FunctionFrame &frame, Statement statement) {
+  statement.visit([&](auto alternative) { evaluate(frame, alternative); });
 }
 
-void Script::initialize(FunctionClosure &closure) {
-  const FunctionDefinition &definition{*closure.definition};
+void Script::initialize(FunctionFrame &frame) {
+  const FunctionDefinition &definition{*frame.definition};
   for (auto [nested_name, nested_definition] : definition.nested_functions) {
-    auto *function_lvalue{get_variable(closure, nested_name)};
+    auto *function_lvalue{get_variable(frame, nested_name)};
     assert(function_lvalue != nullptr);
-    function_closures.push_back(
-        FunctionClosure{nested_definition, &closure, resource.get()});
-    *function_lvalue = &function_closures.back();
+    function_frames.push_back(
+        FunctionFrame{nested_definition, &frame, resource.get()});
+    *function_lvalue = &function_frames.back();
   }
 }
 
