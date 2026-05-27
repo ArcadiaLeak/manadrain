@@ -168,9 +168,8 @@ struct ObjectInstance {
   virtual Dynamic *get_property(Identifier property) = 0;
 };
 struct VanillaObject final : ObjectInstance {
-  VanillaObject(const ObjectShape *sh, std::pmr::memory_resource *r);
   const ObjectShape *object_shape;
-  std::pmr::vector<Dynamic> properties;
+  std::span<Dynamic> properties;
   Dynamic *get_property(Identifier property) override;
 };
 struct GlobalObject final : ObjectInstance {
@@ -185,16 +184,15 @@ struct ConsoleObject final : ObjectInstance {
 };
 
 struct FunctionFrame {
-  FunctionFrame(const FunctionDefinition *d, std::pmr::memory_resource *r);
-  FunctionFrame clone() const;
-
   const FunctionDefinition *definition;
-  std::pmr::vector<std::optional<Dynamic>> own_scope;
+
+  std::span<Dynamic> interim;
+  std::span<std::optional<Dynamic>> own_scope;
+  std::optional<Dynamic> *get_variable(Identifier var_handle);
+
+  Dynamic return_val;
   FunctionFrame *closure;
   FunctionFrame *caller;
-  Dynamic return_val;
-
-  std::optional<Dynamic> *get_variable(Identifier var_handle);
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -224,7 +222,10 @@ protected:
 
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
   std::pmr::list<FunctionFrame> function_frames;
+  std::pmr::list<std::pmr::vector<std::optional<Dynamic>>> function_scopes;
+  std::pmr::list<std::pmr::vector<Dynamic>> function_interim;
   std::pmr::list<VanillaObject> object_instances;
+  std::pmr::list<std::pmr::vector<Dynamic>> object_properties;
 
   void initialize();
 

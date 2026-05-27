@@ -206,8 +206,11 @@ void Parser::parse_text() {
     definition->body.append_range(parse_statement(*definition));
   }
   function_definitions.push_back(definition);
-  function_frames.push_back(FunctionFrame{definition.get(), resource.get()});
-  current_frame = &function_frames.back();
+  FunctionFrame &frame{function_frames.emplace_back()};
+  frame.definition = definition.get();
+  frame.own_scope =
+      function_scopes.emplace_back(definition->local_scope.size());
+  current_frame = &frame;
   initialize();
 }
 
@@ -456,7 +459,9 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
 
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
-      function_frames{resource.get()}, object_instances{resource.get()} {}
+      function_frames{resource.get()}, function_scopes{resource.get()},
+      function_interim{resource.get()}, object_instances{resource.get()},
+      object_properties{resource.get()} {}
 
 std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
   const auto &local_scope{definition->local_scope};
@@ -468,20 +473,6 @@ std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
   std::optional<Dynamic> *own_scope_data{own_scope.data()};
   return std::next(own_scope_data, own_scope_distance);
 }
-
-FunctionFrame::FunctionFrame(const FunctionDefinition *d,
-                             std::pmr::memory_resource *r)
-    : definition{d}, own_scope{definition->local_scope.size(), r} {};
-
-FunctionFrame FunctionFrame::clone() const {
-  FunctionFrame clone_frame{definition, own_scope.get_allocator().resource()};
-  clone_frame.closure = closure;
-  return clone_frame;
-}
-
-VanillaObject::VanillaObject(const ObjectShape *sh,
-                             std::pmr::memory_resource *r)
-    : object_shape{sh}, properties{sh->properties.size(), r} {};
 
 Dynamic *VanillaObject::get_property(Identifier property) {
   std::span<const Identifier> shape_view{object_shape->properties};
@@ -603,10 +594,13 @@ Dynamic Script::evaluate_function_call(const FunctionCallExpression &expr_call,
   auto dynamic_arguments = expr_call.arguments |
                            std::views::transform(evaluate_argument) |
                            std::views::enumerate;
-  function_frames.push_back(callee_ptr->clone());
-  FunctionFrame *copied_callee_ptr{&function_frames.back()};
-  copied_callee_ptr->caller = current_frame;
-  current_frame = copied_callee_ptr;
+  FunctionFrame &copied_callee{function_frames.emplace_back()};
+  copied_callee.closure = callee_ptr->closure;
+  copied_callee.definition = callee_ptr->definition;
+  copied_callee.own_scope =
+      function_scopes.emplace_back(callee_ptr->definition->local_scope.size());
+  copied_callee.caller = current_frame;
+  current_frame = &copied_callee;
   initialize();
   for (auto [index, argument] : dynamic_arguments) {
     Identifier identifier{callee_ptr->definition->arguments[index]};
@@ -616,8 +610,8 @@ Dynamic Script::evaluate_function_call(const FunctionCallExpression &expr_call,
   }
   for (Statement statement : callee_ptr->definition->body)
     evaluate(statement);
-  current_frame = copied_callee_ptr->caller;
-  return copied_callee_ptr->return_val;
+  current_frame = copied_callee.caller;
+  return copied_callee.return_val;
 }
 
 Dynamic Script::evaluate_function_call(const FunctionCallExpression &expr_call,
@@ -719,14 +713,15 @@ Dynamic Script::evaluate(const AssignExpression &assign_expr) {
 }
 
 Dynamic Script::evaluate(const ObjectExpression &object_expr) {
-  object_instances.push_back(
-      VanillaObject{object_expr.object_shape, resource.get()});
-  VanillaObject *object_ptr{&object_instances.back()};
+  VanillaObject &instance{object_instances.emplace_back()};
+  instance.object_shape = object_expr.object_shape;
+  instance.properties = object_properties.emplace_back(
+      object_expr.object_shape->properties.size());
   for (auto [identifier, expression] : object_expr.properties) {
-    Dynamic *property_ptr{object_ptr->get_property(identifier)};
+    Dynamic *property_ptr{instance.get_property(identifier)};
     *property_ptr = evaluate(expression);
   }
-  return object_ptr;
+  return &instance;
 }
 
 Dynamic Script::evaluate(const MemberExpression &expression) {
@@ -738,9 +733,12 @@ Dynamic Script::evaluate(const MemberExpression &expression) {
 }
 
 Dynamic Script::evaluate(const FunctionDefinition *definition) {
-  function_frames.push_back(FunctionFrame{definition, resource.get()});
-  function_frames.back().closure = current_frame;
-  return &function_frames.back();
+  FunctionFrame &frame{function_frames.emplace_back()};
+  frame.definition = definition;
+  frame.closure = current_frame;
+  frame.own_scope =
+      function_scopes.emplace_back(definition->local_scope.size());
+  return &frame;
 }
 
 Dynamic Script::evaluate(const ReferentialExpression *expr_ptr) {
@@ -794,8 +792,11 @@ void Script::initialize() {
   for (auto [nested_name, nested_definition] : definition.nested_functions) {
     auto *function_lvalue{current_frame->get_variable(nested_name)};
     assert(function_lvalue != nullptr);
-    function_frames.push_back(FunctionFrame{nested_definition, resource.get()});
-    function_frames.back().closure = current_frame;
+    FunctionFrame &nested_frame{function_frames.emplace_back()};
+    nested_frame.definition = nested_definition;
+    nested_frame.closure = current_frame;
+    nested_frame.own_scope =
+        function_scopes.emplace_back(nested_definition->local_scope.size());
     *function_lvalue = &function_frames.back();
   }
 }
