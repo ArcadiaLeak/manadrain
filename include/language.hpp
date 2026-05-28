@@ -233,60 +233,6 @@ private:
   std::list<ConsoleMessage> console_messages;
 
   GlobalObject global_this{&console};
-
-  std::u16string evaluate_message(std::monostate);
-  std::u16string evaluate_message(std::u16string_view permanent_string);
-  std::u16string evaluate_message(std::int64_t number);
-  std::u16string evaluate_message(double number);
-  std::u16string evaluate_message(ObjectInstance *object_instance);
-  std::u16string evaluate_message(FunctionFrame *frame);
-  std::u16string evaluate_message(IntrinsicFunction intrinsic_function);
-
-  Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
-  Dynamic evaluate_operation(Operator op, std::int64_t lhs, std::int64_t rhs);
-
-  Dynamic evaluate_property(Identifier property, std::monostate);
-  Dynamic evaluate_property(Identifier property,
-                            std::u16string_view permanent_string);
-  Dynamic evaluate_property(Identifier property, std::int64_t number);
-  Dynamic evaluate_property(Identifier property, double number);
-  Dynamic evaluate_property(Identifier property,
-                            ObjectInstance *object_instance);
-  Dynamic evaluate_property(Identifier property, FunctionFrame *frame);
-  Dynamic evaluate_property(Identifier property,
-                            IntrinsicFunction intrinsic_function);
-
-  Dynamic evaluate_function_call(const FunctionCallExpression &expr_call,
-                                 Dynamic context, FunctionFrame *callee_ptr);
-  Dynamic evaluate_function_call(const FunctionCallExpression &expr_call,
-                                 Dynamic context,
-                                 IntrinsicFunction intrinsic_function);
-
-  std::pair<Dynamic, Dynamic>
-  evaluate_callee(const MemberExpression &expression);
-  std::pair<Dynamic, Dynamic> evaluate_callee(Identifier identifier);
-  std::pair<Dynamic, Dynamic>
-  evaluate_callee(const ReferentialExpression *expr_ptr);
-
-  Dynamic evaluate(const BinaryExpression &expression);
-  Dynamic evaluate(const LogicalExpression &expression);
-  Dynamic evaluate(const MemberExpression &expression);
-  Dynamic evaluate(const FunctionCallExpression &expression);
-  Dynamic evaluate(const AssignExpression &expression);
-  Dynamic evaluate(const ObjectExpression &expression);
-  Dynamic evaluate(Identifier identifier);
-  Dynamic evaluate(const FunctionDefinition *definition);
-  Dynamic evaluate(const ReferentialExpression *expr_ptr);
-  Dynamic evaluate(std::u16string_view permanent_string);
-  Dynamic evaluate(std::int64_t number);
-  Dynamic evaluate(double number);
-  Dynamic evaluate(std::monostate) { return {}; }
-  Dynamic evaluate(Expression expression);
-
-  void evaluate_statement(Expression expression);
-  void evaluate_statement(WriteVariable statement);
-  void evaluate_statement(ReturnStatement statement);
-  void evaluate(Statement statement);
 };
 
 class Parser : public Script {
