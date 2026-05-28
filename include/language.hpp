@@ -94,51 +94,35 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct ReferentialExpression;
 struct FunctionDefinition;
-using Expression =
-    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 Identifier, const ReferentialExpression *,
-                 const FunctionDefinition *>;
 
 struct BinaryExpression {
-  Expression left;
-  Expression right;
-  char32_t op;
+  char32_t operation;
 };
 struct LogicalExpression {
-  Expression left;
-  Expression right;
-  Operator op;
+  Operator operation;
 };
 struct MemberExpression {
-  Expression object;
   Identifier property;
 };
 struct FunctionCallExpression {
-  Expression callee;
   std::size_t passed_arguments;
   bool under_context;
 };
-struct AssignExpression {
-  Expression left;
-  Expression right;
-};
+struct AssignExpression {};
 
-struct ObjectInstance;
 struct ObjectShape {
   std::vector<Identifier> properties;
 };
 struct ObjectExpression {
   const ObjectShape *object_shape;
-  std::vector<std::pair<Identifier, Expression>> properties;
 };
 
-struct ReferentialExpression {
-  std::variant<BinaryExpression, LogicalExpression, MemberExpression,
-               FunctionCallExpression, AssignExpression, ObjectExpression>
-      alt;
-};
+using Expression =
+    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
+                 Identifier, const FunctionDefinition *, BinaryExpression,
+                 LogicalExpression, MemberExpression, FunctionCallExpression,
+                 AssignExpression, ObjectExpression>;
 
 struct WriteVariable {
   Identifier variable_name;
@@ -161,6 +145,7 @@ struct FunctionDefinition {
   std::vector<Statement> body;
 };
 
+struct ObjectInstance;
 using Dynamic =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
                  ObjectInstance *, FunctionFrame *, IntrinsicFunction>;
@@ -212,8 +197,6 @@ public:
 
 protected:
   FunctionFrame *current_frame;
-  std::vector<std::shared_ptr<const ReferentialExpression>>
-      referential_expressions;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
