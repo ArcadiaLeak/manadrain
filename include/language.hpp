@@ -116,9 +116,9 @@ struct MemberExpression {
   Identifier property;
 };
 struct FunctionCallExpression {
+  Unit context;
   Unit callee;
   std::size_t passed_arguments;
-  bool under_context;
 };
 struct AssignExpression {
   Unit left;
@@ -131,20 +131,25 @@ struct ObjectShape {
 };
 struct ObjectExpression {
   const ObjectShape *object_shape;
+  std::size_t passed_properties;
 };
 
 using Expression =
     std::variant<Unit, BinaryExpression, LogicalExpression, MemberExpression,
                  FunctionCallExpression, AssignExpression, ObjectExpression>;
 
-struct WriteVariable {
+struct InitializeVariable {
   Identifier variable_name;
   Unit rvalue;
 };
 struct ReturnStatement {
   Unit argument;
 };
-using Statement = std::variant<Expression, WriteVariable, ReturnStatement>;
+struct ExpressionStatement {
+  Unit argument;
+};
+using Statement = std::variant<Expression, ExpressionStatement,
+                               InitializeVariable, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -264,10 +269,19 @@ private:
 
   FunctionDefinition *current_function;
 
+  Unit parse_object_literal();
+  Unit parse_primary_expr();
+  Unit parse_member_expr(Unit object);
+  Unit parse_call_expr(Unit context, Unit callee);
+  Unit parse_postfix_expr(Unit base_unit);
+  Unit parse_postfix_expr();
+  Unit parse_additive_expr();
+  Unit parse_logical_disjunct();
+  Unit parse_assign_expr();
   Unit parse_expression();
 
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
-  WriteVariable parse_variable_decl();
+  InitializeVariable parse_variable_decl();
 };
 } // namespace Manadrain

@@ -214,7 +214,134 @@ void Parser::parse_text() {
   frame.initialize();
 }
 
-Unit Parser::parse_expression() { return std::monostate{}; }
+Unit Parser::parse_object_literal() {
+  std::vector<std::pair<Identifier, Unit>> properties{};
+  tokenize();
+  while (last_token != Token{U'}'}) {
+    if (not std::holds_alternative<Identifier>(last_token))
+      throw ScriptError{InvalidPropertyName{}};
+    Identifier property_key{std::get<Identifier>(last_token)};
+    tokenize();
+    if (last_token == Token{U':'}) {
+      tokenize();
+      properties.emplace_back(property_key, parse_expression());
+    } else
+      properties.emplace_back(property_key, std::monostate{});
+    if (last_token != Token{U','})
+      break;
+    tokenize();
+  }
+  assert_punct('}');
+  auto shape_view = std::ranges::transform_view{
+      properties, [](const auto &prop_pair) { return prop_pair.first; }};
+  auto statement_view = std::ranges::transform_view{
+      properties, [](const auto &prop_pair) {
+        return InitializeVariable{prop_pair.first, prop_pair.second};
+      }};
+  std::shared_ptr object_shape{
+      std::make_shared<ObjectShape>(std::vector{std::from_range, shape_view})};
+  std::ranges::sort(object_shape->properties);
+  object_shapes.push_back(object_shape);
+  current_function->program.push_back(
+      ObjectExpression{object_shape.get(), properties.size()});
+  current_function->program.append_range(statement_view);
+  return Interim{};
+}
+
+Unit Parser::parse_primary_expr() {
+  return last_token.visit([this](auto t) -> Unit {
+    if constexpr (std::is_same_v<decltype(t), std::u16string_view> ||
+                  std::is_same_v<decltype(t), Identifier> ||
+                  std::is_same_v<decltype(t), std::int64_t> ||
+                  std::is_same_v<decltype(t), double>)
+      return t;
+    if constexpr (std::is_same_v<decltype(t), Keyword>)
+      if (t == Keyword::K_FUNCTION)
+        return parse_function_decl();
+    if constexpr (std::is_same_v<decltype(t), char32_t>)
+      if (t == '{')
+        return parse_object_literal();
+    throw ScriptError{UnexpectedToken{}};
+  });
+}
+
+Unit Parser::parse_call_expr(Unit context, Unit callee) {
+  std::size_t passed_arguments{};
+  while (1) {
+    tokenize();
+    if (last_token == Token{U')'})
+      break;
+    current_function->program.push_back(parse_expression());
+    ++passed_arguments;
+    if (last_token == Token{U')'})
+      break;
+    assert_punct(',');
+  }
+  current_function->program.push_back(
+      FunctionCallExpression{context, callee, passed_arguments});
+  return Interim{};
+}
+
+Unit Parser::parse_member_expr(Unit object) {
+  tokenize();
+  Identifier *field_name{std::get_if<Identifier>(&last_token)};
+  if (not field_name)
+    throw ScriptError{MissingFieldName{}};
+  current_function->program.push_back(MemberExpression{object, *field_name});
+  tokenize();
+  return last_token == Token{U'('} ? parse_call_expr(object, Interim{})
+                                   : parse_postfix_expr(Interim{});
+}
+
+Unit Parser::parse_postfix_expr(Unit base_unit) {
+  if (last_token == Token{U'.'})
+    return parse_member_expr(base_unit);
+  if (last_token == Token{U'('})
+    return parse_call_expr(std::monostate{}, base_unit);
+  return base_unit;
+}
+
+Unit Parser::parse_postfix_expr() {
+  Unit base_unit{parse_primary_expr()};
+  tokenize();
+  return parse_postfix_expr(base_unit);
+}
+
+Unit Parser::parse_additive_expr() {
+  Unit expr_left{parse_postfix_expr()};
+  if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
+    char32_t binary_op{std::get<char32_t>(last_token)};
+    tokenize();
+    current_function->program.push_back(
+        BinaryExpression{expr_left, parse_postfix_expr(), binary_op});
+    return Interim{};
+  }
+  return expr_left;
+}
+
+Unit Parser::parse_logical_disjunct() {
+  Unit expr_left{parse_additive_expr()};
+  while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
+    Operator op{std::get<Operator>(last_token)};
+    tokenize();
+    current_function->program.push_back(
+        LogicalExpression{expr_left, parse_additive_expr(), op});
+    expr_left = Interim{};
+  }
+  return expr_left;
+}
+
+Unit Parser::parse_assign_expr() {
+  Unit lhs_expr{parse_logical_disjunct()};
+  if (last_token != Token{U'='})
+    return lhs_expr;
+  tokenize();
+  current_function->program.push_back(
+      AssignExpression{lhs_expr, parse_assign_expr()});
+  return Interim{};
+}
+
+Unit Parser::parse_expression() { return parse_assign_expr(); }
 
 void Parser::parse_statement() {
   Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
@@ -234,7 +361,7 @@ void Parser::parse_statement() {
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
-    WriteVariable statement{parse_variable_decl()};
+    InitializeVariable statement{parse_variable_decl()};
     Identifier variable_name{statement.variable_name};
     if (std::ranges::binary_search(current_function->local_scope,
                                    variable_name))
@@ -252,7 +379,7 @@ void Parser::parse_statement() {
     current_function->program.push_back(statement);
     return;
   }
-  Expression expression{parse_expression()};
+  ExpressionStatement expression{parse_expression()};
   assert_punct(';');
   current_function->program.push_back(expression);
   return;
@@ -300,18 +427,18 @@ const FunctionDefinition *Parser::parse_function_decl() {
   return definition;
 }
 
-WriteVariable Parser::parse_variable_decl() {
+InitializeVariable Parser::parse_variable_decl() {
   tokenize();
   Identifier *variable_name{std::get_if<Identifier>(&last_token)};
   if (not variable_name)
     throw ScriptError{MissingVariableName{}};
-  WriteVariable variable_decl{*variable_name};
+  InitializeVariable variable_init{*variable_name};
   tokenize();
   assert_punct('=');
   tokenize();
-  variable_decl.rvalue = parse_expression();
+  variable_init.rvalue = parse_expression();
   assert_punct(';');
-  return variable_decl;
+  return variable_init;
 }
 
 Script::Script()
