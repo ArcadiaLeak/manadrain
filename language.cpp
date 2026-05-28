@@ -279,7 +279,8 @@ Unit Parser::parse_call_expr(Unit context, Unit callee) {
   }
   current_function->program.push_back(
       FunctionCallExpression{context, callee, passed_arguments});
-  return Interim{};
+  tokenize();
+  return parse_postfix_expr(Interim{});
 }
 
 Unit Parser::parse_member_expr(Unit object) {
@@ -488,7 +489,33 @@ void FunctionFrame::initialize() {
   }
 }
 
-void Script::evaluate() {}
+void StatementVisitor::operator()(Expression expression) {
+  script.interim.push_back(expression.visit(ExpressionVisitor{script}));
+}
+
+void StatementVisitor::operator()(ExpressionStatement statement) {
+  statement.argument.visit(ExpressionVisitor{script});
+}
+
+void StatementVisitor::operator()(InitializeVariable statement) {
+  Dynamic rvalue_dynamic{statement.rvalue.visit(UnitVisitor{script})};
+  std::optional<Dynamic> *variable_lvalue{
+      script.current_frame->get_variable(statement.variable_name)};
+  assert(variable_lvalue != nullptr);
+  *variable_lvalue = rvalue_dynamic;
+}
+
+void StatementVisitor::operator()(ReturnStatement statement) {
+  script.current_frame->return_val =
+      statement.argument.visit(UnitVisitor{script});
+}
+
+void Script::evaluate() {
+  while (current_frame->program_count <
+         current_frame->definition->program.size())
+    current_frame->definition->program[current_frame->program_count++].visit(
+        StatementVisitor{*this});
+}
 
 void Script::collect_console_messages(std::stop_token stopper,
                                       std::list<ConsoleMessage> &message_box) {

@@ -193,6 +193,7 @@ struct ConsoleObject final : ObjectInstance {
 
 struct FunctionFrame {
   const FunctionDefinition *definition;
+  std::size_t program_count;
   std::span<std::optional<Dynamic>> own_scope;
   FunctionFrame *closure;
   Dynamic return_val;
@@ -208,6 +209,38 @@ inline constexpr std::size_t OFFSET_length{2};
 struct ConsoleMessage {
   std::u16string content;
   std::string encode_for_print() const;
+};
+
+class Script;
+
+struct UnitVisitor {
+  Script &script;
+  Dynamic operator()(std::monostate);
+  Dynamic operator()(std::u16string_view);
+  Dynamic operator()(std::int64_t);
+  Dynamic operator()(double);
+  Dynamic operator()(Interim);
+  Dynamic operator()(Identifier);
+  Dynamic operator()(const FunctionDefinition *);
+};
+
+struct ExpressionVisitor {
+  Script &script;
+  Dynamic operator()(Unit);
+  Dynamic operator()(BinaryExpression);
+  Dynamic operator()(LogicalExpression);
+  Dynamic operator()(MemberExpression);
+  Dynamic operator()(FunctionCallExpression);
+  Dynamic operator()(AssignExpression);
+  Dynamic operator()(ObjectExpression);
+};
+
+struct StatementVisitor {
+  Script &script;
+  void operator()(Expression);
+  void operator()(ExpressionStatement);
+  void operator()(InitializeVariable);
+  void operator()(ReturnStatement);
 };
 
 class Script {
@@ -231,6 +264,9 @@ protected:
   std::pmr::list<std::pmr::vector<Dynamic>> object_properties;
 
 private:
+  friend struct UnitVisitor;
+  friend struct StatementVisitor;
+
   std::pmr::list<Dynamic> interim;
 
   ConsoleObject console{IntrinsicFunction::F_LOG};
