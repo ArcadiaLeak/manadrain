@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <cassert>
 #include <functional>
-#include <inplace_vector>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -212,7 +211,7 @@ void Parser::parse_text() {
   frame.own_scope =
       function_scopes.emplace_back(definition->local_scope.size());
   current_frame = &frame;
-  initialize();
+  initialize(frame);
 }
 
 void Parser::parse_statement() {
@@ -458,7 +457,7 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
     assert_punct(',');
   }
   std::shared_ptr expr_ptr{std::make_shared<ReferentialExpression>(
-      FunctionCallExpression{callee_expr, std::move(arguments)})};
+      FunctionCallExpression{callee_expr, arguments.size()})};
   referential_expressions.push_back(expr_ptr);
   return expr_ptr.get();
 }
@@ -466,8 +465,7 @@ Expression Parser::parse_call_expr(Expression callee_expr) {
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
       function_frames{resource.get()}, function_scopes{resource.get()},
-      function_interim{resource.get()}, object_instances{resource.get()},
-      object_properties{resource.get()} {}
+      object_instances{resource.get()}, object_properties{resource.get()} {}
 
 std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
   const auto &local_scope{definition->local_scope};
@@ -594,29 +592,29 @@ std::u16string Script::evaluate_message(IntrinsicFunction intrinsic_function) {
 Dynamic Script::evaluate_function_call(const FunctionCallExpression &expr_call,
                                        Dynamic context,
                                        FunctionFrame *callee_ptr) {
-  auto evaluate_argument = [this](Expression expression) {
-    return evaluate(expression);
-  };
-  auto dynamic_arguments = expr_call.arguments |
-                           std::views::transform(evaluate_argument) |
-                           std::views::enumerate;
   FunctionFrame &copied_callee{function_frames.emplace_back()};
   copied_callee.closure = callee_ptr->closure;
   copied_callee.definition = callee_ptr->definition;
   copied_callee.own_scope =
       function_scopes.emplace_back(callee_ptr->definition->local_scope.size());
-  copied_callee.caller = current_frame;
-  current_frame = &copied_callee;
-  initialize();
-  for (auto [index, argument] : dynamic_arguments) {
-    Identifier identifier{callee_ptr->definition->arguments[index]};
+  initialize(copied_callee);
+  std::size_t arguments_begin{current_frame->program_count};
+  while (current_frame->program_count <
+         arguments_begin + expr_call.passed_arguments) {
+    std::size_t argument_index{current_frame->program_count - arguments_begin};
+    Identifier identifier{callee_ptr->definition->arguments[argument_index]};
     auto *argument_lvalue{current_frame->get_variable(identifier)};
     assert(argument_lvalue != nullptr);
-    *argument_lvalue = argument;
+    const Expression *argument_expr{std::get_if<Expression>(
+        &current_frame->definition->body[current_frame->program_count++])};
+    assert(argument_expr != nullptr);
+    *argument_lvalue = evaluate(*argument_expr);
   }
-  for (Statement statement : callee_ptr->definition->body)
-    evaluate(statement);
-  current_frame = copied_callee.caller;
+  FunctionFrame *caller_frame{current_frame};
+  current_frame = &copied_callee;
+  while (current_frame->program_count < callee_ptr->definition->body.size())
+    evaluate(callee_ptr->definition->body[current_frame->program_count++]);
+  current_frame = caller_frame;
   return copied_callee.return_val;
 }
 
@@ -624,18 +622,26 @@ Dynamic Script::evaluate_function_call(const FunctionCallExpression &expr_call,
                                        Dynamic context,
                                        IntrinsicFunction intrinsic_function) {
   if (intrinsic_function == IntrinsicFunction::F_LOG) {
+    std::vector<Dynamic> dynamic_arguments{expr_call.passed_arguments};
+    std::size_t arguments_begin{current_frame->program_count};
+    while (current_frame->program_count <
+           arguments_begin + expr_call.passed_arguments) {
+      std::size_t argument_index{current_frame->program_count -
+                                 arguments_begin};
+      const Expression *argument_expr{std::get_if<Expression>(
+          &current_frame->definition->body[current_frame->program_count++])};
+      assert(argument_expr != nullptr);
+      dynamic_arguments[argument_index] = evaluate(*argument_expr);
+    }
     auto match_message_alt = [&](auto dynamic_alt) {
       return evaluate_message(dynamic_alt);
     };
     auto match_message_arg = [&](Dynamic argument) {
       return argument.visit(match_message_alt);
     };
-    auto evaluate_argument = [this](Expression expression) {
-      return evaluate(expression);
-    };
-    auto message_parts =
-        expr_call.arguments | std::views::transform(evaluate_argument) |
-        std::views::transform(match_message_arg) | std::views::join_with(' ');
+    auto message_parts = dynamic_arguments |
+                         std::views::transform(match_message_arg) |
+                         std::views::join_with(' ');
     {
       std::lock_guard console_lock{*console_mutex};
       console_messages.emplace_back(
@@ -777,11 +783,6 @@ Dynamic Script::evaluate(Identifier identifier) {
 
 void Script::evaluate_statement(Expression expression) { evaluate(expression); }
 
-void Script::evaluate_statement(WriteInterim statement) {
-  Dynamic rvalue_dynamic{evaluate(statement.rvalue)};
-  current_frame->interim[statement.level] = rvalue_dynamic;
-}
-
 void Script::evaluate_statement(WriteVariable statement) {
   Dynamic rvalue_dynamic{evaluate(statement.rvalue)};
   std::optional<Dynamic> *variable_lvalue{
@@ -798,14 +799,14 @@ void Script::evaluate(Statement statement) {
   statement.visit([&](auto alternative) { evaluate_statement(alternative); });
 }
 
-void Script::initialize() {
-  const FunctionDefinition &definition{*current_frame->definition};
+void Script::initialize(FunctionFrame &frame) {
+  const FunctionDefinition &definition{*frame.definition};
   for (auto [nested_name, nested_definition] : definition.nested_functions) {
-    auto *function_lvalue{current_frame->get_variable(nested_name)};
+    auto *function_lvalue{frame.get_variable(nested_name)};
     assert(function_lvalue != nullptr);
     FunctionFrame &nested_frame{function_frames.emplace_back()};
     nested_frame.definition = nested_definition;
-    nested_frame.closure = current_frame;
+    nested_frame.closure = &frame;
     nested_frame.own_scope =
         function_scopes.emplace_back(nested_definition->local_scope.size());
     *function_lvalue = &function_frames.back();

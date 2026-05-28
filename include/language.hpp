@@ -1,6 +1,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <generator>
+#include <inplace_vector>
 #include <list>
 #include <memory>
 #include <memory_resource>
@@ -116,7 +117,8 @@ struct MemberExpression {
 };
 struct FunctionCallExpression {
   Expression callee;
-  std::vector<Expression> arguments;
+  std::size_t passed_arguments;
+  bool under_context;
 };
 struct AssignExpression {
   Expression left;
@@ -138,10 +140,6 @@ struct ReferentialExpression {
       alt;
 };
 
-struct WriteInterim {
-  std::size_t level;
-  Expression rvalue;
-};
 struct WriteVariable {
   Identifier variable_name;
   Expression rvalue;
@@ -149,8 +147,7 @@ struct WriteVariable {
 struct ReturnStatement {
   Expression argument;
 };
-using Statement =
-    std::variant<Expression, WriteInterim, WriteVariable, ReturnStatement>;
+using Statement = std::variant<Expression, WriteVariable, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -189,14 +186,11 @@ struct ConsoleObject final : ObjectInstance {
 
 struct FunctionFrame {
   const FunctionDefinition *definition;
-
-  std::span<Dynamic> interim;
+  std::size_t program_count;
   std::span<std::optional<Dynamic>> own_scope;
-  std::optional<Dynamic> *get_variable(Identifier var_handle);
-
-  Dynamic return_val;
   FunctionFrame *closure;
-  FunctionFrame *caller;
+  Dynamic return_val;
+  std::optional<Dynamic> *get_variable(Identifier var_handle);
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -227,18 +221,12 @@ protected:
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
   std::pmr::list<FunctionFrame> function_frames;
   std::pmr::list<std::pmr::vector<std::optional<Dynamic>>> function_scopes;
-  std::pmr::list<std::pmr::vector<Dynamic>> function_interim;
   std::pmr::list<VanillaObject> object_instances;
   std::pmr::list<std::pmr::vector<Dynamic>> object_properties;
 
-  void initialize();
+  void initialize(FunctionFrame &frame);
 
 private:
-  static inline const std::array shape_console{
-      std::to_array<Identifier>({Identifier{OFFSET_log}})};
-  static inline const std::array shape_global_this{
-      std::to_array<Identifier>({Identifier{OFFSET_console}})};
-
   ConsoleObject console{IntrinsicFunction::F_LOG};
   std::indirect<std::mutex> console_mutex;
   std::indirect<std::condition_variable_any> console_condition;
@@ -296,7 +284,6 @@ private:
   Dynamic evaluate(Expression expression);
 
   void evaluate_statement(Expression expression);
-  void evaluate_statement(WriteInterim statement);
   void evaluate_statement(WriteVariable statement);
   void evaluate_statement(ReturnStatement statement);
   void evaluate(Statement statement);
