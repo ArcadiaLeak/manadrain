@@ -261,17 +261,6 @@ private:
   void assert_punct(char32_t must_be);
   void tokenize();
 
-  Expression parse_primary_expr();
-  Expression parse_postfix_expr();
-  Expression parse_additive_expr();
-  Expression parse_logical_disjunct();
-  Expression parse_assign_expr();
-  Expression parse_member_expr(Expression obj_expr);
-  Expression parse_call_expr(Expression callee_expr);
-  Expression parse_object_literal();
-  Expression parse_paren_expr();
-  Expression parse_expression();
-
   FunctionDefinition *current_function;
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
