@@ -94,35 +94,35 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct ReferentialExpression;
 struct FunctionDefinition;
-using Expression =
+
+struct Interim {};
+using Unit =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 Identifier, const ReferentialExpression *,
-                 const FunctionDefinition *>;
+                 Interim, Identifier, const FunctionDefinition *>;
 
 struct BinaryExpression {
-  Expression left;
-  Expression right;
+  Unit left;
+  Unit right;
   char32_t op;
 };
 struct LogicalExpression {
-  Expression left;
-  Expression right;
+  Unit left;
+  Unit right;
   Operator op;
 };
 struct MemberExpression {
-  Expression object;
+  Unit object;
   Identifier property;
 };
 struct FunctionCallExpression {
-  Expression callee;
+  Unit callee;
   std::size_t passed_arguments;
   bool under_context;
 };
 struct AssignExpression {
-  Expression left;
-  Expression right;
+  Unit left;
+  Unit right;
 };
 
 struct ObjectInstance;
@@ -131,39 +131,41 @@ struct ObjectShape {
 };
 struct ObjectExpression {
   const ObjectShape *object_shape;
-  std::vector<std::pair<Identifier, Expression>> properties;
 };
 
-struct ReferentialExpression {
-  std::variant<BinaryExpression, LogicalExpression, MemberExpression,
-               FunctionCallExpression, AssignExpression, ObjectExpression>
-      alt;
-};
+using Expression =
+    std::variant<Unit, BinaryExpression, LogicalExpression, MemberExpression,
+                 FunctionCallExpression, AssignExpression, ObjectExpression>;
 
 struct WriteVariable {
   Identifier variable_name;
-  Expression rvalue;
+  Unit rvalue;
 };
 struct ReturnStatement {
-  Expression argument;
+  Unit argument;
 };
 using Statement = std::variant<Expression, WriteVariable, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
-struct FunctionFrame;
 struct FunctionDefinition {
   std::optional<Identifier> function_name;
   std::vector<Identifier> arguments;
   std::vector<Identifier> local_scope;
   std::vector<std::pair<Identifier, const FunctionDefinition *>>
       nested_functions;
-  std::vector<Statement> body;
+  std::vector<Statement> program;
+};
+
+struct FunctionFrame;
+struct FunctionReference {
+  const FunctionDefinition *definition;
+  FunctionFrame *closure;
 };
 
 using Dynamic =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 ObjectInstance *, FunctionFrame *, IntrinsicFunction>;
+                 ObjectInstance *, FunctionReference, IntrinsicFunction>;
 
 struct ObjectInstance {
   virtual Dynamic *get_property(Identifier property) = 0;
@@ -186,11 +188,12 @@ struct ConsoleObject final : ObjectInstance {
 
 struct FunctionFrame {
   const FunctionDefinition *definition;
-  std::size_t program_count;
   std::span<std::optional<Dynamic>> own_scope;
   FunctionFrame *closure;
   Dynamic return_val;
+
   std::optional<Dynamic> *get_variable(Identifier var_handle);
+  void initialize();
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -212,8 +215,6 @@ public:
 
 protected:
   FunctionFrame *current_frame;
-  std::vector<std::shared_ptr<const ReferentialExpression>>
-      referential_expressions;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
@@ -224,9 +225,9 @@ protected:
   std::pmr::list<VanillaObject> object_instances;
   std::pmr::list<std::pmr::vector<Dynamic>> object_properties;
 
-  void initialize(FunctionFrame &frame);
-
 private:
+  std::pmr::list<Dynamic> interim;
+
   ConsoleObject console{IntrinsicFunction::F_LOG};
   std::indirect<std::mutex> console_mutex;
   std::indirect<std::condition_variable_any> console_condition;
@@ -262,6 +263,9 @@ private:
   void tokenize();
 
   FunctionDefinition *current_function;
+
+  Unit parse_expression();
+
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
   WriteVariable parse_variable_decl();

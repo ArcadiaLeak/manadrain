@@ -211,10 +211,52 @@ void Parser::parse_text() {
   frame.own_scope =
       function_scopes.emplace_back(definition->local_scope.size());
   current_frame = &frame;
-  initialize(frame);
+  frame.initialize();
 }
 
-void Parser::parse_statement() {}
+Unit Parser::parse_expression() { return std::monostate{}; }
+
+void Parser::parse_statement() {
+  Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
+  if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
+    const FunctionDefinition *nested_definition{parse_function_decl()};
+    std::optional<Identifier> function_name{nested_definition->function_name};
+    if (not function_name)
+      throw ScriptError{MissingFunctionName{}};
+    if (std::ranges::binary_search(current_function->local_scope,
+                                   *function_name))
+      throw ScriptError{DuplicateDeclaration{}};
+    current_function->nested_functions.push_back(
+        {*function_name, nested_definition});
+    auto lower_bound =
+        std::ranges::lower_bound(current_function->local_scope, *function_name);
+    current_function->local_scope.insert(lower_bound, *function_name);
+    return;
+  }
+  if (word_ptr && *word_ptr == Keyword::K_LET) {
+    WriteVariable statement{parse_variable_decl()};
+    Identifier variable_name{statement.variable_name};
+    if (std::ranges::binary_search(current_function->local_scope,
+                                   variable_name))
+      throw ScriptError{DuplicateDeclaration{}};
+    auto lower_bound =
+        std::ranges::lower_bound(current_function->local_scope, variable_name);
+    current_function->local_scope.insert(lower_bound, variable_name);
+    current_function->program.push_back(statement);
+    return;
+  }
+  if (word_ptr && *word_ptr == Keyword::K_RETURN) {
+    tokenize();
+    ReturnStatement statement{parse_expression()};
+    assert_punct(';');
+    current_function->program.push_back(statement);
+    return;
+  }
+  Expression expression{parse_expression()};
+  assert_punct(';');
+  current_function->program.push_back(expression);
+  return;
+}
 
 const FunctionDefinition *Parser::parse_function_decl() {
   tokenize();
@@ -267,7 +309,7 @@ WriteVariable Parser::parse_variable_decl() {
   tokenize();
   assert_punct('=');
   tokenize();
-  variable_decl.rvalue = std::monostate{};
+  variable_decl.rvalue = parse_expression();
   assert_punct(';');
   return variable_decl;
 }
@@ -275,7 +317,8 @@ WriteVariable Parser::parse_variable_decl() {
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
       function_frames{resource.get()}, function_scopes{resource.get()},
-      object_instances{resource.get()}, object_properties{resource.get()} {}
+      object_instances{resource.get()}, object_properties{resource.get()},
+      interim{resource.get()} {}
 
 std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
   const auto &local_scope{definition->local_scope};
@@ -310,17 +353,11 @@ Dynamic *ConsoleObject::get_property(Identifier property) {
   return {};
 }
 
-void Script::initialize(FunctionFrame &frame) {
-  const FunctionDefinition &definition{*frame.definition};
-  for (auto [nested_name, nested_definition] : definition.nested_functions) {
-    auto *function_lvalue{frame.get_variable(nested_name)};
+void FunctionFrame::initialize() {
+  for (auto [nested_name, nested_definition] : definition->nested_functions) {
+    auto *function_lvalue{get_variable(nested_name)};
     assert(function_lvalue != nullptr);
-    FunctionFrame &nested_frame{function_frames.emplace_back()};
-    nested_frame.definition = nested_definition;
-    nested_frame.closure = &frame;
-    nested_frame.own_scope =
-        function_scopes.emplace_back(nested_definition->local_scope.size());
-    *function_lvalue = &function_frames.back();
+    *function_lvalue = FunctionReference{nested_definition, this};
   }
 }
 
