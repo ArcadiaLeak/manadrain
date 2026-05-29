@@ -117,7 +117,6 @@ struct MemberExpression {
   Identifier property;
 };
 struct FunctionCallExpression {
-  Unit context;
   Unit callee;
   std::size_t passed_arguments;
 };
@@ -146,11 +145,7 @@ struct InitializeVariable {
 struct ReturnStatement {
   Unit argument;
 };
-struct ExpressionStatement {
-  Unit argument;
-};
-using Statement = std::variant<Expression, ExpressionStatement,
-                               InitializeVariable, ReturnStatement>;
+using Statement = std::variant<Expression, InitializeVariable, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -192,6 +187,11 @@ struct ConsoleObject final : ObjectInstance {
   Dynamic *get_property(Identifier property) override;
 };
 
+struct FunctionCallInfo {
+  Dynamic context;
+  std::span<Dynamic> arguments;
+};
+
 struct FunctionFrame {
   const FunctionDefinition *definition;
   std::size_t program_count;
@@ -216,7 +216,6 @@ class Script;
 
 struct UnitVisitor {
   Script &script;
-  std::size_t level;
   Dynamic operator()(std::monostate);
   Dynamic operator()(std::u16string_view);
   Dynamic operator()(std::int64_t);
@@ -224,6 +223,14 @@ struct UnitVisitor {
   Dynamic operator()(Interim);
   Dynamic operator()(Identifier);
   Dynamic operator()(const FunctionDefinition *);
+};
+
+struct CalleeVisitor {
+  Script &script;
+  std::pair<Dynamic, Dynamic> operator()(Interim);
+  std::pair<Dynamic, Dynamic> operator()(Identifier);
+  std::pair<Dynamic, Dynamic> operator()(MemberExpression);
+  template <typename T> std::pair<Dynamic, Dynamic> operator()(T) { return {}; }
 };
 
 struct ExpressionVisitor {
@@ -240,7 +247,6 @@ struct ExpressionVisitor {
 struct StatementVisitor {
   Script &script;
   void operator()(Expression);
-  void operator()(ExpressionStatement);
   void operator()(InitializeVariable);
   void operator()(ReturnStatement);
 };
@@ -263,14 +269,13 @@ protected:
   std::pmr::list<FunctionFrame> function_frames;
   std::pmr::list<std::pmr::vector<std::optional<Dynamic>>> function_scopes;
   std::pmr::list<VanillaObject> object_instances;
-  std::pmr::list<std::pmr::vector<Dynamic>> object_properties;
+  std::pmr::list<std::pmr::vector<Dynamic>> object_data;
 
 private:
   friend struct UnitVisitor;
+  friend struct CalleeVisitor;
   friend struct ExpressionVisitor;
   friend struct StatementVisitor;
-
-  std::pmr::deque<Dynamic> interim;
 
   ConsoleObject console{IntrinsicFunction::F_LOG};
   std::indirect<std::mutex> console_mutex;
@@ -301,9 +306,9 @@ private:
   Dynamic evaluate_property(Identifier property,
                             IntrinsicFunction intrinsic_function);
 
-  Dynamic evaluate_function_call(FunctionCallExpression expr_call,
+  Dynamic evaluate_function_call(FunctionCallInfo call_info,
                                  FunctionReference callee);
-  Dynamic evaluate_function_call(FunctionCallExpression expr_call,
+  Dynamic evaluate_function_call(FunctionCallInfo call_info,
                                  IntrinsicFunction intrinsic_function);
 };
 
@@ -337,9 +342,9 @@ private:
 
   Unit parse_object_literal();
   Unit parse_primary_expr();
-  Unit parse_member_expr(Unit object);
-  Unit parse_call_expr(Unit context, Unit callee);
-  Unit parse_postfix_expr(Unit base_unit);
+  Unit parse_member_expr(std::size_t base_idx, Unit object);
+  Unit parse_call_expr(std::size_t base_idx, Unit callee);
+  Unit parse_postfix_expr(std::size_t base_idx, Unit base_unit);
   Unit parse_postfix_expr();
   Unit parse_additive_expr();
   Unit parse_logical_disjunct();
@@ -348,6 +353,6 @@ private:
 
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
-  InitializeVariable parse_variable_decl();
+  void parse_variable_decl();
 };
 } // namespace Manadrain
