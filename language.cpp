@@ -206,12 +206,12 @@ void Parser::parse_text() {
     parse_statement();
   }
   function_definitions.emplace_back(definition);
-  FunctionFrame &frame{function_frames.emplace_back()};
-  frame.definition = definition;
-  frame.own_scope =
+  FunctionFrame &function_frame{function_frames.emplace_back()};
+  function_frame.definition = definition;
+  function_frame.own_scope =
       function_scopes.emplace_back(definition->local_scope.size());
-  current_frame = &frame;
-  frame.initialize();
+  current_frame = &function_frame;
+  initialize_descriptors(function_frame);
 }
 
 Unit Parser::parse_object_literal() {
@@ -468,17 +468,22 @@ void Parser::parse_variable_decl() {
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
       function_frames{resource.get()}, function_scopes{resource.get()},
+      function_descriptors{resource.get()}, scope_stacks{resource.get()},
       object_instances{resource.get()}, object_data{resource.get()} {}
 
 std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
-  const auto &local_scope{definition->local_scope};
-  auto lower_bound = std::ranges::lower_bound(local_scope, var_handle);
-  if (lower_bound == local_scope.end() || *lower_bound != var_handle)
-    return closure ? closure->get_variable(var_handle) : nullptr;
-  std::ptrdiff_t own_scope_distance{
-      std::distance(local_scope.begin(), lower_bound)};
-  std::optional<Dynamic> *own_scope_data{own_scope.data()};
-  return std::next(own_scope_data, own_scope_distance);
+  for (FunctionFrame *scope_frame : std::ranges::reverse_view{
+           std::ranges::concat_view{closure, std::ranges::single_view{this}}}) {
+    const auto &local_scope{scope_frame->definition->local_scope};
+    auto lower_bound = std::ranges::lower_bound(local_scope, var_handle);
+    if (lower_bound == local_scope.end() || *lower_bound != var_handle)
+      continue;
+    std::ptrdiff_t own_scope_distance{
+        std::distance(local_scope.begin(), lower_bound)};
+    std::optional<Dynamic> *own_scope_data{scope_frame->own_scope.data()};
+    return std::next(own_scope_data, own_scope_distance);
+  }
+  return nullptr;
 }
 
 Dynamic *VanillaObject::get_property(Identifier property) {
@@ -503,11 +508,20 @@ Dynamic *ConsoleObject::get_property(Identifier property) {
   return {};
 }
 
-void FunctionFrame::initialize() {
-  for (auto [nested_name, nested_definition] : definition->nested_functions) {
-    auto *function_lvalue{get_variable(nested_name)};
+void Script::initialize_descriptors(FunctionFrame &function_frame) {
+  std::span<FunctionFrame *> nested_closure{};
+  if (function_frame.definition->nested_functions.size() > 0) {
+    std::ranges::concat_view closure_view{
+        function_frame.closure, std::ranges::single_view{&function_frame}};
+    nested_closure = scope_stacks.emplace_back(std::from_range, closure_view);
+  }
+  for (auto [nested_name, nested_definition] :
+       function_frame.definition->nested_functions) {
+    std::optional<Dynamic> *function_lvalue{
+        function_frame.get_variable(nested_name)};
     assert(function_lvalue != nullptr);
-    *function_lvalue = FunctionReference{nested_definition, this};
+    *function_lvalue =
+        &function_descriptors.emplace_back(nested_definition, nested_closure);
   }
 }
 
@@ -546,7 +560,12 @@ Dynamic UnitVisitor::operator()(Identifier identifier) {
 }
 
 Dynamic UnitVisitor::operator()(const FunctionDefinition *definition) {
-  return FunctionReference{definition, script.current_frame};
+  std::ranges::concat_view closure_view{
+      script.current_frame->closure,
+      std::ranges::single_view{script.current_frame}};
+  return &script.function_descriptors.emplace_back(
+      definition,
+      script.scope_stacks.emplace_back(std::from_range, closure_view));
 }
 
 std::pair<Dynamic, Dynamic>
@@ -622,7 +641,7 @@ Dynamic ExpressionVisitor::operator()(FunctionCallExpression function_call) {
   for (Dynamic &argument_lvalue : dynamic_arguments)
     argument_lvalue = UnitVisitor{script}(Interim{});
   auto visit_dynamic = [&](auto dynamic_alt) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionReference> ||
+    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionDescriptor *> ||
                   std::is_same_v<decltype(dynamic_alt), IntrinsicFunction>)
       return script.evaluate_function_call(call_info, dynamic_alt);
     else
@@ -701,7 +720,7 @@ std::u16string Script::stringify(std::int64_t number) {
 
 std::u16string Script::stringify(double number) { return u"<unimplemented>"; }
 
-std::u16string Script::stringify(FunctionReference reference) {
+std::u16string Script::stringify(FunctionDescriptor *descriptor) {
   return u"<unimplemented>";
 }
 
@@ -714,13 +733,13 @@ std::u16string Script::stringify(IntrinsicFunction intrinsic_function) {
 }
 
 Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
-                                       FunctionReference callee) {
+                                       FunctionDescriptor *callee) {
   FunctionFrame &callee_frame{function_frames.emplace_back()};
-  callee_frame.closure = callee.closure;
-  callee_frame.definition = callee.definition;
+  callee_frame.closure = callee->closure;
+  callee_frame.definition = callee->definition;
   callee_frame.own_scope =
-      function_scopes.emplace_back(callee.definition->local_scope.size());
-  callee_frame.initialize();
+      function_scopes.emplace_back(callee->definition->local_scope.size());
+  initialize_descriptors(callee_frame);
   for (std::size_t i = 0; i < call_info.arguments.size(); ++i) {
     Identifier identifier{callee_frame.definition->arguments[i]};
     auto *argument_lvalue{callee_frame.get_variable(identifier)};
@@ -802,7 +821,7 @@ Dynamic Script::evaluate_property(Identifier property,
 }
 
 Dynamic Script::evaluate_property(Identifier property,
-                                  FunctionReference reference) {
+                                  FunctionDescriptor *descriptor) {
   return {};
 }
 

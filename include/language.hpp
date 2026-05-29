@@ -159,14 +159,14 @@ struct FunctionDefinition {
 };
 
 struct FunctionFrame;
-struct FunctionReference {
+struct FunctionDescriptor {
   const FunctionDefinition *definition;
-  FunctionFrame *closure;
+  std::span<FunctionFrame *> closure;
 };
 
 using Dynamic =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 ObjectInstance *, FunctionReference, IntrinsicFunction>;
+                 ObjectInstance *, FunctionDescriptor *, IntrinsicFunction>;
 
 struct ObjectInstance {
   virtual Dynamic *get_property(Identifier property) = 0;
@@ -196,11 +196,9 @@ struct FunctionFrame {
   const FunctionDefinition *definition;
   std::size_t program_count;
   std::span<std::optional<Dynamic>> own_scope;
-  FunctionFrame *closure;
+  std::span<FunctionFrame *> closure;
   Dynamic return_val;
-
   std::optional<Dynamic> *get_variable(Identifier var_handle);
-  void initialize();
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -268,8 +266,12 @@ protected:
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
   std::pmr::list<FunctionFrame> function_frames;
   std::pmr::list<std::pmr::vector<std::optional<Dynamic>>> function_scopes;
+  std::pmr::list<FunctionDescriptor> function_descriptors;
+  std::pmr::list<std::pmr::vector<FunctionFrame *>> scope_stacks;
   std::pmr::list<VanillaObject> object_instances;
   std::pmr::list<std::pmr::vector<Dynamic>> object_data;
+
+  void initialize_descriptors(FunctionFrame &function_frame);
 
 private:
   friend struct UnitVisitor;
@@ -289,7 +291,7 @@ private:
   std::u16string stringify(std::int64_t number);
   std::u16string stringify(double number);
   std::u16string stringify(ObjectInstance *object_instance);
-  std::u16string stringify(FunctionReference reference);
+  std::u16string stringify(FunctionDescriptor *descriptor);
   std::u16string stringify(IntrinsicFunction intrinsic_function);
 
   Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
@@ -302,12 +304,13 @@ private:
   Dynamic evaluate_property(Identifier property, double number);
   Dynamic evaluate_property(Identifier property,
                             ObjectInstance *object_instance);
-  Dynamic evaluate_property(Identifier property, FunctionReference reference);
+  Dynamic evaluate_property(Identifier property,
+                            FunctionDescriptor *descriptor);
   Dynamic evaluate_property(Identifier property,
                             IntrinsicFunction intrinsic_function);
 
   Dynamic evaluate_function_call(FunctionCallInfo call_info,
-                                 FunctionReference callee);
+                                 FunctionDescriptor *callee);
   Dynamic evaluate_function_call(FunctionCallInfo call_info,
                                  IntrinsicFunction intrinsic_function);
 };
