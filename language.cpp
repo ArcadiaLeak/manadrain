@@ -522,11 +522,16 @@ Dynamic UnitVisitor::operator()(std::int64_t primitive) { return primitive; }
 Dynamic UnitVisitor::operator()(double primitive) { return primitive; }
 
 Dynamic UnitVisitor::operator()(Interim) {
-  std::size_t statement_idx{script.current_frame->program_count++};
-  const Expression *expression{std::get_if<Expression>(
-      &script.current_frame->definition->program[statement_idx])};
-  assert(expression != nullptr);
-  return expression->visit(ExpressionVisitor{script});
+  FunctionFrame *frame{script.current_frame};
+  std::size_t statement_idx{frame->program_count++};
+  const Statement &expression_stmt{frame->definition->program[statement_idx]};
+  auto assert_expression = [](auto visitee) -> Expression {
+    if constexpr (std::is_same_v<decltype(visitee), Expression>)
+      return visitee;
+    std::unreachable();
+  };
+  return expression_stmt.visit(assert_expression)
+      .visit(ExpressionVisitor{script});
 }
 
 Dynamic UnitVisitor::operator()(Identifier identifier) {
@@ -556,10 +561,14 @@ CalleeVisitor::operator()(MemberExpression expression) {
 
 std::pair<Dynamic, Dynamic> CalleeVisitor::operator()(Interim) {
   std::size_t statement_idx{script.current_frame->program_count++};
-  const Expression *expression{std::get_if<Expression>(
-      &script.current_frame->definition->program[statement_idx])};
-  assert(expression != nullptr);
-  return expression->visit(*this);
+  const Statement &argument_stmt{
+      script.current_frame->definition->program[statement_idx]};
+  auto assert_expression = [](auto visitee) -> Expression {
+    if constexpr (std::is_same_v<decltype(visitee), Expression>)
+      return visitee;
+    std::unreachable();
+  };
+  return argument_stmt.visit(assert_expression).visit(*this);
 }
 
 std::pair<Dynamic, Dynamic> CalleeVisitor::operator()(Identifier identifier) {
@@ -640,11 +649,16 @@ Dynamic ExpressionVisitor::operator()(ObjectExpression object_expr) {
     FunctionFrame *frame{script.current_frame};
     std::size_t property_idx{frame->program_count++};
     const Statement &statement{frame->definition->program[property_idx]};
-    const InitializeVariable *property{
-        std::get_if<InitializeVariable>(&statement)};
-    assert(property != nullptr);
-    Dynamic *property_ptr{instance.get_property(property->variable_name)};
-    *property_ptr = property->rvalue.visit(UnitVisitor{script});
+    auto assert_variable_init =
+        [](const auto &visitee) -> const InitializeVariable & {
+      if constexpr (std::is_same_v<decltype(visitee),
+                                   const InitializeVariable &>)
+        return visitee;
+      std::unreachable();
+    };
+    const InitializeVariable &property{statement.visit(assert_variable_init)};
+    Dynamic *property_ptr{instance.get_property(property.variable_name)};
+    *property_ptr = property.rvalue.visit(UnitVisitor{script});
   }
   return &instance;
 }
