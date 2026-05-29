@@ -1,5 +1,6 @@
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <generator>
 #include <inplace_vector>
 #include <list>
@@ -215,6 +216,7 @@ class Script;
 
 struct UnitVisitor {
   Script &script;
+  std::size_t level;
   Dynamic operator()(std::monostate);
   Dynamic operator()(std::u16string_view);
   Dynamic operator()(std::int64_t);
@@ -267,7 +269,7 @@ private:
   friend struct UnitVisitor;
   friend struct StatementVisitor;
 
-  std::pmr::list<Dynamic> interim;
+  std::pmr::deque<Dynamic> interim;
 
   ConsoleObject console{IntrinsicFunction::F_LOG};
   std::indirect<std::mutex> console_mutex;

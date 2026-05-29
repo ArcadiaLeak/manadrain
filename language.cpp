@@ -489,6 +489,35 @@ void FunctionFrame::initialize() {
   }
 }
 
+Dynamic UnitVisitor::operator()(std::monostate primitive) { return primitive; }
+
+Dynamic UnitVisitor::operator()(std::u16string_view primitive) {
+  return primitive;
+}
+
+Dynamic UnitVisitor::operator()(std::int64_t primitive) { return primitive; }
+
+Dynamic UnitVisitor::operator()(double primitive) { return primitive; }
+
+Dynamic UnitVisitor::operator()(Interim) {
+  return script.interim.rbegin()[level];
+}
+
+Dynamic UnitVisitor::operator()(Identifier identifier) {
+  std::optional<Dynamic> *from_scope{
+      script.current_frame->get_variable(identifier)};
+  if (from_scope && *from_scope)
+    return **from_scope;
+  Dynamic *from_globalThis{script.global_this.get_property(identifier)};
+  if (from_globalThis)
+    return *from_globalThis;
+  throw ScriptError{InvalidVariableAccess{}};
+}
+
+Dynamic UnitVisitor::operator()(const FunctionDefinition *definition) {
+  return FunctionReference{definition, script.current_frame};
+}
+
 void StatementVisitor::operator()(Expression expression) {
   script.interim.push_back(expression.visit(ExpressionVisitor{script}));
 }
