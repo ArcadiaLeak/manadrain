@@ -215,36 +215,37 @@ void Parser::parse_text() {
 }
 
 Unit Parser::parse_object_literal() {
-  std::vector<std::pair<Identifier, Unit>> properties{};
+  std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
+  object_shapes.push_back(object_shape);
+  std::size_t statement_idx{current_function->program.size()};
+  current_function->program.push_back(ObjectExpression{object_shape.get()});
   tokenize();
   while (last_token != Token{U'}'}) {
     if (not std::holds_alternative<Identifier>(last_token))
       throw ScriptError{InvalidPropertyName{}};
-    Identifier property_key{std::get<Identifier>(last_token)};
+    std::size_t property_idx{current_function->program.size()};
+    Identifier property_name{std::get<Identifier>(last_token)};
+    current_function->program.push_back(InitializeVariable{property_name});
+    auto ordered_it =
+        std::ranges::lower_bound(object_shape->properties, property_name);
+    object_shape->properties.insert(ordered_it, property_name);
+    ObjectExpression &statement{std::get<ObjectExpression>(
+        std::get<Expression>(current_function->program.data()[statement_idx]))};
+    ++statement.passed_properties;
     tokenize();
+    Unit property_rvalue{};
     if (last_token == Token{U':'}) {
       tokenize();
-      properties.emplace_back(property_key, parse_expression());
-    } else
-      properties.emplace_back(property_key, std::monostate{});
+      property_rvalue = parse_expression();
+    }
+    InitializeVariable *property{std::get_if<InitializeVariable>(
+        current_function->program.data() + property_idx)};
+    property->rvalue = property_rvalue;
     if (last_token != Token{U','})
       break;
     tokenize();
   }
   assert_punct('}');
-  auto shape_view = std::ranges::transform_view{
-      properties, [](const auto &prop_pair) { return prop_pair.first; }};
-  auto statement_view = std::ranges::transform_view{
-      properties, [](const auto &prop_pair) {
-        return InitializeVariable{prop_pair.first, prop_pair.second};
-      }};
-  std::shared_ptr object_shape{
-      std::make_shared<ObjectShape>(std::vector{std::from_range, shape_view})};
-  std::ranges::sort(object_shape->properties);
-  object_shapes.push_back(object_shape);
-  current_function->program.push_back(
-      ObjectExpression{object_shape.get(), properties.size()});
-  current_function->program.append_range(statement_view);
   return Interim{};
 }
 
@@ -271,7 +272,9 @@ Unit Parser::parse_call_expr(std::size_t base_idx, Unit callee) {
     tokenize();
     if (last_token == Token{U')'})
       break;
-    parse_expression();
+    Unit argument_unit{parse_expression()};
+    if (not std::holds_alternative<Interim>(argument_unit))
+      current_function->program.push_back(argument_unit);
     ++passed_arguments;
     if (last_token == Token{U')'})
       break;
@@ -628,8 +631,22 @@ Dynamic ExpressionVisitor::operator()(AssignExpression assign_expr) {
   return {};
 }
 
-Dynamic ExpressionVisitor::operator()(ObjectExpression) {
-  return std::monostate{};
+Dynamic ExpressionVisitor::operator()(ObjectExpression object_expr) {
+  VanillaObject &instance{script.object_instances.emplace_back()};
+  instance.object_shape = object_expr.object_shape;
+  std::size_t object_size{object_expr.passed_properties};
+  instance.properties = script.object_data.emplace_back(object_size);
+  for (int i = 0; i < object_size; ++i) {
+    FunctionFrame *frame{script.current_frame};
+    std::size_t property_idx{frame->program_count++};
+    const Statement &statement{frame->definition->program[property_idx]};
+    const InitializeVariable *property{
+        std::get_if<InitializeVariable>(&statement)};
+    assert(property != nullptr);
+    Dynamic *property_ptr{instance.get_property(property->variable_name)};
+    *property_ptr = property->rvalue.visit(UnitVisitor{script});
+  }
+  return &instance;
 }
 
 void StatementVisitor::operator()(Expression expression) {
@@ -692,7 +709,7 @@ Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
   callee_frame.initialize();
   for (std::size_t i = 0; i < call_info.arguments.size(); ++i) {
     Identifier identifier{callee_frame.definition->arguments[i]};
-    auto *argument_lvalue{current_frame->get_variable(identifier)};
+    auto *argument_lvalue{callee_frame.get_variable(identifier)};
     assert(argument_lvalue != nullptr);
     *argument_lvalue = call_info.arguments[i];
   }
