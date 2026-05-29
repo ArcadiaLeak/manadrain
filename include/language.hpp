@@ -267,6 +267,7 @@ protected:
 
 private:
   friend struct UnitVisitor;
+  friend struct ExpressionVisitor;
   friend struct StatementVisitor;
 
   std::pmr::deque<Dynamic> interim;
@@ -277,6 +278,20 @@ private:
   std::list<ConsoleMessage> console_messages;
 
   GlobalObject global_this{&console};
+
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
+  Dynamic evaluate_operation(Operator op, std::int64_t lhs, std::int64_t rhs);
+
+  Dynamic evaluate_property(Identifier property, std::monostate);
+  Dynamic evaluate_property(Identifier property,
+                            std::u16string_view permanent_string);
+  Dynamic evaluate_property(Identifier property, std::int64_t number);
+  Dynamic evaluate_property(Identifier property, double number);
+  Dynamic evaluate_property(Identifier property,
+                            ObjectInstance *object_instance);
+  Dynamic evaluate_property(Identifier property, FunctionReference reference);
+  Dynamic evaluate_property(Identifier property,
+                            IntrinsicFunction intrinsic_function);
 };
 
 class Parser : public Script {

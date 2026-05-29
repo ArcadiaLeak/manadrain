@@ -514,6 +514,61 @@ Dynamic UnitVisitor::operator()(Identifier identifier) {
   throw ScriptError{InvalidVariableAccess{}};
 }
 
+Dynamic ExpressionVisitor::operator()(Unit unit) {
+  return unit.visit(UnitVisitor{script});
+}
+
+Dynamic ExpressionVisitor::operator()(BinaryExpression expression) {
+  Dynamic dynamic_lhs{expression.left.visit(UnitVisitor{script, 1})};
+  Dynamic dynamic_rhs{expression.right.visit(UnitVisitor{script})};
+  auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
+                  std::is_same_v<decltype(rhs), std::int64_t>)
+      return script.evaluate_operation(expression.op, lhs, rhs);
+    else
+      return {};
+  };
+  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
+}
+
+Dynamic ExpressionVisitor::operator()(LogicalExpression expression) {
+  Dynamic dynamic_lhs{expression.left.visit(UnitVisitor{script, 1})};
+  Dynamic dynamic_rhs{expression.right.visit(UnitVisitor{script})};
+  auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
+                  std::is_same_v<decltype(rhs), std::int64_t>)
+      return script.evaluate_operation(expression.op, lhs, rhs);
+    else
+      return {};
+  };
+  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
+}
+
+Dynamic ExpressionVisitor::operator()(MemberExpression expression) {
+  Dynamic dynamic_object{expression.object.visit(UnitVisitor{script, 1})};
+  auto visit_object = [&](auto dynamic_alt) {
+    return script.evaluate_property(expression.property, dynamic_alt);
+  };
+  return dynamic_object.visit(visit_object);
+}
+
+Dynamic ExpressionVisitor::operator()(FunctionCallExpression) {
+  return std::monostate{};
+}
+
+Dynamic ExpressionVisitor::operator()(AssignExpression assign_expr) {
+  Identifier *assign_identifier{std::get_if<Identifier>(&assign_expr.left)};
+  std::optional<Dynamic> *assign_lvalue{
+      script.current_frame->get_variable(*assign_identifier)};
+  assert(assign_lvalue != nullptr);
+  *assign_lvalue = assign_expr.right.visit(UnitVisitor{script});
+  return {};
+}
+
+Dynamic ExpressionVisitor::operator()(ObjectExpression) {
+  return std::monostate{};
+}
+
 Dynamic UnitVisitor::operator()(const FunctionDefinition *definition) {
   return FunctionReference{definition, script.current_frame};
 }
@@ -537,6 +592,59 @@ void StatementVisitor::operator()(InitializeVariable statement) {
 void StatementVisitor::operator()(ReturnStatement statement) {
   script.current_frame->return_val =
       statement.argument.visit(UnitVisitor{script});
+}
+
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   std::int64_t rhs) {
+  if (op == '+')
+    return lhs + rhs;
+  if (op == '-')
+    return lhs - rhs;
+  std::unreachable();
+}
+
+Dynamic Script::evaluate_operation(Operator op, std::int64_t lhs,
+                                   std::int64_t rhs) {
+  if (op == Operator::LOGICAL_DISJUNCT)
+    return lhs ? lhs : rhs;
+  std::unreachable();
+}
+
+Dynamic Script::evaluate_property(Identifier property, std::monostate) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  std::u16string_view permanent_string) {
+  if (property == Identifier{OFFSET_length})
+    return static_cast<std::int64_t>(permanent_string.size());
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property, std::int64_t number) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property, double number) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  ObjectInstance *object_instance) {
+  Dynamic *property_ptr{object_instance->get_property(property)};
+  if (not property_ptr)
+    return std::monostate{};
+  return *property_ptr;
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  FunctionReference reference) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  IntrinsicFunction intrinsic_function) {
+  return {};
 }
 
 void Script::evaluate() {
