@@ -279,6 +279,14 @@ private:
 
   GlobalObject global_this{&console};
 
+  std::u16string stringify(std::monostate);
+  std::u16string stringify(std::u16string_view permanent_string);
+  std::u16string stringify(std::int64_t number);
+  std::u16string stringify(double number);
+  std::u16string stringify(ObjectInstance *object_instance);
+  std::u16string stringify(FunctionReference reference);
+  std::u16string stringify(IntrinsicFunction intrinsic_function);
+
   Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
   Dynamic evaluate_operation(Operator op, std::int64_t lhs, std::int64_t rhs);
 
@@ -292,6 +300,11 @@ private:
   Dynamic evaluate_property(Identifier property, FunctionReference reference);
   Dynamic evaluate_property(Identifier property,
                             IntrinsicFunction intrinsic_function);
+
+  Dynamic evaluate_function_call(FunctionCallExpression expr_call,
+                                 FunctionReference callee);
+  Dynamic evaluate_function_call(FunctionCallExpression expr_call,
+                                 IntrinsicFunction intrinsic_function);
 };
 
 class Parser : public Script {

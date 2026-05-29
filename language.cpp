@@ -552,8 +552,15 @@ Dynamic ExpressionVisitor::operator()(MemberExpression expression) {
   return dynamic_object.visit(visit_object);
 }
 
-Dynamic ExpressionVisitor::operator()(FunctionCallExpression) {
-  return std::monostate{};
+Dynamic ExpressionVisitor::operator()(FunctionCallExpression function_call) {
+  Dynamic dynamic_callee{function_call.callee.visit(UnitVisitor{script})};
+  auto visit_dynamic = [&](auto dynamic_alt) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionReference> ||
+                  std::is_same_v<decltype(dynamic_alt), IntrinsicFunction>)
+      return script.evaluate_function_call(function_call, dynamic_alt);
+    throw ScriptError{InvalidFunctionCall{}};
+  };
+  return dynamic_callee.visit(visit_dynamic);
 }
 
 Dynamic ExpressionVisitor::operator()(AssignExpression assign_expr) {
@@ -592,6 +599,88 @@ void StatementVisitor::operator()(InitializeVariable statement) {
 void StatementVisitor::operator()(ReturnStatement statement) {
   script.current_frame->return_val =
       statement.argument.visit(UnitVisitor{script});
+}
+
+std::u16string Script::stringify(std::monostate) { return u"undefined"; }
+
+std::u16string Script::stringify(std::u16string_view permanent_string) {
+  return std::u16string(permanent_string);
+}
+
+std::u16string Script::stringify(std::int64_t number) {
+  static constexpr int buffer_size =
+      std::numeric_limits<std::int64_t>::digits10 + 2;
+  std::array<char, buffer_size> buffer{};
+  auto [ptr, ec] =
+      std::to_chars(buffer.data(), buffer.data() + buffer.size(), number);
+  assert(ec == std::errc{});
+  std::size_t message_size{
+      static_cast<std::size_t>(std::distance(buffer.data(), ptr))};
+  std::string_view message_view{buffer.data(), message_size};
+  return {std::from_range, message_view};
+}
+
+std::u16string Script::stringify(double number) { return u"<unimplemented>"; }
+
+std::u16string Script::stringify(FunctionReference reference) {
+  return u"<unimplemented>";
+}
+
+std::u16string Script::stringify(ObjectInstance *object_instance) {
+  return u"<unimplemented>";
+}
+
+std::u16string Script::stringify(IntrinsicFunction intrinsic_function) {
+  return u"<unimplemented>";
+}
+
+Dynamic Script::evaluate_function_call(FunctionCallExpression expr_call,
+                                       FunctionReference callee) {
+  FunctionFrame &callee_frame{function_frames.emplace_back()};
+  callee_frame.closure = callee.closure;
+  callee_frame.definition = callee.definition;
+  callee_frame.own_scope =
+      function_scopes.emplace_back(callee.definition->local_scope.size());
+  callee_frame.initialize();
+  for (std::size_t i = 0; i < expr_call.passed_arguments; ++i) {
+    Identifier identifier{callee_frame.definition->arguments[i]};
+    auto *argument_lvalue{current_frame->get_variable(identifier)};
+    assert(argument_lvalue != nullptr);
+    *argument_lvalue = interim.rbegin()[expr_call.passed_arguments + 1 - i];
+  }
+  FunctionFrame *caller_frame{current_frame};
+  current_frame = &callee_frame;
+  while (current_frame->program_count < callee_frame.definition->program.size())
+    callee_frame.definition->program[current_frame->program_count++].visit(
+        StatementVisitor{*this});
+  current_frame = caller_frame;
+  return callee_frame.return_val;
+}
+
+Dynamic Script::evaluate_function_call(FunctionCallExpression expr_call,
+                                       IntrinsicFunction intrinsic_function) {
+  if (intrinsic_function == IntrinsicFunction::F_LOG) {
+    std::vector<Dynamic> dynamic_arguments(expr_call.passed_arguments);
+    for (std::size_t i = 0; i < expr_call.passed_arguments; ++i)
+      dynamic_arguments[i] =
+          interim.rbegin()[expr_call.passed_arguments + 1 - i];
+    auto match_message_alt = [&](auto dynamic_alt) {
+      return stringify(dynamic_alt);
+    };
+    auto match_message_arg = [&](Dynamic argument) {
+      return argument.visit(match_message_alt);
+    };
+    auto message_parts = dynamic_arguments |
+                         std::views::transform(match_message_arg) |
+                         std::views::join_with(' ');
+    {
+      std::lock_guard console_lock{*console_mutex};
+      console_messages.emplace_back(
+          std::u16string{std::from_range, message_parts});
+    }
+    console_condition->notify_one();
+  }
+  return {};
 }
 
 Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
