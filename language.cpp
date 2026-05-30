@@ -210,7 +210,7 @@ void Parser::parse_text() {
   FunctionFrame &function_frame{function_frames.emplace_back()};
   function_frame.definition = definition;
   function_frame.own_scope =
-      function_scopes.emplace_back(definition->local_scope.size());
+      structures.emplace_back(definition->local_scope.size());
   current_frame = &function_frame;
   initialize_descriptors(function_frame);
 }
@@ -470,11 +470,10 @@ void Parser::parse_variable_decl() {
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
       tagged_heap{resource.get()}, function_frames{resource.get()},
-      function_scopes{resource.get()}, function_descriptors{resource.get()},
-      scope_stacks{resource.get()}, object_instances{resource.get()},
-      object_data{resource.get()} {}
+      function_descriptors{resource.get()}, scope_stacks{resource.get()},
+      object_instances{resource.get()}, structures{resource.get()} {}
 
-std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
+Dynamic *FunctionFrame::get_variable(Identifier var_handle) {
   for (FunctionFrame *scope_frame : std::ranges::reverse_view{
            std::ranges::concat_view{closure, std::ranges::single_view{this}}}) {
     const auto &local_scope{scope_frame->definition->local_scope};
@@ -483,13 +482,13 @@ std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
       continue;
     std::ptrdiff_t own_scope_distance{
         std::distance(local_scope.begin(), lower_bound)};
-    std::optional<Dynamic> *own_scope_data{scope_frame->own_scope.data()};
+    Dynamic *own_scope_data{scope_frame->own_scope.data()};
     return std::next(own_scope_data, own_scope_distance);
   }
   return nullptr;
 }
 
-std::optional<Dynamic> &FunctionFrame::access_scope(ScopeAccess accessor) {
+Dynamic &FunctionFrame::access_scope(ScopeAccess accessor) {
   std::ranges::single_view current_frame{this};
   auto closure_view =
       std::ranges::concat_view{closure, current_frame} | std::views::reverse;
@@ -527,8 +526,7 @@ void Script::initialize_descriptors(FunctionFrame &function_frame) {
   }
   for (auto [nested_name, nested_definition] :
        function_frame.definition->nested_functions) {
-    std::optional<Dynamic> *function_lvalue{
-        function_frame.get_variable(nested_name)};
+    Dynamic *function_lvalue{function_frame.get_variable(nested_name)};
     assert(function_lvalue != nullptr);
     *function_lvalue =
         &function_descriptors.emplace_back(nested_definition, nested_closure);
@@ -559,14 +557,13 @@ Dynamic EvaluateUnit::operator()(Interim) {
 }
 
 Dynamic EvaluateUnit::operator()(Identifier identifier) {
-  std::optional<Dynamic> *from_scope{
-      script.current_frame->get_variable(identifier)};
-  if (from_scope && *from_scope)
-    return **from_scope;
+  Dynamic *from_scope{script.current_frame->get_variable(identifier)};
+  if (from_scope)
+    return *from_scope;
   Dynamic *from_globalThis{script.global_this.get_property(identifier)};
   if (from_globalThis)
     return *from_globalThis;
-  throw ScriptError{InvalidVariableAccess{}};
+  std::unreachable();
 }
 
 Dynamic EvaluateUnit::operator()(ScopeAccess scope_access) {
@@ -666,7 +663,7 @@ Dynamic EvaluateExpression::operator()(FunctionCallExpression function_call) {
 
 Dynamic EvaluateExpression::operator()(AssignExpression assign_expr) {
   Identifier *assign_identifier{std::get_if<Identifier>(&assign_expr.left)};
-  std::optional<Dynamic> *assign_lvalue{
+  Dynamic *assign_lvalue{
       script.current_frame->get_variable(*assign_identifier)};
   assert(assign_lvalue != nullptr);
   *assign_lvalue = assign_expr.right.visit(EvaluateUnit{script});
@@ -677,7 +674,7 @@ Dynamic EvaluateExpression::operator()(ObjectExpression object_expr) {
   VanillaObject &instance{script.object_instances.emplace_back()};
   instance.object_shape = object_expr.object_shape;
   std::size_t object_size{object_expr.passed_properties};
-  instance.properties = script.object_data.emplace_back(object_size);
+  instance.properties = script.structures.emplace_back(object_size);
   for (int i = 0; i < object_size; ++i) {
     FunctionFrame *frame{script.current_frame};
     std::size_t property_idx{frame->program_count++};
@@ -701,7 +698,7 @@ void EvaluateStatement::operator()(Expression expression) {
 
 void EvaluateStatement::operator()(InitializeVariable statement) {
   Dynamic rvalue_dynamic{statement.rvalue.visit(EvaluateUnit{script})};
-  std::optional<Dynamic> *variable_lvalue{
+  Dynamic *variable_lvalue{
       script.current_frame->get_variable(statement.variable_name)};
   assert(variable_lvalue != nullptr);
   *variable_lvalue = rvalue_dynamic;
@@ -760,7 +757,7 @@ Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
   callee_frame.closure = callee->closure;
   callee_frame.definition = callee->definition;
   callee_frame.own_scope =
-      function_scopes.emplace_back(callee->definition->local_scope.size());
+      structures.emplace_back(callee->definition->local_scope.size());
   initialize_descriptors(callee_frame);
   for (std::size_t i = 0; i < call_info.arguments.size(); ++i) {
     Identifier identifier{callee_frame.definition->arguments[i]};

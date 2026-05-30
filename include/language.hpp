@@ -208,11 +208,11 @@ struct FunctionCallInfo {
 struct FunctionFrame {
   const FunctionDefinition *definition;
   std::size_t program_count;
-  std::span<std::optional<Dynamic>> own_scope;
+  std::span<Dynamic> own_scope;
   std::span<FunctionFrame *> closure;
   Dynamic return_val;
-  std::optional<Dynamic> &access_scope(ScopeAccess accessor);
-  std::optional<Dynamic> *get_variable(Identifier var_handle);
+  Dynamic &access_scope(ScopeAccess accessor);
+  Dynamic *get_variable(Identifier var_handle);
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -283,11 +283,10 @@ protected:
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
   std::pmr::list<Dynamic> tagged_heap;
   std::pmr::list<FunctionFrame> function_frames;
-  std::pmr::list<std::pmr::vector<std::optional<Dynamic>>> function_scopes;
   std::pmr::list<FunctionDescriptor> function_descriptors;
   std::pmr::list<std::pmr::vector<FunctionFrame *>> scope_stacks;
   std::pmr::list<VanillaObject> object_instances;
-  std::pmr::list<std::pmr::vector<Dynamic>> object_data;
+  std::pmr::list<std::pmr::vector<Dynamic>> structures;
 
   void initialize_descriptors(FunctionFrame &function_frame);
 
