@@ -12,6 +12,10 @@ public:
 
 private:
   std::size_t position;
-  std::generator<std::uint8_t> traverse_binary();
+  std::generator<std::uint8_t> traverse();
+  std::optional<std::uint8_t> forward();
+  std::uint32_t decode_varuint32();
+
+  void parse_function_type();
 };
 } // namespace Manadrain
