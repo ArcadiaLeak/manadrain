@@ -205,6 +205,7 @@ void Parser::parse_text() {
       break;
     parse_statement();
   }
+  // analyze_scope_access();
   function_definitions.emplace_back(definition);
   FunctionFrame &function_frame{function_frames.emplace_back()};
   function_frame.definition = definition;
@@ -435,6 +436,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
       break;
     parse_statement();
   }
+  // analyze_scope_access();
   std::swap(current_function, definition);
   function_definitions.emplace_back(definition);
   return definition;
@@ -467,9 +469,10 @@ void Parser::parse_variable_decl() {
 
 Script::Script()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
-      function_frames{resource.get()}, function_scopes{resource.get()},
-      function_descriptors{resource.get()}, scope_stacks{resource.get()},
-      object_instances{resource.get()}, object_data{resource.get()} {}
+      tagged_heap{resource.get()}, function_frames{resource.get()},
+      function_scopes{resource.get()}, function_descriptors{resource.get()},
+      scope_stacks{resource.get()}, object_instances{resource.get()},
+      object_data{resource.get()} {}
 
 std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
   for (FunctionFrame *scope_frame : std::ranges::reverse_view{
@@ -484,6 +487,13 @@ std::optional<Dynamic> *FunctionFrame::get_variable(Identifier var_handle) {
     return std::next(own_scope_data, own_scope_distance);
   }
   return nullptr;
+}
+
+std::optional<Dynamic> &FunctionFrame::access_scope(ScopeAccess accessor) {
+  std::ranges::single_view current_frame{this};
+  auto closure_view =
+      std::ranges::concat_view{closure, current_frame} | std::views::reverse;
+  return closure_view[accessor.frame_offset]->own_scope[accessor.scope_offset];
 }
 
 Dynamic *VanillaObject::get_property(Identifier property) {
@@ -701,6 +711,11 @@ void EvaluateStatement::operator()(InitializeMember statement) {
   std::unreachable();
 }
 
+void EvaluateStatement::operator()(InitializeScope statement) {
+  Dynamic rvalue_dynamic{statement.rvalue.visit(EvaluateUnit{script})};
+  script.current_frame->access_scope(statement.accessor) = rvalue_dynamic;
+}
+
 void EvaluateStatement::operator()(ReturnStatement statement) {
   script.current_frame->return_val =
       statement.argument.visit(EvaluateUnit{script});
@@ -867,4 +882,24 @@ std::string ConsoleMessage::encode_for_print() const {
     u8_message.append_range(encode_u16_for_print(uchar));
   return u8_message;
 }
+
+void Parser::analyze_scope_access() {
+  program_count = 0;
+  while (program_count < current_function->program.size())
+    current_function->program[program_count++].visit(AnalyzeStatement{*this});
+}
+
+void AnalyzeStatement::operator()(Expression expression) {}
+
+void AnalyzeStatement::operator()(InitializeVariable statement) {}
+
+void AnalyzeStatement::operator()(InitializeMember statement) {
+  std::unreachable();
+}
+
+void AnalyzeStatement::operator()(InitializeScope statement) {
+  std::unreachable();
+}
+
+void AnalyzeStatement::operator()(ReturnStatement statement) {}
 } // namespace Manadrain

@@ -150,11 +150,15 @@ struct InitializeMember {
   Identifier member_name;
   Unit rvalue;
 };
+struct InitializeScope {
+  ScopeAccess accessor;
+  Unit rvalue;
+};
 struct ReturnStatement {
   Unit argument;
 };
 using Statement = std::variant<Expression, InitializeVariable, InitializeMember,
-                               ReturnStatement>;
+                               InitializeScope, ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -207,6 +211,7 @@ struct FunctionFrame {
   std::span<std::optional<Dynamic>> own_scope;
   std::span<FunctionFrame *> closure;
   Dynamic return_val;
+  std::optional<Dynamic> &access_scope(ScopeAccess accessor);
   std::optional<Dynamic> *get_variable(Identifier var_handle);
 };
 
@@ -257,6 +262,7 @@ struct EvaluateStatement {
   void operator()(Expression);
   void operator()(InitializeVariable);
   void operator()(InitializeMember);
+  void operator()(InitializeScope);
   void operator()(ReturnStatement);
 };
 
@@ -275,6 +281,7 @@ protected:
   std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
 
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
+  std::pmr::list<Dynamic> tagged_heap;
   std::pmr::list<FunctionFrame> function_frames;
   std::pmr::list<std::pmr::vector<std::optional<Dynamic>>> function_scopes;
   std::pmr::list<FunctionDescriptor> function_descriptors;
@@ -326,14 +333,44 @@ private:
                                  IntrinsicFunction intrinsic_function);
 };
 
-class Analyzer : public Script {};
+class Parser;
 
-class Parser : public Analyzer {
+struct AnalyzeUnit {
+  Parser &parser;
+  Unit operator()(Interim);
+  Unit operator()(Identifier);
+  Unit operator()(ScopeAccess);
+  template <typename T> Unit operator()(T arg) { return arg; }
+};
+
+struct AnalyzeExpression {
+  Parser &parser;
+  void operator()(Unit);
+  void operator()(BinaryExpression);
+  void operator()(LogicalExpression);
+  void operator()(MemberExpression);
+  void operator()(FunctionCallExpression);
+  void operator()(AssignExpression);
+  void operator()(ObjectExpression);
+};
+
+struct AnalyzeStatement {
+  Parser &parser;
+  void operator()(Expression);
+  void operator()(InitializeVariable);
+  void operator()(InitializeMember);
+  void operator()(InitializeScope);
+  void operator()(ReturnStatement);
+};
+
+class Parser : public Script {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
 
 private:
+  friend struct AnalyzeStatement;
+
   std::vector<std::unique_ptr<const std::string>> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
   std::unordered_set<std::u16string_view> string_atlas;
@@ -355,6 +392,9 @@ private:
   void tokenize();
 
   FunctionDefinition *current_function;
+  std::size_t program_count;
+  std::vector<bool> scope_trace;
+  void analyze_scope_access();
 
   Unit parse_object_literal();
   Unit parse_primary_expr();
