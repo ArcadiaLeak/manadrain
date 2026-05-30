@@ -98,9 +98,13 @@ public:
 struct FunctionDefinition;
 
 struct Interim {};
+struct ScopeAccess {
+  std::size_t frame_offset;
+  std::size_t scope_offset;
+};
 using Unit =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 Interim, Identifier, const FunctionDefinition *>;
+                 Interim, Identifier, ScopeAccess, const FunctionDefinition *>;
 
 struct BinaryExpression {
   Unit left;
@@ -142,10 +146,15 @@ struct InitializeVariable {
   Identifier variable_name;
   Unit rvalue;
 };
+struct InitializeMember {
+  Identifier member_name;
+  Unit rvalue;
+};
 struct ReturnStatement {
   Unit argument;
 };
-using Statement = std::variant<Expression, InitializeVariable, ReturnStatement>;
+using Statement = std::variant<Expression, InitializeVariable, InitializeMember,
+                               ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -212,7 +221,7 @@ struct ConsoleMessage {
 
 class Script;
 
-struct UnitVisitor {
+struct EvaluateUnit {
   Script &script;
   Dynamic operator()(std::monostate);
   Dynamic operator()(std::u16string_view);
@@ -220,10 +229,11 @@ struct UnitVisitor {
   Dynamic operator()(double);
   Dynamic operator()(Interim);
   Dynamic operator()(Identifier);
+  Dynamic operator()(ScopeAccess);
   Dynamic operator()(const FunctionDefinition *);
 };
 
-struct CalleeVisitor {
+struct EvaluateCallee {
   Script &script;
   std::pair<Dynamic, Dynamic> operator()(Interim);
   std::pair<Dynamic, Dynamic> operator()(Identifier);
@@ -231,7 +241,7 @@ struct CalleeVisitor {
   template <typename T> std::pair<Dynamic, Dynamic> operator()(T) { return {}; }
 };
 
-struct ExpressionVisitor {
+struct EvaluateExpression {
   Script &script;
   Dynamic operator()(Unit);
   Dynamic operator()(BinaryExpression);
@@ -242,10 +252,11 @@ struct ExpressionVisitor {
   Dynamic operator()(ObjectExpression);
 };
 
-struct StatementVisitor {
+struct EvaluateStatement {
   Script &script;
   void operator()(Expression);
   void operator()(InitializeVariable);
+  void operator()(InitializeMember);
   void operator()(ReturnStatement);
 };
 
@@ -274,10 +285,10 @@ protected:
   void initialize_descriptors(FunctionFrame &function_frame);
 
 private:
-  friend struct UnitVisitor;
-  friend struct CalleeVisitor;
-  friend struct ExpressionVisitor;
-  friend struct StatementVisitor;
+  friend struct EvaluateUnit;
+  friend struct EvaluateCallee;
+  friend struct EvaluateExpression;
+  friend struct EvaluateStatement;
 
   ConsoleObject console{IntrinsicFunction::F_LOG};
   std::indirect<std::mutex> console_mutex;
@@ -315,7 +326,9 @@ private:
                                  IntrinsicFunction intrinsic_function);
 };
 
-class Parser : public Script {
+class Analyzer : public Script {};
+
+class Parser : public Analyzer {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();

@@ -225,7 +225,7 @@ Unit Parser::parse_object_literal() {
       throw ScriptError{InvalidPropertyName{}};
     std::size_t property_idx{current_function->program.size()};
     Identifier property_name{std::get<Identifier>(last_token)};
-    current_function->program.push_back(InitializeVariable{property_name});
+    current_function->program.push_back(InitializeMember{property_name});
     auto ordered_it =
         std::ranges::lower_bound(object_shape->properties, property_name);
     object_shape->properties.insert(ordered_it, property_name);
@@ -238,7 +238,7 @@ Unit Parser::parse_object_literal() {
       tokenize();
       property_rvalue = parse_expression();
     }
-    InitializeVariable *property{std::get_if<InitializeVariable>(
+    InitializeMember *property{std::get_if<InitializeMember>(
         current_function->program.data() + property_idx)};
     property->rvalue = property_rvalue;
     if (last_token != Token{U','})
@@ -525,17 +525,17 @@ void Script::initialize_descriptors(FunctionFrame &function_frame) {
   }
 }
 
-Dynamic UnitVisitor::operator()(std::monostate primitive) { return primitive; }
+Dynamic EvaluateUnit::operator()(std::monostate primitive) { return primitive; }
 
-Dynamic UnitVisitor::operator()(std::u16string_view primitive) {
+Dynamic EvaluateUnit::operator()(std::u16string_view primitive) {
   return primitive;
 }
 
-Dynamic UnitVisitor::operator()(std::int64_t primitive) { return primitive; }
+Dynamic EvaluateUnit::operator()(std::int64_t primitive) { return primitive; }
 
-Dynamic UnitVisitor::operator()(double primitive) { return primitive; }
+Dynamic EvaluateUnit::operator()(double primitive) { return primitive; }
 
-Dynamic UnitVisitor::operator()(Interim) {
+Dynamic EvaluateUnit::operator()(Interim) {
   FunctionFrame *frame{script.current_frame};
   std::size_t statement_idx{frame->program_count++};
   const Statement &expression_stmt{frame->definition->program[statement_idx]};
@@ -545,10 +545,10 @@ Dynamic UnitVisitor::operator()(Interim) {
     std::unreachable();
   };
   return expression_stmt.visit(assert_expression)
-      .visit(ExpressionVisitor{script});
+      .visit(EvaluateExpression{script});
 }
 
-Dynamic UnitVisitor::operator()(Identifier identifier) {
+Dynamic EvaluateUnit::operator()(Identifier identifier) {
   std::optional<Dynamic> *from_scope{
       script.current_frame->get_variable(identifier)};
   if (from_scope && *from_scope)
@@ -559,7 +559,11 @@ Dynamic UnitVisitor::operator()(Identifier identifier) {
   throw ScriptError{InvalidVariableAccess{}};
 }
 
-Dynamic UnitVisitor::operator()(const FunctionDefinition *definition) {
+Dynamic EvaluateUnit::operator()(ScopeAccess scope_access) {
+  std::unreachable();
+}
+
+Dynamic EvaluateUnit::operator()(const FunctionDefinition *definition) {
   std::ranges::concat_view closure_view{
       script.current_frame->closure,
       std::ranges::single_view{script.current_frame}};
@@ -569,8 +573,8 @@ Dynamic UnitVisitor::operator()(const FunctionDefinition *definition) {
 }
 
 std::pair<Dynamic, Dynamic>
-CalleeVisitor::operator()(MemberExpression expression) {
-  Dynamic dynamic_object{expression.object.visit(UnitVisitor{script})};
+EvaluateCallee::operator()(MemberExpression expression) {
+  Dynamic dynamic_object{expression.object.visit(EvaluateUnit{script})};
   auto visit_object = [&](auto dynamic_alt) {
     return script.evaluate_property(expression.property, dynamic_alt);
   };
@@ -578,7 +582,7 @@ CalleeVisitor::operator()(MemberExpression expression) {
   return {dynamic_object, dynamic_property};
 }
 
-std::pair<Dynamic, Dynamic> CalleeVisitor::operator()(Interim) {
+std::pair<Dynamic, Dynamic> EvaluateCallee::operator()(Interim) {
   std::size_t statement_idx{script.current_frame->program_count++};
   const Statement &argument_stmt{
       script.current_frame->definition->program[statement_idx]};
@@ -590,17 +594,17 @@ std::pair<Dynamic, Dynamic> CalleeVisitor::operator()(Interim) {
   return argument_stmt.visit(assert_expression).visit(*this);
 }
 
-std::pair<Dynamic, Dynamic> CalleeVisitor::operator()(Identifier identifier) {
-  return {std::monostate{}, UnitVisitor{script}(identifier)};
+std::pair<Dynamic, Dynamic> EvaluateCallee::operator()(Identifier identifier) {
+  return {std::monostate{}, EvaluateUnit{script}(identifier)};
 }
 
-Dynamic ExpressionVisitor::operator()(Unit unit) {
-  return unit.visit(UnitVisitor{script});
+Dynamic EvaluateExpression::operator()(Unit unit) {
+  return unit.visit(EvaluateUnit{script});
 }
 
-Dynamic ExpressionVisitor::operator()(BinaryExpression expression) {
-  Dynamic dynamic_lhs{expression.left.visit(UnitVisitor{script})};
-  Dynamic dynamic_rhs{expression.right.visit(UnitVisitor{script})};
+Dynamic EvaluateExpression::operator()(BinaryExpression expression) {
+  Dynamic dynamic_lhs{expression.left.visit(EvaluateUnit{script})};
+  Dynamic dynamic_rhs{expression.right.visit(EvaluateUnit{script})};
   auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
     if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
                   std::is_same_v<decltype(rhs), std::int64_t>)
@@ -611,9 +615,9 @@ Dynamic ExpressionVisitor::operator()(BinaryExpression expression) {
   return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
 }
 
-Dynamic ExpressionVisitor::operator()(LogicalExpression expression) {
-  Dynamic dynamic_lhs{expression.left.visit(UnitVisitor{script})};
-  Dynamic dynamic_rhs{expression.right.visit(UnitVisitor{script})};
+Dynamic EvaluateExpression::operator()(LogicalExpression expression) {
+  Dynamic dynamic_lhs{expression.left.visit(EvaluateUnit{script})};
+  Dynamic dynamic_rhs{expression.right.visit(EvaluateUnit{script})};
   auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
     if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
                   std::is_same_v<decltype(rhs), std::int64_t>)
@@ -624,22 +628,22 @@ Dynamic ExpressionVisitor::operator()(LogicalExpression expression) {
   return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
 }
 
-Dynamic ExpressionVisitor::operator()(MemberExpression expression) {
-  Dynamic dynamic_object{expression.object.visit(UnitVisitor{script})};
+Dynamic EvaluateExpression::operator()(MemberExpression expression) {
+  Dynamic dynamic_object{expression.object.visit(EvaluateUnit{script})};
   auto visit_object = [&](auto dynamic_alt) {
     return script.evaluate_property(expression.property, dynamic_alt);
   };
   return dynamic_object.visit(visit_object);
 }
 
-Dynamic ExpressionVisitor::operator()(FunctionCallExpression function_call) {
+Dynamic EvaluateExpression::operator()(FunctionCallExpression function_call) {
   auto [dynamic_context, dynamic_callee] =
-      function_call.callee.visit(CalleeVisitor{script});
+      function_call.callee.visit(EvaluateCallee{script});
   std::pmr::vector<Dynamic> dynamic_arguments(function_call.passed_arguments,
                                               script.resource.get());
   FunctionCallInfo call_info{dynamic_context, dynamic_arguments};
   for (Dynamic &argument_lvalue : dynamic_arguments)
-    argument_lvalue = UnitVisitor{script}(Interim{});
+    argument_lvalue = EvaluateUnit{script}(Interim{});
   auto visit_dynamic = [&](auto dynamic_alt) -> Dynamic {
     if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionDescriptor *> ||
                   std::is_same_v<decltype(dynamic_alt), IntrinsicFunction>)
@@ -650,16 +654,16 @@ Dynamic ExpressionVisitor::operator()(FunctionCallExpression function_call) {
   return dynamic_callee.visit(visit_dynamic);
 }
 
-Dynamic ExpressionVisitor::operator()(AssignExpression assign_expr) {
+Dynamic EvaluateExpression::operator()(AssignExpression assign_expr) {
   Identifier *assign_identifier{std::get_if<Identifier>(&assign_expr.left)};
   std::optional<Dynamic> *assign_lvalue{
       script.current_frame->get_variable(*assign_identifier)};
   assert(assign_lvalue != nullptr);
-  *assign_lvalue = assign_expr.right.visit(UnitVisitor{script});
+  *assign_lvalue = assign_expr.right.visit(EvaluateUnit{script});
   return {};
 }
 
-Dynamic ExpressionVisitor::operator()(ObjectExpression object_expr) {
+Dynamic EvaluateExpression::operator()(ObjectExpression object_expr) {
   VanillaObject &instance{script.object_instances.emplace_back()};
   instance.object_shape = object_expr.object_shape;
   std::size_t object_size{object_expr.passed_properties};
@@ -669,34 +673,37 @@ Dynamic ExpressionVisitor::operator()(ObjectExpression object_expr) {
     std::size_t property_idx{frame->program_count++};
     const Statement &statement{frame->definition->program[property_idx]};
     auto assert_variable_init =
-        [](const auto &visitee) -> const InitializeVariable & {
-      if constexpr (std::is_same_v<decltype(visitee),
-                                   const InitializeVariable &>)
+        [](const auto &visitee) -> const InitializeMember & {
+      if constexpr (std::is_same_v<decltype(visitee), const InitializeMember &>)
         return visitee;
       std::unreachable();
     };
-    const InitializeVariable &property{statement.visit(assert_variable_init)};
-    Dynamic *property_ptr{instance.get_property(property.variable_name)};
-    *property_ptr = property.rvalue.visit(UnitVisitor{script});
+    const InitializeMember &property{statement.visit(assert_variable_init)};
+    Dynamic *property_ptr{instance.get_property(property.member_name)};
+    *property_ptr = property.rvalue.visit(EvaluateUnit{script});
   }
   return &instance;
 }
 
-void StatementVisitor::operator()(Expression expression) {
-  expression.visit(ExpressionVisitor{script});
+void EvaluateStatement::operator()(Expression expression) {
+  expression.visit(EvaluateExpression{script});
 }
 
-void StatementVisitor::operator()(InitializeVariable statement) {
-  Dynamic rvalue_dynamic{statement.rvalue.visit(UnitVisitor{script})};
+void EvaluateStatement::operator()(InitializeVariable statement) {
+  Dynamic rvalue_dynamic{statement.rvalue.visit(EvaluateUnit{script})};
   std::optional<Dynamic> *variable_lvalue{
       script.current_frame->get_variable(statement.variable_name)};
   assert(variable_lvalue != nullptr);
   *variable_lvalue = rvalue_dynamic;
 }
 
-void StatementVisitor::operator()(ReturnStatement statement) {
+void EvaluateStatement::operator()(InitializeMember statement) {
+  std::unreachable();
+}
+
+void EvaluateStatement::operator()(ReturnStatement statement) {
   script.current_frame->return_val =
-      statement.argument.visit(UnitVisitor{script});
+      statement.argument.visit(EvaluateUnit{script});
 }
 
 std::u16string Script::stringify(std::monostate) { return u"undefined"; }
@@ -750,7 +757,7 @@ Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
   current_frame = &callee_frame;
   while (current_frame->program_count < callee_frame.definition->program.size())
     callee_frame.definition->program[current_frame->program_count++].visit(
-        StatementVisitor{*this});
+        EvaluateStatement{*this});
   current_frame = caller_frame;
   return callee_frame.return_val;
 }
@@ -834,7 +841,7 @@ void Script::evaluate() {
   while (current_frame->program_count <
          current_frame->definition->program.size())
     current_frame->definition->program[current_frame->program_count++].visit(
-        StatementVisitor{*this});
+        EvaluateStatement{*this});
 }
 
 void Script::collect_console_messages(std::stop_token stopper,
