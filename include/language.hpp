@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <deque>
+#include <flat_map>
 #include <generator>
 #include <inplace_vector>
 #include <list>
@@ -92,12 +93,20 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
+struct ObjectShape;
 struct FunctionDefinition;
 
+enum class Primitive { T_ANY, T_NUMBER, T_STRING };
+enum class IntrinsicFunction { F_LOG, F_LENGTH };
+enum class IntrinsicObject { O_GLOBAL, O_CONSOLE };
+using Datatype =
+    std::variant<Primitive, const ObjectShape *, const FunctionDefinition *,
+                 IntrinsicFunction, IntrinsicObject>;
+
 struct Interim {};
-using Unit =
-    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 Interim, Identifier, const FunctionDefinition *>;
+using Unit = std::variant<std::monostate, std::u16string_view, std::int32_t,
+                          std::int64_t, double, Interim, Identifier,
+                          const FunctionDefinition *>;
 
 struct BinaryExpression {
   Unit left;
@@ -121,13 +130,6 @@ struct AssignExpression {
   Unit left;
   Unit right;
 };
-
-struct NumberType {};
-struct StringType {};
-struct DynamicType {};
-struct ObjectShape;
-using Datatype = std::variant<DynamicType, NumberType, StringType,
-                              const ObjectShape *, const FunctionDefinition *>;
 
 struct ObjectShape {
   std::vector<Datatype> property_types;
@@ -157,55 +159,18 @@ struct ReturnStatement {
 using Statement = std::variant<Expression, InitializeVariable, InitializeMember,
                                ReturnStatement>;
 
-enum class IntrinsicFunction { F_LOG };
-
 struct FunctionDefinition {
   std::optional<Identifier> function_name;
-  std::vector<Datatype> argument_types;
   std::vector<Identifier> arguments;
   Datatype return_type;
-  std::vector<Datatype> local_types;
-  std::vector<Identifier> local_scope;
-  std::vector<std::pair<Identifier, const FunctionDefinition *>>
-      nested_functions;
+  std::flat_map<Identifier, Datatype> local_scope;
+  std::flat_map<Identifier, const FunctionDefinition *> nested_functions;
   std::vector<Statement> program;
 };
 
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
-
-class Analyzer;
-
-struct AnalyzeUnit {
-  Analyzer &analyzer;
-  Unit operator()(std::monostate);
-  Unit operator()(std::u16string_view permanent);
-  Unit operator()(std::int64_t number);
-  Unit operator()(double number);
-  Unit operator()(Interim);
-  Unit operator()(Identifier identifier);
-  Unit operator()(const FunctionDefinition *definiton);
-};
-
-struct AnalyzeExpression {
-  Analyzer &analyzer;
-  void operator()(Unit unit);
-  void operator()(BinaryExpression expression);
-  void operator()(LogicalExpression expression);
-  void operator()(MemberExpression expression);
-  void operator()(FunctionCallExpression expression);
-  void operator()(AssignExpression expression);
-  void operator()(ObjectExpression expression);
-};
-
-struct AnalyzeStatement {
-  Analyzer &analyzer;
-  void operator()(Expression statement);
-  void operator()(InitializeVariable statement);
-  void operator()(InitializeMember statement);
-  void operator()(ReturnStatement statement);
-};
 
 enum class Syscall { FD_CLOSE, FD_WRITE, FD_SEEK, PROC_EXIT };
 

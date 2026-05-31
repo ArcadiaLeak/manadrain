@@ -360,14 +360,11 @@ void Parser::parse_statement() {
     std::optional<Identifier> function_name{nested_definition->function_name};
     if (not function_name)
       throw ScriptError{MissingFunctionName{}};
-    if (std::ranges::binary_search(current_function->local_scope,
-                                   *function_name))
+    if (current_function->local_scope.contains(*function_name) ||
+        current_function->nested_functions.contains(*function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    current_function->nested_functions.push_back(
+    current_function->nested_functions.insert(
         {*function_name, nested_definition});
-    auto lower_bound =
-        std::ranges::lower_bound(current_function->local_scope, *function_name);
-    current_function->local_scope.insert(lower_bound, *function_name);
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
@@ -408,9 +405,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
     Identifier *parameter{std::get_if<Identifier>(&last_token)};
     if (not parameter)
       throw ScriptError{MissingFormalParameter{}};
-    auto lower_bound =
-        std::ranges::lower_bound(definition->local_scope, *parameter);
-    definition->local_scope.insert(lower_bound, *parameter);
+    definition->local_scope.insert({*parameter, Primitive::T_ANY});
     definition->arguments.push_back(*parameter);
     tokenize();
     if (last_token == Token{U')'})
@@ -452,11 +447,10 @@ void Parser::parse_variable_decl() {
   variable_init->rvalue = rvalue_unit;
   assert_punct(';');
   Identifier variable_name{variable_init->variable_name};
-  if (std::ranges::binary_search(current_function->local_scope, variable_name))
+  if (current_function->local_scope.contains(variable_name) ||
+      current_function->nested_functions.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
-  auto variable_it =
-      std::ranges::lower_bound(current_function->local_scope, variable_name);
-  current_function->local_scope.insert(variable_it, variable_name);
+  current_function->local_scope.insert({variable_name, Primitive::T_ANY});
 }
 
 void Analyzer::analyze_program() {
@@ -464,14 +458,4 @@ void Analyzer::analyze_program() {
        function_definitions) {
   }
 }
-
-void AnalyzeStatement::operator()(Expression expression) {}
-
-void AnalyzeStatement::operator()(InitializeVariable statement) {}
-
-void AnalyzeStatement::operator()(InitializeMember statement) {
-  std::unreachable();
-}
-
-void AnalyzeStatement::operator()(ReturnStatement statement) {}
 } // namespace Manadrain
