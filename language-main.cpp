@@ -36,21 +36,5 @@ int main(int argc, char *argv[]) {
   parser.text_buffer = std::move(text_buffer);
   parser.parse_text();
 
-  Manadrain::Script script{std::move(parser)};
-  script.evaluate();
-
-  auto console_printer = [&](std::stop_token stopper) {
-    std::list<Manadrain::ConsoleMessage> messages{};
-    script.collect_console_messages(stopper, messages);
-    for (const Manadrain::ConsoleMessage &message : messages)
-      std::println("{}", message.encode_for_print());
-  };
-  auto console_worker = [&](std::stop_token stopper) {
-    do
-      console_printer(stopper);
-    while (not stopper.stop_requested());
-  };
-  std::jthread console_thread{console_worker};
-
   return 0;
 }

@@ -171,171 +171,14 @@ struct FunctionDefinition {
   std::vector<Statement> program;
 };
 
-struct FunctionFrame;
-struct FunctionDescriptor {
-  const FunctionDefinition *definition;
-  std::span<FunctionFrame *> closure;
-};
-
-using Dynamic =
-    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 ObjectInstance *, FunctionDescriptor *, IntrinsicFunction>;
-
-struct ObjectInstance {
-  virtual Dynamic *get_property(Identifier property) = 0;
-};
-struct VanillaObject final : ObjectInstance {
-  const ObjectShape *object_shape;
-  std::span<Dynamic> properties;
-  Dynamic *get_property(Identifier property) override;
-};
-struct GlobalObject final : ObjectInstance {
-  GlobalObject(Dynamic c) : console{c} {};
-  Dynamic console;
-  Dynamic *get_property(Identifier property) override;
-};
-struct ConsoleObject final : ObjectInstance {
-  ConsoleObject(Dynamic l) : log{l} {};
-  Dynamic log;
-  Dynamic *get_property(Identifier property) override;
-};
-
-struct FunctionCallInfo {
-  Dynamic context;
-  std::span<Dynamic> arguments;
-};
-
-struct FunctionFrame {
-  const FunctionDefinition *definition;
-  std::size_t program_count;
-  std::span<Dynamic> own_scope;
-  std::span<FunctionFrame *> closure;
-  Dynamic return_val;
-  Dynamic &access_scope(ScopeAccess accessor);
-  Dynamic *get_variable(Identifier var_handle);
-};
-
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
-struct ConsoleMessage {
-  std::u16string content;
-  std::string encode_for_print() const;
-};
-
-class Script;
-
-struct EvaluateUnit {
-  Script &script;
-  Dynamic operator()(std::monostate);
-  Dynamic operator()(std::u16string_view);
-  Dynamic operator()(std::int64_t);
-  Dynamic operator()(double);
-  Dynamic operator()(Interim);
-  Dynamic operator()(Identifier);
-  Dynamic operator()(ScopeAccess);
-  Dynamic operator()(const FunctionDefinition *);
-};
-
-struct EvaluateCallee {
-  Script &script;
-  std::pair<Dynamic, Dynamic> operator()(Interim);
-  std::pair<Dynamic, Dynamic> operator()(Identifier);
-  std::pair<Dynamic, Dynamic> operator()(MemberExpression);
-  template <typename T> std::pair<Dynamic, Dynamic> operator()(T) { return {}; }
-};
-
-struct EvaluateExpression {
-  Script &script;
-  Dynamic operator()(Unit);
-  Dynamic operator()(BinaryExpression);
-  Dynamic operator()(LogicalExpression);
-  Dynamic operator()(MemberExpression);
-  Dynamic operator()(FunctionCallExpression);
-  Dynamic operator()(AssignExpression);
-  Dynamic operator()(ObjectExpression);
-};
-
-struct EvaluateStatement {
-  Script &script;
-  void operator()(Expression);
-  void operator()(InitializeVariable);
-  void operator()(InitializeMember);
-  void operator()(InitializeScope);
-  void operator()(ReturnStatement);
-};
-
-class Script {
-public:
-  Script();
-
-  void collect_console_messages(std::stop_token stopper,
-                                std::list<ConsoleMessage> &message_box);
-  void evaluate();
-
-protected:
-  FunctionFrame *current_frame;
-  std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
-  std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
-  std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
-
-  std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
-  std::pmr::list<Dynamic> tagged_heap;
-  std::pmr::list<FunctionFrame> function_frames;
-  std::pmr::list<FunctionDescriptor> function_descriptors;
-  std::pmr::list<std::pmr::vector<FunctionFrame *>> scope_stacks;
-  std::pmr::list<VanillaObject> object_instances;
-  std::pmr::list<std::pmr::vector<Dynamic>> structures;
-
-  void initialize_descriptors(FunctionFrame &function_frame);
-
-private:
-  friend struct EvaluateUnit;
-  friend struct EvaluateCallee;
-  friend struct EvaluateExpression;
-  friend struct EvaluateStatement;
-
-  ConsoleObject console{IntrinsicFunction::F_LOG};
-  std::indirect<std::mutex> console_mutex;
-  std::indirect<std::condition_variable_any> console_condition;
-  std::list<ConsoleMessage> console_messages;
-
-  GlobalObject global_this{&console};
-
-  std::u16string stringify(std::monostate);
-  std::u16string stringify(std::u16string_view permanent_string);
-  std::u16string stringify(std::int64_t number);
-  std::u16string stringify(double number);
-  std::u16string stringify(ObjectInstance *object_instance);
-  std::u16string stringify(FunctionDescriptor *descriptor);
-  std::u16string stringify(IntrinsicFunction intrinsic_function);
-
-  Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
-  Dynamic evaluate_operation(Operator op, std::int64_t lhs, std::int64_t rhs);
-
-  Dynamic evaluate_property(Identifier property, std::monostate);
-  Dynamic evaluate_property(Identifier property,
-                            std::u16string_view permanent_string);
-  Dynamic evaluate_property(Identifier property, std::int64_t number);
-  Dynamic evaluate_property(Identifier property, double number);
-  Dynamic evaluate_property(Identifier property,
-                            ObjectInstance *object_instance);
-  Dynamic evaluate_property(Identifier property,
-                            FunctionDescriptor *descriptor);
-  Dynamic evaluate_property(Identifier property,
-                            IntrinsicFunction intrinsic_function);
-
-  Dynamic evaluate_function_call(FunctionCallInfo call_info,
-                                 FunctionDescriptor *callee);
-  Dynamic evaluate_function_call(FunctionCallInfo call_info,
-                                 IntrinsicFunction intrinsic_function);
-};
-
-class Parser;
+class Analyzer;
 
 struct AnalyzeUnit {
-  Parser &parser;
+  Analyzer &analyzer;
   Unit operator()(Interim);
   Unit operator()(Identifier);
   Unit operator()(ScopeAccess);
@@ -343,7 +186,7 @@ struct AnalyzeUnit {
 };
 
 struct AnalyzeExpression {
-  Parser &parser;
+  Analyzer &analyzer;
   void operator()(Unit);
   void operator()(BinaryExpression);
   void operator()(LogicalExpression);
@@ -354,7 +197,7 @@ struct AnalyzeExpression {
 };
 
 struct AnalyzeStatement {
-  Parser &parser;
+  Analyzer &analyzer;
   void operator()(Expression);
   void operator()(InitializeVariable);
   void operator()(InitializeMember);
@@ -362,14 +205,25 @@ struct AnalyzeStatement {
   void operator()(ReturnStatement);
 };
 
-class Parser : public Script {
+class Analyzer {
+public:
+  void analyze_program();
+
+protected:
+  std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
+  std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
+  std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
+
+private:
+  friend struct AnalyzeStatement;
+};
+
+class Parser : public Analyzer {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
 
 private:
-  friend struct AnalyzeStatement;
-
   std::vector<std::unique_ptr<const std::string>> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
   std::unordered_set<std::u16string_view> string_atlas;
