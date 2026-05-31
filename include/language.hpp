@@ -1,12 +1,9 @@
-#include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <generator>
 #include <inplace_vector>
 #include <list>
 #include <memory>
-#include <memory_resource>
-#include <mutex>
 #include <optional>
 #include <ranges>
 #include <unordered_map>
@@ -129,10 +126,13 @@ struct AssignExpression {
   Unit right;
 };
 
-struct ObjectInstance;
+enum class Datatype { T_NUMBER, T_STRING, T_DYNAMIC };
+
 struct ObjectShape {
+  std::vector<Datatype> property_types;
   std::vector<Identifier> properties;
 };
+
 struct ObjectExpression {
   const ObjectShape *object_shape;
   std::size_t passed_properties;
@@ -164,7 +164,9 @@ enum class IntrinsicFunction { F_LOG };
 
 struct FunctionDefinition {
   std::optional<Identifier> function_name;
+  std::vector<Datatype> argument_types;
   std::vector<Identifier> arguments;
+  std::vector<Datatype> local_types;
   std::vector<Identifier> local_scope;
   std::vector<std::pair<Identifier, const FunctionDefinition *>>
       nested_functions;

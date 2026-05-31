@@ -5,7 +5,6 @@
 #include <iostream>
 #include <print>
 #include <ranges>
-#include <thread>
 
 #include <unistr.h>
 
@@ -35,6 +34,9 @@ int main(int argc, char *argv[]) {
       std::from_range, std::ranges::istream_view<std::uint8_t>{file})};
   parser.text_buffer = std::move(text_buffer);
   parser.parse_text();
+
+  Manadrain::Analyzer analyzer{std::move(parser)};
+  analyzer.analyze_program();
 
   return 0;
 }

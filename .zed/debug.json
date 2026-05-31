@@ -8,7 +8,7 @@
     "label": "language (GDB)",
     "request": "launch",
     "program": "./build/manadrain",
-    "args": ["./samples/add.wasm"],
+    "args": ["./samples/helloworld.js"],
     "stopAtBeginningOfMainSubprogram": true,
     "cwd": "/home/evgenii/manadrain",
   },
