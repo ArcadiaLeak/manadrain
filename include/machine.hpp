@@ -19,16 +19,15 @@ public:
 private:
   std::size_t position;
 
-  std::generator<std::uint8_t> head_traverse();
-  std::generator<std::uint8_t> tail_traverse();
+  std::generator<std::uint8_t> traverse();
+  std::uint8_t forward();
 
-  std::optional<std::uint8_t> forward();
-
-  std::uint32_t decode_varsint32();
-  std::uint32_t decode_varuint32();
+  std::uint32_t take_vars32();
+  std::uint32_t take_varu32();
 
   std::vector<std::unique_ptr<const FunctionDefinition>> function_definitions;
 
   void parse_function_type();
+  void parse_import_entry();
 };
 } // namespace Manadrain
