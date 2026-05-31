@@ -115,7 +115,7 @@ Token Parser::tokenize_string_literal(char32_t separator) {
   if (iter_existing != string_atlas.end())
     return *iter_existing;
   permanent_strings.push_back(
-      std::make_shared<std::u16string>(std::move(literal_str)));
+      std::make_unique<std::u16string>(std::move(literal_str)));
   std::u16string_view permanent_view{*permanent_strings.back()};
   string_atlas.insert(permanent_view);
   return permanent_view;
@@ -209,10 +209,10 @@ void Parser::parse_text() {
 }
 
 Unit Parser::parse_object_literal() {
-  std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
-  object_shapes.push_back(object_shape);
+  ObjectShape *object_shape{new ObjectShape{}};
+  object_shapes.emplace_back(object_shape);
   std::size_t statement_idx{current_function->program.size()};
-  current_function->program.push_back(ObjectExpression{object_shape.get()});
+  current_function->program.push_back(ObjectExpression{object_shape});
   tokenize();
   while (last_token != Token{U'}'}) {
     if (not std::holds_alternative<Identifier>(last_token))
@@ -459,17 +459,17 @@ void Parser::parse_variable_decl() {
   current_function->local_scope.insert(variable_it, variable_name);
 }
 
-void Analyzer::analyze_program() {}
+void Analyzer::analyze_program() {
+  for (std::unique_ptr<const FunctionDefinition> &definition :
+       function_definitions) {
+  }
+}
 
 void AnalyzeStatement::operator()(Expression expression) {}
 
 void AnalyzeStatement::operator()(InitializeVariable statement) {}
 
 void AnalyzeStatement::operator()(InitializeMember statement) {
-  std::unreachable();
-}
-
-void AnalyzeStatement::operator()(InitializeScope statement) {
   std::unreachable();
 }
 

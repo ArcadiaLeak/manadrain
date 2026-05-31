@@ -95,13 +95,9 @@ public:
 struct FunctionDefinition;
 
 struct Interim {};
-struct ScopeAccess {
-  std::size_t frame_offset;
-  std::size_t scope_offset;
-};
 using Unit =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 Interim, Identifier, ScopeAccess, const FunctionDefinition *>;
+                 Interim, Identifier, const FunctionDefinition *>;
 
 struct BinaryExpression {
   Unit left;
@@ -126,7 +122,12 @@ struct AssignExpression {
   Unit right;
 };
 
-enum class Datatype { T_NUMBER, T_STRING, T_DYNAMIC };
+struct NumberType {};
+struct StringType {};
+struct DynamicType {};
+struct ObjectShape;
+using Datatype = std::variant<DynamicType, NumberType, StringType,
+                              const ObjectShape *, const FunctionDefinition *>;
 
 struct ObjectShape {
   std::vector<Datatype> property_types;
@@ -150,15 +151,11 @@ struct InitializeMember {
   Identifier member_name;
   Unit rvalue;
 };
-struct InitializeScope {
-  ScopeAccess accessor;
-  Unit rvalue;
-};
 struct ReturnStatement {
   Unit argument;
 };
 using Statement = std::variant<Expression, InitializeVariable, InitializeMember,
-                               InitializeScope, ReturnStatement>;
+                               ReturnStatement>;
 
 enum class IntrinsicFunction { F_LOG };
 
@@ -166,6 +163,7 @@ struct FunctionDefinition {
   std::optional<Identifier> function_name;
   std::vector<Datatype> argument_types;
   std::vector<Identifier> arguments;
+  Datatype return_type;
   std::vector<Datatype> local_types;
   std::vector<Identifier> local_scope;
   std::vector<std::pair<Identifier, const FunctionDefinition *>>
@@ -181,40 +179,44 @@ class Analyzer;
 
 struct AnalyzeUnit {
   Analyzer &analyzer;
+  Unit operator()(std::monostate);
+  Unit operator()(std::u16string_view permanent);
+  Unit operator()(std::int64_t number);
+  Unit operator()(double number);
   Unit operator()(Interim);
-  Unit operator()(Identifier);
-  Unit operator()(ScopeAccess);
-  template <typename T> Unit operator()(T arg) { return arg; }
+  Unit operator()(Identifier identifier);
+  Unit operator()(const FunctionDefinition *definiton);
 };
 
 struct AnalyzeExpression {
   Analyzer &analyzer;
-  void operator()(Unit);
-  void operator()(BinaryExpression);
-  void operator()(LogicalExpression);
-  void operator()(MemberExpression);
-  void operator()(FunctionCallExpression);
-  void operator()(AssignExpression);
-  void operator()(ObjectExpression);
+  void operator()(Unit unit);
+  void operator()(BinaryExpression expression);
+  void operator()(LogicalExpression expression);
+  void operator()(MemberExpression expression);
+  void operator()(FunctionCallExpression expression);
+  void operator()(AssignExpression expression);
+  void operator()(ObjectExpression expression);
 };
 
 struct AnalyzeStatement {
   Analyzer &analyzer;
-  void operator()(Expression);
-  void operator()(InitializeVariable);
-  void operator()(InitializeMember);
-  void operator()(InitializeScope);
-  void operator()(ReturnStatement);
+  void operator()(Expression statement);
+  void operator()(InitializeVariable statement);
+  void operator()(InitializeMember statement);
+  void operator()(ReturnStatement statement);
 };
+
+enum class Syscall { FD_CLOSE, FD_WRITE, FD_SEEK, PROC_EXIT };
 
 class Analyzer {
 public:
   void analyze_program();
 
 protected:
-  std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
-  std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
-  std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
+  std::vector<std::unique_ptr<const FunctionDefinition>> function_definitions;
+  std::vector<std::unique_ptr<const ObjectShape>> object_shapes;
+  std::vector<std::unique_ptr<const std::u16string>> permanent_strings;
 
 private:
   friend struct AnalyzeStatement;
@@ -247,9 +249,6 @@ private:
   void tokenize();
 
   FunctionDefinition *current_function;
-  std::size_t program_count;
-  std::vector<bool> scope_trace;
-  void analyze_scope_access();
 
   Unit parse_object_literal();
   Unit parse_primary_expr();
