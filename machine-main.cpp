@@ -1,20 +1,27 @@
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <cstring>
+#include <vector>
 
 #include <binaryen-c.h>
-
-// "hello world" type example: create a function that adds two i32s and returns
-// the result
 
 int main() {
   BinaryenModuleRef module = BinaryenModuleCreate();
 
+  std::u16string hello_world_u16{u"hello world\n"};
+  std::vector<char> hello_world_enc(hello_world_u16.size() * sizeof(char16_t));
+  std::memcpy(hello_world_enc.data(), hello_world_u16.data(),
+              hello_world_u16.size() * sizeof(char16_t));
+
   std::array segment_names{std::to_array<const char *>({nullptr})};
-  std::array segment_datas{std::to_array({"hello world\n"})};
+  std::array segment_datas{
+      std::to_array<const char *>({hello_world_enc.data()})};
   std::array segment_passives{std::to_array({false})};
   std::array segment_offsets{
       std::to_array({BinaryenConst(module, BinaryenLiteralInt32(0))})};
-  std::array segment_sizes{std::to_array<BinaryenIndex>({12})};
+  std::array segment_sizes{std::to_array<BinaryenIndex>(
+      {static_cast<std::uint32_t>(hello_world_enc.size())})};
   BinaryenSetMemory(module, 1, -1, "memory", segment_names.data(),
                     segment_datas.data(), segment_passives.data(),
                     segment_offsets.data(), segment_sizes.data(),
@@ -166,8 +173,9 @@ int main() {
        BinaryenBinary(module, BinaryenAddInt32(),
                       BinaryenLocalGet(module, 0, BinaryenTypeInt32()),
                       BinaryenConst(module, BinaryenLiteralInt32(8)))})};
-  std::array exit_operands{
-      std::to_array({BinaryenConst(module, BinaryenLiteralInt32(0))})};
+  std::array exit_operands{std::to_array(
+      {BinaryenCall(module, "fd_write", write_operands.data(),
+                    write_operands.size(), BinaryenTypeInt32())})};
   std::array main_body{std::to_array(
       {BinaryenStore(module, 4, 0, 0,
                      BinaryenLocalTee(module, 0,
@@ -185,9 +193,6 @@ int main() {
                           BinaryenConst(module, BinaryenLiteralInt32(4))),
            BinaryenConst(module, BinaryenLiteralInt32(12)), BinaryenTypeInt32(),
            "memory"),
-       BinaryenDrop(module,
-                    BinaryenCall(module, "fd_write", write_operands.data(),
-                                 write_operands.size(), BinaryenTypeInt32())),
        BinaryenCall(module, "proc_exit", exit_operands.data(),
                     exit_operands.size(), BinaryenTypeNone())})};
   std::array main_locals{std::to_array({BinaryenTypeInt32()})};
@@ -196,8 +201,19 @@ int main() {
       main_locals.data(), main_locals.size(),
       BinaryenBlock(module, nullptr, main_body.data(), main_body.size(),
                     BinaryenTypeAuto()));
-  BinaryenFunctionSetLocalName(main_func, 0, "ioptr");
+  BinaryenFunctionSetLocalName(main_func, 0, "ptr_iovec");
   BinaryenAddFunctionExport(module, "main", "_start");
+
+  std::array unicode_to_utf8_params{
+      std::to_array({BinaryenTypeInt32(), BinaryenTypeInt32()})};
+  BinaryenFunctionRef unicode_to_utf8_func =
+      BinaryenAddFunction(module, "unicode_to_utf8",
+                          BinaryenTypeCreate(unicode_to_utf8_params.data(),
+                                             unicode_to_utf8_params.size()),
+                          BinaryenTypeInt32(), nullptr, 0,
+                          BinaryenConst(module, BinaryenLiteralInt32(4)));
+  BinaryenFunctionSetLocalName(unicode_to_utf8_func, 0, "ptr_buf");
+  BinaryenFunctionSetLocalName(unicode_to_utf8_func, 1, "ch");
 
   BinaryenModulePrint(module);
   BinaryenModuleDispose(module);

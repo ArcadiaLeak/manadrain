@@ -96,7 +96,16 @@ public:
 struct ObjectShape;
 struct FunctionDefinition;
 
-enum class Primitive { T_ANY, T_NUMBER, T_STRING };
+enum class Primitive {
+  T_ANY,
+  T_BYTE,
+  T_LIGATURE,
+  T_NUMBER,
+  T_PRODUCT,
+  T_FRACTION,
+  T_QUOTIENT,
+  T_STRING
+};
 enum class IntrinsicFunction { F_LOG, F_LENGTH };
 enum class IntrinsicObject { O_GLOBAL, O_CONSOLE };
 using Datatype =
