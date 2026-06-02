@@ -186,24 +186,19 @@ inline constexpr std::size_t OFFSET_length{2};
 
 enum class Syscall { FD_CLOSE, FD_WRITE, FD_SEEK, PROC_EXIT };
 
-class Analyzer {
+class Compiler {
 public:
+  std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
+  void parse_text();
   void analyze_program();
 
-protected:
+private:
   std::vector<std::unique_ptr<const Expression>> expressions;
   std::vector<std::unique_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::unique_ptr<const ObjectShape>> object_shapes;
   std::vector<std::unique_ptr<const std::u16string>> permanent_strings;
   std::unordered_set<std::u16string_view> string_atlas;
-};
 
-class Parser : public Analyzer {
-public:
-  std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
-  void parse_text();
-
-private:
   std::vector<std::unique_ptr<const std::string>> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
 

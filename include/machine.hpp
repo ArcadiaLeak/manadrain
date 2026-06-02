@@ -46,6 +46,7 @@ struct FunctionFrame {
 
 struct Machine {
   Machine();
-  std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
+  std::array<std::byte, 65536> buffer;
+  std::pmr::monotonic_buffer_resource resource;
   std::deque<FunctionFrame *> function_frames;
 };

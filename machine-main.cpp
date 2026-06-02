@@ -3,7 +3,7 @@
 int main(int argc, char *argv[]) {
   Machine machine{};
 
-  std::pmr::polymorphic_allocator<> allocator(machine.resource.get());
+  std::pmr::polymorphic_allocator<> allocator(&machine.resource);
   machine.function_frames.push_front(allocator.new_object<FunctionFrame>());
   for (FunctionFrame *function_frame : machine.function_frames)
     allocator.delete_object(function_frame);

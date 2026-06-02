@@ -29,14 +29,12 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Parser parser{};
+  Manadrain::Compiler compiler{};
   std::unique_ptr text_buffer{std::make_unique<std::vector<std::uint8_t>>(
       std::from_range, std::ranges::istream_view<std::uint8_t>{file})};
-  parser.text_buffer = std::move(text_buffer);
-  parser.parse_text();
-
-  Manadrain::Analyzer analyzer{std::move(parser)};
-  analyzer.analyze_program();
+  compiler.text_buffer = std::move(text_buffer);
+  compiler.parse_text();
+  compiler.analyze_program();
 
   return 0;
 }

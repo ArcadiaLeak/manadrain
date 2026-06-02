@@ -28,7 +28,7 @@ static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
 static const std::array permanent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::optional<char32_t> Parser::forward() {
+std::optional<char32_t> Compiler::forward() {
   if (position >= text_buffer->size())
     backtrace.push_back(std::nullopt);
   else {
@@ -42,7 +42,7 @@ std::optional<char32_t> Parser::forward() {
   return backtrace.back();
 }
 
-std::generator<std::optional<char32_t>> Parser::traverse_text() {
+std::generator<std::optional<char32_t>> Compiler::traverse_text() {
   while (1)
     co_yield forward();
 }
@@ -61,19 +61,19 @@ std::inplace_vector<char16_t, 2> traverse_u16(ucs4_t cp) {
   return {std::from_range, buffer | std::views::take(advance)};
 }
 
-void Parser::backward() {
+void Compiler::backward() {
   std::optional<char32_t> behind{backtrace.back()};
   position -= std::ranges::distance(
       behind | std::views::transform(traverse_u8) | std::views::join);
   backtrace.pop_back();
 }
 
-void Parser::backward(std::size_t N) {
+void Compiler::backward(std::size_t N) {
   for (int i = 0; i < N; ++i)
     backward();
 }
 
-Token Parser::tokenize_identifier(char32_t leading) {
+Token Compiler::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -97,7 +97,7 @@ Token Parser::tokenize_identifier(char32_t leading) {
   return atom_atlas[identifier_view];
 }
 
-Token Parser::tokenize_string_literal(char32_t separator) {
+Token Compiler::tokenize_string_literal(char32_t separator) {
   std::u16string literal_str{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
@@ -121,7 +121,7 @@ Token Parser::tokenize_string_literal(char32_t separator) {
   return permanent_view;
 }
 
-Token Parser::tokenize_numeric_literal(char32_t leading) {
+Token Compiler::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -138,7 +138,7 @@ Token Parser::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-void Parser::tokenize() {
+void Compiler::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -189,14 +189,14 @@ void Parser::tokenize() {
   last_token = std::monostate{};
 }
 
-void Parser::assert_punct(char32_t must_be) {
+void Compiler::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
   throw ScriptError{MissingPunctuation{must_be}};
 }
 
-void Parser::parse_text() {
+void Compiler::parse_text() {
   FunctionDefinition *definition{new FunctionDefinition{}};
   current_function = definition;
   while (1) {
@@ -208,7 +208,7 @@ void Parser::parse_text() {
   function_definitions.emplace_back(definition);
 }
 
-Unit Parser::parse_object_literal() {
+Unit Compiler::parse_object_literal() {
   ObjectShape *object_shape{new ObjectShape{}};
   object_shapes.emplace_back(object_shape);
   ObjectExpression *object_expr{new ObjectExpression{}};
@@ -237,7 +237,7 @@ Unit Parser::parse_object_literal() {
   return object_expr;
 }
 
-Unit Parser::parse_primary_expr() {
+Unit Compiler::parse_primary_expr() {
   return last_token.visit([this](auto t) -> Unit {
     if constexpr (std::is_same_v<decltype(t), std::u16string_view> ||
                   std::is_same_v<decltype(t), Identifier> ||
@@ -254,7 +254,7 @@ Unit Parser::parse_primary_expr() {
   });
 }
 
-Unit Parser::parse_call_expr(Unit callee) {
+Unit Compiler::parse_call_expr(Unit callee) {
   FunctionCallExpression *expression{new FunctionCallExpression{}};
   expression->callee = callee;
   expressions.emplace_back(expression);
@@ -271,7 +271,7 @@ Unit Parser::parse_call_expr(Unit callee) {
   return parse_postfix_expr(expression);
 }
 
-Unit Parser::parse_member_expr(Unit object) {
+Unit Compiler::parse_member_expr(Unit object) {
   tokenize();
   Identifier *field_name{std::get_if<Identifier>(&last_token)};
   if (not field_name)
@@ -284,7 +284,7 @@ Unit Parser::parse_member_expr(Unit object) {
   return parse_postfix_expr(expression);
 }
 
-Unit Parser::parse_postfix_expr(Unit base_unit) {
+Unit Compiler::parse_postfix_expr(Unit base_unit) {
   if (last_token == Token{U'.'})
     return parse_member_expr(base_unit);
   if (last_token == Token{U'('})
@@ -292,13 +292,13 @@ Unit Parser::parse_postfix_expr(Unit base_unit) {
   return base_unit;
 }
 
-Unit Parser::parse_postfix_expr() {
+Unit Compiler::parse_postfix_expr() {
   Unit base_unit{parse_primary_expr()};
   tokenize();
   return parse_postfix_expr(base_unit);
 }
 
-Unit Parser::parse_additive_expr() {
+Unit Compiler::parse_additive_expr() {
   Unit unit_left{parse_postfix_expr()};
   if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
     char32_t binary_op{std::get<char32_t>(last_token)};
@@ -314,7 +314,7 @@ Unit Parser::parse_additive_expr() {
   return unit_left;
 }
 
-Unit Parser::parse_logical_disjunct() {
+Unit Compiler::parse_logical_disjunct() {
   Unit unit_left{parse_additive_expr()};
   while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     Operator op{std::get<Operator>(last_token)};
@@ -330,7 +330,7 @@ Unit Parser::parse_logical_disjunct() {
   return unit_left;
 }
 
-Unit Parser::parse_assign_expr() {
+Unit Compiler::parse_assign_expr() {
   Unit unit_left{parse_logical_disjunct()};
   if (last_token != Token{U'='})
     return unit_left;
@@ -343,9 +343,9 @@ Unit Parser::parse_assign_expr() {
   return expression;
 }
 
-Unit Parser::parse_expression() { return parse_assign_expr(); }
+Unit Compiler::parse_expression() { return parse_assign_expr(); }
 
-void Parser::parse_statement() {
+void Compiler::parse_statement() {
   Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
   if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
     const FunctionDefinition *nested_definition{parse_function_decl()};
@@ -382,7 +382,7 @@ void Parser::parse_statement() {
   return;
 }
 
-const FunctionDefinition *Parser::parse_function_decl() {
+const FunctionDefinition *Compiler::parse_function_decl() {
   tokenize();
   Identifier *function_name{std::get_if<Identifier>(&last_token)};
   FunctionDefinition *definition{new FunctionDefinition{}};
@@ -422,7 +422,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
   return definition;
 }
 
-void Parser::parse_variable_decl() {
+void Compiler::parse_variable_decl() {
   tokenize();
   Identifier *varname_ptr{std::get_if<Identifier>(&last_token)};
   if (not varname_ptr)
@@ -446,9 +446,14 @@ void Parser::parse_variable_decl() {
   current_function->local_scope.insert({variable_name, Primitive::T_ANY});
 }
 
-void Analyzer::analyze_program() {
+void Compiler::analyze_program() {
+  const FunctionDefinition *main_function{current_function};
   for (std::unique_ptr<const FunctionDefinition> &definition :
        function_definitions) {
+    if (definition.get() == main_function)
+      continue;
+  }
+  for (Statement statement : main_function->program) {
   }
 }
 } // namespace Manadrain
