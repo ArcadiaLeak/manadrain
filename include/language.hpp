@@ -190,7 +190,7 @@ class Compiler {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
-  void analyze_program();
+  void print_program();
 
 private:
   std::vector<std::unique_ptr<const Expression>> expressions;
@@ -234,5 +234,7 @@ private:
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
   void parse_variable_decl();
+
+  std::array<std::string, 2> print_permanents();
 };
 } // namespace Manadrain

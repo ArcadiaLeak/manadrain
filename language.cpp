@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cassert>
+#include <format>
 #include <functional>
+#include <print>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -446,12 +448,50 @@ void Compiler::parse_variable_decl() {
   current_function->local_scope.insert({variable_name, Primitive::T_ANY});
 }
 
-void Compiler::analyze_program() {
+std::array<std::string, 2> Compiler::print_permanents() {
+  std::array<std::string, 2> output{};
+  std::vector<std::string> permanent_chars{};
+  std::vector<std::string> permanent_views{};
+  std::size_t offset{};
+  for (std::unique_ptr<const std::u16string> &permanent_string :
+       permanent_strings) {
+    for (char16_t ch : *permanent_string)
+      permanent_chars.push_back(std::format("0x{:02x}", std::uint16_t{ch}));
+    std::string view_initializer{
+        std::format("{{permanent_chars.data() + {}, {}}}", offset,
+                    permanent_string->size())};
+    permanent_views.push_back(view_initializer);
+    offset += permanent_string->size();
+  }
+  auto chars_sequence =
+      permanent_chars | std::views::join_with(std::string_view{", "});
+  std::get<0>(output) =
+      std::format("static const std::array "
+                  "permanent_chars{{std::to_array<char>({{{}}})}};\n",
+                  std::string{std::from_range, chars_sequence});
+  auto views_sequence =
+      permanent_views | std::views::join_with(std::string_view{", "});
+  std::get<1>(output) = std::format(
+      "static const std::array "
+      "permanent_views{{std::to_array<std::string_view>({{{}}})}};\n",
+      std::string{std::from_range, views_sequence});
+  return output;
+}
+
+void Compiler::print_program() {
+  std::vector<std::string> main_pieces{};
+  main_pieces.push_back("#include \"machine.hpp\"\n");
+  main_pieces.append_range(print_permanents());
+  std::println("{}",
+               std::string{std::from_range, main_pieces | std::views::join});
+
   const FunctionDefinition *main_function{current_function};
   for (std::unique_ptr<const FunctionDefinition> &definition :
        function_definitions) {
     if (definition.get() == main_function)
       continue;
+    for (Statement statement : definition->program) {
+    }
   }
   for (Statement statement : main_function->program) {
   }

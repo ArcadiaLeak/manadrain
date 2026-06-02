@@ -1,5 +1,10 @@
 #include "machine.hpp"
 
+static const std::array permanent_chars{
+    std::to_array<char>({0x68, 0x65, 0x6c, 0x6c, 0x6f})};
+static const std::array permanent_views{
+    std::to_array<std::string_view>({{permanent_chars.data() + 0, 5}})};
+
 int main(int argc, char *argv[]) {
   Machine machine{};
 
