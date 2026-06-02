@@ -112,30 +112,38 @@ using Datatype =
     std::variant<Primitive, const ObjectShape *, const FunctionDefinition *,
                  IntrinsicFunction, IntrinsicObject>;
 
-struct Interim {};
-using Unit = std::variant<std::monostate, std::u16string_view, std::int32_t,
-                          std::int64_t, double, Interim, Identifier,
-                          const FunctionDefinition *>;
+struct Expression {
+  virtual ~Expression() = default;
+  Expression() = default;
+  Expression(const Expression &) = default;
+  Expression &operator=(const Expression &) = default;
+  Expression(Expression &&) = default;
+  Expression &operator=(Expression &&) = default;
+};
 
-struct BinaryExpression {
+using Unit = std::variant<std::monostate, std::u16string_view, std::int32_t,
+                          std::int64_t, double, Identifier,
+                          const FunctionDefinition *, const Expression *>;
+
+struct BinaryExpression final : Expression {
   Unit left;
   Unit right;
   char32_t op;
 };
-struct LogicalExpression {
+struct LogicalExpression final : Expression {
   Unit left;
   Unit right;
   Operator op;
 };
-struct MemberExpression {
+struct MemberExpression final : Expression {
   Unit object;
   Identifier property;
 };
-struct FunctionCallExpression {
+struct FunctionCallExpression final : Expression {
   Unit callee;
-  std::size_t passed_arguments;
+  std::vector<Unit> arguments;
 };
-struct AssignExpression {
+struct AssignExpression final : Expression {
   Unit left;
   Unit right;
 };
@@ -145,28 +153,23 @@ struct ObjectShape {
   std::vector<Identifier> properties;
 };
 
-struct ObjectExpression {
-  const ObjectShape *object_shape;
-  std::size_t passed_properties;
+struct InitializeMember {
+  Identifier member_name;
+  Unit rvalue;
 };
-
-using Expression =
-    std::variant<Unit, BinaryExpression, LogicalExpression, MemberExpression,
-                 FunctionCallExpression, AssignExpression, ObjectExpression>;
+struct ObjectExpression final : Expression {
+  const ObjectShape *object_shape;
+  std::vector<InitializeMember> properties;
+};
 
 struct InitializeVariable {
   Identifier variable_name;
   Unit rvalue;
 };
-struct InitializeMember {
-  Identifier member_name;
-  Unit rvalue;
-};
 struct ReturnStatement {
   Unit argument;
 };
-using Statement = std::variant<Expression, InitializeVariable, InitializeMember,
-                               ReturnStatement>;
+using Statement = std::variant<Unit, InitializeVariable, ReturnStatement>;
 
 struct FunctionDefinition {
   std::optional<Identifier> function_name;
@@ -188,12 +191,11 @@ public:
   void analyze_program();
 
 protected:
+  std::vector<std::unique_ptr<const Expression>> expressions;
   std::vector<std::unique_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::unique_ptr<const ObjectShape>> object_shapes;
   std::vector<std::unique_ptr<const std::u16string>> permanent_strings;
-
-private:
-  friend struct AnalyzeStatement;
+  std::unordered_set<std::u16string_view> string_atlas;
 };
 
 class Parser : public Analyzer {
@@ -204,7 +206,6 @@ public:
 private:
   std::vector<std::unique_ptr<const std::string>> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
-  std::unordered_set<std::u16string_view> string_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -226,9 +227,9 @@ private:
 
   Unit parse_object_literal();
   Unit parse_primary_expr();
-  Unit parse_member_expr(std::size_t base_idx, Unit object);
-  Unit parse_call_expr(std::size_t base_idx, Unit callee);
-  Unit parse_postfix_expr(std::size_t base_idx, Unit base_unit);
+  Unit parse_member_expr(Unit object);
+  Unit parse_call_expr(Unit callee);
+  Unit parse_postfix_expr(Unit base_unit);
   Unit parse_postfix_expr();
   Unit parse_additive_expr();
   Unit parse_logical_disjunct();

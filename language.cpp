@@ -211,36 +211,30 @@ void Parser::parse_text() {
 Unit Parser::parse_object_literal() {
   ObjectShape *object_shape{new ObjectShape{}};
   object_shapes.emplace_back(object_shape);
-  std::size_t statement_idx{current_function->program.size()};
-  current_function->program.push_back(ObjectExpression{object_shape});
+  ObjectExpression *object_expr{new ObjectExpression{}};
+  object_expr->object_shape = object_shape;
+  expressions.emplace_back(object_expr);
   tokenize();
   while (last_token != Token{U'}'}) {
     if (not std::holds_alternative<Identifier>(last_token))
       throw ScriptError{InvalidPropertyName{}};
-    std::size_t property_idx{current_function->program.size()};
     Identifier property_name{std::get<Identifier>(last_token)};
-    current_function->program.push_back(InitializeMember{property_name});
     auto ordered_it =
         std::ranges::lower_bound(object_shape->properties, property_name);
     object_shape->properties.insert(ordered_it, property_name);
-    ObjectExpression &statement{std::get<ObjectExpression>(
-        std::get<Expression>(current_function->program.data()[statement_idx]))};
-    ++statement.passed_properties;
     tokenize();
     Unit property_rvalue{};
     if (last_token == Token{U':'}) {
       tokenize();
       property_rvalue = parse_expression();
     }
-    InitializeMember *property{std::get_if<InitializeMember>(
-        current_function->program.data() + property_idx)};
-    property->rvalue = property_rvalue;
+    object_expr->properties.emplace_back(property_name, property_rvalue);
     if (last_token != Token{U','})
       break;
     tokenize();
   }
   assert_punct('}');
-  return Interim{};
+  return object_expr;
 }
 
 Unit Parser::parse_primary_expr() {
@@ -260,95 +254,93 @@ Unit Parser::parse_primary_expr() {
   });
 }
 
-Unit Parser::parse_call_expr(std::size_t base_idx, Unit callee) {
-  std::size_t passed_arguments{};
+Unit Parser::parse_call_expr(Unit callee) {
+  FunctionCallExpression *expression{new FunctionCallExpression{}};
+  expression->callee = callee;
+  expressions.emplace_back(expression);
   while (1) {
     tokenize();
     if (last_token == Token{U')'})
       break;
-    Unit argument_unit{parse_expression()};
-    if (not std::holds_alternative<Interim>(argument_unit))
-      current_function->program.push_back(argument_unit);
-    ++passed_arguments;
+    expression->arguments.push_back(parse_expression());
     if (last_token == Token{U')'})
       break;
     assert_punct(',');
   }
-  FunctionCallExpression expression{callee, passed_arguments};
-  auto expression_it = std::next(current_function->program.begin(), base_idx);
-  current_function->program.insert(expression_it, expression);
   tokenize();
-  return parse_postfix_expr(base_idx, Interim{});
+  return parse_postfix_expr(expression);
 }
 
-Unit Parser::parse_member_expr(std::size_t base_idx, Unit object) {
+Unit Parser::parse_member_expr(Unit object) {
   tokenize();
   Identifier *field_name{std::get_if<Identifier>(&last_token)};
   if (not field_name)
     throw ScriptError{MissingFieldName{}};
-  MemberExpression expression{object, *field_name};
-  auto expression_it = std::next(current_function->program.begin(), base_idx);
-  current_function->program.insert(expression_it, expression);
+  MemberExpression *expression{new MemberExpression{}};
+  expression->object = object;
+  expression->property = *field_name;
+  expressions.emplace_back(expression);
   tokenize();
-  return parse_postfix_expr(base_idx, Interim{});
+  return parse_postfix_expr(expression);
 }
 
-Unit Parser::parse_postfix_expr(std::size_t base_idx, Unit base_unit) {
+Unit Parser::parse_postfix_expr(Unit base_unit) {
   if (last_token == Token{U'.'})
-    return parse_member_expr(base_idx, base_unit);
+    return parse_member_expr(base_unit);
   if (last_token == Token{U'('})
-    return parse_call_expr(base_idx, base_unit);
+    return parse_call_expr(base_unit);
   return base_unit;
 }
 
 Unit Parser::parse_postfix_expr() {
-  std::size_t base_idx{current_function->program.size()};
   Unit base_unit{parse_primary_expr()};
   tokenize();
-  return parse_postfix_expr(base_idx, base_unit);
+  return parse_postfix_expr(base_unit);
 }
 
 Unit Parser::parse_additive_expr() {
-  std::size_t base_idx{current_function->program.size()};
   Unit unit_left{parse_postfix_expr()};
   if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
     char32_t binary_op{std::get<char32_t>(last_token)};
     tokenize();
     Unit unit_right{parse_postfix_expr()};
-    BinaryExpression expression{unit_left, unit_right, binary_op};
-    auto expression_it = std::next(current_function->program.begin(), base_idx);
-    current_function->program.insert(expression_it, expression);
-    return Interim{};
+    BinaryExpression *expression{new BinaryExpression{}};
+    expression->left = unit_left;
+    expression->right = unit_right;
+    expression->op = binary_op;
+    expressions.emplace_back(expression);
+    return expression;
   }
   return unit_left;
 }
 
 Unit Parser::parse_logical_disjunct() {
-  std::size_t base_idx{current_function->program.size()};
   Unit unit_left{parse_additive_expr()};
   while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     Operator op{std::get<Operator>(last_token)};
     tokenize();
     Unit unit_right{parse_additive_expr()};
-    LogicalExpression expression{unit_left, unit_right, op};
-    auto expression_it = std::next(current_function->program.begin(), base_idx);
-    current_function->program.insert(expression_it, expression);
-    unit_left = Interim{};
+    LogicalExpression *expression{new LogicalExpression{}};
+    expression->left = unit_left;
+    expression->right = unit_right;
+    expression->op = op;
+    expressions.emplace_back(expression);
+    unit_left = expression;
   }
   return unit_left;
 }
 
 Unit Parser::parse_assign_expr() {
-  std::size_t base_idx{current_function->program.size()};
   Unit unit_left{parse_logical_disjunct()};
   if (last_token != Token{U'='})
     return unit_left;
   tokenize();
   Unit unit_right{parse_assign_expr()};
-  AssignExpression expression{unit_left, unit_right};
-  auto expression_it = std::next(current_function->program.begin(), base_idx);
-  current_function->program.insert(expression_it, expression);
-  return Interim{};
+  AssignExpression *expression{new AssignExpression{}};
+  expression->left = unit_left;
+  expression->right = unit_right;
+  expressions.emplace_back(expression);
+  return expression;
 }
 
 Unit Parser::parse_expression() { return parse_assign_expr(); }
@@ -384,7 +376,8 @@ void Parser::parse_statement() {
     assert_punct(';');
     return;
   }
-  parse_expression();
+  Unit expression_statement{parse_expression()};
+  current_function->program.push_back(expression_statement);
   assert_punct(';');
   return;
 }
