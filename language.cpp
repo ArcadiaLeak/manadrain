@@ -478,10 +478,17 @@ std::array<std::string, 2> Compiler::print_permanents() {
   return output;
 }
 
+std::string PrintStatement::operator()(Unit unit) { return {}; }
+std::string PrintStatement::operator()(InitializeVariable statement) {
+  return {};
+}
+std::string PrintStatement::operator()(ReturnStatement statement) { return {}; }
+
 void Compiler::print_program() {
   std::vector<std::string> main_pieces{};
   main_pieces.push_back("#include \"machine.hpp\"\n");
   main_pieces.append_range(print_permanents());
+  main_pieces.push_back("static Machine machine{};\n");
   std::println("{}",
                std::string{std::from_range, main_pieces | std::views::join});
 
@@ -490,8 +497,9 @@ void Compiler::print_program() {
        function_definitions) {
     if (definition.get() == main_function)
       continue;
-    for (Statement statement : definition->program) {
-    }
+    std::vector<std::string> function_statements{};
+    for (Statement statement : definition->program)
+      function_statements.push_back(statement.visit(PrintStatement{*this}));
   }
   for (Statement statement : main_function->program) {
   }

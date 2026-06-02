@@ -96,21 +96,14 @@ public:
 struct ObjectShape;
 struct FunctionDefinition;
 
-enum class Primitive {
-  T_ANY,
-  T_BYTE,
-  T_LIGATURE,
-  T_NUMBER,
-  T_PRODUCT,
-  T_FRACTION,
-  T_QUOTIENT,
-  T_STRING
-};
+enum class Primitive { T_ANY, T_NUMBER, T_STRING };
 enum class IntrinsicFunction { F_LOG, F_LENGTH };
 enum class IntrinsicObject { O_GLOBAL, O_CONSOLE };
 using Datatype =
     std::variant<Primitive, const ObjectShape *, const FunctionDefinition *,
                  IntrinsicFunction, IntrinsicObject>;
+
+class Compiler;
 
 struct Expression {
   virtual ~Expression() = default;
@@ -119,33 +112,39 @@ struct Expression {
   Expression &operator=(const Expression &) = default;
   Expression(Expression &&) = default;
   Expression &operator=(Expression &&) = default;
+  virtual Datatype infer_datatype(Compiler &compiler) const = 0;
 };
 
-using Unit = std::variant<std::monostate, std::u16string_view, std::int32_t,
-                          std::int64_t, double, Identifier,
-                          const FunctionDefinition *, const Expression *>;
+using Unit =
+    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
+                 Identifier, const FunctionDefinition *, const Expression *>;
 
 struct BinaryExpression final : Expression {
   Unit left;
   Unit right;
   char32_t op;
+  Datatype infer_datatype(Compiler &compiler) const override;
 };
 struct LogicalExpression final : Expression {
   Unit left;
   Unit right;
   Operator op;
+  Datatype infer_datatype(Compiler &compiler) const override;
 };
 struct MemberExpression final : Expression {
   Unit object;
   Identifier property;
+  Datatype infer_datatype(Compiler &compiler) const override;
 };
 struct FunctionCallExpression final : Expression {
   Unit callee;
   std::vector<Unit> arguments;
+  Datatype infer_datatype(Compiler &compiler) const override;
 };
 struct AssignExpression final : Expression {
   Unit left;
   Unit right;
+  Datatype infer_datatype(Compiler &compiler) const override;
 };
 
 struct ObjectShape {
@@ -160,6 +159,7 @@ struct InitializeMember {
 struct ObjectExpression final : Expression {
   const ObjectShape *object_shape;
   std::vector<InitializeMember> properties;
+  Datatype infer_datatype(Compiler &compiler) const override;
 };
 
 struct InitializeVariable {
@@ -185,6 +185,23 @@ inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
 enum class Syscall { FD_CLOSE, FD_WRITE, FD_SEEK, PROC_EXIT };
+
+struct InferDatatype {
+  Datatype operator()(std::monostate unit);
+  Datatype operator()(std::u16string_view unit);
+  Datatype operator()(std::int64_t unit);
+  Datatype operator()(double unit);
+  Datatype operator()(Identifier identifier);
+  Datatype operator()(const FunctionDefinition *definition);
+  Datatype operator()(const Expression *expression);
+};
+
+struct PrintStatement {
+  Compiler &compiler;
+  std::string operator()(Unit unit);
+  std::string operator()(InitializeVariable statement);
+  std::string operator()(ReturnStatement statement);
+};
 
 class Compiler {
 public:
@@ -234,6 +251,9 @@ private:
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
   void parse_variable_decl();
+
+  friend struct InferDatatype;
+  friend struct PrintStatement;
 
   std::array<std::string, 2> print_permanents();
 };
