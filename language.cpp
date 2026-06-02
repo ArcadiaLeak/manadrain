@@ -1,8 +1,6 @@
 #include <algorithm>
 #include <cassert>
-#include <format>
 #include <functional>
-#include <print>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -30,7 +28,7 @@ static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
 static const std::array permanent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::optional<char32_t> Compiler::forward() {
+std::optional<char32_t> Parser::forward() {
   if (position >= text_buffer->size())
     backtrace.push_back(std::nullopt);
   else {
@@ -44,7 +42,7 @@ std::optional<char32_t> Compiler::forward() {
   return backtrace.back();
 }
 
-std::generator<std::optional<char32_t>> Compiler::traverse_text() {
+std::generator<std::optional<char32_t>> Parser::traverse_text() {
   while (1)
     co_yield forward();
 }
@@ -63,19 +61,19 @@ std::inplace_vector<char16_t, 2> traverse_u16(ucs4_t cp) {
   return {std::from_range, buffer | std::views::take(advance)};
 }
 
-void Compiler::backward() {
+void Parser::backward() {
   std::optional<char32_t> behind{backtrace.back()};
   position -= std::ranges::distance(
       behind | std::views::transform(traverse_u8) | std::views::join);
   backtrace.pop_back();
 }
 
-void Compiler::backward(std::size_t N) {
+void Parser::backward(std::size_t N) {
   for (int i = 0; i < N; ++i)
     backward();
 }
 
-Token Compiler::tokenize_identifier(char32_t leading) {
+Token Parser::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -99,7 +97,7 @@ Token Compiler::tokenize_identifier(char32_t leading) {
   return atom_atlas[identifier_view];
 }
 
-Token Compiler::tokenize_string_literal(char32_t separator) {
+Token Parser::tokenize_string_literal(char32_t separator) {
   std::u16string literal_str{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
@@ -117,13 +115,13 @@ Token Compiler::tokenize_string_literal(char32_t separator) {
   if (iter_existing != string_atlas.end())
     return *iter_existing;
   permanent_strings.push_back(
-      std::make_unique<std::u16string>(std::move(literal_str)));
+      std::make_shared<std::u16string>(std::move(literal_str)));
   std::u16string_view permanent_view{*permanent_strings.back()};
   string_atlas.insert(permanent_view);
   return permanent_view;
 }
 
-Token Compiler::tokenize_numeric_literal(char32_t leading) {
+Token Parser::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -140,7 +138,7 @@ Token Compiler::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-void Compiler::tokenize() {
+void Parser::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -191,14 +189,14 @@ void Compiler::tokenize() {
   last_token = std::monostate{};
 }
 
-void Compiler::assert_punct(char32_t must_be) {
+void Parser::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
   throw ScriptError{MissingPunctuation{must_be}};
 }
 
-void Compiler::parse_text() {
+void Parser::parse_text() {
   FunctionDefinition *definition{new FunctionDefinition{}};
   current_function = definition;
   while (1) {
@@ -207,39 +205,52 @@ void Compiler::parse_text() {
       break;
     parse_statement();
   }
+  // analyze_scope_access();
   function_definitions.emplace_back(definition);
+  FunctionFrame &function_frame{function_frames.emplace_back()};
+  function_frame.definition = definition;
+  function_frame.own_scope =
+      structures.emplace_back(definition->local_scope.size());
+  current_frame = &function_frame;
+  initialize_descriptors(function_frame);
 }
 
-Unit Compiler::parse_object_literal() {
-  ObjectShape *object_shape{new ObjectShape{}};
-  object_shapes.emplace_back(object_shape);
-  ObjectExpression *object_expr{new ObjectExpression{}};
-  object_expr->object_shape = object_shape;
-  expressions.emplace_back(object_expr);
+Unit Parser::parse_object_literal() {
+  std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
+  object_shapes.push_back(object_shape);
+  std::size_t statement_idx{current_function->program.size()};
+  current_function->program.push_back(ObjectExpression{object_shape.get()});
   tokenize();
   while (last_token != Token{U'}'}) {
     if (not std::holds_alternative<Identifier>(last_token))
       throw ScriptError{InvalidPropertyName{}};
+    std::size_t property_idx{current_function->program.size()};
     Identifier property_name{std::get<Identifier>(last_token)};
+    current_function->program.push_back(InitializeMember{property_name});
     auto ordered_it =
         std::ranges::lower_bound(object_shape->properties, property_name);
     object_shape->properties.insert(ordered_it, property_name);
+    ObjectExpression &statement{std::get<ObjectExpression>(
+        std::get<Expression>(current_function->program.data()[statement_idx]))};
+    ++statement.passed_properties;
     tokenize();
     Unit property_rvalue{};
     if (last_token == Token{U':'}) {
       tokenize();
       property_rvalue = parse_expression();
     }
-    object_expr->properties.emplace_back(property_name, property_rvalue);
+    InitializeMember *property{std::get_if<InitializeMember>(
+        current_function->program.data() + property_idx)};
+    property->rvalue = property_rvalue;
     if (last_token != Token{U','})
       break;
     tokenize();
   }
   assert_punct('}');
-  return object_expr;
+  return Interim{};
 }
 
-Unit Compiler::parse_primary_expr() {
+Unit Parser::parse_primary_expr() {
   return last_token.visit([this](auto t) -> Unit {
     if constexpr (std::is_same_v<decltype(t), std::u16string_view> ||
                   std::is_same_v<decltype(t), Identifier> ||
@@ -256,109 +267,114 @@ Unit Compiler::parse_primary_expr() {
   });
 }
 
-Unit Compiler::parse_call_expr(Unit callee) {
-  FunctionCallExpression *expression{new FunctionCallExpression{}};
-  expression->callee = callee;
-  expressions.emplace_back(expression);
+Unit Parser::parse_call_expr(std::size_t base_idx, Unit callee) {
+  std::size_t passed_arguments{};
   while (1) {
     tokenize();
     if (last_token == Token{U')'})
       break;
-    expression->arguments.push_back(parse_expression());
+    Unit argument_unit{parse_expression()};
+    if (not std::holds_alternative<Interim>(argument_unit))
+      current_function->program.push_back(argument_unit);
+    ++passed_arguments;
     if (last_token == Token{U')'})
       break;
     assert_punct(',');
   }
+  FunctionCallExpression expression{callee, passed_arguments};
+  auto expression_it = std::next(current_function->program.begin(), base_idx);
+  current_function->program.insert(expression_it, expression);
   tokenize();
-  return parse_postfix_expr(expression);
+  return parse_postfix_expr(base_idx, Interim{});
 }
 
-Unit Compiler::parse_member_expr(Unit object) {
+Unit Parser::parse_member_expr(std::size_t base_idx, Unit object) {
   tokenize();
   Identifier *field_name{std::get_if<Identifier>(&last_token)};
   if (not field_name)
     throw ScriptError{MissingFieldName{}};
-  MemberExpression *expression{new MemberExpression{}};
-  expression->object = object;
-  expression->property = *field_name;
-  expressions.emplace_back(expression);
+  MemberExpression expression{object, *field_name};
+  auto expression_it = std::next(current_function->program.begin(), base_idx);
+  current_function->program.insert(expression_it, expression);
   tokenize();
-  return parse_postfix_expr(expression);
+  return parse_postfix_expr(base_idx, Interim{});
 }
 
-Unit Compiler::parse_postfix_expr(Unit base_unit) {
+Unit Parser::parse_postfix_expr(std::size_t base_idx, Unit base_unit) {
   if (last_token == Token{U'.'})
-    return parse_member_expr(base_unit);
+    return parse_member_expr(base_idx, base_unit);
   if (last_token == Token{U'('})
-    return parse_call_expr(base_unit);
+    return parse_call_expr(base_idx, base_unit);
   return base_unit;
 }
 
-Unit Compiler::parse_postfix_expr() {
+Unit Parser::parse_postfix_expr() {
+  std::size_t base_idx{current_function->program.size()};
   Unit base_unit{parse_primary_expr()};
   tokenize();
-  return parse_postfix_expr(base_unit);
+  return parse_postfix_expr(base_idx, base_unit);
 }
 
-Unit Compiler::parse_additive_expr() {
+Unit Parser::parse_additive_expr() {
+  std::size_t base_idx{current_function->program.size()};
   Unit unit_left{parse_postfix_expr()};
   if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
     char32_t binary_op{std::get<char32_t>(last_token)};
     tokenize();
     Unit unit_right{parse_postfix_expr()};
-    BinaryExpression *expression{new BinaryExpression{}};
-    expression->left = unit_left;
-    expression->right = unit_right;
-    expression->op = binary_op;
-    expressions.emplace_back(expression);
-    return expression;
+    BinaryExpression expression{unit_left, unit_right, binary_op};
+    auto expression_it = std::next(current_function->program.begin(), base_idx);
+    current_function->program.insert(expression_it, expression);
+    return Interim{};
   }
   return unit_left;
 }
 
-Unit Compiler::parse_logical_disjunct() {
+Unit Parser::parse_logical_disjunct() {
+  std::size_t base_idx{current_function->program.size()};
   Unit unit_left{parse_additive_expr()};
   while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     Operator op{std::get<Operator>(last_token)};
     tokenize();
     Unit unit_right{parse_additive_expr()};
-    LogicalExpression *expression{new LogicalExpression{}};
-    expression->left = unit_left;
-    expression->right = unit_right;
-    expression->op = op;
-    expressions.emplace_back(expression);
-    unit_left = expression;
+    LogicalExpression expression{unit_left, unit_right, op};
+    auto expression_it = std::next(current_function->program.begin(), base_idx);
+    current_function->program.insert(expression_it, expression);
+    unit_left = Interim{};
   }
   return unit_left;
 }
 
-Unit Compiler::parse_assign_expr() {
+Unit Parser::parse_assign_expr() {
+  std::size_t base_idx{current_function->program.size()};
   Unit unit_left{parse_logical_disjunct()};
   if (last_token != Token{U'='})
     return unit_left;
   tokenize();
   Unit unit_right{parse_assign_expr()};
-  AssignExpression *expression{new AssignExpression{}};
-  expression->left = unit_left;
-  expression->right = unit_right;
-  expressions.emplace_back(expression);
-  return expression;
+  AssignExpression expression{unit_left, unit_right};
+  auto expression_it = std::next(current_function->program.begin(), base_idx);
+  current_function->program.insert(expression_it, expression);
+  return Interim{};
 }
 
-Unit Compiler::parse_expression() { return parse_assign_expr(); }
+Unit Parser::parse_expression() { return parse_assign_expr(); }
 
-void Compiler::parse_statement() {
+void Parser::parse_statement() {
   Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
   if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
     const FunctionDefinition *nested_definition{parse_function_decl()};
     std::optional<Identifier> function_name{nested_definition->function_name};
     if (not function_name)
       throw ScriptError{MissingFunctionName{}};
-    if (current_function->local_scope.contains(*function_name) ||
-        current_function->nested_functions.contains(*function_name))
+    if (std::ranges::binary_search(current_function->local_scope,
+                                   *function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    current_function->nested_functions.insert(
+    current_function->nested_functions.push_back(
         {*function_name, nested_definition});
+    auto lower_bound =
+        std::ranges::lower_bound(current_function->local_scope, *function_name);
+    current_function->local_scope.insert(lower_bound, *function_name);
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
@@ -378,13 +394,12 @@ void Compiler::parse_statement() {
     assert_punct(';');
     return;
   }
-  Unit expression_statement{parse_expression()};
-  current_function->program.push_back(expression_statement);
+  parse_expression();
   assert_punct(';');
   return;
 }
 
-const FunctionDefinition *Compiler::parse_function_decl() {
+const FunctionDefinition *Parser::parse_function_decl() {
   tokenize();
   Identifier *function_name{std::get_if<Identifier>(&last_token)};
   FunctionDefinition *definition{new FunctionDefinition{}};
@@ -400,7 +415,9 @@ const FunctionDefinition *Compiler::parse_function_decl() {
     Identifier *parameter{std::get_if<Identifier>(&last_token)};
     if (not parameter)
       throw ScriptError{MissingFormalParameter{}};
-    definition->local_scope.insert({*parameter, Primitive::T_ANY});
+    auto lower_bound =
+        std::ranges::lower_bound(definition->local_scope, *parameter);
+    definition->local_scope.insert(lower_bound, *parameter);
     definition->arguments.push_back(*parameter);
     tokenize();
     if (last_token == Token{U')'})
@@ -419,12 +436,13 @@ const FunctionDefinition *Compiler::parse_function_decl() {
       break;
     parse_statement();
   }
+  // analyze_scope_access();
   std::swap(current_function, definition);
   function_definitions.emplace_back(definition);
   return definition;
 }
 
-void Compiler::parse_variable_decl() {
+void Parser::parse_variable_decl() {
   tokenize();
   Identifier *varname_ptr{std::get_if<Identifier>(&last_token)};
   if (not varname_ptr)
@@ -442,66 +460,443 @@ void Compiler::parse_variable_decl() {
   variable_init->rvalue = rvalue_unit;
   assert_punct(';');
   Identifier variable_name{variable_init->variable_name};
-  if (current_function->local_scope.contains(variable_name) ||
-      current_function->nested_functions.contains(variable_name))
+  if (std::ranges::binary_search(current_function->local_scope, variable_name))
     throw ScriptError{DuplicateDeclaration{}};
-  current_function->local_scope.insert({variable_name, Primitive::T_ANY});
+  auto variable_it =
+      std::ranges::lower_bound(current_function->local_scope, variable_name);
+  current_function->local_scope.insert(variable_it, variable_name);
 }
 
-std::array<std::string, 2> Compiler::print_permanents() {
-  std::array<std::string, 2> output{};
-  std::vector<std::string> permanent_chars{};
-  std::vector<std::string> permanent_views{};
-  std::size_t offset{};
-  for (std::unique_ptr<const std::u16string> &permanent_string :
-       permanent_strings) {
-    for (char16_t ch : *permanent_string)
-      permanent_chars.push_back(std::format("0x{:02x}", std::uint16_t{ch}));
-    std::string view_initializer{
-        std::format("{{permanent_chars.data() + {}, {}}}", offset,
-                    permanent_string->size())};
-    permanent_views.push_back(view_initializer);
-    offset += permanent_string->size();
+Script::Script()
+    : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
+      tagged_heap{resource.get()}, function_frames{resource.get()},
+      function_descriptors{resource.get()}, scope_stacks{resource.get()},
+      object_instances{resource.get()}, structures{resource.get()} {}
+
+Dynamic *FunctionFrame::get_variable(Identifier var_handle) {
+  for (FunctionFrame *scope_frame : std::ranges::reverse_view{
+           std::ranges::concat_view{closure, std::ranges::single_view{this}}}) {
+    const auto &local_scope{scope_frame->definition->local_scope};
+    auto lower_bound = std::ranges::lower_bound(local_scope, var_handle);
+    if (lower_bound == local_scope.end() || *lower_bound != var_handle)
+      continue;
+    std::ptrdiff_t own_scope_distance{
+        std::distance(local_scope.begin(), lower_bound)};
+    Dynamic *own_scope_data{scope_frame->own_scope.data()};
+    return std::next(own_scope_data, own_scope_distance);
   }
-  auto chars_sequence =
-      permanent_chars | std::views::join_with(std::string_view{", "});
-  std::get<0>(output) =
-      std::format("static const std::array "
-                  "permanent_chars{{std::to_array<char>({{{}}})}};\n",
-                  std::string{std::from_range, chars_sequence});
-  auto views_sequence =
-      permanent_views | std::views::join_with(std::string_view{", "});
-  std::get<1>(output) = std::format(
-      "static const std::array "
-      "permanent_views{{std::to_array<std::string_view>({{{}}})}};\n",
-      std::string{std::from_range, views_sequence});
-  return output;
+  return nullptr;
 }
 
-std::string PrintStatement::operator()(Unit unit) { return {}; }
-std::string PrintStatement::operator()(InitializeVariable statement) {
+Dynamic &FunctionFrame::access_scope(ScopeAccess accessor) {
+  std::ranges::single_view current_frame{this};
+  auto closure_view =
+      std::ranges::concat_view{closure, current_frame} | std::views::reverse;
+  return closure_view[accessor.frame_offset]->own_scope[accessor.scope_offset];
+}
+
+Dynamic *VanillaObject::get_property(Identifier property) {
+  std::span<const Identifier> shape_view{object_shape->properties};
+  auto lower_bound = std::ranges::lower_bound(shape_view, property);
+  if (lower_bound == shape_view.end() || *lower_bound != property)
+    return nullptr;
+  std::ptrdiff_t property_distance{
+      std::distance(shape_view.begin(), lower_bound)};
+  return std::next(properties.data(), property_distance);
+}
+
+Dynamic *GlobalObject::get_property(Identifier property) {
+  if (property == Identifier{OFFSET_console})
+    return &console;
   return {};
 }
-std::string PrintStatement::operator()(ReturnStatement statement) { return {}; }
 
-void Compiler::print_program() {
-  std::vector<std::string> main_pieces{};
-  main_pieces.push_back("#include \"machine.hpp\"\n");
-  main_pieces.append_range(print_permanents());
-  main_pieces.push_back("static Machine machine{};\n");
-  std::println("{}",
-               std::string{std::from_range, main_pieces | std::views::join});
+Dynamic *ConsoleObject::get_property(Identifier property) {
+  if (property == Identifier{OFFSET_log})
+    return &log;
+  return {};
+}
 
-  const FunctionDefinition *main_function{current_function};
-  for (std::unique_ptr<const FunctionDefinition> &definition :
-       function_definitions) {
-    if (definition.get() == main_function)
-      continue;
-    std::vector<std::string> function_statements{};
-    for (Statement statement : definition->program)
-      function_statements.push_back(statement.visit(PrintStatement{*this}));
+void Script::initialize_descriptors(FunctionFrame &function_frame) {
+  std::span<FunctionFrame *> nested_closure{};
+  if (function_frame.definition->nested_functions.size() > 0) {
+    std::ranges::concat_view closure_view{
+        function_frame.closure, std::ranges::single_view{&function_frame}};
+    nested_closure = scope_stacks.emplace_back(std::from_range, closure_view);
   }
-  for (Statement statement : main_function->program) {
+  for (auto [nested_name, nested_definition] :
+       function_frame.definition->nested_functions) {
+    Dynamic *function_lvalue{function_frame.get_variable(nested_name)};
+    assert(function_lvalue != nullptr);
+    *function_lvalue =
+        &function_descriptors.emplace_back(nested_definition, nested_closure);
   }
 }
+
+Dynamic EvaluateUnit::operator()(std::monostate primitive) { return primitive; }
+
+Dynamic EvaluateUnit::operator()(std::u16string_view primitive) {
+  return primitive;
+}
+
+Dynamic EvaluateUnit::operator()(std::int64_t primitive) { return primitive; }
+
+Dynamic EvaluateUnit::operator()(double primitive) { return primitive; }
+
+Dynamic EvaluateUnit::operator()(Interim) {
+  FunctionFrame *frame{script.current_frame};
+  std::size_t statement_idx{frame->program_count++};
+  const Statement &expression_stmt{frame->definition->program[statement_idx]};
+  auto assert_expression = [](auto visitee) -> Expression {
+    if constexpr (std::is_same_v<decltype(visitee), Expression>)
+      return visitee;
+    std::unreachable();
+  };
+  return expression_stmt.visit(assert_expression)
+      .visit(EvaluateExpression{script});
+}
+
+Dynamic EvaluateUnit::operator()(Identifier identifier) {
+  Dynamic *from_scope{script.current_frame->get_variable(identifier)};
+  if (from_scope)
+    return *from_scope;
+  Dynamic *from_globalThis{script.global_this.get_property(identifier)};
+  if (from_globalThis)
+    return *from_globalThis;
+  std::unreachable();
+}
+
+Dynamic EvaluateUnit::operator()(ScopeAccess scope_access) {
+  std::unreachable();
+}
+
+Dynamic EvaluateUnit::operator()(const FunctionDefinition *definition) {
+  std::ranges::concat_view closure_view{
+      script.current_frame->closure,
+      std::ranges::single_view{script.current_frame}};
+  return &script.function_descriptors.emplace_back(
+      definition,
+      script.scope_stacks.emplace_back(std::from_range, closure_view));
+}
+
+std::pair<Dynamic, Dynamic>
+EvaluateCallee::operator()(MemberExpression expression) {
+  Dynamic dynamic_object{expression.object.visit(EvaluateUnit{script})};
+  auto visit_object = [&](auto dynamic_alt) {
+    return script.evaluate_property(expression.property, dynamic_alt);
+  };
+  Dynamic dynamic_property{dynamic_object.visit(visit_object)};
+  return {dynamic_object, dynamic_property};
+}
+
+std::pair<Dynamic, Dynamic> EvaluateCallee::operator()(Interim) {
+  std::size_t statement_idx{script.current_frame->program_count++};
+  const Statement &argument_stmt{
+      script.current_frame->definition->program[statement_idx]};
+  auto assert_expression = [](auto visitee) -> Expression {
+    if constexpr (std::is_same_v<decltype(visitee), Expression>)
+      return visitee;
+    std::unreachable();
+  };
+  return argument_stmt.visit(assert_expression).visit(*this);
+}
+
+std::pair<Dynamic, Dynamic> EvaluateCallee::operator()(Identifier identifier) {
+  return {std::monostate{}, EvaluateUnit{script}(identifier)};
+}
+
+Dynamic EvaluateExpression::operator()(Unit unit) {
+  return unit.visit(EvaluateUnit{script});
+}
+
+Dynamic EvaluateExpression::operator()(BinaryExpression expression) {
+  Dynamic dynamic_lhs{expression.left.visit(EvaluateUnit{script})};
+  Dynamic dynamic_rhs{expression.right.visit(EvaluateUnit{script})};
+  auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
+                  std::is_same_v<decltype(rhs), std::int64_t>)
+      return script.evaluate_operation(expression.op, lhs, rhs);
+    else
+      return {};
+  };
+  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
+}
+
+Dynamic EvaluateExpression::operator()(LogicalExpression expression) {
+  Dynamic dynamic_lhs{expression.left.visit(EvaluateUnit{script})};
+  Dynamic dynamic_rhs{expression.right.visit(EvaluateUnit{script})};
+  auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
+                  std::is_same_v<decltype(rhs), std::int64_t>)
+      return script.evaluate_operation(expression.op, lhs, rhs);
+    else
+      return {};
+  };
+  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
+}
+
+Dynamic EvaluateExpression::operator()(MemberExpression expression) {
+  Dynamic dynamic_object{expression.object.visit(EvaluateUnit{script})};
+  auto visit_object = [&](auto dynamic_alt) {
+    return script.evaluate_property(expression.property, dynamic_alt);
+  };
+  return dynamic_object.visit(visit_object);
+}
+
+Dynamic EvaluateExpression::operator()(FunctionCallExpression function_call) {
+  auto [dynamic_context, dynamic_callee] =
+      function_call.callee.visit(EvaluateCallee{script});
+  std::pmr::vector<Dynamic> dynamic_arguments(function_call.passed_arguments,
+                                              script.resource.get());
+  FunctionCallInfo call_info{dynamic_context, dynamic_arguments};
+  for (Dynamic &argument_lvalue : dynamic_arguments)
+    argument_lvalue = EvaluateUnit{script}(Interim{});
+  auto visit_dynamic = [&](auto dynamic_alt) -> Dynamic {
+    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionDescriptor *> ||
+                  std::is_same_v<decltype(dynamic_alt), IntrinsicFunction>)
+      return script.evaluate_function_call(call_info, dynamic_alt);
+    else
+      throw ScriptError{InvalidFunctionCall{}};
+  };
+  return dynamic_callee.visit(visit_dynamic);
+}
+
+Dynamic EvaluateExpression::operator()(AssignExpression assign_expr) {
+  Identifier *assign_identifier{std::get_if<Identifier>(&assign_expr.left)};
+  Dynamic *assign_lvalue{
+      script.current_frame->get_variable(*assign_identifier)};
+  assert(assign_lvalue != nullptr);
+  *assign_lvalue = assign_expr.right.visit(EvaluateUnit{script});
+  return {};
+}
+
+Dynamic EvaluateExpression::operator()(ObjectExpression object_expr) {
+  VanillaObject &instance{script.object_instances.emplace_back()};
+  instance.object_shape = object_expr.object_shape;
+  std::size_t object_size{object_expr.passed_properties};
+  instance.properties = script.structures.emplace_back(object_size);
+  for (int i = 0; i < object_size; ++i) {
+    FunctionFrame *frame{script.current_frame};
+    std::size_t property_idx{frame->program_count++};
+    const Statement &statement{frame->definition->program[property_idx]};
+    auto assert_variable_init =
+        [](const auto &visitee) -> const InitializeMember & {
+      if constexpr (std::is_same_v<decltype(visitee), const InitializeMember &>)
+        return visitee;
+      std::unreachable();
+    };
+    const InitializeMember &property{statement.visit(assert_variable_init)};
+    Dynamic *property_ptr{instance.get_property(property.member_name)};
+    *property_ptr = property.rvalue.visit(EvaluateUnit{script});
+  }
+  return &instance;
+}
+
+void EvaluateStatement::operator()(Expression expression) {
+  expression.visit(EvaluateExpression{script});
+}
+
+void EvaluateStatement::operator()(InitializeVariable statement) {
+  Dynamic rvalue_dynamic{statement.rvalue.visit(EvaluateUnit{script})};
+  Dynamic *variable_lvalue{
+      script.current_frame->get_variable(statement.variable_name)};
+  assert(variable_lvalue != nullptr);
+  *variable_lvalue = rvalue_dynamic;
+}
+
+void EvaluateStatement::operator()(InitializeMember statement) {
+  std::unreachable();
+}
+
+void EvaluateStatement::operator()(InitializeScope statement) {
+  Dynamic rvalue_dynamic{statement.rvalue.visit(EvaluateUnit{script})};
+  script.current_frame->access_scope(statement.accessor) = rvalue_dynamic;
+}
+
+void EvaluateStatement::operator()(ReturnStatement statement) {
+  script.current_frame->return_val =
+      statement.argument.visit(EvaluateUnit{script});
+}
+
+std::u16string Script::stringify(std::monostate) { return u"undefined"; }
+
+std::u16string Script::stringify(std::u16string_view permanent_string) {
+  return std::u16string(permanent_string);
+}
+
+std::u16string Script::stringify(std::int64_t number) {
+  static constexpr int buffer_size =
+      std::numeric_limits<std::int64_t>::digits10 + 2;
+  std::array<char, buffer_size> buffer{};
+  auto [ptr, ec] =
+      std::to_chars(buffer.data(), buffer.data() + buffer.size(), number);
+  assert(ec == std::errc{});
+  std::size_t message_size{
+      static_cast<std::size_t>(std::distance(buffer.data(), ptr))};
+  std::string_view message_view{buffer.data(), message_size};
+  return {std::from_range, message_view};
+}
+
+std::u16string Script::stringify(double number) { return u"<unimplemented>"; }
+
+std::u16string Script::stringify(FunctionDescriptor *descriptor) {
+  return u"<unimplemented>";
+}
+
+std::u16string Script::stringify(ObjectInstance *object_instance) {
+  return u"<unimplemented>";
+}
+
+std::u16string Script::stringify(IntrinsicFunction intrinsic_function) {
+  return u"<unimplemented>";
+}
+
+Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
+                                       FunctionDescriptor *callee) {
+  FunctionFrame &callee_frame{function_frames.emplace_back()};
+  callee_frame.closure = callee->closure;
+  callee_frame.definition = callee->definition;
+  callee_frame.own_scope =
+      structures.emplace_back(callee->definition->local_scope.size());
+  initialize_descriptors(callee_frame);
+  for (std::size_t i = 0; i < call_info.arguments.size(); ++i) {
+    Identifier identifier{callee_frame.definition->arguments[i]};
+    auto *argument_lvalue{callee_frame.get_variable(identifier)};
+    assert(argument_lvalue != nullptr);
+    *argument_lvalue = call_info.arguments[i];
+  }
+  FunctionFrame *caller_frame{current_frame};
+  current_frame = &callee_frame;
+  while (current_frame->program_count < callee_frame.definition->program.size())
+    callee_frame.definition->program[current_frame->program_count++].visit(
+        EvaluateStatement{*this});
+  current_frame = caller_frame;
+  return callee_frame.return_val;
+}
+
+Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
+                                       IntrinsicFunction intrinsic_function) {
+  if (intrinsic_function == IntrinsicFunction::F_LOG) {
+    auto match_message_alt = [&](auto dynamic_alt) {
+      return stringify(dynamic_alt);
+    };
+    auto match_message_arg = [&](Dynamic argument) {
+      return argument.visit(match_message_alt);
+    };
+    auto message_parts = call_info.arguments |
+                         std::views::transform(match_message_arg) |
+                         std::views::join_with(' ');
+    {
+      std::lock_guard console_lock{*console_mutex};
+      console_messages.emplace_back(
+          std::u16string{std::from_range, message_parts});
+    }
+    console_condition->notify_one();
+  }
+  return {};
+}
+
+Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
+                                   std::int64_t rhs) {
+  if (op == '+')
+    return lhs + rhs;
+  if (op == '-')
+    return lhs - rhs;
+  std::unreachable();
+}
+
+Dynamic Script::evaluate_operation(Operator op, std::int64_t lhs,
+                                   std::int64_t rhs) {
+  if (op == Operator::LOGICAL_DISJUNCT)
+    return lhs ? lhs : rhs;
+  std::unreachable();
+}
+
+Dynamic Script::evaluate_property(Identifier property, std::monostate) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  std::u16string_view permanent_string) {
+  if (property == Identifier{OFFSET_length})
+    return static_cast<std::int64_t>(permanent_string.size());
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property, std::int64_t number) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property, double number) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  ObjectInstance *object_instance) {
+  Dynamic *property_ptr{object_instance->get_property(property)};
+  if (not property_ptr)
+    return std::monostate{};
+  return *property_ptr;
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  FunctionDescriptor *descriptor) {
+  return {};
+}
+
+Dynamic Script::evaluate_property(Identifier property,
+                                  IntrinsicFunction intrinsic_function) {
+  return {};
+}
+
+void Script::evaluate() {
+  while (current_frame->program_count <
+         current_frame->definition->program.size())
+    current_frame->definition->program[current_frame->program_count++].visit(
+        EvaluateStatement{*this});
+}
+
+void Script::collect_console_messages(std::stop_token stopper,
+                                      std::list<ConsoleMessage> &message_box) {
+  auto check_messages = [&] { return console_messages.size() > 0; };
+  std::unique_lock console_lock{*console_mutex};
+  console_condition->wait(console_lock, stopper, check_messages);
+  console_messages.swap(message_box);
+}
+
+static std::inplace_vector<std::uint8_t, 3>
+encode_u16_for_print(std::uint16_t uchar) {
+  std::array<std::uint8_t, 3> buffer{};
+  std::size_t buffer_len{buffer.size()};
+  uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
+  assert(result != nullptr);
+  return {std::from_range, buffer | std::views::take(buffer_len)};
+}
+
+std::string ConsoleMessage::encode_for_print() const {
+  std::string u8_message{};
+  for (char16_t uchar : content)
+    u8_message.append_range(encode_u16_for_print(uchar));
+  return u8_message;
+}
+
+void Parser::analyze_scope_access() {
+  program_count = 0;
+  while (program_count < current_function->program.size())
+    current_function->program[program_count++].visit(AnalyzeStatement{*this});
+}
+
+void AnalyzeStatement::operator()(Expression expression) {}
+
+void AnalyzeStatement::operator()(InitializeVariable statement) {}
+
+void AnalyzeStatement::operator()(InitializeMember statement) {
+  std::unreachable();
+}
+
+void AnalyzeStatement::operator()(InitializeScope statement) {
+  std::unreachable();
+}
+
+void AnalyzeStatement::operator()(ReturnStatement statement) {}
 } // namespace Manadrain

@@ -1,10 +1,12 @@
+#include <condition_variable>
 #include <cstdint>
 #include <deque>
-#include <flat_map>
 #include <generator>
 #include <inplace_vector>
 #include <list>
 #include <memory>
+#include <memory_resource>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <unordered_map>
@@ -93,131 +95,284 @@ public:
   const char *what() const noexcept override { return "script error!"; }
 };
 
-struct ObjectShape;
 struct FunctionDefinition;
 
-enum class Primitive { T_ANY, T_NUMBER, T_STRING };
-enum class IntrinsicFunction { F_LOG, F_LENGTH };
-enum class IntrinsicObject { O_GLOBAL, O_CONSOLE };
-using Datatype =
-    std::variant<Primitive, const ObjectShape *, const FunctionDefinition *,
-                 IntrinsicFunction, IntrinsicObject>;
-
-class Compiler;
-
-struct Expression {
-  virtual ~Expression() = default;
-  Expression() = default;
-  Expression(const Expression &) = default;
-  Expression &operator=(const Expression &) = default;
-  Expression(Expression &&) = default;
-  Expression &operator=(Expression &&) = default;
-  virtual Datatype infer_datatype(Compiler &compiler) const = 0;
+struct Interim {};
+struct ScopeAccess {
+  std::size_t frame_offset;
+  std::size_t scope_offset;
 };
-
 using Unit =
     std::variant<std::monostate, std::u16string_view, std::int64_t, double,
-                 Identifier, const FunctionDefinition *, const Expression *>;
+                 Interim, Identifier, ScopeAccess, const FunctionDefinition *>;
 
-struct BinaryExpression final : Expression {
+struct BinaryExpression {
   Unit left;
   Unit right;
   char32_t op;
-  Datatype infer_datatype(Compiler &compiler) const override;
 };
-struct LogicalExpression final : Expression {
+struct LogicalExpression {
   Unit left;
   Unit right;
   Operator op;
-  Datatype infer_datatype(Compiler &compiler) const override;
 };
-struct MemberExpression final : Expression {
+struct MemberExpression {
   Unit object;
   Identifier property;
-  Datatype infer_datatype(Compiler &compiler) const override;
 };
-struct FunctionCallExpression final : Expression {
+struct FunctionCallExpression {
   Unit callee;
-  std::vector<Unit> arguments;
-  Datatype infer_datatype(Compiler &compiler) const override;
+  std::size_t passed_arguments;
 };
-struct AssignExpression final : Expression {
+struct AssignExpression {
   Unit left;
   Unit right;
-  Datatype infer_datatype(Compiler &compiler) const override;
 };
 
+struct ObjectInstance;
 struct ObjectShape {
-  std::vector<Datatype> property_types;
   std::vector<Identifier> properties;
 };
-
-struct InitializeMember {
-  Identifier member_name;
-  Unit rvalue;
-};
-struct ObjectExpression final : Expression {
+struct ObjectExpression {
   const ObjectShape *object_shape;
-  std::vector<InitializeMember> properties;
-  Datatype infer_datatype(Compiler &compiler) const override;
+  std::size_t passed_properties;
 };
+
+using Expression =
+    std::variant<Unit, BinaryExpression, LogicalExpression, MemberExpression,
+                 FunctionCallExpression, AssignExpression, ObjectExpression>;
 
 struct InitializeVariable {
   Identifier variable_name;
   Unit rvalue;
 };
+struct InitializeMember {
+  Identifier member_name;
+  Unit rvalue;
+};
+struct InitializeScope {
+  ScopeAccess accessor;
+  Unit rvalue;
+};
 struct ReturnStatement {
   Unit argument;
 };
-using Statement = std::variant<Unit, InitializeVariable, ReturnStatement>;
+using Statement = std::variant<Expression, InitializeVariable, InitializeMember,
+                               InitializeScope, ReturnStatement>;
+
+enum class IntrinsicFunction { F_LOG };
 
 struct FunctionDefinition {
   std::optional<Identifier> function_name;
   std::vector<Identifier> arguments;
-  Datatype return_type;
-  std::flat_map<Identifier, Datatype> local_scope;
-  std::flat_map<Identifier, const FunctionDefinition *> nested_functions;
+  std::vector<Identifier> local_scope;
+  std::vector<std::pair<Identifier, const FunctionDefinition *>>
+      nested_functions;
   std::vector<Statement> program;
+};
+
+struct FunctionFrame;
+struct FunctionDescriptor {
+  const FunctionDefinition *definition;
+  std::span<FunctionFrame *> closure;
+};
+
+using Dynamic =
+    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
+                 ObjectInstance *, FunctionDescriptor *, IntrinsicFunction>;
+
+struct ObjectInstance {
+  virtual Dynamic *get_property(Identifier property) = 0;
+};
+struct VanillaObject final : ObjectInstance {
+  const ObjectShape *object_shape;
+  std::span<Dynamic> properties;
+  Dynamic *get_property(Identifier property) override;
+};
+struct GlobalObject final : ObjectInstance {
+  GlobalObject(Dynamic c) : console{c} {};
+  Dynamic console;
+  Dynamic *get_property(Identifier property) override;
+};
+struct ConsoleObject final : ObjectInstance {
+  ConsoleObject(Dynamic l) : log{l} {};
+  Dynamic log;
+  Dynamic *get_property(Identifier property) override;
+};
+
+struct FunctionCallInfo {
+  Dynamic context;
+  std::span<Dynamic> arguments;
+};
+
+struct FunctionFrame {
+  const FunctionDefinition *definition;
+  std::size_t program_count;
+  std::span<Dynamic> own_scope;
+  std::span<FunctionFrame *> closure;
+  Dynamic return_val;
+  Dynamic &access_scope(ScopeAccess accessor);
+  Dynamic *get_variable(Identifier var_handle);
 };
 
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
-enum class Syscall { FD_CLOSE, FD_WRITE, FD_SEEK, PROC_EXIT };
-
-struct InferDatatype {
-  Datatype operator()(std::monostate unit);
-  Datatype operator()(std::u16string_view unit);
-  Datatype operator()(std::int64_t unit);
-  Datatype operator()(double unit);
-  Datatype operator()(Identifier identifier);
-  Datatype operator()(const FunctionDefinition *definition);
-  Datatype operator()(const Expression *expression);
+struct ConsoleMessage {
+  std::u16string content;
+  std::string encode_for_print() const;
 };
 
-struct PrintStatement {
-  Compiler &compiler;
-  std::string operator()(Unit unit);
-  std::string operator()(InitializeVariable statement);
-  std::string operator()(ReturnStatement statement);
+class Script;
+
+struct EvaluateUnit {
+  Script &script;
+  Dynamic operator()(std::monostate);
+  Dynamic operator()(std::u16string_view);
+  Dynamic operator()(std::int64_t);
+  Dynamic operator()(double);
+  Dynamic operator()(Interim);
+  Dynamic operator()(Identifier);
+  Dynamic operator()(ScopeAccess);
+  Dynamic operator()(const FunctionDefinition *);
 };
 
-class Compiler {
+struct EvaluateCallee {
+  Script &script;
+  std::pair<Dynamic, Dynamic> operator()(Interim);
+  std::pair<Dynamic, Dynamic> operator()(Identifier);
+  std::pair<Dynamic, Dynamic> operator()(MemberExpression);
+  template <typename T> std::pair<Dynamic, Dynamic> operator()(T) { return {}; }
+};
+
+struct EvaluateExpression {
+  Script &script;
+  Dynamic operator()(Unit);
+  Dynamic operator()(BinaryExpression);
+  Dynamic operator()(LogicalExpression);
+  Dynamic operator()(MemberExpression);
+  Dynamic operator()(FunctionCallExpression);
+  Dynamic operator()(AssignExpression);
+  Dynamic operator()(ObjectExpression);
+};
+
+struct EvaluateStatement {
+  Script &script;
+  void operator()(Expression);
+  void operator()(InitializeVariable);
+  void operator()(InitializeMember);
+  void operator()(InitializeScope);
+  void operator()(ReturnStatement);
+};
+
+class Script {
+public:
+  Script();
+
+  void collect_console_messages(std::stop_token stopper,
+                                std::list<ConsoleMessage> &message_box);
+  void evaluate();
+
+protected:
+  FunctionFrame *current_frame;
+  std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
+  std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
+  std::vector<std::shared_ptr<const std::u16string>> permanent_strings;
+
+  std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
+  std::pmr::list<Dynamic> tagged_heap;
+  std::pmr::list<FunctionFrame> function_frames;
+  std::pmr::list<FunctionDescriptor> function_descriptors;
+  std::pmr::list<std::pmr::vector<FunctionFrame *>> scope_stacks;
+  std::pmr::list<VanillaObject> object_instances;
+  std::pmr::list<std::pmr::vector<Dynamic>> structures;
+
+  void initialize_descriptors(FunctionFrame &function_frame);
+
+private:
+  friend struct EvaluateUnit;
+  friend struct EvaluateCallee;
+  friend struct EvaluateExpression;
+  friend struct EvaluateStatement;
+
+  ConsoleObject console{IntrinsicFunction::F_LOG};
+  std::indirect<std::mutex> console_mutex;
+  std::indirect<std::condition_variable_any> console_condition;
+  std::list<ConsoleMessage> console_messages;
+
+  GlobalObject global_this{&console};
+
+  std::u16string stringify(std::monostate);
+  std::u16string stringify(std::u16string_view permanent_string);
+  std::u16string stringify(std::int64_t number);
+  std::u16string stringify(double number);
+  std::u16string stringify(ObjectInstance *object_instance);
+  std::u16string stringify(FunctionDescriptor *descriptor);
+  std::u16string stringify(IntrinsicFunction intrinsic_function);
+
+  Dynamic evaluate_operation(char32_t op, std::int64_t lhs, std::int64_t rhs);
+  Dynamic evaluate_operation(Operator op, std::int64_t lhs, std::int64_t rhs);
+
+  Dynamic evaluate_property(Identifier property, std::monostate);
+  Dynamic evaluate_property(Identifier property,
+                            std::u16string_view permanent_string);
+  Dynamic evaluate_property(Identifier property, std::int64_t number);
+  Dynamic evaluate_property(Identifier property, double number);
+  Dynamic evaluate_property(Identifier property,
+                            ObjectInstance *object_instance);
+  Dynamic evaluate_property(Identifier property,
+                            FunctionDescriptor *descriptor);
+  Dynamic evaluate_property(Identifier property,
+                            IntrinsicFunction intrinsic_function);
+
+  Dynamic evaluate_function_call(FunctionCallInfo call_info,
+                                 FunctionDescriptor *callee);
+  Dynamic evaluate_function_call(FunctionCallInfo call_info,
+                                 IntrinsicFunction intrinsic_function);
+};
+
+class Parser;
+
+struct AnalyzeUnit {
+  Parser &parser;
+  Unit operator()(Interim);
+  Unit operator()(Identifier);
+  Unit operator()(ScopeAccess);
+  template <typename T> Unit operator()(T arg) { return arg; }
+};
+
+struct AnalyzeExpression {
+  Parser &parser;
+  void operator()(Unit);
+  void operator()(BinaryExpression);
+  void operator()(LogicalExpression);
+  void operator()(MemberExpression);
+  void operator()(FunctionCallExpression);
+  void operator()(AssignExpression);
+  void operator()(ObjectExpression);
+};
+
+struct AnalyzeStatement {
+  Parser &parser;
+  void operator()(Expression);
+  void operator()(InitializeVariable);
+  void operator()(InitializeMember);
+  void operator()(InitializeScope);
+  void operator()(ReturnStatement);
+};
+
+class Parser : public Script {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
-  void print_program();
 
 private:
-  std::vector<std::unique_ptr<const Expression>> expressions;
-  std::vector<std::unique_ptr<const FunctionDefinition>> function_definitions;
-  std::vector<std::unique_ptr<const ObjectShape>> object_shapes;
-  std::vector<std::unique_ptr<const std::u16string>> permanent_strings;
-  std::unordered_set<std::u16string_view> string_atlas;
+  friend struct AnalyzeStatement;
 
   std::vector<std::unique_ptr<const std::string>> atom_pool;
   std::unordered_map<std::string_view, Identifier> atom_atlas;
+  std::unordered_set<std::u16string_view> string_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -236,12 +391,15 @@ private:
   void tokenize();
 
   FunctionDefinition *current_function;
+  std::size_t program_count;
+  std::vector<bool> scope_trace;
+  void analyze_scope_access();
 
   Unit parse_object_literal();
   Unit parse_primary_expr();
-  Unit parse_member_expr(Unit object);
-  Unit parse_call_expr(Unit callee);
-  Unit parse_postfix_expr(Unit base_unit);
+  Unit parse_member_expr(std::size_t base_idx, Unit object);
+  Unit parse_call_expr(std::size_t base_idx, Unit callee);
+  Unit parse_postfix_expr(std::size_t base_idx, Unit base_unit);
   Unit parse_postfix_expr();
   Unit parse_additive_expr();
   Unit parse_logical_disjunct();
@@ -251,10 +409,5 @@ private:
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
   void parse_variable_decl();
-
-  friend struct InferDatatype;
-  friend struct PrintStatement;
-
-  std::array<std::string, 2> print_permanents();
 };
 } // namespace Manadrain
