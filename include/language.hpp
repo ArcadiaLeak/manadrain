@@ -127,7 +127,7 @@ using Unit =
 
 class Parser;
 
-struct UnitDatatype {
+struct AnalyzeUnit {
   Parser &parser;
   Datatype operator()(std::monostate unit);
   Datatype operator()(std::u16string_view unit);
@@ -175,7 +175,7 @@ using Expression =
     std::variant<Unit, BinaryExpression, LogicalExpression, MemberExpression,
                  FunctionCallExpression, AssignExpression, ObjectExpression>;
 
-struct ExpressionDatatype {
+struct AnalyzeExpression {
   Parser &parser;
   Datatype operator()(Unit unit);
   Datatype operator()(BinaryExpression expression);
@@ -197,24 +197,35 @@ struct AnalyzeFunctionCallee {
   }
 };
 
-template <typename T> struct InitializeVariable {
+struct FunctionFrame;
+
+using CompactString = std::variant<std::string, std::u16string>;
+union Value {
+  double number;
+  const CompactString *compact_string;
+  FunctionFrame *function_frame;
+  ObjectInstance *object_instance;
+};
+
+struct InitializeVariable {
   Identifier variable_name;
-  T rvalue;
+  Unit rvalue;
 };
 struct InitializeMember {
   Identifier member_name;
   Unit rvalue;
 };
-struct InitializeScope {
+template <typename T> struct InitializeScope {
   ScopeAccess accessor;
-  Unit rvalue;
+  T rvalue;
 };
 struct ReturnStatement {
   Unit argument;
 };
 using Statement =
-    std::variant<Expression, InitializeVariable<Unit>, InitializeMember,
-                 InitializeScope, ReturnStatement>;
+    std::variant<Expression, InitializeVariable,
+                 InitializeScope<const CompactString *>,
+                 InitializeScope<double>, InitializeMember, ReturnStatement>;
 
 struct FunctionDefinition {
   std::size_t definition_idx;
@@ -226,16 +237,6 @@ struct FunctionDefinition {
   std::list<Statement> parsed_program;
   std::vector<Statement> analyzed_program;
   std::optional<Datatype> analyze_variable(Identifier identifier);
-};
-
-struct FunctionFrame;
-
-using Polystring = std::variant<std::string, std::u16string>;
-union Value {
-  double number;
-  const Polystring *polystring;
-  FunctionFrame *function_frame;
-  ObjectInstance *object_instance;
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -259,7 +260,7 @@ protected:
   FunctionFrame *current_frame;
   std::vector<std::unique_ptr<FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
-  std::vector<std::shared_ptr<const Polystring>> permanent_strings;
+  std::vector<std::shared_ptr<const CompactString>> permanent_strings;
 
   std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
 
@@ -282,9 +283,10 @@ private:
 struct AnalyzeStatement {
   Parser &parser;
   void operator()(Expression statement);
-  void operator()(InitializeVariable<Unit> statement);
+  void operator()(InitializeVariable statement);
+  void operator()(InitializeScope<const CompactString *> statement);
+  void operator()(InitializeScope<double> statement);
   void operator()(InitializeMember statement);
-  void operator()(InitializeScope statement);
   void operator()(ReturnStatement statement);
 };
 
@@ -334,8 +336,9 @@ private:
   const FunctionDefinition *parse_function_decl();
   void parse_variable_decl();
 
-  friend struct UnitDatatype;
-  friend struct ExpressionDatatype;
+  friend struct AnalyzeUnit;
+  friend struct AnalyzeExpression;
+  friend struct AnalyzeStatement;
   friend struct AnalyzeFunctionCallee;
 };
 } // namespace Manadrain

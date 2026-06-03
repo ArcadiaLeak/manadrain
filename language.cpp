@@ -115,7 +115,7 @@ Token Parser::tokenize_string_literal(char32_t separator) {
   if (iter_existing != string_atlas.end())
     return *iter_existing;
   permanent_strings.push_back(
-      std::make_shared<Polystring>(std::move(literal_str)));
+      std::make_shared<CompactString>(std::move(literal_str)));
   std::u16string_view permanent_view{
       std::get<std::u16string>(*permanent_strings.back())};
   string_atlas.insert(permanent_view);
@@ -436,7 +436,7 @@ void Parser::parse_variable_decl() {
   assert_punct('=');
   tokenize();
   Unit rvalue_unit{parse_expression()};
-  statement_it->emplace<InitializeVariable<Unit>>(variable_name, rvalue_unit);
+  statement_it->emplace<InitializeVariable>(variable_name, rvalue_unit);
   assert_punct(';');
   if (current_function->local_scope.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
@@ -505,23 +505,23 @@ std::string ConsoleMessage::encode_for_print() const {
   return u8_message;
 }
 
-Datatype UnitDatatype::operator()(std::monostate unit) {
+Datatype AnalyzeUnit::operator()(std::monostate unit) {
   return Primitive::T_ANY;
 }
 
-Datatype UnitDatatype::operator()(std::u16string_view unit) {
+Datatype AnalyzeUnit::operator()(std::u16string_view unit) {
   return Primitive::T_STRING;
 }
 
-Datatype UnitDatatype::operator()(std::int64_t unit) {
+Datatype AnalyzeUnit::operator()(std::int64_t unit) {
   return Primitive::T_NUMBER;
 }
 
-Datatype UnitDatatype::operator()(double unit) { return Primitive::T_NUMBER; }
+Datatype AnalyzeUnit::operator()(double unit) { return Primitive::T_NUMBER; }
 
-Datatype UnitDatatype::operator()(Interim) {
+Datatype AnalyzeUnit::operator()(Interim) {
   return std::get<Expression>(*parser.program_it++)
-      .visit(ExpressionDatatype{parser});
+      .visit(AnalyzeExpression{parser});
 }
 
 std::optional<Datatype>
@@ -533,7 +533,7 @@ FunctionDefinition::analyze_variable(Identifier identifier) {
   return std::nullopt;
 }
 
-Datatype UnitDatatype::operator()(Identifier identifier) {
+Datatype AnalyzeUnit::operator()(Identifier identifier) {
   auto complete_trace = std::ranges::concat_view{
       parser.function_trace, std::ranges::single_view{parser.current_function}};
   for (FunctionDefinition *definition : complete_trace | std::views::reverse)
@@ -544,11 +544,11 @@ Datatype UnitDatatype::operator()(Identifier identifier) {
   throw ScriptError{InvalidVariableAccess{}};
 }
 
-Datatype UnitDatatype::operator()(ScopeAccess scope_access) {
+Datatype AnalyzeUnit::operator()(ScopeAccess scope_access) {
   std::unreachable();
 }
 
-Datatype UnitDatatype::operator()(const FunctionDefinition *definition) {
+Datatype AnalyzeUnit::operator()(const FunctionDefinition *definition) {
   return definition;
 }
 
@@ -577,7 +577,7 @@ Datatype PropertyDatatype::operator()(IntrinsicObject object_type) {
 
 std::pair<Datatype, Datatype>
 AnalyzeFunctionCallee::operator()(MemberExpression expression) {
-  Datatype object_type{expression.object.visit(UnitDatatype{parser})};
+  Datatype object_type{expression.object.visit(AnalyzeUnit{parser})};
   Datatype property_type{
       object_type.visit(PropertyDatatype{expression.property})};
   return {object_type, property_type};
@@ -593,30 +593,30 @@ std::pair<Datatype, Datatype> AnalyzeFunctionCallee::operator()(Interim) {
 
 std::pair<Datatype, Datatype>
 AnalyzeFunctionCallee::operator()(Identifier identifier) {
-  Datatype callee_type{UnitDatatype{parser}(identifier)};
+  Datatype callee_type{AnalyzeUnit{parser}(identifier)};
   return {std::monostate{}, callee_type};
 }
 
-Datatype ExpressionDatatype::operator()(Unit unit) {
-  return unit.visit(UnitDatatype{parser});
+Datatype AnalyzeExpression::operator()(Unit unit) {
+  return unit.visit(AnalyzeUnit{parser});
 }
 
-Datatype ExpressionDatatype::operator()(BinaryExpression expression) {
+Datatype AnalyzeExpression::operator()(BinaryExpression expression) {
   return Primitive::T_ANY;
 }
 
-Datatype ExpressionDatatype::operator()(LogicalExpression expression) {
+Datatype AnalyzeExpression::operator()(LogicalExpression expression) {
   return Primitive::T_ANY;
 }
 
-Datatype ExpressionDatatype::operator()(MemberExpression expression) {
-  Datatype object_type{expression.object.visit(UnitDatatype{parser})};
+Datatype AnalyzeExpression::operator()(MemberExpression expression) {
+  Datatype object_type{expression.object.visit(AnalyzeUnit{parser})};
   Datatype property_type{
       object_type.visit(PropertyDatatype{expression.property})};
   return Primitive::T_ANY;
 }
 
-Datatype ExpressionDatatype::operator()(FunctionCallExpression expression) {
+Datatype AnalyzeExpression::operator()(FunctionCallExpression expression) {
   auto [context, callee] =
       expression.callee.visit(AnalyzeFunctionCallee{parser});
   for (std::size_t i = 0; i < expression.passed_arguments; ++i)
@@ -627,27 +627,44 @@ Datatype ExpressionDatatype::operator()(FunctionCallExpression expression) {
     return Primitive::T_ANY;
 }
 
-Datatype ExpressionDatatype::operator()(AssignExpression expression) {
+Datatype AnalyzeExpression::operator()(AssignExpression expression) {
   return Primitive::T_ANY;
 }
 
-Datatype ExpressionDatatype::operator()(ObjectExpression expression) {
+Datatype AnalyzeExpression::operator()(ObjectExpression expression) {
   return Primitive::T_ANY;
 }
 
 void AnalyzeStatement::operator()(Expression statement) {
-  statement.visit(ExpressionDatatype{parser});
+  statement.visit(AnalyzeExpression{parser});
 }
 
-void AnalyzeStatement::operator()(InitializeVariable<Unit> statement) {
+void AnalyzeStatement::operator()(InitializeVariable statement) {
+  auto complete_trace = std::ranges::concat_view{
+      parser.function_trace, std::ranges::single_view{parser.current_function}};
+  for (auto [frame_offset, definition] :
+       complete_trace | std::views::enumerate | std::views::reverse) {
+    if (not definition->local_scope.contains(statement.variable_name))
+      continue;
+    auto variable_it = definition->local_scope.find(statement.variable_name);
+    std::size_t scope_offset{static_cast<std::size_t>(
+        std::distance(definition->local_scope.begin(), variable_it))};
+    ScopeAccess scope_access{static_cast<std::size_t>(frame_offset),
+                             scope_offset};
+    assert(0);
+  }
+}
+
+void AnalyzeStatement::operator()(
+    InitializeScope<const CompactString *> statement) {
+  std::unreachable();
+}
+
+void AnalyzeStatement::operator()(InitializeScope<double> statement) {
   std::unreachable();
 }
 
 void AnalyzeStatement::operator()(InitializeMember statement) {
-  std::unreachable();
-}
-
-void AnalyzeStatement::operator()(InitializeScope statement) {
   std::unreachable();
 }
 
