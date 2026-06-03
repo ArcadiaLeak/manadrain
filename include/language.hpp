@@ -223,7 +223,8 @@ struct FunctionDefinition {
   std::vector<Identifier> arguments;
   std::flat_map<Identifier, Datatype> local_scope;
   std::flat_map<Identifier, const FunctionDefinition *> nested_functions;
-  std::vector<Statement> program;
+  std::list<Statement> parsed_program;
+  std::vector<Statement> analyzed_program;
   std::optional<Datatype> analyze_variable(Identifier identifier);
 };
 
@@ -316,14 +317,13 @@ private:
 
   std::vector<FunctionDefinition *> function_trace;
   FunctionDefinition *current_function;
-  std::size_t program_count;
+  std::list<Statement>::iterator program_it;
   std::vector<bool> scope_trace;
 
   Unit parse_object_literal();
   Unit parse_primary_expr();
-  Unit parse_member_expr(std::size_t base_idx, Unit object);
-  Unit parse_call_expr(std::size_t base_idx, Unit callee);
-  Unit parse_postfix_expr(std::size_t base_idx, Unit base_unit);
+  Expression parse_member_expr(Unit object);
+  Expression parse_call_expr(Unit callee);
   Unit parse_postfix_expr();
   Unit parse_additive_expr();
   Unit parse_logical_disjunct();

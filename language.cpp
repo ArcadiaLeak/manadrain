@@ -213,28 +213,26 @@ void Parser::parse_text() {
 Unit Parser::parse_object_literal() {
   std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
   object_shapes.push_back(object_shape);
-  std::size_t statement_idx{current_function->program.size()};
-  current_function->program.push_back(ObjectExpression{object_shape.get()});
+  Expression &expression{
+      current_function->parsed_program.emplace_back().emplace<Expression>()};
+  ObjectExpression &object_expression{
+      expression.emplace<ObjectExpression>(object_shape.get())};
   tokenize();
   while (last_token != Token{U'}'}) {
     if (not std::holds_alternative<Identifier>(last_token))
       throw ScriptError{InvalidPropertyName{}};
-    std::size_t property_idx{current_function->program.size()};
     Identifier property_name{std::get<Identifier>(last_token)};
-    current_function->program.push_back(InitializeMember{property_name});
     object_shape->properties.emplace(property_name, std::monostate{});
-    ObjectExpression &statement{std::get<ObjectExpression>(
-        std::get<Expression>(current_function->program.data()[statement_idx]))};
-    ++statement.passed_properties;
+    ++object_expression.passed_properties;
     tokenize();
-    Unit property_rvalue{};
+    auto initializer_iter = current_function->parsed_program.emplace(
+        current_function->parsed_program.end());
+    InitializeMember &initialize_member{
+        initializer_iter->emplace<InitializeMember>(property_name)};
     if (last_token == Token{U':'}) {
       tokenize();
-      property_rvalue = parse_expression();
+      initialize_member.rvalue = parse_expression();
     }
-    InitializeMember *property{std::get_if<InitializeMember>(
-        current_function->program.data() + property_idx)};
-    property->rvalue = property_rvalue;
     if (last_token != Token{U','})
       break;
     tokenize();
@@ -260,7 +258,7 @@ Unit Parser::parse_primary_expr() {
   });
 }
 
-Unit Parser::parse_call_expr(std::size_t base_idx, Unit callee) {
+Expression Parser::parse_call_expr(Unit callee) {
   std::size_t passed_arguments{};
   while (1) {
     tokenize();
@@ -268,87 +266,87 @@ Unit Parser::parse_call_expr(std::size_t base_idx, Unit callee) {
       break;
     Unit argument_unit{parse_expression()};
     if (not std::holds_alternative<Interim>(argument_unit))
-      current_function->program.push_back(argument_unit);
+      current_function->parsed_program.emplace_back(argument_unit);
     ++passed_arguments;
     if (last_token == Token{U')'})
       break;
     assert_punct(',');
   }
-  FunctionCallExpression expression{callee, passed_arguments};
-  auto expression_it = std::next(current_function->program.begin(), base_idx);
-  current_function->program.insert(expression_it, expression);
-  tokenize();
-  return parse_postfix_expr(base_idx, Interim{});
+  return FunctionCallExpression{callee, passed_arguments};
 }
 
-Unit Parser::parse_member_expr(std::size_t base_idx, Unit object) {
+Expression Parser::parse_member_expr(Unit object) {
   tokenize();
   Identifier *field_name{std::get_if<Identifier>(&last_token)};
   if (not field_name)
     throw ScriptError{MissingFieldName{}};
-  MemberExpression expression{object, *field_name};
-  auto expression_it = std::next(current_function->program.begin(), base_idx);
-  current_function->program.insert(expression_it, expression);
-  tokenize();
-  return parse_postfix_expr(base_idx, Interim{});
-}
-
-Unit Parser::parse_postfix_expr(std::size_t base_idx, Unit base_unit) {
-  if (last_token == Token{U'.'})
-    return parse_member_expr(base_idx, base_unit);
-  if (last_token == Token{U'('})
-    return parse_call_expr(base_idx, base_unit);
-  return base_unit;
+  return MemberExpression{object, *field_name};
 }
 
 Unit Parser::parse_postfix_expr() {
-  std::size_t base_idx{current_function->program.size()};
-  Unit base_unit{parse_primary_expr()};
-  tokenize();
-  return parse_postfix_expr(base_idx, base_unit);
+  auto base_iter = current_function->parsed_program.emplace(
+      current_function->parsed_program.end());
+  Unit postfix_unit{parse_primary_expr()};
+  while (1) {
+    tokenize();
+    if (last_token == Token{U'.'}) {
+      *base_iter = parse_member_expr(postfix_unit);
+      base_iter = current_function->parsed_program.emplace(base_iter);
+      postfix_unit = Interim{};
+    } else if (last_token == Token{U'('}) {
+      *base_iter = parse_call_expr(postfix_unit);
+      base_iter = current_function->parsed_program.emplace(base_iter);
+      postfix_unit = Interim{};
+    } else {
+      current_function->parsed_program.erase(base_iter);
+      return postfix_unit;
+    }
+  }
 }
 
 Unit Parser::parse_additive_expr() {
-  std::size_t base_idx{current_function->program.size()};
+  auto base_iter = current_function->parsed_program.emplace(
+      current_function->parsed_program.end());
   Unit unit_left{parse_postfix_expr()};
   if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
     char32_t binary_op{std::get<char32_t>(last_token)};
     tokenize();
     Unit unit_right{parse_postfix_expr()};
-    BinaryExpression expression{unit_left, unit_right, binary_op};
-    auto expression_it = std::next(current_function->program.begin(), base_idx);
-    current_function->program.insert(expression_it, expression);
+    *base_iter = BinaryExpression{unit_left, unit_right, binary_op};
     return Interim{};
   }
+  current_function->parsed_program.erase(base_iter);
   return unit_left;
 }
 
 Unit Parser::parse_logical_disjunct() {
-  std::size_t base_idx{current_function->program.size()};
+  auto base_iter = current_function->parsed_program.emplace(
+      current_function->parsed_program.end());
   Unit unit_left{parse_additive_expr()};
   while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     Operator op{std::get<Operator>(last_token)};
     tokenize();
     Unit unit_right{parse_additive_expr()};
-    LogicalExpression expression{unit_left, unit_right, op};
-    auto expression_it = std::next(current_function->program.begin(), base_idx);
-    current_function->program.insert(expression_it, expression);
     unit_left = Interim{};
+    *base_iter = LogicalExpression{unit_left, unit_right, op};
+    base_iter = current_function->parsed_program.emplace(base_iter);
   }
+  current_function->parsed_program.erase(base_iter);
   return unit_left;
 }
 
 Unit Parser::parse_assign_expr() {
-  std::size_t base_idx{current_function->program.size()};
+  auto base_iter = current_function->parsed_program.emplace(
+      current_function->parsed_program.end());
   Unit unit_left{parse_logical_disjunct()};
-  if (last_token != Token{U'='})
-    return unit_left;
-  tokenize();
-  Unit unit_right{parse_assign_expr()};
-  AssignExpression expression{unit_left, unit_right};
-  auto expression_it = std::next(current_function->program.begin(), base_idx);
-  current_function->program.insert(expression_it, expression);
-  return Interim{};
+  if (last_token == Token{U'='}) {
+    tokenize();
+    Unit unit_right{parse_assign_expr()};
+    *base_iter = AssignExpression{unit_left, unit_right};
+    return Interim{};
+  }
+  current_function->parsed_program.erase(base_iter);
+  return unit_left;
 }
 
 Unit Parser::parse_expression() { return parse_assign_expr(); }
@@ -372,14 +370,10 @@ void Parser::parse_statement() {
   }
   if (word_ptr && *word_ptr == Keyword::K_RETURN) {
     tokenize();
-    auto statement_it{current_function->program.insert(
-        current_function->program.end(), ReturnStatement{})};
-    std::size_t statement_idx =
-        std::distance(current_function->program.begin(), statement_it);
+    auto statement_it{current_function->parsed_program.emplace(
+        current_function->parsed_program.end())};
     Unit return_argument{parse_expression()};
-    ReturnStatement *statement{std::get_if<ReturnStatement>(
-        current_function->program.data() + statement_idx)};
-    statement->argument = return_argument;
+    *statement_it = ReturnStatement{return_argument};
     assert_punct(';');
     return;
   }
@@ -433,22 +427,17 @@ const FunctionDefinition *Parser::parse_function_decl() {
 
 void Parser::parse_variable_decl() {
   tokenize();
-  Identifier *varname_ptr{std::get_if<Identifier>(&last_token)};
-  if (not varname_ptr)
+  if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingVariableName{}};
-  auto statement_it{current_function->program.insert(
-      current_function->program.end(), InitializeVariable<Unit>{*varname_ptr})};
-  std::size_t statement_idx =
-      std::distance(current_function->program.begin(), statement_it);
+  Identifier variable_name{std::get<Identifier>(last_token)};
+  auto statement_it{current_function->parsed_program.emplace(
+      current_function->parsed_program.end())};
   tokenize();
   assert_punct('=');
   tokenize();
   Unit rvalue_unit{parse_expression()};
-  InitializeVariable<Unit> &variable_init{std::get<InitializeVariable<Unit>>(
-      current_function->program[statement_idx])};
-  variable_init.rvalue = rvalue_unit;
+  statement_it->emplace<InitializeVariable<Unit>>(variable_name, rvalue_unit);
   assert_punct(';');
-  Identifier variable_name{variable_init.variable_name};
   if (current_function->local_scope.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
   current_function->local_scope.emplace(variable_name, std::monostate{});
@@ -531,9 +520,7 @@ Datatype UnitDatatype::operator()(std::int64_t unit) {
 Datatype UnitDatatype::operator()(double unit) { return Primitive::T_NUMBER; }
 
 Datatype UnitDatatype::operator()(Interim) {
-  Statement expression_stmt{
-      parser.current_function->program[parser.program_count++]};
-  return std::get<Expression>(expression_stmt)
+  return std::get<Expression>(*parser.program_it++)
       .visit(ExpressionDatatype{parser});
 }
 
@@ -601,9 +588,7 @@ std::pair<Datatype, Datatype> AnalyzeFunctionCallee::operator()(Unit unit) {
 }
 
 std::pair<Datatype, Datatype> AnalyzeFunctionCallee::operator()(Interim) {
-  Statement expression_stmt{
-      parser.current_function->program[parser.program_count++]};
-  return std::get<Expression>(expression_stmt).visit(*this);
+  return std::get<Expression>(*parser.program_it++).visit(*this);
 }
 
 std::pair<Datatype, Datatype>
@@ -634,11 +619,8 @@ Datatype ExpressionDatatype::operator()(MemberExpression expression) {
 Datatype ExpressionDatatype::operator()(FunctionCallExpression expression) {
   auto [context, callee] =
       expression.callee.visit(AnalyzeFunctionCallee{parser});
-  for (std::size_t i = 0; i < expression.passed_arguments; ++i) {
-    Expression argument{std::get<Expression>(
-        parser.current_function->program[parser.program_count++])};
-    argument.visit(*this);
-  }
+  for (std::size_t i = 0; i < expression.passed_arguments; ++i)
+    std::get<Expression>(*parser.program_it++).visit(*this);
   if (callee == Datatype{IntrinsicFunction::F_LOG})
     return Primitive::T_NUMBER;
   else
@@ -682,8 +664,8 @@ void Parser::analyze_program() {
     current_function = function_trace.back();
     function_trace.pop_back();
   }
-  while (program_count < current_function->program.size())
-    current_function->program[program_count++].visit(AnalyzeStatement{*this});
-  program_count = 0;
+  std::list<Statement> &prg{current_function->parsed_program};
+  for (program_it = prg.begin(); program_it != prg.end(); ++program_it)
+    program_it->visit(AnalyzeStatement{*this});
 }
 } // namespace Manadrain
