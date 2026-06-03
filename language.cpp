@@ -115,8 +115,9 @@ Token Parser::tokenize_string_literal(char32_t separator) {
   if (iter_existing != string_atlas.end())
     return *iter_existing;
   permanent_strings.push_back(
-      std::make_shared<std::u16string>(std::move(literal_str)));
-  std::u16string_view permanent_view{*permanent_strings.back()};
+      std::make_shared<Polystring>(std::move(literal_str)));
+  std::u16string_view permanent_view{
+      std::get<std::u16string>(*permanent_strings.back())};
   string_atlas.insert(permanent_view);
   return permanent_view;
 }
@@ -205,14 +206,8 @@ void Parser::parse_text() {
       break;
     parse_statement();
   }
-  // analyze_scope_access();
+  definition->definition_idx = function_definitions.size();
   function_definitions.emplace_back(definition);
-  FunctionFrame &function_frame{function_frames.emplace_back()};
-  function_frame.definition = definition;
-  function_frame.own_scope =
-      structures.emplace_back(definition->local_scope.size());
-  current_frame = &function_frame;
-  initialize_descriptors(function_frame);
 }
 
 Unit Parser::parse_object_literal() {
@@ -227,9 +222,7 @@ Unit Parser::parse_object_literal() {
     std::size_t property_idx{current_function->program.size()};
     Identifier property_name{std::get<Identifier>(last_token)};
     current_function->program.push_back(InitializeMember{property_name});
-    auto ordered_it =
-        std::ranges::lower_bound(object_shape->properties, property_name);
-    object_shape->properties.insert(ordered_it, property_name);
+    object_shape->properties.emplace(property_name, std::monostate{});
     ObjectExpression &statement{std::get<ObjectExpression>(
         std::get<Expression>(current_function->program.data()[statement_idx]))};
     ++statement.passed_properties;
@@ -367,14 +360,10 @@ void Parser::parse_statement() {
     std::optional<Identifier> function_name{nested_definition->function_name};
     if (not function_name)
       throw ScriptError{MissingFunctionName{}};
-    if (std::ranges::binary_search(current_function->local_scope,
-                                   *function_name))
+    if (current_function->nested_functions.contains(*function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    current_function->nested_functions.push_back(
-        {*function_name, nested_definition});
-    auto lower_bound =
-        std::ranges::lower_bound(current_function->local_scope, *function_name);
-    current_function->local_scope.insert(lower_bound, *function_name);
+    current_function->nested_functions.emplace(*function_name,
+                                               nested_definition);
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
@@ -415,9 +404,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
     Identifier *parameter{std::get_if<Identifier>(&last_token)};
     if (not parameter)
       throw ScriptError{MissingFormalParameter{}};
-    auto lower_bound =
-        std::ranges::lower_bound(definition->local_scope, *parameter);
-    definition->local_scope.insert(lower_bound, *parameter);
+    definition->local_scope.emplace(*parameter, std::monostate{});
     definition->arguments.push_back(*parameter);
     tokenize();
     if (last_token == Token{U')'})
@@ -426,7 +413,8 @@ const FunctionDefinition *Parser::parse_function_decl() {
   }
   tokenize();
   assert_punct('{');
-  std::swap(current_function, definition);
+  function_trace.push_back(current_function);
+  current_function = definition;
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
@@ -436,8 +424,9 @@ const FunctionDefinition *Parser::parse_function_decl() {
       break;
     parse_statement();
   }
-  // analyze_scope_access();
-  std::swap(current_function, definition);
+  current_function = function_trace.back();
+  function_trace.pop_back();
+  definition->definition_idx = function_definitions.size();
   function_definitions.emplace_back(definition);
   return definition;
 }
@@ -448,275 +437,25 @@ void Parser::parse_variable_decl() {
   if (not varname_ptr)
     throw ScriptError{MissingVariableName{}};
   auto statement_it{current_function->program.insert(
-      current_function->program.end(), InitializeVariable{*varname_ptr})};
+      current_function->program.end(), InitializeVariable<Unit>{*varname_ptr})};
   std::size_t statement_idx =
       std::distance(current_function->program.begin(), statement_it);
   tokenize();
   assert_punct('=');
   tokenize();
   Unit rvalue_unit{parse_expression()};
-  InitializeVariable *variable_init{std::get_if<InitializeVariable>(
-      current_function->program.data() + statement_idx)};
-  variable_init->rvalue = rvalue_unit;
+  InitializeVariable<Unit> &variable_init{std::get<InitializeVariable<Unit>>(
+      current_function->program[statement_idx])};
+  variable_init.rvalue = rvalue_unit;
   assert_punct(';');
-  Identifier variable_name{variable_init->variable_name};
-  if (std::ranges::binary_search(current_function->local_scope, variable_name))
+  Identifier variable_name{variable_init.variable_name};
+  if (current_function->local_scope.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
-  auto variable_it =
-      std::ranges::lower_bound(current_function->local_scope, variable_name);
-  current_function->local_scope.insert(variable_it, variable_name);
+  current_function->local_scope.emplace(variable_name, std::monostate{});
 }
 
 Script::Script()
-    : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()},
-      tagged_heap{resource.get()}, function_frames{resource.get()},
-      function_descriptors{resource.get()}, scope_stacks{resource.get()},
-      object_instances{resource.get()}, structures{resource.get()} {}
-
-Dynamic *FunctionFrame::get_variable(Identifier var_handle) {
-  for (FunctionFrame *scope_frame : std::ranges::reverse_view{
-           std::ranges::concat_view{closure, std::ranges::single_view{this}}}) {
-    const auto &local_scope{scope_frame->definition->local_scope};
-    auto lower_bound = std::ranges::lower_bound(local_scope, var_handle);
-    if (lower_bound == local_scope.end() || *lower_bound != var_handle)
-      continue;
-    std::ptrdiff_t own_scope_distance{
-        std::distance(local_scope.begin(), lower_bound)};
-    Dynamic *own_scope_data{scope_frame->own_scope.data()};
-    return std::next(own_scope_data, own_scope_distance);
-  }
-  return nullptr;
-}
-
-Dynamic &FunctionFrame::access_scope(ScopeAccess accessor) {
-  std::ranges::single_view current_frame{this};
-  auto closure_view =
-      std::ranges::concat_view{closure, current_frame} | std::views::reverse;
-  return closure_view[accessor.frame_offset]->own_scope[accessor.scope_offset];
-}
-
-Dynamic *VanillaObject::get_property(Identifier property) {
-  std::span<const Identifier> shape_view{object_shape->properties};
-  auto lower_bound = std::ranges::lower_bound(shape_view, property);
-  if (lower_bound == shape_view.end() || *lower_bound != property)
-    return nullptr;
-  std::ptrdiff_t property_distance{
-      std::distance(shape_view.begin(), lower_bound)};
-  return std::next(properties.data(), property_distance);
-}
-
-Dynamic *GlobalObject::get_property(Identifier property) {
-  if (property == Identifier{OFFSET_console})
-    return &console;
-  return {};
-}
-
-Dynamic *ConsoleObject::get_property(Identifier property) {
-  if (property == Identifier{OFFSET_log})
-    return &log;
-  return {};
-}
-
-void Script::initialize_descriptors(FunctionFrame &function_frame) {
-  std::span<FunctionFrame *> nested_closure{};
-  if (function_frame.definition->nested_functions.size() > 0) {
-    std::ranges::concat_view closure_view{
-        function_frame.closure, std::ranges::single_view{&function_frame}};
-    nested_closure = scope_stacks.emplace_back(std::from_range, closure_view);
-  }
-  for (auto [nested_name, nested_definition] :
-       function_frame.definition->nested_functions) {
-    Dynamic *function_lvalue{function_frame.get_variable(nested_name)};
-    assert(function_lvalue != nullptr);
-    *function_lvalue =
-        &function_descriptors.emplace_back(nested_definition, nested_closure);
-  }
-}
-
-Dynamic EvaluateUnit::operator()(std::monostate primitive) { return primitive; }
-
-Dynamic EvaluateUnit::operator()(std::u16string_view primitive) {
-  return primitive;
-}
-
-Dynamic EvaluateUnit::operator()(std::int64_t primitive) { return primitive; }
-
-Dynamic EvaluateUnit::operator()(double primitive) { return primitive; }
-
-Dynamic EvaluateUnit::operator()(Interim) {
-  FunctionFrame *frame{script.current_frame};
-  std::size_t statement_idx{frame->program_count++};
-  const Statement &expression_stmt{frame->definition->program[statement_idx]};
-  auto assert_expression = [](auto visitee) -> Expression {
-    if constexpr (std::is_same_v<decltype(visitee), Expression>)
-      return visitee;
-    std::unreachable();
-  };
-  return expression_stmt.visit(assert_expression)
-      .visit(EvaluateExpression{script});
-}
-
-Dynamic EvaluateUnit::operator()(Identifier identifier) {
-  Dynamic *from_scope{script.current_frame->get_variable(identifier)};
-  if (from_scope)
-    return *from_scope;
-  Dynamic *from_globalThis{script.global_this.get_property(identifier)};
-  if (from_globalThis)
-    return *from_globalThis;
-  std::unreachable();
-}
-
-Dynamic EvaluateUnit::operator()(ScopeAccess scope_access) {
-  std::unreachable();
-}
-
-Dynamic EvaluateUnit::operator()(const FunctionDefinition *definition) {
-  std::ranges::concat_view closure_view{
-      script.current_frame->closure,
-      std::ranges::single_view{script.current_frame}};
-  return &script.function_descriptors.emplace_back(
-      definition,
-      script.scope_stacks.emplace_back(std::from_range, closure_view));
-}
-
-std::pair<Dynamic, Dynamic>
-EvaluateCallee::operator()(MemberExpression expression) {
-  Dynamic dynamic_object{expression.object.visit(EvaluateUnit{script})};
-  auto visit_object = [&](auto dynamic_alt) {
-    return script.evaluate_property(expression.property, dynamic_alt);
-  };
-  Dynamic dynamic_property{dynamic_object.visit(visit_object)};
-  return {dynamic_object, dynamic_property};
-}
-
-std::pair<Dynamic, Dynamic> EvaluateCallee::operator()(Interim) {
-  std::size_t statement_idx{script.current_frame->program_count++};
-  const Statement &argument_stmt{
-      script.current_frame->definition->program[statement_idx]};
-  auto assert_expression = [](auto visitee) -> Expression {
-    if constexpr (std::is_same_v<decltype(visitee), Expression>)
-      return visitee;
-    std::unreachable();
-  };
-  return argument_stmt.visit(assert_expression).visit(*this);
-}
-
-std::pair<Dynamic, Dynamic> EvaluateCallee::operator()(Identifier identifier) {
-  return {std::monostate{}, EvaluateUnit{script}(identifier)};
-}
-
-Dynamic EvaluateExpression::operator()(Unit unit) {
-  return unit.visit(EvaluateUnit{script});
-}
-
-Dynamic EvaluateExpression::operator()(BinaryExpression expression) {
-  Dynamic dynamic_lhs{expression.left.visit(EvaluateUnit{script})};
-  Dynamic dynamic_rhs{expression.right.visit(EvaluateUnit{script})};
-  auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
-                  std::is_same_v<decltype(rhs), std::int64_t>)
-      return script.evaluate_operation(expression.op, lhs, rhs);
-    else
-      return {};
-  };
-  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
-}
-
-Dynamic EvaluateExpression::operator()(LogicalExpression expression) {
-  Dynamic dynamic_lhs{expression.left.visit(EvaluateUnit{script})};
-  Dynamic dynamic_rhs{expression.right.visit(EvaluateUnit{script})};
-  auto visit_operands = [&](auto lhs, auto rhs) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(lhs), std::int64_t> &&
-                  std::is_same_v<decltype(rhs), std::int64_t>)
-      return script.evaluate_operation(expression.op, lhs, rhs);
-    else
-      return {};
-  };
-  return std::visit(visit_operands, dynamic_lhs, dynamic_rhs);
-}
-
-Dynamic EvaluateExpression::operator()(MemberExpression expression) {
-  Dynamic dynamic_object{expression.object.visit(EvaluateUnit{script})};
-  auto visit_object = [&](auto dynamic_alt) {
-    return script.evaluate_property(expression.property, dynamic_alt);
-  };
-  return dynamic_object.visit(visit_object);
-}
-
-Dynamic EvaluateExpression::operator()(FunctionCallExpression function_call) {
-  auto [dynamic_context, dynamic_callee] =
-      function_call.callee.visit(EvaluateCallee{script});
-  std::pmr::vector<Dynamic> dynamic_arguments(function_call.passed_arguments,
-                                              script.resource.get());
-  FunctionCallInfo call_info{dynamic_context, dynamic_arguments};
-  for (Dynamic &argument_lvalue : dynamic_arguments)
-    argument_lvalue = EvaluateUnit{script}(Interim{});
-  auto visit_dynamic = [&](auto dynamic_alt) -> Dynamic {
-    if constexpr (std::is_same_v<decltype(dynamic_alt), FunctionDescriptor *> ||
-                  std::is_same_v<decltype(dynamic_alt), IntrinsicFunction>)
-      return script.evaluate_function_call(call_info, dynamic_alt);
-    else
-      throw ScriptError{InvalidFunctionCall{}};
-  };
-  return dynamic_callee.visit(visit_dynamic);
-}
-
-Dynamic EvaluateExpression::operator()(AssignExpression assign_expr) {
-  Identifier *assign_identifier{std::get_if<Identifier>(&assign_expr.left)};
-  Dynamic *assign_lvalue{
-      script.current_frame->get_variable(*assign_identifier)};
-  assert(assign_lvalue != nullptr);
-  *assign_lvalue = assign_expr.right.visit(EvaluateUnit{script});
-  return {};
-}
-
-Dynamic EvaluateExpression::operator()(ObjectExpression object_expr) {
-  VanillaObject &instance{script.object_instances.emplace_back()};
-  instance.object_shape = object_expr.object_shape;
-  std::size_t object_size{object_expr.passed_properties};
-  instance.properties = script.structures.emplace_back(object_size);
-  for (int i = 0; i < object_size; ++i) {
-    FunctionFrame *frame{script.current_frame};
-    std::size_t property_idx{frame->program_count++};
-    const Statement &statement{frame->definition->program[property_idx]};
-    auto assert_variable_init =
-        [](const auto &visitee) -> const InitializeMember & {
-      if constexpr (std::is_same_v<decltype(visitee), const InitializeMember &>)
-        return visitee;
-      std::unreachable();
-    };
-    const InitializeMember &property{statement.visit(assert_variable_init)};
-    Dynamic *property_ptr{instance.get_property(property.member_name)};
-    *property_ptr = property.rvalue.visit(EvaluateUnit{script});
-  }
-  return &instance;
-}
-
-void EvaluateStatement::operator()(Expression expression) {
-  expression.visit(EvaluateExpression{script});
-}
-
-void EvaluateStatement::operator()(InitializeVariable statement) {
-  Dynamic rvalue_dynamic{statement.rvalue.visit(EvaluateUnit{script})};
-  Dynamic *variable_lvalue{
-      script.current_frame->get_variable(statement.variable_name)};
-  assert(variable_lvalue != nullptr);
-  *variable_lvalue = rvalue_dynamic;
-}
-
-void EvaluateStatement::operator()(InitializeMember statement) {
-  std::unreachable();
-}
-
-void EvaluateStatement::operator()(InitializeScope statement) {
-  Dynamic rvalue_dynamic{statement.rvalue.visit(EvaluateUnit{script})};
-  script.current_frame->access_scope(statement.accessor) = rvalue_dynamic;
-}
-
-void EvaluateStatement::operator()(ReturnStatement statement) {
-  script.current_frame->return_val =
-      statement.argument.visit(EvaluateUnit{script});
-}
+    : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()} {}
 
 std::u16string Script::stringify(std::monostate) { return u"undefined"; }
 
@@ -739,7 +478,7 @@ std::u16string Script::stringify(std::int64_t number) {
 
 std::u16string Script::stringify(double number) { return u"<unimplemented>"; }
 
-std::u16string Script::stringify(FunctionDescriptor *descriptor) {
+std::u16string Script::stringify(FunctionFrame *function_frame) {
   return u"<unimplemented>";
 }
 
@@ -751,110 +490,7 @@ std::u16string Script::stringify(IntrinsicFunction intrinsic_function) {
   return u"<unimplemented>";
 }
 
-Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
-                                       FunctionDescriptor *callee) {
-  FunctionFrame &callee_frame{function_frames.emplace_back()};
-  callee_frame.closure = callee->closure;
-  callee_frame.definition = callee->definition;
-  callee_frame.own_scope =
-      structures.emplace_back(callee->definition->local_scope.size());
-  initialize_descriptors(callee_frame);
-  for (std::size_t i = 0; i < call_info.arguments.size(); ++i) {
-    Identifier identifier{callee_frame.definition->arguments[i]};
-    auto *argument_lvalue{callee_frame.get_variable(identifier)};
-    assert(argument_lvalue != nullptr);
-    *argument_lvalue = call_info.arguments[i];
-  }
-  FunctionFrame *caller_frame{current_frame};
-  current_frame = &callee_frame;
-  while (current_frame->program_count < callee_frame.definition->program.size())
-    callee_frame.definition->program[current_frame->program_count++].visit(
-        EvaluateStatement{*this});
-  current_frame = caller_frame;
-  return callee_frame.return_val;
-}
-
-Dynamic Script::evaluate_function_call(FunctionCallInfo call_info,
-                                       IntrinsicFunction intrinsic_function) {
-  if (intrinsic_function == IntrinsicFunction::F_LOG) {
-    auto match_message_alt = [&](auto dynamic_alt) {
-      return stringify(dynamic_alt);
-    };
-    auto match_message_arg = [&](Dynamic argument) {
-      return argument.visit(match_message_alt);
-    };
-    auto message_parts = call_info.arguments |
-                         std::views::transform(match_message_arg) |
-                         std::views::join_with(' ');
-    {
-      std::lock_guard console_lock{*console_mutex};
-      console_messages.emplace_back(
-          std::u16string{std::from_range, message_parts});
-    }
-    console_condition->notify_one();
-  }
-  return {};
-}
-
-Dynamic Script::evaluate_operation(char32_t op, std::int64_t lhs,
-                                   std::int64_t rhs) {
-  if (op == '+')
-    return lhs + rhs;
-  if (op == '-')
-    return lhs - rhs;
-  std::unreachable();
-}
-
-Dynamic Script::evaluate_operation(Operator op, std::int64_t lhs,
-                                   std::int64_t rhs) {
-  if (op == Operator::LOGICAL_DISJUNCT)
-    return lhs ? lhs : rhs;
-  std::unreachable();
-}
-
-Dynamic Script::evaluate_property(Identifier property, std::monostate) {
-  return {};
-}
-
-Dynamic Script::evaluate_property(Identifier property,
-                                  std::u16string_view permanent_string) {
-  if (property == Identifier{OFFSET_length})
-    return static_cast<std::int64_t>(permanent_string.size());
-  return {};
-}
-
-Dynamic Script::evaluate_property(Identifier property, std::int64_t number) {
-  return {};
-}
-
-Dynamic Script::evaluate_property(Identifier property, double number) {
-  return {};
-}
-
-Dynamic Script::evaluate_property(Identifier property,
-                                  ObjectInstance *object_instance) {
-  Dynamic *property_ptr{object_instance->get_property(property)};
-  if (not property_ptr)
-    return std::monostate{};
-  return *property_ptr;
-}
-
-Dynamic Script::evaluate_property(Identifier property,
-                                  FunctionDescriptor *descriptor) {
-  return {};
-}
-
-Dynamic Script::evaluate_property(Identifier property,
-                                  IntrinsicFunction intrinsic_function) {
-  return {};
-}
-
-void Script::evaluate() {
-  while (current_frame->program_count <
-         current_frame->definition->program.size())
-    current_frame->definition->program[current_frame->program_count++].visit(
-        EvaluateStatement{*this});
-}
+void Script::evaluate() {}
 
 void Script::collect_console_messages(std::stop_token stopper,
                                       std::list<ConsoleMessage> &message_box) {
@@ -880,15 +516,150 @@ std::string ConsoleMessage::encode_for_print() const {
   return u8_message;
 }
 
-void Parser::analyze_scope_access() {
-  program_count = 0;
-  while (program_count < current_function->program.size())
-    current_function->program[program_count++].visit(AnalyzeStatement{*this});
+Datatype UnitDatatype::operator()(std::monostate unit) {
+  return Primitive::T_ANY;
 }
 
-void AnalyzeStatement::operator()(Expression expression) {}
+Datatype UnitDatatype::operator()(std::u16string_view unit) {
+  return Primitive::T_STRING;
+}
 
-void AnalyzeStatement::operator()(InitializeVariable statement) {}
+Datatype UnitDatatype::operator()(std::int64_t unit) {
+  return Primitive::T_NUMBER;
+}
+
+Datatype UnitDatatype::operator()(double unit) { return Primitive::T_NUMBER; }
+
+Datatype UnitDatatype::operator()(Interim) {
+  Statement expression_stmt{
+      parser.current_function->program[parser.program_count++]};
+  return std::get<Expression>(expression_stmt)
+      .visit(ExpressionDatatype{parser});
+}
+
+std::optional<Datatype>
+FunctionDefinition::analyze_variable(Identifier identifier) {
+  if (auto it = local_scope.find(identifier); it != local_scope.end())
+    return it->second;
+  if (auto it = nested_functions.find(identifier); it != nested_functions.end())
+    return it->second;
+  return std::nullopt;
+}
+
+Datatype UnitDatatype::operator()(Identifier identifier) {
+  auto complete_trace = std::ranges::concat_view{
+      parser.function_trace, std::ranges::single_view{parser.current_function}};
+  for (FunctionDefinition *definition : complete_trace | std::views::reverse)
+    if (auto datatype = definition->analyze_variable(identifier); datatype)
+      return *datatype;
+  if (identifier.offset == OFFSET_console)
+    return IntrinsicObject::O_CONSOLE;
+  throw ScriptError{InvalidVariableAccess{}};
+}
+
+Datatype UnitDatatype::operator()(ScopeAccess scope_access) {
+  std::unreachable();
+}
+
+Datatype UnitDatatype::operator()(const FunctionDefinition *definition) {
+  return definition;
+}
+
+Datatype PropertyDatatype::operator()(std::monostate object_type) {
+  return Primitive::T_ANY;
+}
+Datatype PropertyDatatype::operator()(Primitive object_type) {
+  return Primitive::T_ANY;
+}
+Datatype PropertyDatatype::operator()(const ObjectShape *object_type) {
+  return Primitive::T_ANY;
+}
+Datatype PropertyDatatype::operator()(const FunctionDefinition *object_type) {
+  return Primitive::T_ANY;
+}
+Datatype PropertyDatatype::operator()(IntrinsicFunction object_type) {
+  return Primitive::T_ANY;
+}
+Datatype PropertyDatatype::operator()(IntrinsicObject object_type) {
+  if (object_type == IntrinsicObject::O_CONSOLE &&
+      property.offset == OFFSET_log)
+    return IntrinsicFunction::F_LOG;
+  else
+    return Primitive::T_ANY;
+}
+
+std::pair<Datatype, Datatype>
+AnalyzeFunctionCallee::operator()(MemberExpression expression) {
+  Datatype object_type{expression.object.visit(UnitDatatype{parser})};
+  Datatype property_type{
+      object_type.visit(PropertyDatatype{expression.property})};
+  return {object_type, property_type};
+}
+
+std::pair<Datatype, Datatype> AnalyzeFunctionCallee::operator()(Unit unit) {
+  return unit.visit(*this);
+}
+
+std::pair<Datatype, Datatype> AnalyzeFunctionCallee::operator()(Interim) {
+  Statement expression_stmt{
+      parser.current_function->program[parser.program_count++]};
+  return std::get<Expression>(expression_stmt).visit(*this);
+}
+
+std::pair<Datatype, Datatype>
+AnalyzeFunctionCallee::operator()(Identifier identifier) {
+  Datatype callee_type{UnitDatatype{parser}(identifier)};
+  return {std::monostate{}, callee_type};
+}
+
+Datatype ExpressionDatatype::operator()(Unit unit) {
+  return unit.visit(UnitDatatype{parser});
+}
+
+Datatype ExpressionDatatype::operator()(BinaryExpression expression) {
+  return Primitive::T_ANY;
+}
+
+Datatype ExpressionDatatype::operator()(LogicalExpression expression) {
+  return Primitive::T_ANY;
+}
+
+Datatype ExpressionDatatype::operator()(MemberExpression expression) {
+  Datatype object_type{expression.object.visit(UnitDatatype{parser})};
+  Datatype property_type{
+      object_type.visit(PropertyDatatype{expression.property})};
+  return Primitive::T_ANY;
+}
+
+Datatype ExpressionDatatype::operator()(FunctionCallExpression expression) {
+  auto [context, callee] =
+      expression.callee.visit(AnalyzeFunctionCallee{parser});
+  for (std::size_t i = 0; i < expression.passed_arguments; ++i) {
+    Expression argument{std::get<Expression>(
+        parser.current_function->program[parser.program_count++])};
+    argument.visit(*this);
+  }
+  if (callee == Datatype{IntrinsicFunction::F_LOG})
+    return Primitive::T_NUMBER;
+  else
+    return Primitive::T_ANY;
+}
+
+Datatype ExpressionDatatype::operator()(AssignExpression expression) {
+  return Primitive::T_ANY;
+}
+
+Datatype ExpressionDatatype::operator()(ObjectExpression expression) {
+  return Primitive::T_ANY;
+}
+
+void AnalyzeStatement::operator()(Expression statement) {
+  statement.visit(ExpressionDatatype{parser});
+}
+
+void AnalyzeStatement::operator()(InitializeVariable<Unit> statement) {
+  std::unreachable();
+}
 
 void AnalyzeStatement::operator()(InitializeMember statement) {
   std::unreachable();
@@ -898,5 +669,21 @@ void AnalyzeStatement::operator()(InitializeScope statement) {
   std::unreachable();
 }
 
-void AnalyzeStatement::operator()(ReturnStatement statement) {}
+void AnalyzeStatement::operator()(ReturnStatement statement) {
+  std::unreachable();
+}
+
+void Parser::analyze_program() {
+  for (auto nested_entry : current_function->nested_functions) {
+    function_trace.push_back(current_function);
+    std::size_t definition_idx{nested_entry.second->definition_idx};
+    current_function = function_definitions[definition_idx].get();
+    analyze_program();
+    current_function = function_trace.back();
+    function_trace.pop_back();
+  }
+  while (program_count < current_function->program.size())
+    current_function->program[program_count++].visit(AnalyzeStatement{*this});
+  program_count = 0;
+}
 } // namespace Manadrain

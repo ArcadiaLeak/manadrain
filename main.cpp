@@ -35,6 +35,7 @@ int main(int argc, char *argv[]) {
       std::from_range, std::ranges::istream_view<std::uint8_t>{file})};
   parser.text_buffer = std::move(text_buffer);
   parser.parse_text();
+  parser.analyze_program();
 
   Manadrain::Script script{std::move(parser)};
   script.evaluate();
