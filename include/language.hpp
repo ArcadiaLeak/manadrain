@@ -15,6 +15,7 @@
 
 namespace Manadrain {
 enum class Keyword {
+  MONOSTATE,
   K_CONST,
   K_LET,
   K_VAR,
@@ -201,7 +202,7 @@ struct FunctionDefinition {
   std::optional<Identifier> function_name;
   std::vector<Identifier> arguments;
   std::flat_map<Identifier, Datatype> local_scope;
-  std::flat_map<Identifier, const FunctionDefinition *> nested_functions;
+  std::vector<const FunctionDefinition *> nested_functions;
   std::list<StatementIR> intermediate;
   std::vector<Statement> program;
 };
@@ -216,6 +217,7 @@ struct ConsoleMessage {
 };
 
 class Parser;
+class Typechecker;
 
 class Machine {
 public:
@@ -227,7 +229,7 @@ public:
 
 private:
   FunctionFrame *current_frame;
-  std::unique_ptr<FunctionDefinition> main_function;
+  std::shared_ptr<const FunctionDefinition> main_function;
   std::vector<std::shared_ptr<const FunctionDefinition>> function_defs;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const CompactString>> permanent_strings;
@@ -249,11 +251,12 @@ private:
   std::u16string stringify(IntrinsicFunction intrinsic_function);
 
   friend class Parser;
+  friend class Typechecker;
 };
 
 class Parser {
 public:
-  Parser(Machine &s) : machine{s} {}
+  Parser(Machine &m) : machine{m} {}
   std::shared_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
 
@@ -280,6 +283,8 @@ private:
   void assert_punct(char32_t must_be);
   void tokenize();
 
+  std::unique_ptr<FunctionDefinition> curr_definition;
+
   Unit parse_object_literal();
   Unit parse_primary_expr();
   Unit parse_member_expr(Unit object);
@@ -292,6 +297,31 @@ private:
 
   void parse_statement();
   const FunctionDefinition *parse_function_decl();
+  void parse_function_stmt();
   void parse_variable_decl();
+};
+
+struct AnalyzedDefinition {
+  const FunctionDefinition *model;
+  std::unique_ptr<FunctionDefinition> replica;
+};
+
+class Typechecker {
+public:
+  Typechecker(Machine &m) : machine{m} {}
+  void typecheck();
+
+private:
+  Machine &machine;
+  std::vector<std::shared_ptr<const FunctionDefinition>> input_defs;
+
+  AnalyzedDefinition analyzed_definition;
+  std::vector<AnalyzedDefinition> closure_trace;
+
+  void analyze_definition();
+
+  void analyze_statement(Expression expression);
+  void analyze_statement(InitializeVariable statement);
+  void analyze_statement(ReturnStatement statement);
 };
 } // namespace Manadrain

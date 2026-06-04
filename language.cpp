@@ -206,18 +206,19 @@ void Parser::assert_punct(char32_t must_be) {
 }
 
 void Parser::parse_text() {
-  machine.main_function = std::make_unique<FunctionDefinition>();
+  curr_definition = std::make_unique<FunctionDefinition>();
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
       break;
     parse_statement();
   }
+  machine.main_function = std::move(curr_definition);
 }
 
 Unit Parser::parse_object_literal() {
   std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
-  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
+  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
   ObjectExpression &object_expression{
       statement_ir.nested.emplace<Expression>().emplace<ObjectExpression>()};
   object_expression.object_shape = object_shape.get();
@@ -228,8 +229,7 @@ Unit Parser::parse_object_literal() {
     Identifier property_name{std::get<Identifier>(last_token)};
     object_shape->properties.emplace(property_name, std::monostate{});
     tokenize();
-    StatementIR &initializer_ir{
-        machine.main_function->intermediate.emplace_back()};
+    StatementIR &initializer_ir{curr_definition->intermediate.emplace_back()};
     InitializeMember &initialize_member{
         initializer_ir.nested.emplace<InitializeMember>(property_name)};
     if (last_token == Token{U':'}) {
@@ -264,7 +264,7 @@ Unit Parser::parse_primary_expr() {
 }
 
 Unit Parser::parse_call_expr(Unit callee) {
-  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
+  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
   FunctionCallExpression &expression{statement_ir.nested.emplace<Expression>()
                                          .emplace<FunctionCallExpression>()};
   expression.callee = callee;
@@ -285,7 +285,7 @@ Unit Parser::parse_member_expr(Unit object) {
   if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingFieldName{}};
   Identifier field_name{std::get<Identifier>(last_token)};
-  return &machine.main_function->intermediate.emplace_back(
+  return &curr_definition->intermediate.emplace_back(
       MemberExpression{object, field_name});
 }
 
@@ -312,7 +312,7 @@ Unit Parser::parse_additive_expr() {
   char32_t binary_op{std::get<char32_t>(last_token)};
   tokenize();
   Unit unit_right{parse_postfix_expr()};
-  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
+  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
   statement_ir.nested.emplace<Expression>(
       BinaryExpression{unit_left, unit_right, binary_op});
   return &statement_ir;
@@ -324,8 +324,7 @@ Unit Parser::parse_logical_disjunct() {
     Operator op{std::get<Operator>(last_token)};
     tokenize();
     Unit unit_right{parse_additive_expr()};
-    StatementIR &statement_ir{
-        machine.main_function->intermediate.emplace_back()};
+    StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
     statement_ir.nested.emplace<Expression>(
         LogicalExpression{unit_left, unit_right, op});
     unit_left = &statement_ir;
@@ -339,7 +338,7 @@ Unit Parser::parse_assign_expr() {
     return unit_left;
   tokenize();
   Unit unit_right{parse_assign_expr()};
-  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
+  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
   statement_ir.nested.emplace<Expression>(
       AssignExpression{unit_left, unit_right});
   return &statement_ir;
@@ -347,33 +346,41 @@ Unit Parser::parse_assign_expr() {
 
 Unit Parser::parse_expression() { return parse_assign_expr(); }
 
+void Parser::parse_function_stmt() {
+  const FunctionDefinition *nested_def{parse_function_decl()};
+  if (not nested_def->function_name)
+    throw ScriptError{MissingFunctionName{}};
+  bool duplicate_exists = std::ranges::contains(
+      curr_definition->nested_functions, nested_def->function_name,
+      [](auto el) { return el->function_name; });
+  if (duplicate_exists)
+    throw ScriptError{DuplicateDeclaration{}};
+  curr_definition->nested_functions.push_back(nested_def);
+}
+
 void Parser::parse_statement() {
-  Keyword *word_ptr{std::get_if<Keyword>(&last_token)};
-  if (word_ptr && *word_ptr == Keyword::K_FUNCTION) {
-    const FunctionDefinition *nested_definition{parse_function_decl()};
-    std::optional<Identifier> function_name{nested_definition->function_name};
-    if (not function_name)
-      throw ScriptError{MissingFunctionName{}};
-    if (machine.main_function->nested_functions.contains(*function_name))
-      throw ScriptError{DuplicateDeclaration{}};
-    machine.main_function->nested_functions.emplace(*function_name,
-                                                    nested_definition);
+  Keyword keyword{};
+  if (std::holds_alternative<Keyword>(last_token))
+    keyword = std::get<Keyword>(last_token);
+  switch (keyword) {
+  case Keyword::K_FUNCTION:
+    parse_function_stmt();
     return;
-  }
-  if (word_ptr && *word_ptr == Keyword::K_LET) {
+  case Keyword::K_LET:
     parse_variable_decl();
     return;
-  }
-  if (word_ptr && *word_ptr == Keyword::K_RETURN) {
+  case Keyword::K_RETURN: {
     tokenize();
     ReturnStatement return_statement{parse_expression()};
-    machine.main_function->program.push_back(return_statement);
+    curr_definition->program.push_back(return_statement);
     assert_punct(';');
     return;
   }
-  machine.main_function->program.push_back(parse_expression());
-  assert_punct(';');
-  return;
+  default:
+    curr_definition->program.push_back(parse_expression());
+    assert_punct(';');
+    return;
+  }
 }
 
 const FunctionDefinition *Parser::parse_function_decl() {
@@ -401,7 +408,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
   }
   tokenize();
   assert_punct('{');
-  machine.main_function.swap(definition);
+  curr_definition.swap(definition);
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
@@ -411,8 +418,8 @@ const FunctionDefinition *Parser::parse_function_decl() {
       break;
     parse_statement();
   }
-  machine.main_function.swap(definition);
-  return machine.function_defs.emplace_back(definition.release()).get();
+  curr_definition.swap(definition);
+  return machine.function_defs.emplace_back(std::move(definition)).get();
 }
 
 void Parser::parse_variable_decl() {
@@ -420,17 +427,17 @@ void Parser::parse_variable_decl() {
   if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingVariableName{}};
   Identifier variable_name{std::get<Identifier>(last_token)};
-  auto statement_it{machine.main_function->program.emplace(
-      machine.main_function->program.end())};
+  auto statement_it{
+      curr_definition->program.emplace(curr_definition->program.end())};
   tokenize();
   assert_punct('=');
   tokenize();
   Unit rvalue_unit{parse_expression()};
   statement_it->emplace<InitializeVariable>(variable_name, rvalue_unit);
   assert_punct(';');
-  if (machine.main_function->local_scope.contains(variable_name))
+  if (curr_definition->local_scope.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
-  machine.main_function->local_scope.emplace(variable_name, std::monostate{});
+  curr_definition->local_scope.emplace(variable_name, std::monostate{});
 }
 
 Machine::Machine()
@@ -493,5 +500,44 @@ std::string ConsoleMessage::encode_for_print() const {
   for (char16_t uchar : content)
     u8_message.append_range(encode_u16_for_print(uchar));
   return u8_message;
+}
+
+void Typechecker::analyze_statement(Expression expression) {}
+
+void Typechecker::analyze_statement(InitializeVariable statement) { assert(0); }
+
+void Typechecker::analyze_statement(ReturnStatement statement) {}
+
+void Typechecker::analyze_definition() {
+  for (const FunctionDefinition *nested_definition :
+       analyzed_definition.model->nested_functions) {
+    closure_trace.push_back(std::move(analyzed_definition));
+    analyzed_definition.model = nested_definition;
+    analyzed_definition.replica = std::make_unique<FunctionDefinition>();
+    analyze_definition();
+    const FunctionDefinition *replica_def{analyzed_definition.replica.get()};
+    machine.function_defs.push_back(std::move(analyzed_definition.replica));
+    analyzed_definition = std::move(closure_trace.back());
+    closure_trace.pop_back();
+    analyzed_definition.replica->nested_functions.push_back(replica_def);
+  }
+  std::span<const Statement> model_program{analyzed_definition.model->program};
+  for (Statement model_stmt : model_program)
+    model_stmt.visit([this](auto stmt_alt) {
+      if constexpr (std::is_same_v<decltype(stmt_alt), Expression> ||
+                    std::is_same_v<decltype(stmt_alt), InitializeVariable> ||
+                    std::is_same_v<decltype(stmt_alt), ReturnStatement>)
+        analyze_statement(stmt_alt);
+      else
+        std::unreachable();
+    });
+}
+
+void Typechecker::typecheck() {
+  input_defs.swap(machine.function_defs);
+  analyzed_definition.model = machine.main_function.get();
+  analyzed_definition.replica = std::make_unique<FunctionDefinition>();
+  analyze_definition();
+  machine.main_function = std::move(analyzed_definition.replica);
 }
 } // namespace Manadrain

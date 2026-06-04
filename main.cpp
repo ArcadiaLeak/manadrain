@@ -38,6 +38,9 @@ int main(int argc, char *argv[]) {
   parser.text_buffer = std::move(text_buffer);
   parser.parse_text();
 
+  Manadrain::Typechecker typechecker{machine};
+  typechecker.typecheck();
+
   auto console_printer = [&](std::stop_token stopper) {
     std::list<Manadrain::ConsoleMessage> messages{};
     machine.collect_console_messages(stopper, messages);
