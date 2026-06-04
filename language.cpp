@@ -90,7 +90,7 @@ Token Parser::tokenize_identifier(char32_t leading) {
     return Identifier{iter_permanent->second};
   if (atom_atlas.contains(identifier_str))
     return atom_atlas[identifier_str];
-  atom_pool.push_back(std::make_unique<std::string>(std::move(identifier_str)));
+  atom_pool.push_back(std::make_shared<std::string>(std::move(identifier_str)));
   std::string_view identifier_view{*atom_pool.back()};
   atom_atlas[identifier_view] =
       Identifier{permanent_identifiers.size() + atom_pool.size() - 1};
@@ -111,15 +111,23 @@ Token Parser::tokenize_string_literal(char32_t separator) {
       throw ScriptError{UnexpectedStringEnd{}};
     literal_str.append_range(traverse_u16(*leading));
   }
-  auto iter_existing = string_atlas.find(literal_str);
-  if (iter_existing != string_atlas.end())
-    return *iter_existing;
-  permanent_strings.push_back(
-      std::make_shared<CompactString>(std::move(literal_str)));
-  std::u16string_view permanent_view{
-      std::get<std::u16string>(*permanent_strings.back())};
-  string_atlas.insert(permanent_view);
-  return permanent_view;
+  auto [atlas_it, already_there] =
+      string_atlas.try_emplace(std::move(literal_str));
+  if (already_there)
+    return atlas_it->second;
+  std::shared_ptr compact_string{std::make_shared<CompactString>()};
+  if (std::ranges::all_of(atlas_it->first,
+                          [](char16_t ch) { return ch < 128; })) {
+    auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
+    auto ascii_string = atlas_it->first | std::views::transform(cast_to_ascii);
+    compact_string->ascii = {std::from_range, ascii_string};
+  } else {
+    compact_string->unicode = atlas_it->first;
+    compact_string->is_unicode = 1;
+  }
+  atlas_it->second = compact_string.get();
+  machine.permanent_strings.push_back(std::move(compact_string));
+  return atlas_it->second;
 }
 
 Token Parser::tokenize_numeric_literal(char32_t leading) {
@@ -198,23 +206,20 @@ void Parser::assert_punct(char32_t must_be) {
 }
 
 void Parser::parse_text() {
-  FunctionDefinition *definition{new FunctionDefinition{}};
-  current_function = definition;
+  current_function = std::make_unique<FunctionDefinition>();
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
       break;
     parse_statement();
   }
-  definition->definition_idx = function_definitions.size();
-  function_definitions.emplace_back(definition);
+  machine.function_definitions.emplace_back(current_function.release());
 }
 
 Unit Parser::parse_object_literal() {
   std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
-  object_shapes.push_back(object_shape);
   Expression &expression{
-      current_function->parsed_program.emplace_back().emplace<Expression>()};
+      current_function->program.emplace_back().emplace<Expression>()};
   ObjectExpression &object_expression{
       expression.emplace<ObjectExpression>(object_shape.get())};
   tokenize();
@@ -225,8 +230,8 @@ Unit Parser::parse_object_literal() {
     object_shape->properties.emplace(property_name, std::monostate{});
     ++object_expression.passed_properties;
     tokenize();
-    auto initializer_iter = current_function->parsed_program.emplace(
-        current_function->parsed_program.end());
+    auto initializer_iter =
+        current_function->program.emplace(current_function->program.end());
     InitializeMember &initialize_member{
         initializer_iter->emplace<InitializeMember>(property_name)};
     if (last_token == Token{U':'}) {
@@ -238,6 +243,7 @@ Unit Parser::parse_object_literal() {
     tokenize();
   }
   assert_punct('}');
+  machine.object_shapes.push_back(std::move(object_shape));
   return Interim{};
 }
 
@@ -266,7 +272,7 @@ Expression Parser::parse_call_expr(Unit callee) {
       break;
     Unit argument_unit{parse_expression()};
     if (not std::holds_alternative<Interim>(argument_unit))
-      current_function->parsed_program.emplace_back(argument_unit);
+      current_function->program.emplace_back(argument_unit);
     ++passed_arguments;
     if (last_token == Token{U')'})
       break;
@@ -284,29 +290,29 @@ Expression Parser::parse_member_expr(Unit object) {
 }
 
 Unit Parser::parse_postfix_expr() {
-  auto base_iter = current_function->parsed_program.emplace(
-      current_function->parsed_program.end());
+  auto base_iter =
+      current_function->program.emplace(current_function->program.end());
   Unit postfix_unit{parse_primary_expr()};
   while (1) {
     tokenize();
     if (last_token == Token{U'.'}) {
       *base_iter = parse_member_expr(postfix_unit);
-      base_iter = current_function->parsed_program.emplace(base_iter);
+      base_iter = current_function->program.emplace(base_iter);
       postfix_unit = Interim{};
     } else if (last_token == Token{U'('}) {
       *base_iter = parse_call_expr(postfix_unit);
-      base_iter = current_function->parsed_program.emplace(base_iter);
+      base_iter = current_function->program.emplace(base_iter);
       postfix_unit = Interim{};
     } else {
-      current_function->parsed_program.erase(base_iter);
+      current_function->program.erase(base_iter);
       return postfix_unit;
     }
   }
 }
 
 Unit Parser::parse_additive_expr() {
-  auto base_iter = current_function->parsed_program.emplace(
-      current_function->parsed_program.end());
+  auto base_iter =
+      current_function->program.emplace(current_function->program.end());
   Unit unit_left{parse_postfix_expr()};
   if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
     char32_t binary_op{std::get<char32_t>(last_token)};
@@ -315,13 +321,13 @@ Unit Parser::parse_additive_expr() {
     *base_iter = BinaryExpression{unit_left, unit_right, binary_op};
     return Interim{};
   }
-  current_function->parsed_program.erase(base_iter);
+  current_function->program.erase(base_iter);
   return unit_left;
 }
 
 Unit Parser::parse_logical_disjunct() {
-  auto base_iter = current_function->parsed_program.emplace(
-      current_function->parsed_program.end());
+  auto base_iter =
+      current_function->program.emplace(current_function->program.end());
   Unit unit_left{parse_additive_expr()};
   while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     Operator op{std::get<Operator>(last_token)};
@@ -329,15 +335,15 @@ Unit Parser::parse_logical_disjunct() {
     Unit unit_right{parse_additive_expr()};
     unit_left = Interim{};
     *base_iter = LogicalExpression{unit_left, unit_right, op};
-    base_iter = current_function->parsed_program.emplace(base_iter);
+    base_iter = current_function->program.emplace(base_iter);
   }
-  current_function->parsed_program.erase(base_iter);
+  current_function->program.erase(base_iter);
   return unit_left;
 }
 
 Unit Parser::parse_assign_expr() {
-  auto base_iter = current_function->parsed_program.emplace(
-      current_function->parsed_program.end());
+  auto base_iter =
+      current_function->program.emplace(current_function->program.end());
   Unit unit_left{parse_logical_disjunct()};
   if (last_token == Token{U'='}) {
     tokenize();
@@ -345,7 +351,7 @@ Unit Parser::parse_assign_expr() {
     *base_iter = AssignExpression{unit_left, unit_right};
     return Interim{};
   }
-  current_function->parsed_program.erase(base_iter);
+  current_function->program.erase(base_iter);
   return unit_left;
 }
 
@@ -370,8 +376,8 @@ void Parser::parse_statement() {
   }
   if (word_ptr && *word_ptr == Keyword::K_RETURN) {
     tokenize();
-    auto statement_it{current_function->parsed_program.emplace(
-        current_function->parsed_program.end())};
+    auto statement_it{
+        current_function->program.emplace(current_function->program.end())};
     Unit return_argument{parse_expression()};
     *statement_it = ReturnStatement{return_argument};
     assert_punct(';');
@@ -385,7 +391,7 @@ void Parser::parse_statement() {
 const FunctionDefinition *Parser::parse_function_decl() {
   tokenize();
   Identifier *function_name{std::get_if<Identifier>(&last_token)};
-  FunctionDefinition *definition{new FunctionDefinition{}};
+  std::unique_ptr definition{std::make_unique<FunctionDefinition>()};
   if (function_name) {
     definition->function_name = *function_name;
     tokenize();
@@ -407,8 +413,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
   }
   tokenize();
   assert_punct('{');
-  function_trace.push_back(current_function);
-  current_function = definition;
+  current_function.swap(definition);
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
@@ -418,11 +423,8 @@ const FunctionDefinition *Parser::parse_function_decl() {
       break;
     parse_statement();
   }
-  current_function = function_trace.back();
-  function_trace.pop_back();
-  definition->definition_idx = function_definitions.size();
-  function_definitions.emplace_back(definition);
-  return definition;
+  current_function.swap(definition);
+  return machine.function_definitions.emplace_back(definition.release()).get();
 }
 
 void Parser::parse_variable_decl() {
@@ -430,8 +432,8 @@ void Parser::parse_variable_decl() {
   if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingVariableName{}};
   Identifier variable_name{std::get<Identifier>(last_token)};
-  auto statement_it{current_function->parsed_program.emplace(
-      current_function->parsed_program.end())};
+  auto statement_it{
+      current_function->program.emplace(current_function->program.end())};
   tokenize();
   assert_punct('=');
   tokenize();
@@ -443,16 +445,16 @@ void Parser::parse_variable_decl() {
   current_function->local_scope.emplace(variable_name, std::monostate{});
 }
 
-Script::Script()
+Machine::Machine()
     : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()} {}
 
-std::u16string Script::stringify(std::monostate) { return u"undefined"; }
+std::u16string Machine::stringify(std::monostate) { return u"undefined"; }
 
-std::u16string Script::stringify(std::u16string_view permanent_string) {
+std::u16string Machine::stringify(std::u16string_view permanent_string) {
   return std::u16string(permanent_string);
 }
 
-std::u16string Script::stringify(std::int64_t number) {
+std::u16string Machine::stringify(std::int64_t number) {
   static constexpr int buffer_size =
       std::numeric_limits<std::int64_t>::digits10 + 2;
   std::array<char, buffer_size> buffer{};
@@ -465,24 +467,24 @@ std::u16string Script::stringify(std::int64_t number) {
   return {std::from_range, message_view};
 }
 
-std::u16string Script::stringify(double number) { return u"<unimplemented>"; }
+std::u16string Machine::stringify(double number) { return u"<unimplemented>"; }
 
-std::u16string Script::stringify(FunctionFrame *function_frame) {
+std::u16string Machine::stringify(FunctionFrame *function_frame) {
   return u"<unimplemented>";
 }
 
-std::u16string Script::stringify(ObjectInstance *object_instance) {
+std::u16string Machine::stringify(ObjectInstance *object_instance) {
   return u"<unimplemented>";
 }
 
-std::u16string Script::stringify(IntrinsicFunction intrinsic_function) {
+std::u16string Machine::stringify(IntrinsicFunction intrinsic_function) {
   return u"<unimplemented>";
 }
 
-void Script::evaluate() {}
+void Machine::evaluate() {}
 
-void Script::collect_console_messages(std::stop_token stopper,
-                                      std::list<ConsoleMessage> &message_box) {
+void Machine::collect_console_messages(std::stop_token stopper,
+                                       std::list<ConsoleMessage> &message_box) {
   auto check_messages = [&] { return console_messages.size() > 0; };
   std::unique_lock console_lock{*console_mutex};
   console_condition->wait(console_lock, stopper, check_messages);
@@ -503,186 +505,5 @@ std::string ConsoleMessage::encode_for_print() const {
   for (char16_t uchar : content)
     u8_message.append_range(encode_u16_for_print(uchar));
   return u8_message;
-}
-
-Datatype AnalyzeUnit::operator()(std::monostate unit) {
-  return Primitive::T_ANY;
-}
-
-Datatype AnalyzeUnit::operator()(std::u16string_view unit) {
-  return Primitive::T_STRING;
-}
-
-Datatype AnalyzeUnit::operator()(std::int64_t unit) {
-  return Primitive::T_NUMBER;
-}
-
-Datatype AnalyzeUnit::operator()(double unit) { return Primitive::T_NUMBER; }
-
-Datatype AnalyzeUnit::operator()(Interim) {
-  return std::get<Expression>(*parser.program_it++)
-      .visit(AnalyzeExpression{parser});
-}
-
-std::optional<Datatype>
-FunctionDefinition::analyze_variable(Identifier identifier) {
-  if (auto it = local_scope.find(identifier); it != local_scope.end())
-    return it->second;
-  if (auto it = nested_functions.find(identifier); it != nested_functions.end())
-    return it->second;
-  return std::nullopt;
-}
-
-Datatype AnalyzeUnit::operator()(Identifier identifier) {
-  auto complete_trace = std::ranges::concat_view{
-      parser.function_trace, std::ranges::single_view{parser.current_function}};
-  for (FunctionDefinition *definition : complete_trace | std::views::reverse)
-    if (auto datatype = definition->analyze_variable(identifier); datatype)
-      return *datatype;
-  if (identifier.offset == OFFSET_console)
-    return IntrinsicObject::O_CONSOLE;
-  throw ScriptError{InvalidVariableAccess{}};
-}
-
-Datatype AnalyzeUnit::operator()(ScopeAccess scope_access) {
-  std::unreachable();
-}
-
-Datatype AnalyzeUnit::operator()(const FunctionDefinition *definition) {
-  return definition;
-}
-
-Datatype PropertyDatatype::operator()(std::monostate object_type) {
-  return Primitive::T_ANY;
-}
-Datatype PropertyDatatype::operator()(Primitive object_type) {
-  return Primitive::T_ANY;
-}
-Datatype PropertyDatatype::operator()(const ObjectShape *object_type) {
-  return Primitive::T_ANY;
-}
-Datatype PropertyDatatype::operator()(const FunctionDefinition *object_type) {
-  return Primitive::T_ANY;
-}
-Datatype PropertyDatatype::operator()(IntrinsicFunction object_type) {
-  return Primitive::T_ANY;
-}
-Datatype PropertyDatatype::operator()(IntrinsicObject object_type) {
-  if (object_type == IntrinsicObject::O_CONSOLE &&
-      property.offset == OFFSET_log)
-    return IntrinsicFunction::F_LOG;
-  else
-    return Primitive::T_ANY;
-}
-
-std::pair<Datatype, Datatype>
-AnalyzeFunctionCallee::operator()(MemberExpression expression) {
-  Datatype object_type{expression.object.visit(AnalyzeUnit{parser})};
-  Datatype property_type{
-      object_type.visit(PropertyDatatype{expression.property})};
-  return {object_type, property_type};
-}
-
-std::pair<Datatype, Datatype> AnalyzeFunctionCallee::operator()(Unit unit) {
-  return unit.visit(*this);
-}
-
-std::pair<Datatype, Datatype> AnalyzeFunctionCallee::operator()(Interim) {
-  return std::get<Expression>(*parser.program_it++).visit(*this);
-}
-
-std::pair<Datatype, Datatype>
-AnalyzeFunctionCallee::operator()(Identifier identifier) {
-  Datatype callee_type{AnalyzeUnit{parser}(identifier)};
-  return {std::monostate{}, callee_type};
-}
-
-Datatype AnalyzeExpression::operator()(Unit unit) {
-  return unit.visit(AnalyzeUnit{parser});
-}
-
-Datatype AnalyzeExpression::operator()(BinaryExpression expression) {
-  return Primitive::T_ANY;
-}
-
-Datatype AnalyzeExpression::operator()(LogicalExpression expression) {
-  return Primitive::T_ANY;
-}
-
-Datatype AnalyzeExpression::operator()(MemberExpression expression) {
-  Datatype object_type{expression.object.visit(AnalyzeUnit{parser})};
-  Datatype property_type{
-      object_type.visit(PropertyDatatype{expression.property})};
-  return Primitive::T_ANY;
-}
-
-Datatype AnalyzeExpression::operator()(FunctionCallExpression expression) {
-  auto [context, callee] =
-      expression.callee.visit(AnalyzeFunctionCallee{parser});
-  for (std::size_t i = 0; i < expression.passed_arguments; ++i)
-    std::get<Expression>(*parser.program_it++).visit(*this);
-  if (callee == Datatype{IntrinsicFunction::F_LOG})
-    return Primitive::T_NUMBER;
-  else
-    return Primitive::T_ANY;
-}
-
-Datatype AnalyzeExpression::operator()(AssignExpression expression) {
-  return Primitive::T_ANY;
-}
-
-Datatype AnalyzeExpression::operator()(ObjectExpression expression) {
-  return Primitive::T_ANY;
-}
-
-void AnalyzeStatement::operator()(Expression statement) {
-  statement.visit(AnalyzeExpression{parser});
-}
-
-void AnalyzeStatement::operator()(InitializeVariable statement) {
-  auto complete_trace = std::ranges::concat_view{
-      parser.function_trace, std::ranges::single_view{parser.current_function}};
-  for (auto [frame_offset, definition] :
-       complete_trace | std::views::enumerate | std::views::reverse) {
-    if (not definition->local_scope.contains(statement.variable_name))
-      continue;
-    auto variable_it = definition->local_scope.find(statement.variable_name);
-    std::size_t scope_offset{static_cast<std::size_t>(
-        std::distance(definition->local_scope.begin(), variable_it))};
-    ScopeAccess scope_access{static_cast<std::size_t>(frame_offset),
-                             scope_offset};
-    assert(0);
-  }
-}
-
-void AnalyzeStatement::operator()(
-    InitializeScope<const CompactString *> statement) {
-  std::unreachable();
-}
-
-void AnalyzeStatement::operator()(InitializeScope<double> statement) {
-  std::unreachable();
-}
-
-void AnalyzeStatement::operator()(InitializeMember statement) {
-  std::unreachable();
-}
-
-void AnalyzeStatement::operator()(ReturnStatement statement) {
-  std::unreachable();
-}
-
-void Parser::analyze_program() {
-  for (auto nested_entry : current_function->nested_functions) {
-    function_trace.push_back(current_function);
-    std::size_t definition_idx{nested_entry.second->definition_idx};
-    current_function = function_definitions[definition_idx].get();
-    analyze_program();
-    current_function = function_trace.back();
-    function_trace.pop_back();
-  }
-  std::list<Statement> &prg{current_function->parsed_program};
-  for (program_it = prg.begin(); program_it != prg.end(); ++program_it)
-    program_it->visit(AnalyzeStatement{*this});
 }
 } // namespace Manadrain

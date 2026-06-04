@@ -30,19 +30,17 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Parser parser{};
+  Manadrain::Machine machine{};
+
+  Manadrain::Parser parser{machine};
   std::unique_ptr text_buffer{std::make_unique<std::vector<std::uint8_t>>(
       std::from_range, std::ranges::istream_view<std::uint8_t>{file})};
   parser.text_buffer = std::move(text_buffer);
   parser.parse_text();
-  parser.analyze_program();
-
-  Manadrain::Script script{std::move(parser)};
-  script.evaluate();
 
   auto console_printer = [&](std::stop_token stopper) {
     std::list<Manadrain::ConsoleMessage> messages{};
-    script.collect_console_messages(stopper, messages);
+    machine.collect_console_messages(stopper, messages);
     for (const Manadrain::ConsoleMessage &message : messages)
       std::println("{}", message.encode_for_print());
   };
