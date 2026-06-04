@@ -303,7 +303,7 @@ private:
 
 struct AnalyzedDefinition {
   const FunctionDefinition *model;
-  std::unique_ptr<FunctionDefinition> replica;
+  FunctionDefinition replica;
 };
 
 class Typechecker {
@@ -315,9 +315,7 @@ private:
   Machine &machine;
   std::vector<std::shared_ptr<const FunctionDefinition>> input_defs;
 
-  AnalyzedDefinition analyzed_definition;
-  std::vector<AnalyzedDefinition> closure_trace;
-
+  std::vector<std::unique_ptr<AnalyzedDefinition>> analyzer_stack;
   void analyze_definition();
 
   void analyze_statement(Expression expression);

@@ -504,25 +504,33 @@ std::string ConsoleMessage::encode_for_print() const {
 
 void Typechecker::analyze_statement(Expression expression) {}
 
-void Typechecker::analyze_statement(InitializeVariable statement) { assert(0); }
+void Typechecker::analyze_statement(InitializeVariable statement) {
+  for (std::size_t i = 0; i < analyzer_stack.size(); ++i) {
+    const auto &model_locals{analyzer_stack.rbegin()[i]->model->local_scope};
+    if (not model_locals.contains(statement.variable_name))
+      continue;
+    auto variable_it = model_locals.find(statement.variable_name);
+    std::size_t scope_offset{static_cast<std::size_t>(
+        std::distance(model_locals.begin(), variable_it))};
+  }
+  assert(0);
+}
 
 void Typechecker::analyze_statement(ReturnStatement statement) {}
 
 void Typechecker::analyze_definition() {
   for (const FunctionDefinition *nested_definition :
-       analyzed_definition.model->nested_functions) {
-    closure_trace.push_back(std::move(analyzed_definition));
-    analyzed_definition.model = nested_definition;
-    analyzed_definition.replica = std::make_unique<FunctionDefinition>();
+       analyzer_stack.back()->model->nested_functions) {
+    analyzer_stack.push_back(
+        std::make_unique<AnalyzedDefinition>(nested_definition));
     analyze_definition();
-    const FunctionDefinition *replica_def{analyzed_definition.replica.get()};
-    machine.function_defs.push_back(std::move(analyzed_definition.replica));
-    analyzed_definition = std::move(closure_trace.back());
-    closure_trace.pop_back();
-    analyzed_definition.replica->nested_functions.push_back(replica_def);
+    machine.function_defs.push_back(std::make_shared<FunctionDefinition>(
+        std::move(analyzer_stack.back()->replica)));
+    analyzer_stack.pop_back();
+    analyzer_stack.back()->replica.nested_functions.push_back(
+        machine.function_defs.back().get());
   }
-  std::span<const Statement> model_program{analyzed_definition.model->program};
-  for (Statement model_stmt : model_program)
+  for (Statement model_stmt : analyzer_stack.back()->model->program)
     model_stmt.visit([this](auto stmt_alt) {
       if constexpr (std::is_same_v<decltype(stmt_alt), Expression> ||
                     std::is_same_v<decltype(stmt_alt), InitializeVariable> ||
@@ -535,9 +543,11 @@ void Typechecker::analyze_definition() {
 
 void Typechecker::typecheck() {
   input_defs.swap(machine.function_defs);
-  analyzed_definition.model = machine.main_function.get();
-  analyzed_definition.replica = std::make_unique<FunctionDefinition>();
+  analyzer_stack.push_back(
+      std::make_unique<AnalyzedDefinition>(machine.main_function.get()));
   analyze_definition();
-  machine.main_function = std::move(analyzed_definition.replica);
+  machine.main_function = std::make_shared<FunctionDefinition>(
+      std::move(analyzer_stack.back()->replica));
+  analyzer_stack.pop_back();
 }
 } // namespace Manadrain
