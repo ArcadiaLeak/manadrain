@@ -111,9 +111,9 @@ Token Parser::tokenize_string_literal(char32_t separator) {
       throw ScriptError{UnexpectedStringEnd{}};
     literal_str.append_range(traverse_u16(*leading));
   }
-  auto [atlas_it, already_there] =
+  auto [atlas_it, did_insert] =
       string_atlas.try_emplace(std::move(literal_str));
-  if (already_there)
+  if (not did_insert)
     return atlas_it->second;
   std::shared_ptr compact_string{std::make_shared<CompactString>()};
   if (std::ranges::all_of(atlas_it->first,
@@ -206,50 +206,49 @@ void Parser::assert_punct(char32_t must_be) {
 }
 
 void Parser::parse_text() {
-  current_function = std::make_unique<FunctionDefinition>();
+  machine.main_function = std::make_unique<FunctionDefinition>();
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
       break;
     parse_statement();
   }
-  machine.function_definitions.emplace_back(current_function.release());
 }
 
 Unit Parser::parse_object_literal() {
   std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
-  Expression &expression{
-      current_function->program.emplace_back().emplace<Expression>()};
+  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
   ObjectExpression &object_expression{
-      expression.emplace<ObjectExpression>(object_shape.get())};
+      statement_ir.nested.emplace<Expression>().emplace<ObjectExpression>()};
+  object_expression.object_shape = object_shape.get();
   tokenize();
   while (last_token != Token{U'}'}) {
     if (not std::holds_alternative<Identifier>(last_token))
       throw ScriptError{InvalidPropertyName{}};
     Identifier property_name{std::get<Identifier>(last_token)};
     object_shape->properties.emplace(property_name, std::monostate{});
-    ++object_expression.passed_properties;
     tokenize();
-    auto initializer_iter =
-        current_function->program.emplace(current_function->program.end());
+    StatementIR &initializer_ir{
+        machine.main_function->intermediate.emplace_back()};
     InitializeMember &initialize_member{
-        initializer_iter->emplace<InitializeMember>(property_name)};
+        initializer_ir.nested.emplace<InitializeMember>(property_name)};
     if (last_token == Token{U':'}) {
       tokenize();
       initialize_member.rvalue = parse_expression();
     }
+    object_expression.properties.push_back(&initializer_ir);
     if (last_token != Token{U','})
       break;
     tokenize();
   }
   assert_punct('}');
   machine.object_shapes.push_back(std::move(object_shape));
-  return Interim{};
+  return &statement_ir;
 }
 
 Unit Parser::parse_primary_expr() {
   return last_token.visit([this](auto t) -> Unit {
-    if constexpr (std::is_same_v<decltype(t), std::u16string_view> ||
+    if constexpr (std::is_same_v<decltype(t), const CompactString *> ||
                   std::is_same_v<decltype(t), Identifier> ||
                   std::is_same_v<decltype(t), std::int64_t> ||
                   std::is_same_v<decltype(t), double>)
@@ -264,95 +263,86 @@ Unit Parser::parse_primary_expr() {
   });
 }
 
-Expression Parser::parse_call_expr(Unit callee) {
-  std::size_t passed_arguments{};
+Unit Parser::parse_call_expr(Unit callee) {
+  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
+  FunctionCallExpression &expression{statement_ir.nested.emplace<Expression>()
+                                         .emplace<FunctionCallExpression>()};
+  expression.callee = callee;
   while (1) {
     tokenize();
     if (last_token == Token{U')'})
       break;
-    Unit argument_unit{parse_expression()};
-    if (not std::holds_alternative<Interim>(argument_unit))
-      current_function->program.emplace_back(argument_unit);
-    ++passed_arguments;
+    expression.arguments.emplace_back(parse_expression());
     if (last_token == Token{U')'})
       break;
     assert_punct(',');
   }
-  return FunctionCallExpression{callee, passed_arguments};
+  return &statement_ir;
 }
 
-Expression Parser::parse_member_expr(Unit object) {
+Unit Parser::parse_member_expr(Unit object) {
   tokenize();
-  Identifier *field_name{std::get_if<Identifier>(&last_token)};
-  if (not field_name)
+  if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingFieldName{}};
-  return MemberExpression{object, *field_name};
+  Identifier field_name{std::get<Identifier>(last_token)};
+  return &machine.main_function->intermediate.emplace_back(
+      MemberExpression{object, field_name});
 }
 
 Unit Parser::parse_postfix_expr() {
-  auto base_iter =
-      current_function->program.emplace(current_function->program.end());
-  Unit postfix_unit{parse_primary_expr()};
-  while (1) {
+  Unit postfix_unit{};
+  std::optional postfix_opt{parse_primary_expr()};
+  while (postfix_opt) {
+    postfix_unit = *postfix_opt;
     tokenize();
-    if (last_token == Token{U'.'}) {
-      *base_iter = parse_member_expr(postfix_unit);
-      base_iter = current_function->program.emplace(base_iter);
-      postfix_unit = Interim{};
-    } else if (last_token == Token{U'('}) {
-      *base_iter = parse_call_expr(postfix_unit);
-      base_iter = current_function->program.emplace(base_iter);
-      postfix_unit = Interim{};
-    } else {
-      current_function->program.erase(base_iter);
-      return postfix_unit;
-    }
+    std::optional<Unit> ahead{};
+    if (last_token == Token{U'.'})
+      ahead = parse_member_expr(postfix_unit);
+    else if (last_token == Token{U'('})
+      ahead = parse_call_expr(postfix_unit);
+    postfix_opt = ahead;
   }
+  return postfix_unit;
 }
 
 Unit Parser::parse_additive_expr() {
-  auto base_iter =
-      current_function->program.emplace(current_function->program.end());
   Unit unit_left{parse_postfix_expr()};
-  if (last_token == Token{U'+'} || last_token == Token{U'-'}) {
-    char32_t binary_op{std::get<char32_t>(last_token)};
-    tokenize();
-    Unit unit_right{parse_postfix_expr()};
-    *base_iter = BinaryExpression{unit_left, unit_right, binary_op};
-    return Interim{};
-  }
-  current_function->program.erase(base_iter);
-  return unit_left;
+  if (last_token != Token{U'+'} && last_token != Token{U'-'})
+    return unit_left;
+  char32_t binary_op{std::get<char32_t>(last_token)};
+  tokenize();
+  Unit unit_right{parse_postfix_expr()};
+  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
+  statement_ir.nested.emplace<Expression>(
+      BinaryExpression{unit_left, unit_right, binary_op});
+  return &statement_ir;
 }
 
 Unit Parser::parse_logical_disjunct() {
-  auto base_iter =
-      current_function->program.emplace(current_function->program.end());
   Unit unit_left{parse_additive_expr()};
   while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     Operator op{std::get<Operator>(last_token)};
     tokenize();
     Unit unit_right{parse_additive_expr()};
-    unit_left = Interim{};
-    *base_iter = LogicalExpression{unit_left, unit_right, op};
-    base_iter = current_function->program.emplace(base_iter);
+    StatementIR &statement_ir{
+        machine.main_function->intermediate.emplace_back()};
+    statement_ir.nested.emplace<Expression>(
+        LogicalExpression{unit_left, unit_right, op});
+    unit_left = &statement_ir;
   }
-  current_function->program.erase(base_iter);
   return unit_left;
 }
 
 Unit Parser::parse_assign_expr() {
-  auto base_iter =
-      current_function->program.emplace(current_function->program.end());
   Unit unit_left{parse_logical_disjunct()};
-  if (last_token == Token{U'='}) {
-    tokenize();
-    Unit unit_right{parse_assign_expr()};
-    *base_iter = AssignExpression{unit_left, unit_right};
-    return Interim{};
-  }
-  current_function->program.erase(base_iter);
-  return unit_left;
+  if (last_token != Token{U'='})
+    return unit_left;
+  tokenize();
+  Unit unit_right{parse_assign_expr()};
+  StatementIR &statement_ir{machine.main_function->intermediate.emplace_back()};
+  statement_ir.nested.emplace<Expression>(
+      AssignExpression{unit_left, unit_right});
+  return &statement_ir;
 }
 
 Unit Parser::parse_expression() { return parse_assign_expr(); }
@@ -364,10 +354,10 @@ void Parser::parse_statement() {
     std::optional<Identifier> function_name{nested_definition->function_name};
     if (not function_name)
       throw ScriptError{MissingFunctionName{}};
-    if (current_function->nested_functions.contains(*function_name))
+    if (machine.main_function->nested_functions.contains(*function_name))
       throw ScriptError{DuplicateDeclaration{}};
-    current_function->nested_functions.emplace(*function_name,
-                                               nested_definition);
+    machine.main_function->nested_functions.emplace(*function_name,
+                                                    nested_definition);
     return;
   }
   if (word_ptr && *word_ptr == Keyword::K_LET) {
@@ -376,14 +366,12 @@ void Parser::parse_statement() {
   }
   if (word_ptr && *word_ptr == Keyword::K_RETURN) {
     tokenize();
-    auto statement_it{
-        current_function->program.emplace(current_function->program.end())};
-    Unit return_argument{parse_expression()};
-    *statement_it = ReturnStatement{return_argument};
+    ReturnStatement return_statement{parse_expression()};
+    machine.main_function->program.push_back(return_statement);
     assert_punct(';');
     return;
   }
-  parse_expression();
+  machine.main_function->program.push_back(parse_expression());
   assert_punct(';');
   return;
 }
@@ -413,7 +401,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
   }
   tokenize();
   assert_punct('{');
-  current_function.swap(definition);
+  machine.main_function.swap(definition);
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
@@ -423,8 +411,8 @@ const FunctionDefinition *Parser::parse_function_decl() {
       break;
     parse_statement();
   }
-  current_function.swap(definition);
-  return machine.function_definitions.emplace_back(definition.release()).get();
+  machine.main_function.swap(definition);
+  return machine.function_defs.emplace_back(definition.release()).get();
 }
 
 void Parser::parse_variable_decl() {
@@ -432,17 +420,17 @@ void Parser::parse_variable_decl() {
   if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingVariableName{}};
   Identifier variable_name{std::get<Identifier>(last_token)};
-  auto statement_it{
-      current_function->program.emplace(current_function->program.end())};
+  auto statement_it{machine.main_function->program.emplace(
+      machine.main_function->program.end())};
   tokenize();
   assert_punct('=');
   tokenize();
   Unit rvalue_unit{parse_expression()};
   statement_it->emplace<InitializeVariable>(variable_name, rvalue_unit);
   assert_punct(';');
-  if (current_function->local_scope.contains(variable_name))
+  if (machine.main_function->local_scope.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
-  current_function->local_scope.emplace(variable_name, std::monostate{});
+  machine.main_function->local_scope.emplace(variable_name, std::monostate{});
 }
 
 Machine::Machine()

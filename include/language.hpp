@@ -129,10 +129,12 @@ template <typename T> struct ScopeAccess {
   std::size_t frame_offset;
   std::size_t scope_offset;
 };
+struct StatementIR;
 using Unit =
-    std::variant<std::monostate, std::u16string_view, std::int64_t, double,
+    std::variant<std::monostate, const CompactString *, std::int64_t, double,
                  Interim, Identifier, ScopeAccess<const CompactString *>,
-                 ScopeAccess<double>, const FunctionDefinition *>;
+                 ScopeAccess<double>, const FunctionDefinition *,
+                 const StatementIR *>;
 
 struct BinaryExpression {
   Unit left;
@@ -150,7 +152,8 @@ struct MemberExpression {
 };
 struct FunctionCallExpression {
   Unit callee;
-  std::size_t passed_arguments;
+  std::vector<Unit> arguments;
+  std::size_t inline_arguments;
 };
 struct AssignExpression {
   Unit left;
@@ -162,7 +165,8 @@ struct ObjectShape {
 };
 struct ObjectExpression {
   const ObjectShape *object_shape;
-  std::size_t passed_properties;
+  std::vector<Unit> properties;
+  std::size_t inline_properties;
 };
 
 using Expression =
@@ -188,6 +192,9 @@ using Statement =
     std::variant<Expression, InitializeVariable,
                  InitializeScope<const CompactString *>,
                  InitializeScope<double>, InitializeMember, ReturnStatement>;
+struct StatementIR {
+  Statement nested;
+};
 
 struct FunctionDefinition {
   Datatype return_type;
@@ -195,6 +202,7 @@ struct FunctionDefinition {
   std::vector<Identifier> arguments;
   std::flat_map<Identifier, Datatype> local_scope;
   std::flat_map<Identifier, const FunctionDefinition *> nested_functions;
+  std::list<StatementIR> intermediate;
   std::vector<Statement> program;
 };
 
@@ -219,7 +227,8 @@ public:
 
 private:
   FunctionFrame *current_frame;
-  std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
+  std::unique_ptr<FunctionDefinition> main_function;
+  std::vector<std::shared_ptr<const FunctionDefinition>> function_defs;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const CompactString>> permanent_strings;
 
@@ -271,12 +280,10 @@ private:
   void assert_punct(char32_t must_be);
   void tokenize();
 
-  std::unique_ptr<FunctionDefinition> current_function;
-
   Unit parse_object_literal();
   Unit parse_primary_expr();
-  Expression parse_member_expr(Unit object);
-  Expression parse_call_expr(Unit callee);
+  Unit parse_member_expr(Unit object);
+  Unit parse_call_expr(Unit callee);
   Unit parse_postfix_expr();
   Unit parse_additive_expr();
   Unit parse_logical_disjunct();
