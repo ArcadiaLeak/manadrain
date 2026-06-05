@@ -121,10 +121,8 @@ Token Parser::tokenize_string_literal(char32_t separator) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
     auto ascii_string = atlas_it->first | std::views::transform(cast_to_ascii);
     compact_string->ascii = {std::from_range, ascii_string};
-  } else {
+  } else
     compact_string->unicode = atlas_it->first;
-    compact_string->is_unicode = 1;
-  }
   atlas_it->second = compact_string.get();
   machine.permanent_strings.push_back(std::move(compact_string));
   return atlas_it->second;
@@ -218,32 +216,37 @@ void Parser::parse_text() {
 
 Unit Parser::parse_object_literal() {
   std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
-  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
+  std::size_t statement_idx{curr_definition->intermediate.size()};
+  Statement &statement_ir{*curr_definition->intermediate.emplace_back(
+      std::make_unique<Statement>())};
   ObjectExpression &object_expression{
-      statement_ir.nested.emplace<Expression>().emplace<ObjectExpression>()};
+      statement_ir.emplace<Expression>().emplace<ObjectExpression>()};
   object_expression.object_shape = object_shape.get();
   tokenize();
   while (last_token != Token{U'}'}) {
     if (not std::holds_alternative<Identifier>(last_token))
       throw ScriptError{InvalidPropertyName{}};
     Identifier property_name{std::get<Identifier>(last_token)};
-    object_shape->properties.emplace(property_name, std::monostate{});
+    object_shape->properties.try_emplace(property_name);
     tokenize();
-    StatementIR &initializer_ir{curr_definition->intermediate.emplace_back()};
+    std::size_t initializer_idx{curr_definition->intermediate.size()};
+    Statement &initializer_ir{*curr_definition->intermediate.emplace_back(
+        std::make_unique<Statement>())};
     InitializeMember &initialize_member{
-        initializer_ir.nested.emplace<InitializeMember>(property_name)};
+        initializer_ir.emplace<InitializeMember>(property_name)};
     if (last_token == Token{U':'}) {
       tokenize();
       initialize_member.rvalue = parse_expression();
     }
-    object_expression.properties.push_back(&initializer_ir);
+    object_expression.properties.push_back(
+        ExpressionIR<std::monostate>{initializer_idx});
     if (last_token != Token{U','})
       break;
     tokenize();
   }
   assert_punct('}');
   machine.object_shapes.push_back(std::move(object_shape));
-  return &statement_ir;
+  return ExpressionIR<std::monostate>{statement_idx};
 }
 
 Unit Parser::parse_primary_expr() {
@@ -264,9 +267,11 @@ Unit Parser::parse_primary_expr() {
 }
 
 Unit Parser::parse_call_expr(Unit callee) {
-  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
-  FunctionCallExpression &expression{statement_ir.nested.emplace<Expression>()
-                                         .emplace<FunctionCallExpression>()};
+  std::size_t statement_idx{curr_definition->intermediate.size()};
+  Statement &statement_ir{*curr_definition->intermediate.emplace_back(
+      std::make_unique<Statement>())};
+  FunctionCallExpression &expression{
+      statement_ir.emplace<Expression>().emplace<FunctionCallExpression>()};
   expression.callee = callee;
   while (1) {
     tokenize();
@@ -277,7 +282,7 @@ Unit Parser::parse_call_expr(Unit callee) {
       break;
     assert_punct(',');
   }
-  return &statement_ir;
+  return ExpressionIR<std::monostate>{statement_idx};
 }
 
 Unit Parser::parse_member_expr(Unit object) {
@@ -285,8 +290,10 @@ Unit Parser::parse_member_expr(Unit object) {
   if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingFieldName{}};
   Identifier field_name{std::get<Identifier>(last_token)};
-  return &curr_definition->intermediate.emplace_back(
-      MemberExpression{object, field_name});
+  std::size_t statement_idx{curr_definition->intermediate.size()};
+  curr_definition->intermediate.push_back(
+      std::make_unique<Statement>(MemberExpression{object, field_name}));
+  return ExpressionIR<std::monostate>{statement_idx};
 }
 
 Unit Parser::parse_postfix_expr() {
@@ -312,10 +319,10 @@ Unit Parser::parse_additive_expr() {
   char32_t binary_op{std::get<char32_t>(last_token)};
   tokenize();
   Unit unit_right{parse_postfix_expr()};
-  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
-  statement_ir.nested.emplace<Expression>(
-      BinaryExpression{unit_left, unit_right, binary_op});
-  return &statement_ir;
+  std::size_t statement_idx{curr_definition->intermediate.size()};
+  curr_definition->intermediate.push_back(std::make_unique<Statement>(
+      BinaryExpressionIR{unit_left, unit_right, binary_op}));
+  return ExpressionIR<std::monostate>{statement_idx};
 }
 
 Unit Parser::parse_logical_disjunct() {
@@ -324,10 +331,10 @@ Unit Parser::parse_logical_disjunct() {
     Operator op{std::get<Operator>(last_token)};
     tokenize();
     Unit unit_right{parse_additive_expr()};
-    StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
-    statement_ir.nested.emplace<Expression>(
-        LogicalExpression{unit_left, unit_right, op});
-    unit_left = &statement_ir;
+    std::size_t statement_idx{curr_definition->intermediate.size()};
+    curr_definition->intermediate.push_back(std::make_unique<Statement>(
+        LogicalExpression{unit_left, unit_right, op}));
+    unit_left = ExpressionIR<std::monostate>{statement_idx};
   }
   return unit_left;
 }
@@ -338,10 +345,10 @@ Unit Parser::parse_assign_expr() {
     return unit_left;
   tokenize();
   Unit unit_right{parse_assign_expr()};
-  StatementIR &statement_ir{curr_definition->intermediate.emplace_back()};
-  statement_ir.nested.emplace<Expression>(
-      AssignExpression{unit_left, unit_right});
-  return &statement_ir;
+  std::size_t statement_idx{curr_definition->intermediate.size()};
+  curr_definition->intermediate.push_back(
+      std::make_unique<Statement>(AssignExpression{unit_left, unit_right}));
+  return ExpressionIR<std::monostate>{statement_idx};
 }
 
 Unit Parser::parse_expression() { return parse_assign_expr(); }
@@ -399,7 +406,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
     Identifier *parameter{std::get_if<Identifier>(&last_token)};
     if (not parameter)
       throw ScriptError{MissingFormalParameter{}};
-    definition->local_scope.emplace(*parameter, std::monostate{});
+    definition->local_scope.try_emplace(*parameter);
     definition->arguments.push_back(*parameter);
     tokenize();
     if (last_token == Token{U')'})
@@ -427,17 +434,16 @@ void Parser::parse_variable_decl() {
   if (not std::holds_alternative<Identifier>(last_token))
     throw ScriptError{MissingVariableName{}};
   Identifier variable_name{std::get<Identifier>(last_token)};
-  auto statement_it{
-      curr_definition->program.emplace(curr_definition->program.end())};
   tokenize();
   assert_punct('=');
   tokenize();
   Unit rvalue_unit{parse_expression()};
-  statement_it->emplace<InitializeVariable>(variable_name, rvalue_unit);
+  curr_definition->program.push_back(
+      InitializeVariable{variable_name, rvalue_unit});
   assert_punct(';');
   if (curr_definition->local_scope.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
-  curr_definition->local_scope.emplace(variable_name, std::monostate{});
+  curr_definition->local_scope.try_emplace(variable_name);
 }
 
 Machine::Machine()
@@ -502,18 +508,56 @@ std::string ConsoleMessage::encode_for_print() const {
   return u8_message;
 }
 
+Datatype
+Typechecker::analyze_initializer(std::size_t scope_offset,
+                                 std::size_t local_offset,
+                                 ConcreteUnit<const CompactString *> unit_alt) {
+  analyzer_stack.rbegin()[scope_offset]->replica.program.push_back(
+      InitializeScope<const CompactString *>{scope_offset, local_offset,
+                                             unit_alt});
+  return StringType{};
+}
+
+Datatype
+Typechecker::analyze_initializer(std::size_t scope_offset,
+                                 std::size_t local_offset,
+                                 ExpressionIR<std::monostate> unit_alt) {
+  auto expression_initializer = [&](auto expression_alt) {
+    return analyze_initializer(scope_offset, local_offset,
+                               analyze_expression(expression_alt));
+  };
+  Expression expression_ir{std::get<Expression>(
+      *analyzer_stack.back()->model->intermediate[unit_alt.intermediate_idx])};
+  return expression_ir.visit(expression_initializer);
+}
+
+Unit Typechecker::analyze_expression(BinaryExpressionIR expression_alt) {
+  auto deduce_concrete = [&](auto left_alt, auto right_alt) -> Unit {
+    // return analyze_binary_expression(left_alt, right_alt, expression_alt.op);
+    return std::monostate{};
+  };
+  return std::visit(deduce_concrete, expression_alt.left, expression_alt.right);
+}
+
 void Typechecker::analyze_statement(Expression expression) {}
 
 void Typechecker::analyze_statement(InitializeVariable statement) {
-  for (std::size_t i = 0; i < analyzer_stack.size(); ++i) {
-    const auto &model_locals{analyzer_stack.rbegin()[i]->model->local_scope};
+  for (std::size_t scope_offset = 0; scope_offset < analyzer_stack.size();
+       ++scope_offset) {
+    const auto &model_locals{
+        analyzer_stack.rbegin()[scope_offset]->model->local_scope};
     if (not model_locals.contains(statement.variable_name))
       continue;
     auto variable_it = model_locals.find(statement.variable_name);
-    std::size_t scope_offset{static_cast<std::size_t>(
-        std::distance(model_locals.begin(), variable_it))};
+    std::size_t local_offset = std::distance(model_locals.begin(), variable_it);
+    auto deduce_initializer = [&](auto unit_alt) {
+      return analyze_initializer(scope_offset, local_offset, unit_alt);
+    };
+    Datatype initializer_type{statement.rvalue.visit(deduce_initializer)};
+    analyzer_stack.rbegin()[scope_offset]
+        ->replica.local_scope[statement.variable_name] = initializer_type;
+    break;
   }
-  assert(0);
 }
 
 void Typechecker::analyze_statement(ReturnStatement statement) {}

@@ -116,7 +116,6 @@ struct ObjectInstance;
 struct CompactString {
   std::string ascii;
   std::u16string unicode;
-  bool is_unicode;
 };
 union Value {
   double number;
@@ -125,21 +124,34 @@ union Value {
   ObjectInstance *object_instance;
 };
 
-struct Interim {};
-template <typename T> struct ScopeAccess {
-  std::size_t frame_offset;
+template <typename T> struct Interim {};
+template <typename T> struct ScopeAccessor {
   std::size_t scope_offset;
+  std::size_t local_offset;
 };
-struct StatementIR;
+template <typename T> struct ExpressionIR {
+  std::size_t intermediate_idx;
+};
+template <typename T>
+using ConcreteUnit =
+    std::variant<T, ScopeAccessor<T>, Interim<T>, ExpressionIR<T>>;
 using Unit =
-    std::variant<std::monostate, const CompactString *, std::int64_t, double,
-                 Interim, Identifier, ScopeAccess<const CompactString *>,
-                 ScopeAccess<double>, const FunctionDefinition *,
-                 const StatementIR *>;
+    std::variant<std::monostate, std::int64_t, Identifier,
+                 ConcreteUnit<const CompactString *>, ConcreteUnit<double>,
+                 const FunctionDefinition *, ExpressionIR<std::monostate>>;
 
-struct BinaryExpression {
+struct BinaryExpressionIR {
   Unit left;
   Unit right;
+  char32_t op;
+};
+struct ConcatExpression {
+  ConcreteUnit<const CompactString *> left;
+  ConcreteUnit<const CompactString *> right;
+};
+struct BinaryExpression {
+  ConcreteUnit<double> left;
+  ConcreteUnit<double> right;
   char32_t op;
 };
 struct LogicalExpression {
@@ -171,8 +183,9 @@ struct ObjectExpression {
 };
 
 using Expression =
-    std::variant<Unit, BinaryExpression, LogicalExpression, MemberExpression,
-                 FunctionCallExpression, AssignExpression, ObjectExpression>;
+    std::variant<Unit, BinaryExpressionIR, ConcatExpression, BinaryExpression,
+                 LogicalExpression, MemberExpression, FunctionCallExpression,
+                 AssignExpression, ObjectExpression>;
 
 struct InitializeVariable {
   Identifier variable_name;
@@ -183,8 +196,9 @@ struct InitializeMember {
   Unit rvalue;
 };
 template <typename T> struct InitializeScope {
-  ScopeAccess<T> accessor;
-  T rvalue;
+  std::size_t scope_offset;
+  std::size_t local_offset;
+  ConcreteUnit<T> rvalue;
 };
 struct ReturnStatement {
   Unit argument;
@@ -193,9 +207,6 @@ using Statement =
     std::variant<Expression, InitializeVariable,
                  InitializeScope<const CompactString *>,
                  InitializeScope<double>, InitializeMember, ReturnStatement>;
-struct StatementIR {
-  Statement nested;
-};
 
 struct FunctionDefinition {
   Datatype return_type;
@@ -203,7 +214,7 @@ struct FunctionDefinition {
   std::vector<Identifier> arguments;
   std::flat_map<Identifier, Datatype> local_scope;
   std::vector<const FunctionDefinition *> nested_functions;
-  std::list<StatementIR> intermediate;
+  std::vector<std::unique_ptr<Statement>> intermediate;
   std::vector<Statement> program;
 };
 
@@ -321,5 +332,25 @@ private:
   void analyze_statement(Expression expression);
   void analyze_statement(InitializeVariable statement);
   void analyze_statement(ReturnStatement statement);
+
+  Datatype analyze_initializer(std::size_t scope_offset,
+                               std::size_t local_offset,
+                               ConcreteUnit<const CompactString *> unit_alt);
+  Datatype analyze_initializer(std::size_t scope_offset,
+                               std::size_t local_offset,
+                               ExpressionIR<std::monostate> unit_alt);
+  Datatype analyze_initializer(std::size_t scope_offset,
+                               std::size_t local_offset,
+                               BinaryExpressionIR expression_alt);
+  template <typename T>
+  Datatype analyze_initializer(std::size_t scope_offset,
+                               std::size_t local_offset, T unit_alt) {
+    throw ScriptError{InvalidVariableAccess{}};
+  }
+
+  Unit analyze_expression(BinaryExpressionIR expression_alt);
+  template <typename T> Unit analyze_expression(T expression_alt) {
+    std::unreachable();
+  }
 };
 } // namespace Manadrain
