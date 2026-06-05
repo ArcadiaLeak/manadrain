@@ -219,8 +219,8 @@ Unit Parser::parse_object_literal() {
   std::size_t statement_idx{curr_definition->intermediate.size()};
   Statement &statement_ir{*curr_definition->intermediate.emplace_back(
       std::make_unique<Statement>())};
-  ObjectExpression &object_expression{
-      statement_ir.emplace<Expression>().emplace<ObjectExpression>()};
+  ObjectExpressionIR &object_expression{
+      statement_ir.emplace<Expression>().emplace<ObjectExpressionIR>()};
   object_expression.object_shape = object_shape.get();
   tokenize();
   while (last_token != Token{U'}'}) {
@@ -270,8 +270,8 @@ Unit Parser::parse_call_expr(Unit callee) {
   std::size_t statement_idx{curr_definition->intermediate.size()};
   Statement &statement_ir{*curr_definition->intermediate.emplace_back(
       std::make_unique<Statement>())};
-  FunctionCallExpression &expression{
-      statement_ir.emplace<Expression>().emplace<FunctionCallExpression>()};
+  FunctionCallExpressionIR &expression{
+      statement_ir.emplace<Expression>().emplace<FunctionCallExpressionIR>()};
   expression.callee = callee;
   while (1) {
     tokenize();
@@ -509,21 +509,18 @@ std::string ConsoleMessage::encode_for_print() const {
 }
 
 Datatype
-Typechecker::analyze_initializer(std::size_t scope_offset,
-                                 std::size_t local_offset,
+Typechecker::analyze_initializer(std::size_t local_offset,
                                  ConcreteUnit<const CompactString *> unit_alt) {
-  analyzer_stack.rbegin()[scope_offset]->replica.program.push_back(
-      InitializeScope<const CompactString *>{scope_offset, local_offset,
-                                             unit_alt});
+  analyzer_stack.back()->replica.program.push_back(
+      InitializeScope<const CompactString *>{local_offset, unit_alt});
   return StringType{};
 }
 
 Datatype
-Typechecker::analyze_initializer(std::size_t scope_offset,
-                                 std::size_t local_offset,
+Typechecker::analyze_initializer(std::size_t local_offset,
                                  ExpressionIR<std::monostate> unit_alt) {
   auto expression_initializer = [&](auto expression_alt) {
-    return analyze_initializer(scope_offset, local_offset,
+    return analyze_initializer(local_offset,
                                analyze_expression(expression_alt));
   };
   Expression expression_ir{std::get<Expression>(
@@ -531,33 +528,75 @@ Typechecker::analyze_initializer(std::size_t scope_offset,
   return expression_ir.visit(expression_initializer);
 }
 
-Unit Typechecker::analyze_expression(BinaryExpressionIR expression_alt) {
-  auto deduce_concrete = [&](auto left_alt, auto right_alt) -> Unit {
-    // return analyze_binary_expression(left_alt, right_alt, expression_alt.op);
-    return std::monostate{};
+Unit Typechecker::analyze_scope_access(std::size_t scope_offset,
+                                       std::size_t local_offset, StringType) {
+  return ScopeAccessor<const CompactString *>{scope_offset, local_offset};
+}
+
+Unit Typechecker::analyze_unit(std::int64_t number) {
+  return static_cast<double>(number);
+}
+
+Unit Typechecker::analyze_unit(Identifier identifier) {
+  for (auto it = analyzer_stack.rbegin(); it != analyzer_stack.rend(); ++it) {
+    const auto &local_scope{it->get()->replica.local_scope};
+    if (not local_scope.contains(identifier))
+      continue;
+    std::size_t scope_offset = std::distance(analyzer_stack.rbegin(), it);
+    std::size_t local_offset =
+        std::distance(local_scope.begin(), local_scope.find(identifier));
+    auto deduce_concrete = [&](auto datatype_alt) {
+      return analyze_scope_access(scope_offset, local_offset, datatype_alt);
+    };
+    return local_scope.values()[local_offset].visit(deduce_concrete);
+  }
+  throw ScriptError{InvalidVariableAccess{}};
+}
+
+Unit Typechecker::analyze_unit(ExpressionIR<std::monostate> expression_ir) {
+  auto deduce_concrete = [&](auto expression_alt) {
+    return analyze_expression(expression_alt);
   };
-  return std::visit(deduce_concrete, expression_alt.left, expression_alt.right);
+  std::size_t intermediate_idx{expression_ir.intermediate_idx};
+  Expression expression{std::get<Expression>(
+      *analyzer_stack.back()->model->intermediate[intermediate_idx])};
+  return expression.visit(deduce_concrete);
+}
+
+Unit Typechecker::analyze_member_access(
+    Identifier identifier,
+    ConcreteUnit<const CompactString *> concrete_object) {
+  return std::monostate{};
+}
+
+Unit Typechecker::analyze_expression(MemberExpression expression) {
+  auto deduce_object = [&](auto unit_alt) { return analyze_unit(unit_alt); };
+  Unit concrete_object{expression.object.visit(deduce_object)};
+  auto deduce_member_access = [&](auto concrete_alt) {
+    return analyze_member_access(expression.property, concrete_alt);
+  };
+  Unit concrete_property{concrete_object.visit(deduce_member_access)};
+  return std::monostate{};
+}
+
+Unit Typechecker::analyze_expression(BinaryExpressionIR expression) {
+  auto deduce_concrete = [&](auto unit_alt) { return analyze_unit(unit_alt); };
+  Unit concrete_left{expression.left.visit(deduce_concrete)};
+  Unit concrete_right{expression.right.visit(deduce_concrete)};
+  return std::monostate{};
 }
 
 void Typechecker::analyze_statement(Expression expression) {}
 
 void Typechecker::analyze_statement(InitializeVariable statement) {
-  for (std::size_t scope_offset = 0; scope_offset < analyzer_stack.size();
-       ++scope_offset) {
-    const auto &model_locals{
-        analyzer_stack.rbegin()[scope_offset]->model->local_scope};
-    if (not model_locals.contains(statement.variable_name))
-      continue;
-    auto variable_it = model_locals.find(statement.variable_name);
-    std::size_t local_offset = std::distance(model_locals.begin(), variable_it);
-    auto deduce_initializer = [&](auto unit_alt) {
-      return analyze_initializer(scope_offset, local_offset, unit_alt);
-    };
-    Datatype initializer_type{statement.rvalue.visit(deduce_initializer)};
-    analyzer_stack.rbegin()[scope_offset]
-        ->replica.local_scope[statement.variable_name] = initializer_type;
-    break;
-  }
+  auto &local_scope{analyzer_stack.back()->replica.local_scope};
+  std::size_t local_offset = std::distance(
+      local_scope.begin(), local_scope.find(statement.variable_name));
+  auto deduce_initializer = [&](auto unit_alt) {
+    return analyze_initializer(local_offset, unit_alt);
+  };
+  Datatype initializer_type{statement.rvalue.visit(deduce_initializer)};
+  local_scope[statement.variable_name] = initializer_type;
 }
 
 void Typechecker::analyze_statement(ReturnStatement statement) {}
@@ -574,6 +613,8 @@ void Typechecker::analyze_definition() {
     analyzer_stack.back()->replica.nested_functions.push_back(
         machine.function_defs.back().get());
   }
+  analyzer_stack.back()->replica.local_scope =
+      analyzer_stack.back()->model->local_scope;
   for (Statement model_stmt : analyzer_stack.back()->model->program)
     model_stmt.visit([this](auto stmt_alt) {
       if constexpr (std::is_same_v<decltype(stmt_alt), Expression> ||

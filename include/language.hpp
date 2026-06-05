@@ -66,9 +66,10 @@ using Token =
 struct InvalidNumericLiteral {};
 struct InvalidPropertyName {};
 struct InvalidBackslashEscape {};
-struct DuplicateDeclaration {};
+struct InvalidExpression {};
 struct InvalidVariableAccess {};
 struct InvalidFunctionCall {};
+struct DuplicateDeclaration {};
 struct MissingFieldName {};
 struct MissingVariableName {};
 struct MissingFunctionName {};
@@ -85,12 +86,12 @@ class ScriptError : public std::exception {
 public:
   using Message =
       std::variant<InvalidNumericLiteral, InvalidPropertyName,
-                   InvalidBackslashEscape, DuplicateDeclaration,
-                   InvalidFunctionCall, InvalidVariableAccess, MissingFieldName,
-                   MissingVariableName, MissingFunctionName, MissingIdentifier,
-                   MissingStringLiteral, MissingFormalParameter,
-                   MissingPunctuation, UnexpectedStringEnd,
-                   UnexpectedCommentEnd, UnexpectedToken>;
+                   InvalidBackslashEscape, InvalidExpression,
+                   InvalidFunctionCall, InvalidVariableAccess,
+                   DuplicateDeclaration, MissingFieldName, MissingVariableName,
+                   MissingFunctionName, MissingIdentifier, MissingStringLiteral,
+                   MissingFormalParameter, MissingPunctuation,
+                   UnexpectedStringEnd, UnexpectedCommentEnd, UnexpectedToken>;
   Message message;
 
   explicit ScriptError(Message msg) : message{msg} {}
@@ -163,9 +164,12 @@ struct MemberExpression {
   Unit object;
   Identifier property;
 };
-struct FunctionCallExpression {
+struct FunctionCallExpressionIR {
   Unit callee;
   std::vector<Unit> arguments;
+};
+struct FunctionCallExpression {
+  Unit callee;
   std::size_t inline_arguments;
 };
 struct AssignExpression {
@@ -176,16 +180,20 @@ struct AssignExpression {
 struct ObjectShape {
   std::flat_map<Identifier, Datatype> properties;
 };
-struct ObjectExpression {
+struct ObjectExpressionIR {
   const ObjectShape *object_shape;
   std::vector<Unit> properties;
+};
+struct ObjectExpression {
+  const ObjectShape *object_shape;
   std::size_t inline_properties;
 };
 
 using Expression =
     std::variant<Unit, BinaryExpressionIR, ConcatExpression, BinaryExpression,
-                 LogicalExpression, MemberExpression, FunctionCallExpression,
-                 AssignExpression, ObjectExpression>;
+                 LogicalExpression, MemberExpression, FunctionCallExpressionIR,
+                 FunctionCallExpression, AssignExpression, ObjectExpressionIR,
+                 ObjectExpression>;
 
 struct InitializeVariable {
   Identifier variable_name;
@@ -196,7 +204,6 @@ struct InitializeMember {
   Unit rvalue;
 };
 template <typename T> struct InitializeScope {
-  std::size_t scope_offset;
   std::size_t local_offset;
   ConcreteUnit<T> rvalue;
 };
@@ -333,23 +340,41 @@ private:
   void analyze_statement(InitializeVariable statement);
   void analyze_statement(ReturnStatement statement);
 
-  Datatype analyze_initializer(std::size_t scope_offset,
-                               std::size_t local_offset,
+  Datatype analyze_initializer(std::size_t local_offset,
                                ConcreteUnit<const CompactString *> unit_alt);
-  Datatype analyze_initializer(std::size_t scope_offset,
-                               std::size_t local_offset,
+  Datatype analyze_initializer(std::size_t local_offset,
                                ExpressionIR<std::monostate> unit_alt);
-  Datatype analyze_initializer(std::size_t scope_offset,
-                               std::size_t local_offset,
+  Datatype analyze_initializer(std::size_t local_offset,
                                BinaryExpressionIR expression_alt);
   template <typename T>
-  Datatype analyze_initializer(std::size_t scope_offset,
-                               std::size_t local_offset, T unit_alt) {
-    throw ScriptError{InvalidVariableAccess{}};
+  Datatype analyze_initializer(std::size_t local_offset, T unit_alt) {
+    std::unreachable();
   }
 
-  Unit analyze_expression(BinaryExpressionIR expression_alt);
-  template <typename T> Unit analyze_expression(T expression_alt) {
+  Unit analyze_expression(BinaryExpressionIR expression);
+  Unit analyze_expression(MemberExpression expression);
+  template <typename T> Unit analyze_expression(T expression) {
+    std::unreachable();
+  }
+
+  Unit analyze_unit(std::int64_t number);
+  Unit analyze_unit(Identifier identifier);
+  Unit analyze_unit(ExpressionIR<std::monostate> expression_ir);
+  template <typename T> Unit analyze_unit(T unit_alt) { std::unreachable(); }
+
+  Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
+                            StringType);
+  template <typename T>
+  Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
+                            T) {
+    std::unreachable();
+  }
+
+  Unit
+  analyze_member_access(Identifier identifier,
+                        ConcreteUnit<const CompactString *> concrete_object);
+  template <typename T>
+  Unit analyze_member_access(Identifier identifier, T concrete_object) {
     std::unreachable();
   }
 };
