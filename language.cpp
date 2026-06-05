@@ -217,10 +217,10 @@ void Parser::parse_text() {
 Unit Parser::parse_object_literal() {
   std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
   std::size_t statement_idx{curr_definition->intermediate.size()};
-  Statement &statement_ir{*curr_definition->intermediate.emplace_back(
-      std::make_unique<Statement>())};
+  StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
+      std::make_unique<StatementIR>())};
   ObjectExpressionIR &object_expression{
-      statement_ir.emplace<Expression>().emplace<ObjectExpressionIR>()};
+      statement_ir.emplace<ObjectExpressionIR>()};
   object_expression.object_shape = object_shape.get();
   tokenize();
   while (last_token != Token{U'}'}) {
@@ -230,8 +230,8 @@ Unit Parser::parse_object_literal() {
     object_shape->properties.try_emplace(property_name);
     tokenize();
     std::size_t initializer_idx{curr_definition->intermediate.size()};
-    Statement &initializer_ir{*curr_definition->intermediate.emplace_back(
-        std::make_unique<Statement>())};
+    StatementIR &initializer_ir{*curr_definition->intermediate.emplace_back(
+        std::make_unique<StatementIR>())};
     InitializeMember &initialize_member{
         initializer_ir.emplace<InitializeMember>(property_name)};
     if (last_token == Token{U':'}) {
@@ -268,10 +268,9 @@ Unit Parser::parse_primary_expr() {
 
 Unit Parser::parse_call_expr(Unit callee) {
   std::size_t statement_idx{curr_definition->intermediate.size()};
-  Statement &statement_ir{*curr_definition->intermediate.emplace_back(
-      std::make_unique<Statement>())};
-  FunctionCallExpressionIR &expression{
-      statement_ir.emplace<Expression>().emplace<FunctionCallExpressionIR>()};
+  StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
+      std::make_unique<StatementIR>())};
+  FunctionCallIR &expression{statement_ir.emplace<FunctionCallIR>()};
   expression.callee = callee;
   while (1) {
     tokenize();
@@ -292,7 +291,7 @@ Unit Parser::parse_member_expr(Unit object) {
   Identifier field_name{std::get<Identifier>(last_token)};
   std::size_t statement_idx{curr_definition->intermediate.size()};
   curr_definition->intermediate.push_back(
-      std::make_unique<Statement>(MemberExpression{object, field_name}));
+      std::make_unique<StatementIR>(MemberExpression{object, field_name}));
   return ExpressionIR<std::monostate>{statement_idx};
 }
 
@@ -320,8 +319,8 @@ Unit Parser::parse_additive_expr() {
   tokenize();
   Unit unit_right{parse_postfix_expr()};
   std::size_t statement_idx{curr_definition->intermediate.size()};
-  curr_definition->intermediate.push_back(std::make_unique<Statement>(
-      BinaryExpressionIR{unit_left, unit_right, binary_op}));
+  curr_definition->intermediate.push_back(std::make_unique<StatementIR>(
+      BinaryExpression{unit_left, unit_right, binary_op}));
   return ExpressionIR<std::monostate>{statement_idx};
 }
 
@@ -332,7 +331,7 @@ Unit Parser::parse_logical_disjunct() {
     tokenize();
     Unit unit_right{parse_additive_expr()};
     std::size_t statement_idx{curr_definition->intermediate.size()};
-    curr_definition->intermediate.push_back(std::make_unique<Statement>(
+    curr_definition->intermediate.push_back(std::make_unique<StatementIR>(
         LogicalExpression{unit_left, unit_right, op}));
     unit_left = ExpressionIR<std::monostate>{statement_idx};
   }
@@ -347,7 +346,7 @@ Unit Parser::parse_assign_expr() {
   Unit unit_right{parse_assign_expr()};
   std::size_t statement_idx{curr_definition->intermediate.size()};
   curr_definition->intermediate.push_back(
-      std::make_unique<Statement>(AssignExpression{unit_left, unit_right}));
+      std::make_unique<StatementIR>(AssignExpression{unit_left, unit_right}));
   return ExpressionIR<std::monostate>{statement_idx};
 }
 
@@ -523,9 +522,9 @@ Typechecker::analyze_initializer(std::size_t local_offset,
     return analyze_initializer(local_offset,
                                analyze_expression(expression_alt));
   };
-  Expression expression_ir{std::get<Expression>(
-      *analyzer_stack.back()->model->intermediate[unit_alt.intermediate_idx])};
-  return expression_ir.visit(expression_initializer);
+  return analyzer_stack.back()
+      ->model->intermediate[unit_alt.intermediate_idx]
+      ->visit(expression_initializer);
 }
 
 Unit Typechecker::analyze_scope_access(std::size_t scope_offset,
@@ -558,9 +557,8 @@ Unit Typechecker::analyze_unit(ExpressionIR<std::monostate> expression_ir) {
     return analyze_expression(expression_alt);
   };
   std::size_t intermediate_idx{expression_ir.intermediate_idx};
-  Expression expression{std::get<Expression>(
-      *analyzer_stack.back()->model->intermediate[intermediate_idx])};
-  return expression.visit(deduce_concrete);
+  return analyzer_stack.back()->model->intermediate[intermediate_idx]->visit(
+      deduce_concrete);
 }
 
 Unit Typechecker::analyze_member_access(
@@ -579,14 +577,12 @@ Unit Typechecker::analyze_expression(MemberExpression expression) {
   return std::monostate{};
 }
 
-Unit Typechecker::analyze_expression(BinaryExpressionIR expression) {
+Unit Typechecker::analyze_expression(BinaryExpression expression) {
   auto deduce_concrete = [&](auto unit_alt) { return analyze_unit(unit_alt); };
   Unit concrete_left{expression.left.visit(deduce_concrete)};
   Unit concrete_right{expression.right.visit(deduce_concrete)};
   return std::monostate{};
 }
-
-void Typechecker::analyze_statement(Expression expression) {}
 
 void Typechecker::analyze_statement(InitializeVariable statement) {
   auto &local_scope{analyzer_stack.back()->replica.local_scope};
@@ -616,14 +612,7 @@ void Typechecker::analyze_definition() {
   analyzer_stack.back()->replica.local_scope =
       analyzer_stack.back()->model->local_scope;
   for (Statement model_stmt : analyzer_stack.back()->model->program)
-    model_stmt.visit([this](auto stmt_alt) {
-      if constexpr (std::is_same_v<decltype(stmt_alt), Expression> ||
-                    std::is_same_v<decltype(stmt_alt), InitializeVariable> ||
-                    std::is_same_v<decltype(stmt_alt), ReturnStatement>)
-        analyze_statement(stmt_alt);
-      else
-        std::unreachable();
-    });
+    model_stmt.visit([this](auto stmt_alt) { analyze_statement(stmt_alt); });
 }
 
 void Typechecker::typecheck() {

@@ -141,19 +141,25 @@ using Unit =
                  ConcreteUnit<const CompactString *>, ConcreteUnit<double>,
                  const FunctionDefinition *, ExpressionIR<std::monostate>>;
 
-struct BinaryExpressionIR {
+struct BinaryExpression {
   Unit left;
   Unit right;
   char32_t op;
 };
-struct ConcatExpression {
+struct StringConcat {
   ConcreteUnit<const CompactString *> left;
   ConcreteUnit<const CompactString *> right;
 };
-struct BinaryExpression {
+struct StringLength {
+  ConcreteUnit<const CompactString *> argument;
+};
+struct Addition {
   ConcreteUnit<double> left;
   ConcreteUnit<double> right;
-  char32_t op;
+};
+struct Subtraction {
+  ConcreteUnit<double> left;
+  ConcreteUnit<double> right;
 };
 struct LogicalExpression {
   Unit left;
@@ -164,11 +170,11 @@ struct MemberExpression {
   Unit object;
   Identifier property;
 };
-struct FunctionCallExpressionIR {
+struct FunctionCallIR {
   Unit callee;
   std::vector<Unit> arguments;
 };
-struct FunctionCallExpression {
+struct FunctionCall {
   Unit callee;
   std::size_t inline_arguments;
 };
@@ -189,12 +195,6 @@ struct ObjectExpression {
   std::size_t inline_properties;
 };
 
-using Expression =
-    std::variant<Unit, BinaryExpressionIR, ConcatExpression, BinaryExpression,
-                 LogicalExpression, MemberExpression, FunctionCallExpressionIR,
-                 FunctionCallExpression, AssignExpression, ObjectExpressionIR,
-                 ObjectExpression>;
-
 struct InitializeVariable {
   Identifier variable_name;
   Unit rvalue;
@@ -210,10 +210,18 @@ template <typename T> struct InitializeScope {
 struct ReturnStatement {
   Unit argument;
 };
-using Statement =
-    std::variant<Expression, InitializeVariable,
+using StatementIR =
+    std::variant<Unit, BinaryExpression, StringConcat, StringLength, Addition,
+                 Subtraction, LogicalExpression, MemberExpression,
+                 FunctionCallIR, FunctionCall, AssignExpression,
+                 ObjectExpressionIR, ObjectExpression, InitializeVariable,
                  InitializeScope<const CompactString *>,
                  InitializeScope<double>, InitializeMember, ReturnStatement>;
+using Statement =
+    std::variant<Unit, StringConcat, StringLength, Addition, Subtraction,
+                 InitializeVariable, InitializeScope<const CompactString *>,
+                 InitializeScope<double>, InitializeMember, ReturnStatement,
+                 const StatementIR *>;
 
 struct FunctionDefinition {
   Datatype return_type;
@@ -221,7 +229,7 @@ struct FunctionDefinition {
   std::vector<Identifier> arguments;
   std::flat_map<Identifier, Datatype> local_scope;
   std::vector<const FunctionDefinition *> nested_functions;
-  std::vector<std::unique_ptr<Statement>> intermediate;
+  std::vector<std::unique_ptr<StatementIR>> intermediate;
   std::vector<Statement> program;
 };
 
@@ -336,22 +344,24 @@ private:
   std::vector<std::unique_ptr<AnalyzedDefinition>> analyzer_stack;
   void analyze_definition();
 
-  void analyze_statement(Expression expression);
   void analyze_statement(InitializeVariable statement);
   void analyze_statement(ReturnStatement statement);
+  template <typename T> void analyze_statement(T statement) {
+    std::unreachable();
+  }
 
   Datatype analyze_initializer(std::size_t local_offset,
                                ConcreteUnit<const CompactString *> unit_alt);
   Datatype analyze_initializer(std::size_t local_offset,
                                ExpressionIR<std::monostate> unit_alt);
   Datatype analyze_initializer(std::size_t local_offset,
-                               BinaryExpressionIR expression_alt);
+                               BinaryExpression expression_alt);
   template <typename T>
   Datatype analyze_initializer(std::size_t local_offset, T unit_alt) {
     std::unreachable();
   }
 
-  Unit analyze_expression(BinaryExpressionIR expression);
+  Unit analyze_expression(BinaryExpression expression);
   Unit analyze_expression(MemberExpression expression);
   template <typename T> Unit analyze_expression(T expression) {
     std::unreachable();
