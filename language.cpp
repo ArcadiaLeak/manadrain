@@ -377,8 +377,10 @@ void Parser::parse_statement() {
     return;
   case Keyword::K_RETURN: {
     tokenize();
-    ReturnStatement return_statement{parse_expression()};
-    curr_definition->program.push_back(return_statement);
+    StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
+        std::make_unique<StatementIR>())};
+    statement_ir.emplace<ReturnStatementIR>(parse_expression());
+    curr_definition->program.push_back(&statement_ir);
     assert_punct(';');
     return;
   }
@@ -515,12 +517,21 @@ Typechecker::analyze_initializer(std::size_t local_offset,
   return StringType{};
 }
 
+Datatype Typechecker::analyze_initializer(std::size_t local_offset,
+                                          ConcreteUnit<double> unit_alt) {
+  analyzer_stack.back()->replica.program.push_back(
+      InitializeScope<double>{local_offset, unit_alt});
+  return NumberType{};
+}
+
 Datatype
 Typechecker::analyze_initializer(std::size_t local_offset,
                                  ExpressionIR<std::monostate> unit_alt) {
+  auto deduce_expression = [&](auto concrete_alt) {
+    return analyze_initializer(local_offset, concrete_alt);
+  };
   auto expression_initializer = [&](auto expression_alt) {
-    return analyze_initializer(local_offset,
-                               analyze_expression(expression_alt));
+    return analyze_expression(expression_alt).visit(deduce_expression);
   };
   return analyzer_stack.back()
       ->model->intermediate[unit_alt.intermediate_idx]
@@ -530,6 +541,11 @@ Typechecker::analyze_initializer(std::size_t local_offset,
 Unit Typechecker::analyze_scope_access(std::size_t scope_offset,
                                        std::size_t local_offset, StringType) {
   return ScopeAccessor<const CompactString *>{scope_offset, local_offset};
+}
+
+Unit Typechecker::analyze_scope_access(std::size_t scope_offset,
+                                       std::size_t local_offset, NumberType) {
+  return ScopeAccessor<double>{scope_offset, local_offset};
 }
 
 Unit Typechecker::analyze_unit(std::int64_t number) {
@@ -564,7 +580,12 @@ Unit Typechecker::analyze_unit(ExpressionIR<std::monostate> expression_ir) {
 Unit Typechecker::analyze_member_access(
     Identifier identifier,
     ConcreteUnit<const CompactString *> concrete_object) {
-  return std::monostate{};
+  std::unique_ptr statement_ir{
+      std::make_unique<StatementIR>(StringLength{concrete_object})};
+  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
+  analyzer_stack.back()->replica.intermediate.push_back(
+      std::move(statement_ir));
+  return ExpressionIR<double>{statement_idx};
 }
 
 Unit Typechecker::analyze_expression(MemberExpression expression) {
@@ -573,15 +594,47 @@ Unit Typechecker::analyze_expression(MemberExpression expression) {
   auto deduce_member_access = [&](auto concrete_alt) {
     return analyze_member_access(expression.property, concrete_alt);
   };
-  Unit concrete_property{concrete_object.visit(deduce_member_access)};
-  return std::monostate{};
+  return concrete_object.visit(deduce_member_access);
 }
 
 Unit Typechecker::analyze_expression(BinaryExpression expression) {
-  auto deduce_concrete = [&](auto unit_alt) { return analyze_unit(unit_alt); };
-  Unit concrete_left{expression.left.visit(deduce_concrete)};
-  Unit concrete_right{expression.right.visit(deduce_concrete)};
-  return std::monostate{};
+  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
+  Unit concrete_left{expression.left.visit(deduce_unit)};
+  Unit concrete_right{expression.right.visit(deduce_unit)};
+  auto deduce_addition = [this](auto left_alt, auto right_alt) {
+    return analyze_addition(left_alt, right_alt);
+  };
+  auto deduce_subtraction = [this](auto left_alt, auto right_alt) {
+    return analyze_subtraction(left_alt, right_alt);
+  };
+  switch (expression.op) {
+  case '+':
+    return std::visit(deduce_addition, concrete_left, concrete_right);
+  case '-':
+    return std::visit(deduce_subtraction, concrete_left, concrete_right);
+  default:
+    std::unreachable();
+  }
+}
+
+Unit Typechecker::analyze_addition(ConcreteUnit<double> concrete_left,
+                                   ConcreteUnit<double> concrete_right) {
+  std::unique_ptr statement_ir{
+      std::make_unique<StatementIR>(Addition{concrete_left, concrete_right})};
+  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
+  analyzer_stack.back()->replica.intermediate.push_back(
+      std::move(statement_ir));
+  return ExpressionIR<double>{statement_idx};
+}
+
+Unit Typechecker::analyze_subtraction(ConcreteUnit<double> concrete_left,
+                                      ConcreteUnit<double> concrete_right) {
+  std::unique_ptr statement_ir{std::make_unique<StatementIR>(
+      Subtraction{concrete_left, concrete_right})};
+  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
+  analyzer_stack.back()->replica.intermediate.push_back(
+      std::move(statement_ir));
+  return ExpressionIR<double>{statement_idx};
 }
 
 void Typechecker::analyze_statement(InitializeVariable statement) {
@@ -595,7 +648,29 @@ void Typechecker::analyze_statement(InitializeVariable statement) {
   local_scope[statement.variable_name] = initializer_type;
 }
 
-void Typechecker::analyze_statement(ReturnStatement statement) {}
+void Typechecker::analyze_statement(ReturnStatementIR statement) {
+  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
+  auto deduce_return = [this](auto unit_alt) {
+    return analyze_return(unit_alt);
+  };
+  Datatype return_type{
+      statement.argument.visit(deduce_unit).visit(deduce_return)};
+  analyzer_stack.back()->replica.return_type = return_type;
+}
+
+void Typechecker::analyze_statement(const StatementIR *statement_ir) {
+  statement_ir->visit([this](auto stmt_alt) { analyze_statement(stmt_alt); });
+}
+
+void Typechecker::analyze_statement(Unit unit) {
+  unit.visit([this](auto unit_alt) { analyze_unit(unit_alt); });
+}
+
+Datatype Typechecker::analyze_return(ConcreteUnit<double> unit_alt) {
+  analyzer_stack.back()->replica.program.push_back(
+      ReturnStatement<double>{unit_alt});
+  return NumberType{};
+}
 
 void Typechecker::analyze_definition() {
   for (const FunctionDefinition *nested_definition :
@@ -609,8 +684,7 @@ void Typechecker::analyze_definition() {
     analyzer_stack.back()->replica.nested_functions.push_back(
         machine.function_defs.back().get());
   }
-  analyzer_stack.back()->replica.local_scope =
-      analyzer_stack.back()->model->local_scope;
+  analyzer_stack.back()->replica.replicate(*analyzer_stack.back()->model);
   for (Statement model_stmt : analyzer_stack.back()->model->program)
     model_stmt.visit([this](auto stmt_alt) { analyze_statement(stmt_alt); });
 }
@@ -623,5 +697,10 @@ void Typechecker::typecheck() {
   machine.main_function = std::make_shared<FunctionDefinition>(
       std::move(analyzer_stack.back()->replica));
   analyzer_stack.pop_back();
+}
+
+void FunctionDefinition::replicate(const FunctionDefinition &model) {
+  std::tie(function_name, arguments, local_scope) =
+      std::make_tuple(model.function_name, model.arguments, model.local_scope);
 }
 } // namespace Manadrain

@@ -207,8 +207,11 @@ template <typename T> struct InitializeScope {
   std::size_t local_offset;
   ConcreteUnit<T> rvalue;
 };
-struct ReturnStatement {
+struct ReturnStatementIR {
   Unit argument;
+};
+template <typename T> struct ReturnStatement {
+  ConcreteUnit<T> argument;
 };
 using StatementIR =
     std::variant<Unit, BinaryExpression, StringConcat, StringLength, Addition,
@@ -216,12 +219,12 @@ using StatementIR =
                  FunctionCallIR, FunctionCall, AssignExpression,
                  ObjectExpressionIR, ObjectExpression, InitializeVariable,
                  InitializeScope<const CompactString *>,
-                 InitializeScope<double>, InitializeMember, ReturnStatement>;
+                 InitializeScope<double>, InitializeMember, ReturnStatementIR>;
 using Statement =
     std::variant<Unit, StringConcat, StringLength, Addition, Subtraction,
                  InitializeVariable, InitializeScope<const CompactString *>,
-                 InitializeScope<double>, InitializeMember, ReturnStatement,
-                 const StatementIR *>;
+                 InitializeScope<double>, InitializeMember,
+                 ReturnStatement<double>, const StatementIR *>;
 
 struct FunctionDefinition {
   Datatype return_type;
@@ -231,6 +234,7 @@ struct FunctionDefinition {
   std::vector<const FunctionDefinition *> nested_functions;
   std::vector<std::unique_ptr<StatementIR>> intermediate;
   std::vector<Statement> program;
+  void replicate(const FunctionDefinition &model);
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -344,8 +348,10 @@ private:
   std::vector<std::unique_ptr<AnalyzedDefinition>> analyzer_stack;
   void analyze_definition();
 
+  void analyze_statement(Unit unit);
+  void analyze_statement(const StatementIR *statement_ir);
   void analyze_statement(InitializeVariable statement);
-  void analyze_statement(ReturnStatement statement);
+  void analyze_statement(ReturnStatementIR statement);
   template <typename T> void analyze_statement(T statement) {
     std::unreachable();
   }
@@ -355,9 +361,14 @@ private:
   Datatype analyze_initializer(std::size_t local_offset,
                                ExpressionIR<std::monostate> unit_alt);
   Datatype analyze_initializer(std::size_t local_offset,
-                               BinaryExpression expression_alt);
+                               ConcreteUnit<double> unit_alt);
   template <typename T>
   Datatype analyze_initializer(std::size_t local_offset, T unit_alt) {
+    std::unreachable();
+  }
+
+  Datatype analyze_return(ConcreteUnit<double> unit_alt);
+  template <typename T> Datatype analyze_return(T unit_alt) {
     std::unreachable();
   }
 
@@ -374,6 +385,8 @@ private:
 
   Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
                             StringType);
+  Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
+                            NumberType);
   template <typename T>
   Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
                             T) {
@@ -385,6 +398,20 @@ private:
                         ConcreteUnit<const CompactString *> concrete_object);
   template <typename T>
   Unit analyze_member_access(Identifier identifier, T concrete_object) {
+    std::unreachable();
+  }
+
+  Unit analyze_addition(ConcreteUnit<double> concrete_left,
+                        ConcreteUnit<double> concrete_right);
+  template <typename T, typename U>
+  Unit analyze_addition(T concrete_left, U concrete_right) {
+    std::unreachable();
+  }
+
+  Unit analyze_subtraction(ConcreteUnit<double> concrete_left,
+                           ConcreteUnit<double> concrete_right);
+  template <typename T, typename U>
+  Unit analyze_subtraction(T concrete_left, U concrete_right) {
     std::unreachable();
   }
 };
