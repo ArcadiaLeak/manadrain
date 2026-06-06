@@ -511,33 +511,26 @@ std::string ConsoleMessage::encode_for_print() const {
   return u8_message;
 }
 
-Datatype
-Typechecker::analyze_initializer(std::size_t local_offset,
-                                 ConcreteUnit<const CompactString *> unit_alt) {
-  analyzer_stack.back()->replica.program.push_back(
+Datatype Typechecker::AnalyzeInitializer::operator()(
+    ConcreteUnit<const CompactString *> unit_alt) {
+  checker.def_stack.back()->output.program.push_back(
       InitializeScope<const CompactString *>{local_offset, unit_alt});
   return StringType{};
 }
 
-Datatype Typechecker::analyze_initializer(std::size_t local_offset,
-                                          ConcreteUnit<double> unit_alt) {
-  analyzer_stack.back()->replica.program.push_back(
+Datatype
+Typechecker::AnalyzeInitializer::operator()(ConcreteUnit<double> unit_alt) {
+  checker.def_stack.back()->output.program.push_back(
       InitializeScope<double>{local_offset, unit_alt});
   return NumberType{};
 }
 
-Datatype
-Typechecker::analyze_initializer(std::size_t local_offset,
-                                 ExpressionIR<std::monostate> unit_alt) {
-  auto deduce_expression = [&](auto concrete_alt) {
-    return analyze_initializer(local_offset, concrete_alt);
-  };
-  auto expression_initializer = [&](auto expression_alt) {
-    return analyze_expression(expression_alt).visit(deduce_expression);
-  };
-  return analyzer_stack.back()
+Datatype Typechecker::AnalyzeInitializer::operator()(
+    ExpressionIR<std::monostate> unit_alt) {
+  return checker.def_stack.back()
       ->model->intermediate[unit_alt.intermediate_idx]
-      ->visit(expression_initializer);
+      ->visit(AnalyzeExpression{checker})
+      .visit(*this);
 }
 
 template <typename T>
@@ -575,14 +568,14 @@ Unit FunctionDefinition::analyze_identifier(std::size_t scope_offset,
     return std::monostate{};
 }
 
-Unit Typechecker::analyze_unit(std::int64_t number) {
+Unit Typechecker::AnalyzeUnit::operator()(std::int64_t number) {
   return static_cast<double>(number);
 }
 
-Unit Typechecker::analyze_unit(Identifier identifier) {
-  for (std::ptrdiff_t i = analyzer_stack.size() - 1; i >= 0; --i) {
+Unit Typechecker::AnalyzeUnit::operator()(Identifier identifier) {
+  for (std::ptrdiff_t i = checker.def_stack.size() - 1; i >= 0; --i) {
     Unit concrete_unit{
-        analyzer_stack[i]->replica.analyze_identifier(i, identifier)};
+        checker.def_stack[i]->output.analyze_identifier(i, identifier)};
     if (not concrete_unit.index())
       continue;
     return concrete_unit;
@@ -592,179 +585,158 @@ Unit Typechecker::analyze_unit(Identifier identifier) {
   throw ScriptError{InvalidVariableAccess{}};
 }
 
-Unit Typechecker::analyze_unit(ExpressionIR<std::monostate> expression_ir) {
-  auto deduce_concrete = [&](auto expression_alt) {
-    return analyze_expression(expression_alt);
-  };
+Unit Typechecker::AnalyzeUnit::operator()(
+    ExpressionIR<std::monostate> expression_ir) {
   std::size_t intermediate_idx{expression_ir.intermediate_idx};
-  return analyzer_stack.back()->model->intermediate[intermediate_idx]->visit(
-      deduce_concrete);
+  return checker.def_stack.back()->model->intermediate[intermediate_idx]->visit(
+      AnalyzeExpression{checker});
 }
 
-Unit Typechecker::analyze_member_access(
-    Identifier identifier,
+Unit Typechecker::AnalyzeMemberAccess::operator()(
     ConcreteUnit<const CompactString *> concrete_object) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(StringLength{concrete_object})};
-  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
-  analyzer_stack.back()->replica.intermediate.push_back(
+  std::size_t statement_idx{
+      checker.def_stack.back()->output.intermediate.size()};
+  checker.def_stack.back()->output.intermediate.push_back(
       std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
-Unit Typechecker::analyze_member_access(Identifier identifier,
-                                        IntrinsicObject concrete_object) {
+Unit Typechecker::AnalyzeMemberAccess::operator()(
+    IntrinsicObject concrete_object) {
   if (concrete_object == IntrinsicObject::O_CONSOLE &&
       identifier.offset == OFFSET_log)
     return IntrinsicFunction::F_LOG;
   throw ScriptError{InvalidPropertyAccess{}};
 }
 
-Unit Typechecker::analyze_expression(MemberExpression expression) {
-  auto deduce_object = [&](auto unit_alt) { return analyze_unit(unit_alt); };
-  Unit concrete_object{expression.object.visit(deduce_object)};
-  auto deduce_member_access = [&](auto concrete_alt) {
-    return analyze_member_access(expression.property, concrete_alt);
-  };
-  return concrete_object.visit(deduce_member_access);
+Unit Typechecker::AnalyzeExpression::operator()(MemberExpression expression) {
+  Unit concrete_object{expression.object.visit(AnalyzeUnit{checker})};
+  return concrete_object.visit(
+      AnalyzeMemberAccess{checker, expression.property});
 }
 
-Unit Typechecker::analyze_expression(BinaryExpression expression) {
-  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
-  Unit concrete_left{expression.left.visit(deduce_unit)};
-  Unit concrete_right{expression.right.visit(deduce_unit)};
-  auto deduce_addition = [this](auto left_alt, auto right_alt) {
-    return analyze_addition(left_alt, right_alt);
-  };
-  auto deduce_subtraction = [this](auto left_alt, auto right_alt) {
-    return analyze_subtraction(left_alt, right_alt);
-  };
+Unit Typechecker::AnalyzeExpression::operator()(BinaryExpression expression) {
+  Unit concrete_left{expression.left.visit(AnalyzeUnit{checker})};
+  Unit concrete_right{expression.right.visit(AnalyzeUnit{checker})};
   switch (expression.op) {
   case '+':
-    return std::visit(deduce_addition, concrete_left, concrete_right);
+    return std::visit(AnalyzeAddition{checker}, concrete_left, concrete_right);
   case '-':
-    return std::visit(deduce_subtraction, concrete_left, concrete_right);
+    return std::visit(AnalyzeSubtraction{checker}, concrete_left,
+                      concrete_right);
   default:
     std::unreachable();
   }
 }
 
-Unit Typechecker::analyze_function_call(std::span<const Unit> arguments,
-                                        const FunctionDefinition *callee) {
-  auto deduce_function_return = [&](auto datatype_alt) {
-    return analyze_function_return(FunctionCallIR{callee}, datatype_alt);
-  };
-  return callee->return_type.visit(deduce_function_return);
+Unit Typechecker::AnalyzeExpression::operator()(FunctionCallAST expression) {
+  return expression.callee.visit(AnalyzeUnit{checker})
+      .visit(AnalyzeFunctionCall{checker, expression.arguments});
 }
 
-Unit Typechecker::analyze_function_call(std::span<const Unit> arguments,
-                                        IntrinsicFunction callee) {
-  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
+Unit Typechecker::AnalyzeFunctionCall::operator()(
+    const FunctionDefinition *callee) {
+  return callee->return_type.visit(
+      AnalyzeFunctionReturn{checker, FunctionCallIR{callee}});
+}
+
+Unit Typechecker::AnalyzeFunctionCall::operator()(IntrinsicFunction callee) {
   for (Unit argument : arguments) {
-    Unit concrete_argument{argument.visit(deduce_unit)};
+    Unit concrete_argument{argument.visit(AnalyzeUnit{checker})};
     return double{4};
   }
   return std::monostate{};
 }
 
-Unit Typechecker::analyze_function_return(FunctionCallIR function_call_ir,
-                                          NumberType) {
+Unit Typechecker::AnalyzeFunctionReturn::operator()(NumberType) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(std::move(function_call_ir))};
-  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
-  analyzer_stack.back()->replica.intermediate.push_back(
+  std::size_t statement_idx{
+      checker.def_stack.back()->output.intermediate.size()};
+  checker.def_stack.back()->output.intermediate.push_back(
       std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
-Unit Typechecker::analyze_expression(FunctionCallAST expression) {
-  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
-  auto deduce_function_call = [&](auto cocrete_alt) {
-    return analyze_function_call(expression.arguments, cocrete_alt);
-  };
-  return expression.callee.visit(deduce_unit).visit(deduce_function_call);
-}
-
-Unit Typechecker::analyze_addition(ConcreteUnit<double> concrete_left,
-                                   ConcreteUnit<double> concrete_right) {
+Unit Typechecker::AnalyzeAddition::operator()(
+    ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(Addition{concrete_left, concrete_right})};
-  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
-  analyzer_stack.back()->replica.intermediate.push_back(
+  std::size_t statement_idx{
+      checker.def_stack.back()->output.intermediate.size()};
+  checker.def_stack.back()->output.intermediate.push_back(
       std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
-Unit Typechecker::analyze_subtraction(ConcreteUnit<double> concrete_left,
-                                      ConcreteUnit<double> concrete_right) {
+Unit Typechecker::AnalyzeSubtraction::operator()(
+    ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
   std::unique_ptr statement_ir{std::make_unique<StatementIR>(
       Subtraction{concrete_left, concrete_right})};
-  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
-  analyzer_stack.back()->replica.intermediate.push_back(
+  std::size_t statement_idx{
+      checker.def_stack.back()->output.intermediate.size()};
+  checker.def_stack.back()->output.intermediate.push_back(
       std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
-void Typechecker::analyze_statement(InitializeVariable statement) {
-  auto &local_scope{analyzer_stack.back()->replica.local_scope};
+void Typechecker::AnalyzeStatement::operator()(InitializeVariable statement) {
+  auto &local_scope{checker.def_stack.back()->output.local_scope};
   std::size_t local_offset = std::distance(
       local_scope.begin(), local_scope.find(statement.variable_name));
-  auto deduce_initializer = [&](auto unit_alt) {
-    return analyze_initializer(local_offset, unit_alt);
-  };
-  Datatype initializer_type{statement.rvalue.visit(deduce_initializer)};
+  Datatype initializer_type{
+      statement.rvalue.visit(AnalyzeInitializer{checker, local_offset})};
   local_scope[statement.variable_name] = initializer_type;
 }
 
-void Typechecker::analyze_statement(ReturnStatementIR statement) {
-  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
-  auto deduce_return = [this](auto unit_alt) {
-    return analyze_return_statement(unit_alt);
-  };
-  Datatype return_type{
-      statement.argument.visit(deduce_unit).visit(deduce_return)};
-  analyzer_stack.back()->replica.return_type = return_type;
+void Typechecker::AnalyzeStatement::operator()(ReturnStatementIR statement) {
+  Datatype return_type{statement.argument.visit(AnalyzeUnit{checker})
+                           .visit(AnalyzeReturnStatement{checker})};
+  checker.def_stack.back()->output.return_type = return_type;
 }
 
-void Typechecker::analyze_statement(const StatementIR *statement_ir) {
-  statement_ir->visit([this](auto stmt_alt) { analyze_statement(stmt_alt); });
+void Typechecker::AnalyzeStatement::operator()(
+    const StatementIR *statement_ir) {
+  statement_ir->visit(AnalyzeStatement{checker});
 }
 
-void Typechecker::analyze_statement(Unit unit) {
-  unit.visit([this](auto unit_alt) { analyze_unit(unit_alt); });
+void Typechecker::AnalyzeStatement::operator()(Unit unit) {
+  unit.visit(AnalyzeUnit{checker});
 }
 
-Datatype Typechecker::analyze_return_statement(ConcreteUnit<double> unit_alt) {
-  analyzer_stack.back()->replica.program.push_back(
+Datatype
+Typechecker::AnalyzeReturnStatement::operator()(ConcreteUnit<double> unit_alt) {
+  checker.def_stack.back()->output.program.push_back(
       ReturnStatement<double>{unit_alt});
   return NumberType{};
 }
 
 void Typechecker::analyze_definition() {
   for (const FunctionDefinition *nested_definition :
-       analyzer_stack.back()->model->nested_functions) {
-    analyzer_stack.push_back(
-        std::make_unique<AnalyzedDefinition>(nested_definition));
+       def_stack.back()->model->nested_functions) {
+    def_stack.push_back(std::make_unique<DefinitionPair>(nested_definition));
     analyze_definition();
     machine.function_defs.push_back(std::make_shared<FunctionDefinition>(
-        std::move(analyzer_stack.back()->replica)));
-    analyzer_stack.pop_back();
-    analyzer_stack.back()->replica.nested_functions.push_back(
+        std::move(def_stack.back()->output)));
+    def_stack.pop_back();
+    def_stack.back()->output.nested_functions.push_back(
         machine.function_defs.back().get());
   }
-  analyzer_stack.back()->replica.replicate(*analyzer_stack.back()->model);
-  for (Statement model_stmt : analyzer_stack.back()->model->program)
-    model_stmt.visit([this](auto stmt_alt) { analyze_statement(stmt_alt); });
+  def_stack.back()->output.replicate(*def_stack.back()->model);
+  for (Statement model_stmt : def_stack.back()->model->program)
+    model_stmt.visit(AnalyzeStatement{*this});
 }
 
 void Typechecker::typecheck() {
   input_defs.swap(machine.function_defs);
-  analyzer_stack.push_back(
-      std::make_unique<AnalyzedDefinition>(machine.main_function.get()));
+  def_stack.push_back(
+      std::make_unique<DefinitionPair>(machine.main_function.get()));
   analyze_definition();
-  machine.main_function = std::make_shared<FunctionDefinition>(
-      std::move(analyzer_stack.back()->replica));
-  analyzer_stack.pop_back();
+  machine.main_function =
+      std::make_shared<FunctionDefinition>(std::move(def_stack.back()->output));
+  def_stack.pop_back();
 }
 
 void FunctionDefinition::replicate(const FunctionDefinition &model) {

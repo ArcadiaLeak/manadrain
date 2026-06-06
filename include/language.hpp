@@ -350,11 +350,6 @@ private:
   void parse_variable_decl();
 };
 
-struct AnalyzedDefinition {
-  const FunctionDefinition *model;
-  FunctionDefinition replica;
-};
-
 class Typechecker {
 public:
   Typechecker(Machine &m) : machine{m} {}
@@ -364,82 +359,100 @@ private:
   Machine &machine;
   std::vector<std::shared_ptr<const FunctionDefinition>> input_defs;
 
-  std::vector<std::unique_ptr<AnalyzedDefinition>> analyzer_stack;
+  struct DefinitionPair {
+    const FunctionDefinition *model;
+    FunctionDefinition output;
+  };
+  std::vector<std::unique_ptr<DefinitionPair>> def_stack;
   void analyze_definition();
 
-  void analyze_statement(Unit unit);
-  void analyze_statement(const StatementIR *statement_ir);
-  void analyze_statement(InitializeVariable statement);
-  void analyze_statement(ReturnStatementIR statement);
-  template <typename T> void analyze_statement(T statement) {
-    std::unreachable();
-  }
+  struct AnalyzeStatement {
+    Typechecker &checker;
+    void operator()(Unit unit);
+    void operator()(const StatementIR *statement_ir);
+    void operator()(InitializeVariable statement);
+    void operator()(ReturnStatementIR statement);
+    template <typename T> void operator()(T statement) { std::unreachable(); }
+  };
 
-  Datatype analyze_initializer(std::size_t local_offset,
-                               ConcreteUnit<const CompactString *> unit_alt);
-  Datatype analyze_initializer(std::size_t local_offset,
-                               ExpressionIR<std::monostate> unit_alt);
-  Datatype analyze_initializer(std::size_t local_offset,
-                               ConcreteUnit<double> unit_alt);
-  template <typename T>
-  Datatype analyze_initializer(std::size_t local_offset, T unit_alt) {
-    std::unreachable();
-  }
+  struct AnalyzeInitializer {
+    Typechecker &checker;
+    std::size_t local_offset;
+    Datatype operator()(ConcreteUnit<const CompactString *> unit_alt);
+    Datatype operator()(ExpressionIR<std::monostate> unit_alt);
+    Datatype operator()(ConcreteUnit<double> unit_alt);
+    template <typename T> Datatype operator()(T unit_alt) {
+      std::unreachable();
+    }
+  };
 
-  Datatype analyze_return_statement(ConcreteUnit<double> unit_alt);
-  template <typename T> Datatype analyze_return_statement(T unit_alt) {
-    std::unreachable();
-  }
+  struct AnalyzeReturnStatement {
+    Typechecker &checker;
+    Datatype operator()(ConcreteUnit<double> unit_alt);
+    template <typename T> Datatype operator()(T unit_alt) {
+      std::unreachable();
+    }
+  };
 
-  Unit analyze_expression(BinaryExpression expression);
-  Unit analyze_expression(MemberExpression expression);
-  Unit analyze_expression(FunctionCallAST expression);
-  template <typename T> Unit analyze_expression(T expression) {
-    std::unreachable();
-  }
+  struct AnalyzeExpression {
+    Typechecker &checker;
+    Unit operator()(BinaryExpression expression);
+    Unit operator()(MemberExpression expression);
+    Unit operator()(FunctionCallAST expression);
+    template <typename T> Unit operator()(T expression) { std::unreachable(); }
+  };
 
-  Unit analyze_unit(std::int64_t number);
-  Unit analyze_unit(Identifier identifier);
-  Unit analyze_unit(ExpressionIR<std::monostate> expression_ir);
-  template <typename T> Unit analyze_unit(T unit_alt) { std::unreachable(); }
+  struct AnalyzeUnit {
+    Typechecker &checker;
+    Unit operator()(std::int64_t number);
+    Unit operator()(Identifier identifier);
+    Unit operator()(ExpressionIR<std::monostate> expression_ir);
+    template <typename T> Unit operator()(T unit_alt) { std::unreachable(); }
+  };
 
-  Unit
-  analyze_member_access(Identifier identifier,
-                        ConcreteUnit<const CompactString *> concrete_object);
-  Unit analyze_member_access(Identifier identifier,
-                             IntrinsicObject concrete_object);
-  template <typename T>
-  Unit analyze_member_access(Identifier identifier, T concrete_object) {
-    std::unreachable();
-  }
+  struct AnalyzeMemberAccess {
+    Typechecker &checker;
+    Identifier identifier;
+    Unit operator()(ConcreteUnit<const CompactString *> concrete_object);
+    Unit operator()(IntrinsicObject concrete_object);
+    template <typename T> Unit operator()(T concrete_object) {
+      std::unreachable();
+    }
+  };
 
-  Unit analyze_function_call(std::span<const Unit> arguments,
-                             const FunctionDefinition *callee);
-  Unit analyze_function_call(std::span<const Unit> arguments,
-                             IntrinsicFunction callee);
-  template <typename T>
-  Unit analyze_function_call(std::span<const Unit> arguments, T callee) {
-    std::unreachable();
-  }
+  struct AnalyzeFunctionCall {
+    Typechecker &checker;
+    std::span<const Unit> arguments;
+    Unit operator()(const FunctionDefinition *callee);
+    Unit operator()(IntrinsicFunction callee);
+    template <typename T> Unit operator()(T callee) { std::unreachable(); }
+  };
 
-  Unit analyze_function_return(FunctionCallIR function_call_ir, NumberType);
-  template <typename T>
-  Unit analyze_function_return(FunctionCallIR function_call_ir, T) {
-    std::unreachable();
-  }
+  struct AnalyzeFunctionReturn {
+    Typechecker &checker;
+    FunctionCallIR function_call_ir;
+    Unit operator()(NumberType);
+    template <typename T> Unit operator()(T) { std::unreachable(); }
+  };
 
-  Unit analyze_addition(ConcreteUnit<double> concrete_left,
-                        ConcreteUnit<double> concrete_right);
-  template <typename T, typename U>
-  Unit analyze_addition(T concrete_left, U concrete_right) {
-    std::unreachable();
-  }
+  struct AnalyzeAddition {
+    Typechecker &checker;
+    Unit operator()(ConcreteUnit<double> concrete_left,
+                    ConcreteUnit<double> concrete_right);
+    template <typename T, typename U>
+    Unit operator()(T concrete_left, U concrete_right) {
+      std::unreachable();
+    }
+  };
 
-  Unit analyze_subtraction(ConcreteUnit<double> concrete_left,
-                           ConcreteUnit<double> concrete_right);
-  template <typename T, typename U>
-  Unit analyze_subtraction(T concrete_left, U concrete_right) {
-    std::unreachable();
-  }
+  struct AnalyzeSubtraction {
+    Typechecker &checker;
+    Unit operator()(ConcreteUnit<double> concrete_left,
+                    ConcreteUnit<double> concrete_right);
+    template <typename T, typename U>
+    Unit operator()(T concrete_left, U concrete_right) {
+      std::unreachable();
+    }
+  };
 };
 } // namespace Manadrain
