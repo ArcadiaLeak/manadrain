@@ -68,6 +68,7 @@ struct InvalidPropertyName {};
 struct InvalidBackslashEscape {};
 struct InvalidExpression {};
 struct InvalidVariableAccess {};
+struct InvalidPropertyAccess {};
 struct InvalidFunctionCall {};
 struct DuplicateDeclaration {};
 struct MissingFieldName {};
@@ -84,14 +85,13 @@ struct UnexpectedCommentEnd {};
 struct UnexpectedToken {};
 class ScriptError : public std::exception {
 public:
-  using Message =
-      std::variant<InvalidNumericLiteral, InvalidPropertyName,
-                   InvalidBackslashEscape, InvalidExpression,
-                   InvalidFunctionCall, InvalidVariableAccess,
-                   DuplicateDeclaration, MissingFieldName, MissingVariableName,
-                   MissingFunctionName, MissingIdentifier, MissingStringLiteral,
-                   MissingFormalParameter, MissingPunctuation,
-                   UnexpectedStringEnd, UnexpectedCommentEnd, UnexpectedToken>;
+  using Message = std::variant<
+      InvalidNumericLiteral, InvalidPropertyName, InvalidBackslashEscape,
+      InvalidExpression, InvalidFunctionCall, InvalidVariableAccess,
+      InvalidPropertyAccess, DuplicateDeclaration, MissingFieldName,
+      MissingVariableName, MissingFunctionName, MissingIdentifier,
+      MissingStringLiteral, MissingFormalParameter, MissingPunctuation,
+      UnexpectedStringEnd, UnexpectedCommentEnd, UnexpectedToken>;
   Message message;
 
   explicit ScriptError(Message msg) : message{msg} {}
@@ -101,7 +101,7 @@ public:
 struct ObjectShape;
 struct FunctionDefinition;
 
-enum class IntrinsicFunction { F_LOG, F_LENGTH };
+enum class IntrinsicFunction { F_LOG };
 enum class IntrinsicObject { O_CONSOLE };
 struct NumberType {};
 struct StringType {};
@@ -139,7 +139,8 @@ using ConcreteUnit =
 using Unit =
     std::variant<std::monostate, std::int64_t, Identifier,
                  ConcreteUnit<const CompactString *>, ConcreteUnit<double>,
-                 const FunctionDefinition *, ExpressionIR<std::monostate>>;
+                 const FunctionDefinition *, ExpressionIR<std::monostate>,
+                 IntrinsicObject, IntrinsicFunction>;
 
 struct BinaryExpression {
   Unit left;
@@ -170,12 +171,16 @@ struct MemberExpression {
   Unit object;
   Identifier property;
 };
-struct FunctionCallIR {
+struct FunctionCallAST {
   Unit callee;
   std::vector<Unit> arguments;
 };
+struct FunctionCallIR {
+  const FunctionDefinition *callee;
+  std::vector<Unit> arguments;
+};
 struct FunctionCall {
-  Unit callee;
+  const FunctionDefinition *callee;
   std::size_t inline_arguments;
 };
 struct AssignExpression {
@@ -193,6 +198,10 @@ struct ObjectExpressionIR {
 struct ObjectExpression {
   const ObjectShape *object_shape;
   std::size_t inline_properties;
+};
+
+template <typename T, typename U> struct Typecast {
+  ConcreteUnit<T> argument;
 };
 
 struct InitializeVariable {
@@ -213,18 +222,25 @@ struct ReturnStatementIR {
 template <typename T> struct ReturnStatement {
   ConcreteUnit<T> argument;
 };
+struct ConsoleLogIR {
+  std::vector<ConcreteUnit<const CompactString *>> arguments;
+};
+struct ConsoleLog {
+  std::size_t inline_arguments;
+};
 using StatementIR =
     std::variant<Unit, BinaryExpression, StringConcat, StringLength, Addition,
                  Subtraction, LogicalExpression, MemberExpression,
-                 FunctionCallIR, FunctionCall, AssignExpression,
-                 ObjectExpressionIR, ObjectExpression, InitializeVariable,
-                 InitializeScope<const CompactString *>,
-                 InitializeScope<double>, InitializeMember, ReturnStatementIR>;
+                 FunctionCallAST, FunctionCallIR, FunctionCall, ConsoleLogIR,
+                 AssignExpression, ObjectExpressionIR, ObjectExpression,
+                 InitializeVariable, InitializeScope<const CompactString *>,
+                 InitializeScope<double>, InitializeMember, ReturnStatementIR,
+                 Typecast<double, const CompactString *>>;
 using Statement =
     std::variant<Unit, StringConcat, StringLength, Addition, Subtraction,
-                 InitializeVariable, InitializeScope<const CompactString *>,
-                 InitializeScope<double>, InitializeMember,
-                 ReturnStatement<double>, const StatementIR *>;
+                 ConsoleLog, InitializeScope<const CompactString *>,
+                 InitializeScope<double>, ReturnStatement<double>,
+                 const StatementIR *, Typecast<double, const CompactString *>>;
 
 struct FunctionDefinition {
   Datatype return_type;
@@ -234,7 +250,10 @@ struct FunctionDefinition {
   std::vector<const FunctionDefinition *> nested_functions;
   std::vector<std::unique_ptr<StatementIR>> intermediate;
   std::vector<Statement> program;
+
   void replicate(const FunctionDefinition &model);
+  Unit analyze_identifier(std::size_t scope_offset,
+                          Identifier identifier) const;
 };
 
 inline constexpr std::size_t OFFSET_console{0};
@@ -367,13 +386,14 @@ private:
     std::unreachable();
   }
 
-  Datatype analyze_return(ConcreteUnit<double> unit_alt);
-  template <typename T> Datatype analyze_return(T unit_alt) {
+  Datatype analyze_return_statement(ConcreteUnit<double> unit_alt);
+  template <typename T> Datatype analyze_return_statement(T unit_alt) {
     std::unreachable();
   }
 
   Unit analyze_expression(BinaryExpression expression);
   Unit analyze_expression(MemberExpression expression);
+  Unit analyze_expression(FunctionCallAST expression);
   template <typename T> Unit analyze_expression(T expression) {
     std::unreachable();
   }
@@ -383,21 +403,28 @@ private:
   Unit analyze_unit(ExpressionIR<std::monostate> expression_ir);
   template <typename T> Unit analyze_unit(T unit_alt) { std::unreachable(); }
 
-  Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
-                            StringType);
-  Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
-                            NumberType);
-  template <typename T>
-  Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset,
-                            T) {
-    std::unreachable();
-  }
-
   Unit
   analyze_member_access(Identifier identifier,
                         ConcreteUnit<const CompactString *> concrete_object);
+  Unit analyze_member_access(Identifier identifier,
+                             IntrinsicObject concrete_object);
   template <typename T>
   Unit analyze_member_access(Identifier identifier, T concrete_object) {
+    std::unreachable();
+  }
+
+  Unit analyze_function_call(std::span<const Unit> arguments,
+                             const FunctionDefinition *callee);
+  Unit analyze_function_call(std::span<const Unit> arguments,
+                             IntrinsicFunction callee);
+  template <typename T>
+  Unit analyze_function_call(std::span<const Unit> arguments, T callee) {
+    std::unreachable();
+  }
+
+  Unit analyze_function_return(FunctionCallIR function_call_ir, NumberType);
+  template <typename T>
+  Unit analyze_function_return(FunctionCallIR function_call_ir, T) {
     std::unreachable();
   }
 

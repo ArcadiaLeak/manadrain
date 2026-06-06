@@ -270,7 +270,7 @@ Unit Parser::parse_call_expr(Unit callee) {
   std::size_t statement_idx{curr_definition->intermediate.size()};
   StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
       std::make_unique<StatementIR>())};
-  FunctionCallIR &expression{statement_ir.emplace<FunctionCallIR>()};
+  FunctionCallAST &expression{statement_ir.emplace<FunctionCallAST>()};
   expression.callee = callee;
   while (1) {
     tokenize();
@@ -439,8 +439,10 @@ void Parser::parse_variable_decl() {
   assert_punct('=');
   tokenize();
   Unit rvalue_unit{parse_expression()};
-  curr_definition->program.push_back(
-      InitializeVariable{variable_name, rvalue_unit});
+  StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
+      std::make_unique<StatementIR>())};
+  statement_ir.emplace<InitializeVariable>(variable_name, rvalue_unit);
+  curr_definition->program.push_back(&statement_ir);
   assert_punct(';');
   if (curr_definition->local_scope.contains(variable_name))
     throw ScriptError{DuplicateDeclaration{}};
@@ -538,14 +540,39 @@ Typechecker::analyze_initializer(std::size_t local_offset,
       ->visit(expression_initializer);
 }
 
-Unit Typechecker::analyze_scope_access(std::size_t scope_offset,
-                                       std::size_t local_offset, StringType) {
+template <typename T>
+Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset) {
+  std::unreachable();
+}
+
+template <>
+Unit analyze_scope_access<StringType>(std::size_t scope_offset,
+                                      std::size_t local_offset) {
   return ScopeAccessor<const CompactString *>{scope_offset, local_offset};
 }
 
-Unit Typechecker::analyze_scope_access(std::size_t scope_offset,
-                                       std::size_t local_offset, NumberType) {
+template <>
+Unit analyze_scope_access<NumberType>(std::size_t scope_offset,
+                                      std::size_t local_offset) {
   return ScopeAccessor<double>{scope_offset, local_offset};
+}
+
+Unit FunctionDefinition::analyze_identifier(std::size_t scope_offset,
+                                            Identifier identifier) const {
+  if (auto it = std::ranges::find(nested_functions, identifier,
+                                  [](auto el) { return el->function_name; });
+      it != nested_functions.end())
+    return *it;
+  else if (local_scope.contains(identifier)) {
+    std::size_t local_offset =
+        std::distance(local_scope.begin(), local_scope.find(identifier));
+    auto deduce_concrete = [&](auto datatype_alt) {
+      return analyze_scope_access<decltype(datatype_alt)>(scope_offset,
+                                                          local_offset);
+    };
+    return local_scope.values()[local_offset].visit(deduce_concrete);
+  } else
+    return std::monostate{};
 }
 
 Unit Typechecker::analyze_unit(std::int64_t number) {
@@ -553,18 +580,15 @@ Unit Typechecker::analyze_unit(std::int64_t number) {
 }
 
 Unit Typechecker::analyze_unit(Identifier identifier) {
-  for (auto it = analyzer_stack.rbegin(); it != analyzer_stack.rend(); ++it) {
-    const auto &local_scope{it->get()->replica.local_scope};
-    if (not local_scope.contains(identifier))
+  for (std::ptrdiff_t i = analyzer_stack.size() - 1; i >= 0; --i) {
+    Unit concrete_unit{
+        analyzer_stack[i]->replica.analyze_identifier(i, identifier)};
+    if (not concrete_unit.index())
       continue;
-    std::size_t scope_offset = std::distance(analyzer_stack.rbegin(), it);
-    std::size_t local_offset =
-        std::distance(local_scope.begin(), local_scope.find(identifier));
-    auto deduce_concrete = [&](auto datatype_alt) {
-      return analyze_scope_access(scope_offset, local_offset, datatype_alt);
-    };
-    return local_scope.values()[local_offset].visit(deduce_concrete);
+    return concrete_unit;
   }
+  if (identifier.offset == OFFSET_console)
+    return IntrinsicObject::O_CONSOLE;
   throw ScriptError{InvalidVariableAccess{}};
 }
 
@@ -586,6 +610,14 @@ Unit Typechecker::analyze_member_access(
   analyzer_stack.back()->replica.intermediate.push_back(
       std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
+}
+
+Unit Typechecker::analyze_member_access(Identifier identifier,
+                                        IntrinsicObject concrete_object) {
+  if (concrete_object == IntrinsicObject::O_CONSOLE &&
+      identifier.offset == OFFSET_log)
+    return IntrinsicFunction::F_LOG;
+  throw ScriptError{InvalidPropertyAccess{}};
 }
 
 Unit Typechecker::analyze_expression(MemberExpression expression) {
@@ -615,6 +647,42 @@ Unit Typechecker::analyze_expression(BinaryExpression expression) {
   default:
     std::unreachable();
   }
+}
+
+Unit Typechecker::analyze_function_call(std::span<const Unit> arguments,
+                                        const FunctionDefinition *callee) {
+  auto deduce_function_return = [&](auto datatype_alt) {
+    return analyze_function_return(FunctionCallIR{callee}, datatype_alt);
+  };
+  return callee->return_type.visit(deduce_function_return);
+}
+
+Unit Typechecker::analyze_function_call(std::span<const Unit> arguments,
+                                        IntrinsicFunction callee) {
+  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
+  for (Unit argument : arguments) {
+    Unit concrete_argument{argument.visit(deduce_unit)};
+    return double{4};
+  }
+  return std::monostate{};
+}
+
+Unit Typechecker::analyze_function_return(FunctionCallIR function_call_ir,
+                                          NumberType) {
+  std::unique_ptr statement_ir{
+      std::make_unique<StatementIR>(std::move(function_call_ir))};
+  std::size_t statement_idx{analyzer_stack.back()->replica.intermediate.size()};
+  analyzer_stack.back()->replica.intermediate.push_back(
+      std::move(statement_ir));
+  return ExpressionIR<double>{statement_idx};
+}
+
+Unit Typechecker::analyze_expression(FunctionCallAST expression) {
+  auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
+  auto deduce_function_call = [&](auto cocrete_alt) {
+    return analyze_function_call(expression.arguments, cocrete_alt);
+  };
+  return expression.callee.visit(deduce_unit).visit(deduce_function_call);
 }
 
 Unit Typechecker::analyze_addition(ConcreteUnit<double> concrete_left,
@@ -651,7 +719,7 @@ void Typechecker::analyze_statement(InitializeVariable statement) {
 void Typechecker::analyze_statement(ReturnStatementIR statement) {
   auto deduce_unit = [this](auto unit_alt) { return analyze_unit(unit_alt); };
   auto deduce_return = [this](auto unit_alt) {
-    return analyze_return(unit_alt);
+    return analyze_return_statement(unit_alt);
   };
   Datatype return_type{
       statement.argument.visit(deduce_unit).visit(deduce_return)};
@@ -666,7 +734,7 @@ void Typechecker::analyze_statement(Unit unit) {
   unit.visit([this](auto unit_alt) { analyze_unit(unit_alt); });
 }
 
-Datatype Typechecker::analyze_return(ConcreteUnit<double> unit_alt) {
+Datatype Typechecker::analyze_return_statement(ConcreteUnit<double> unit_alt) {
   analyzer_stack.back()->replica.program.push_back(
       ReturnStatement<double>{unit_alt});
   return NumberType{};
