@@ -427,7 +427,7 @@ const FunctionDefinition *Parser::parse_function_decl() {
     parse_statement();
   }
   curr_definition.swap(definition);
-  return machine.function_defs.emplace_back(std::move(definition)).get();
+  return machine.function_definitions.emplace_back(std::move(definition)).get();
 }
 
 void Parser::parse_variable_decl() {
@@ -511,28 +511,6 @@ std::string ConsoleMessage::encode_for_print() const {
   return u8_message;
 }
 
-Datatype Typechecker::AnalyzeInitializer::operator()(
-    ConcreteUnit<const CompactString *> unit_alt) {
-  checker.def_stack.back()->output.program.push_back(
-      InitializeScope<const CompactString *>{local_offset, unit_alt});
-  return StringType{};
-}
-
-Datatype
-Typechecker::AnalyzeInitializer::operator()(ConcreteUnit<double> unit_alt) {
-  checker.def_stack.back()->output.program.push_back(
-      InitializeScope<double>{local_offset, unit_alt});
-  return NumberType{};
-}
-
-Datatype Typechecker::AnalyzeInitializer::operator()(
-    ExpressionIR<std::monostate> unit_alt) {
-  return checker.def_stack.back()
-      ->model->intermediate[unit_alt.intermediate_idx]
-      ->visit(AnalyzeExpression{checker})
-      .visit(*this);
-}
-
 template <typename T>
 Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset) {
   std::unreachable();
@@ -568,14 +546,41 @@ Unit FunctionDefinition::analyze_identifier(std::size_t scope_offset,
     return std::monostate{};
 }
 
+void FunctionDefinition::replicate(const FunctionDefinition &model) {
+  std::tie(function_name, arguments, local_scope) =
+      std::make_tuple(model.function_name, model.arguments, model.local_scope);
+}
+
+Datatype Typechecker::AnalyzeInitializer::operator()(
+    ConcreteUnit<const CompactString *> unit_alt) {
+  checker.frames.back()->output.program.push_back(
+      InitializeScope<const CompactString *>{local_offset, unit_alt});
+  return StringType{};
+}
+
+Datatype
+Typechecker::AnalyzeInitializer::operator()(ConcreteUnit<double> unit_alt) {
+  checker.frames.back()->output.program.push_back(
+      InitializeScope<double>{local_offset, unit_alt});
+  return NumberType{};
+}
+
+Datatype Typechecker::AnalyzeInitializer::operator()(
+    ExpressionIR<std::monostate> unit_alt) {
+  return checker.frames.back()
+      ->model->intermediate[unit_alt.intermediate_idx]
+      ->visit(AnalyzeExpression{checker})
+      .visit(*this);
+}
+
 Unit Typechecker::AnalyzeUnit::operator()(std::int64_t number) {
   return static_cast<double>(number);
 }
 
 Unit Typechecker::AnalyzeUnit::operator()(Identifier identifier) {
-  for (std::ptrdiff_t i = checker.def_stack.size() - 1; i >= 0; --i) {
+  for (std::ptrdiff_t i = checker.frames.size() - 1; i >= 0; --i) {
     Unit concrete_unit{
-        checker.def_stack[i]->output.analyze_identifier(i, identifier)};
+        checker.frames[i]->output.analyze_identifier(i, identifier)};
     if (not concrete_unit.index())
       continue;
     return concrete_unit;
@@ -588,7 +593,7 @@ Unit Typechecker::AnalyzeUnit::operator()(Identifier identifier) {
 Unit Typechecker::AnalyzeUnit::operator()(
     ExpressionIR<std::monostate> expression_ir) {
   std::size_t intermediate_idx{expression_ir.intermediate_idx};
-  return checker.def_stack.back()->model->intermediate[intermediate_idx]->visit(
+  return checker.frames.back()->model->intermediate[intermediate_idx]->visit(
       AnalyzeExpression{checker});
 }
 
@@ -596,10 +601,8 @@ Unit Typechecker::AnalyzeMemberAccess::operator()(
     ConcreteUnit<const CompactString *> concrete_object) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(StringLength{concrete_object})};
-  std::size_t statement_idx{
-      checker.def_stack.back()->output.intermediate.size()};
-  checker.def_stack.back()->output.intermediate.push_back(
-      std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
+  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
@@ -611,13 +614,15 @@ Unit Typechecker::AnalyzeMemberAccess::operator()(
   throw ScriptError{InvalidPropertyAccess{}};
 }
 
-Unit Typechecker::AnalyzeExpression::operator()(MemberExpression expression) {
+Unit Typechecker::AnalyzeExpression::operator()(
+    const MemberExpression &expression) {
   Unit concrete_object{expression.object.visit(AnalyzeUnit{checker})};
   return concrete_object.visit(
       AnalyzeMemberAccess{checker, expression.property});
 }
 
-Unit Typechecker::AnalyzeExpression::operator()(BinaryExpression expression) {
+Unit Typechecker::AnalyzeExpression::operator()(
+    const BinaryExpression &expression) {
   Unit concrete_left{expression.left.visit(AnalyzeUnit{checker})};
   Unit concrete_right{expression.right.visit(AnalyzeUnit{checker})};
   switch (expression.op) {
@@ -631,9 +636,10 @@ Unit Typechecker::AnalyzeExpression::operator()(BinaryExpression expression) {
   }
 }
 
-Unit Typechecker::AnalyzeExpression::operator()(FunctionCallAST expression) {
+Unit Typechecker::AnalyzeExpression::operator()(
+    const FunctionCallAST &expression) {
   return expression.callee.visit(AnalyzeUnit{checker})
-      .visit(AnalyzeFunctionCall{checker, expression.arguments});
+      .visit(AnalyzeFunctionCall{checker, std::move(expression.arguments)});
 }
 
 Unit Typechecker::AnalyzeFunctionCall::operator()(
@@ -643,20 +649,32 @@ Unit Typechecker::AnalyzeFunctionCall::operator()(
 }
 
 Unit Typechecker::AnalyzeFunctionCall::operator()(IntrinsicFunction callee) {
-  for (Unit argument : arguments) {
-    Unit concrete_argument{argument.visit(AnalyzeUnit{checker})};
-    return double{4};
-  }
-  return std::monostate{};
+  auto inject_stringify = [&](Unit argument) {
+    return argument.visit(AnalyzeUnit{checker}).visit(InjectStringify{checker});
+  };
+  std::vector log_arguments{
+      std::from_range, arguments | std::views::transform(inject_stringify)};
+  std::unique_ptr statement_ir{
+      std::make_unique<StatementIR>(ConsoleLogIR{std::move(log_arguments)})};
+  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
+  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  return ExpressionIR<std::monostate>{statement_idx};
+}
+
+ConcreteUnit<const CompactString *>
+Typechecker::InjectStringify::operator()(ConcreteUnit<double> number_unit) {
+  std::unique_ptr statement_ir{
+      std::make_unique<StatementIR>(Stringify{number_unit})};
+  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
+  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  return ExpressionIR<const CompactString *>{statement_idx};
 }
 
 Unit Typechecker::AnalyzeFunctionReturn::operator()(NumberType) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(std::move(function_call_ir))};
-  std::size_t statement_idx{
-      checker.def_stack.back()->output.intermediate.size()};
-  checker.def_stack.back()->output.intermediate.push_back(
-      std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
+  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
@@ -664,10 +682,8 @@ Unit Typechecker::AnalyzeAddition::operator()(
     ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(Addition{concrete_left, concrete_right})};
-  std::size_t statement_idx{
-      checker.def_stack.back()->output.intermediate.size()};
-  checker.def_stack.back()->output.intermediate.push_back(
-      std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
+  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
@@ -675,15 +691,13 @@ Unit Typechecker::AnalyzeSubtraction::operator()(
     ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
   std::unique_ptr statement_ir{std::make_unique<StatementIR>(
       Subtraction{concrete_left, concrete_right})};
-  std::size_t statement_idx{
-      checker.def_stack.back()->output.intermediate.size()};
-  checker.def_stack.back()->output.intermediate.push_back(
-      std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
+  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
 void Typechecker::AnalyzeStatement::operator()(InitializeVariable statement) {
-  auto &local_scope{checker.def_stack.back()->output.local_scope};
+  auto &local_scope{checker.frames.back()->output.local_scope};
   std::size_t local_offset = std::distance(
       local_scope.begin(), local_scope.find(statement.variable_name));
   Datatype initializer_type{
@@ -694,7 +708,7 @@ void Typechecker::AnalyzeStatement::operator()(InitializeVariable statement) {
 void Typechecker::AnalyzeStatement::operator()(ReturnStatementIR statement) {
   Datatype return_type{statement.argument.visit(AnalyzeUnit{checker})
                            .visit(AnalyzeReturnStatement{checker})};
-  checker.def_stack.back()->output.return_type = return_type;
+  checker.frames.back()->output.return_type = return_type;
 }
 
 void Typechecker::AnalyzeStatement::operator()(
@@ -703,44 +717,74 @@ void Typechecker::AnalyzeStatement::operator()(
 }
 
 void Typechecker::AnalyzeStatement::operator()(Unit unit) {
-  unit.visit(AnalyzeUnit{checker});
+  checker.frames.back()->output.program.push_back(
+      unit.visit(AnalyzeUnit{checker}));
 }
 
 Datatype
 Typechecker::AnalyzeReturnStatement::operator()(ConcreteUnit<double> unit_alt) {
-  checker.def_stack.back()->output.program.push_back(
+  checker.frames.back()->output.program.push_back(
       ReturnStatement<double>{unit_alt});
   return NumberType{};
 }
 
-void Typechecker::analyze_definition() {
-  for (const FunctionDefinition *nested_definition :
-       def_stack.back()->model->nested_functions) {
-    def_stack.push_back(std::make_unique<DefinitionPair>(nested_definition));
-    analyze_definition();
-    machine.function_defs.push_back(std::make_shared<FunctionDefinition>(
-        std::move(def_stack.back()->output)));
-    def_stack.pop_back();
-    def_stack.back()->output.nested_functions.push_back(
-        machine.function_defs.back().get());
-  }
-  def_stack.back()->output.replicate(*def_stack.back()->model);
-  for (Statement model_stmt : def_stack.back()->model->program)
-    model_stmt.visit(AnalyzeStatement{*this});
+void Typechecker::analyze_statement(Statement model_stmt) {
+  model_stmt.visit(AnalyzeStatement{*this});
 }
 
-void Typechecker::typecheck() {
-  input_defs.swap(machine.function_defs);
-  def_stack.push_back(
-      std::make_unique<DefinitionPair>(machine.main_function.get()));
+void Analyzer::analyze_definition() {
+  for (const FunctionDefinition *nested_definition :
+       frames.back()->model->nested_functions) {
+    frames.push_back(std::make_unique<AnalyzerFrame>(nested_definition));
+    analyze_definition();
+    machine.function_definitions.push_back(
+        std::make_shared<FunctionDefinition>(std::move(frames.back()->output)));
+    frames.pop_back();
+    frames.back()->output.nested_functions.push_back(
+        machine.function_definitions.back().get());
+  }
+  frames.back()->output.replicate(*frames.back()->model);
+  for (Statement model_stmt : frames.back()->model->program)
+    analyze_statement(model_stmt);
+}
+
+void Analyzer::analyze() {
+  definitions.swap(machine.function_definitions);
+  frames.push_back(
+      std::make_unique<AnalyzerFrame>(machine.main_function.get()));
   analyze_definition();
   machine.main_function =
-      std::make_shared<FunctionDefinition>(std::move(def_stack.back()->output));
-  def_stack.pop_back();
+      std::make_shared<FunctionDefinition>(std::move(frames.back()->output));
+  frames.pop_back();
 }
 
-void FunctionDefinition::replicate(const FunctionDefinition &model) {
-  std::tie(function_name, arguments, local_scope) =
-      std::make_tuple(model.function_name, model.arguments, model.local_scope);
+template <typename T>
+void Inliner::AnalyzeStatement::operator()(InitializeScope<T> statement) {
+  std::size_t statement_idx{inliner.frames.back()->output.program.size()};
+  inliner.frames.back()->output.program.push_back(statement);
+  ConcreteUnit<T> unit{statement.rvalue.visit(AnalyzeUnit<T>{inliner})};
+  Statement &output_stmt{inliner.frames.back()->output.program[statement_idx]};
+  std::get<InitializeScope<T>>(output_stmt).rvalue = unit;
+}
+
+template <typename T>
+ConcreteUnit<T> Inliner::AnalyzeUnit<T>::operator()(ExpressionIR<T> unit) {
+  const StatementIR *statement{
+      inliner.frames.back()->model->intermediate[unit.intermediate_idx].get()};
+  statement->visit(AnalyzeExpression{inliner});
+  return Interim<T>{};
+}
+
+void Inliner::AnalyzeExpression::operator()(const Addition &expression) {
+  expression.left.visit(AnalyzeUnit<double>{inliner});
+  expression.right.visit(AnalyzeUnit<double>{inliner});
+}
+
+void Inliner::AnalyzeExpression::operator()(const StringLength &expression) {
+  assert(0);
+}
+
+void Inliner::analyze_statement(Statement model_stmt) {
+  model_stmt.visit(AnalyzeStatement{*this});
 }
 } // namespace Manadrain

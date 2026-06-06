@@ -177,7 +177,6 @@ struct FunctionCallAST {
 };
 struct FunctionCallIR {
   const FunctionDefinition *callee;
-  std::vector<Unit> arguments;
 };
 struct FunctionCall {
   const FunctionDefinition *callee;
@@ -200,7 +199,7 @@ struct ObjectExpression {
   std::size_t inline_properties;
 };
 
-template <typename T, typename U> struct Typecast {
+template <typename T> struct Stringify {
   ConcreteUnit<T> argument;
 };
 
@@ -235,12 +234,12 @@ using StatementIR =
                  AssignExpression, ObjectExpressionIR, ObjectExpression,
                  InitializeVariable, InitializeScope<const CompactString *>,
                  InitializeScope<double>, InitializeMember, ReturnStatementIR,
-                 Typecast<double, const CompactString *>>;
+                 Stringify<double>>;
 using Statement =
     std::variant<Unit, StringConcat, StringLength, Addition, Subtraction,
                  ConsoleLog, InitializeScope<const CompactString *>,
                  InitializeScope<double>, ReturnStatement<double>,
-                 const StatementIR *, Typecast<double, const CompactString *>>;
+                 const StatementIR *, Stringify<double>>;
 
 struct FunctionDefinition {
   Datatype return_type;
@@ -266,7 +265,7 @@ struct ConsoleMessage {
 };
 
 class Parser;
-class Typechecker;
+class Analyzer;
 
 class Machine {
 public:
@@ -279,7 +278,7 @@ public:
 private:
   FunctionFrame *current_frame;
   std::shared_ptr<const FunctionDefinition> main_function;
-  std::vector<std::shared_ptr<const FunctionDefinition>> function_defs;
+  std::vector<std::shared_ptr<const FunctionDefinition>> function_definitions;
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const CompactString>> permanent_strings;
 
@@ -300,7 +299,7 @@ private:
   std::u16string stringify(IntrinsicFunction intrinsic_function);
 
   friend class Parser;
-  friend class Typechecker;
+  friend class Analyzer;
 };
 
 class Parser {
@@ -350,21 +349,32 @@ private:
   void parse_variable_decl();
 };
 
-class Typechecker {
+struct AnalyzerFrame {
+  const FunctionDefinition *model;
+  FunctionDefinition output;
+};
+
+class Analyzer {
 public:
-  Typechecker(Machine &m) : machine{m} {}
-  void typecheck();
+  Analyzer(Machine &m) : machine{m} {}
+  void analyze();
+
+protected:
+  Machine &machine;
+  std::vector<std::shared_ptr<const FunctionDefinition>> definitions;
+  std::vector<std::unique_ptr<AnalyzerFrame>> frames;
 
 private:
-  Machine &machine;
-  std::vector<std::shared_ptr<const FunctionDefinition>> input_defs;
-
-  struct DefinitionPair {
-    const FunctionDefinition *model;
-    FunctionDefinition output;
-  };
-  std::vector<std::unique_ptr<DefinitionPair>> def_stack;
   void analyze_definition();
+  virtual void analyze_statement(Statement statement) = 0;
+};
+
+class Typechecker final : public Analyzer {
+public:
+  Typechecker(Machine &m) : Analyzer{m} {}
+
+private:
+  void analyze_statement(Statement statement) override;
 
   struct AnalyzeStatement {
     Typechecker &checker;
@@ -396,10 +406,12 @@ private:
 
   struct AnalyzeExpression {
     Typechecker &checker;
-    Unit operator()(BinaryExpression expression);
-    Unit operator()(MemberExpression expression);
-    Unit operator()(FunctionCallAST expression);
-    template <typename T> Unit operator()(T expression) { std::unreachable(); }
+    Unit operator()(const BinaryExpression &expression);
+    Unit operator()(const MemberExpression &expression);
+    Unit operator()(const FunctionCallAST &expression);
+    template <typename T> Unit operator()(const T &expression) {
+      std::unreachable();
+    }
   };
 
   struct AnalyzeUnit {
@@ -422,7 +434,7 @@ private:
 
   struct AnalyzeFunctionCall {
     Typechecker &checker;
-    std::span<const Unit> arguments;
+    std::vector<Unit> arguments;
     Unit operator()(const FunctionDefinition *callee);
     Unit operator()(IntrinsicFunction callee);
     template <typename T> Unit operator()(T callee) { std::unreachable(); }
@@ -451,6 +463,47 @@ private:
                     ConcreteUnit<double> concrete_right);
     template <typename T, typename U>
     Unit operator()(T concrete_left, U concrete_right) {
+      std::unreachable();
+    }
+  };
+
+  struct InjectStringify {
+    Typechecker &checker;
+    ConcreteUnit<const CompactString *>
+    operator()(ConcreteUnit<double> number_unit);
+    template <typename T>
+    ConcreteUnit<const CompactString *> operator()(T unit_alt) {
+      std::unreachable();
+    }
+  };
+};
+
+class Inliner final : public Analyzer {
+public:
+  Inliner(Machine &m) : Analyzer{m} {}
+
+private:
+  void analyze_statement(Statement statement) override;
+
+  struct AnalyzeStatement {
+    Inliner &inliner;
+    template <typename T> void operator()(InitializeScope<T> statement);
+    template <typename T> void operator()(T statement) { std::unreachable(); }
+  };
+
+  template <typename T> struct AnalyzeUnit {
+    Inliner &inliner;
+    ConcreteUnit<T> operator()(T unit) { return unit; }
+    ConcreteUnit<T> operator()(ScopeAccessor<T> unit) { return unit; }
+    ConcreteUnit<T> operator()(ExpressionIR<T> unit);
+    ConcreteUnit<T> operator()(Interim<T> unit) { std::unreachable(); }
+  };
+
+  struct AnalyzeExpression {
+    Inliner &inliner;
+    void operator()(const Addition &expression);
+    void operator()(const StringLength &expression);
+    template <typename T> void operator()(const T &expression) {
       std::unreachable();
     }
   };
