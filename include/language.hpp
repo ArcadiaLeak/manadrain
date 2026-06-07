@@ -230,7 +230,7 @@ struct ConsoleLog {
 using StatementIR =
     std::variant<Unit, BinaryExpression, StringConcat, StringLength, Addition,
                  Subtraction, LogicalExpression, MemberExpression,
-                 FunctionCallAST, FunctionCallIR, FunctionCall, ConsoleLogIR,
+                 FunctionCallAST, FunctionCallIR, ConsoleLogIR,
                  AssignExpression, ObjectExpressionIR, ObjectExpression,
                  InitializeVariable, InitializeScope<const CompactString *>,
                  InitializeScope<double>, InitializeMember, ReturnStatementIR,
@@ -239,7 +239,7 @@ using Statement =
     std::variant<Unit, StringConcat, StringLength, Addition, Subtraction,
                  ConsoleLog, InitializeScope<const CompactString *>,
                  InitializeScope<double>, ReturnStatement<double>,
-                 const StatementIR *, Stringify<double>>;
+                 const StatementIR *, Stringify<double>, FunctionCall>;
 
 struct FunctionDefinition {
   Datatype return_type;
@@ -351,7 +351,7 @@ private:
 
 struct AnalyzerFrame {
   const FunctionDefinition *model;
-  FunctionDefinition output;
+  std::shared_ptr<FunctionDefinition> output;
 };
 
 class Analyzer {
@@ -361,8 +361,10 @@ public:
 
 protected:
   Machine &machine;
+  std::flat_map<const FunctionDefinition *, const FunctionDefinition *>
+      correspondence;
   std::vector<std::shared_ptr<const FunctionDefinition>> definitions;
-  std::vector<std::unique_ptr<AnalyzerFrame>> frames;
+  std::vector<AnalyzerFrame> frames;
 
 private:
   void analyze_definition();
@@ -488,6 +490,9 @@ private:
   struct AnalyzeStatement {
     Inliner &inliner;
     template <typename T> void operator()(InitializeScope<T> statement);
+    template <typename T> void operator()(ReturnStatement<T> statement);
+    void operator()(Unit statement);
+    void operator()(ExpressionIR<std::monostate> unit);
     template <typename T> void operator()(T statement) { std::unreachable(); }
   };
 
@@ -502,7 +507,11 @@ private:
   struct AnalyzeExpression {
     Inliner &inliner;
     void operator()(const Addition &expression);
+    void operator()(const Subtraction &expression);
     void operator()(const StringLength &expression);
+    void operator()(const ConsoleLogIR &expression);
+    void operator()(const FunctionCallIR &expression);
+    template <typename T> void operator()(const Stringify<T> &expression);
     template <typename T> void operator()(const T &expression) {
       std::unreachable();
     }

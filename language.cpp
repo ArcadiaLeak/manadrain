@@ -553,14 +553,14 @@ void FunctionDefinition::replicate(const FunctionDefinition &model) {
 
 Datatype Typechecker::AnalyzeInitializer::operator()(
     ConcreteUnit<const CompactString *> unit_alt) {
-  checker.frames.back()->output.program.push_back(
+  checker.frames.back().output->program.push_back(
       InitializeScope<const CompactString *>{local_offset, unit_alt});
   return StringType{};
 }
 
 Datatype
 Typechecker::AnalyzeInitializer::operator()(ConcreteUnit<double> unit_alt) {
-  checker.frames.back()->output.program.push_back(
+  checker.frames.back().output->program.push_back(
       InitializeScope<double>{local_offset, unit_alt});
   return NumberType{};
 }
@@ -568,7 +568,7 @@ Typechecker::AnalyzeInitializer::operator()(ConcreteUnit<double> unit_alt) {
 Datatype Typechecker::AnalyzeInitializer::operator()(
     ExpressionIR<std::monostate> unit_alt) {
   return checker.frames.back()
-      ->model->intermediate[unit_alt.intermediate_idx]
+      .model->intermediate[unit_alt.intermediate_idx]
       ->visit(AnalyzeExpression{checker})
       .visit(*this);
 }
@@ -580,7 +580,7 @@ Unit Typechecker::AnalyzeUnit::operator()(std::int64_t number) {
 Unit Typechecker::AnalyzeUnit::operator()(Identifier identifier) {
   for (std::ptrdiff_t i = checker.frames.size() - 1; i >= 0; --i) {
     Unit concrete_unit{
-        checker.frames[i]->output.analyze_identifier(i, identifier)};
+        checker.frames[i].output->analyze_identifier(i, identifier)};
     if (not concrete_unit.index())
       continue;
     return concrete_unit;
@@ -593,7 +593,7 @@ Unit Typechecker::AnalyzeUnit::operator()(Identifier identifier) {
 Unit Typechecker::AnalyzeUnit::operator()(
     ExpressionIR<std::monostate> expression_ir) {
   std::size_t intermediate_idx{expression_ir.intermediate_idx};
-  return checker.frames.back()->model->intermediate[intermediate_idx]->visit(
+  return checker.frames.back().model->intermediate[intermediate_idx]->visit(
       AnalyzeExpression{checker});
 }
 
@@ -601,8 +601,8 @@ Unit Typechecker::AnalyzeMemberAccess::operator()(
     ConcreteUnit<const CompactString *> concrete_object) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(StringLength{concrete_object})};
-  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
-  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
+  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
@@ -656,8 +656,8 @@ Unit Typechecker::AnalyzeFunctionCall::operator()(IntrinsicFunction callee) {
       std::from_range, arguments | std::views::transform(inject_stringify)};
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(ConsoleLogIR{std::move(log_arguments)})};
-  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
-  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
+  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<std::monostate>{statement_idx};
 }
 
@@ -665,16 +665,16 @@ ConcreteUnit<const CompactString *>
 Typechecker::InjectStringify::operator()(ConcreteUnit<double> number_unit) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(Stringify{number_unit})};
-  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
-  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
+  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<const CompactString *>{statement_idx};
 }
 
 Unit Typechecker::AnalyzeFunctionReturn::operator()(NumberType) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(std::move(function_call_ir))};
-  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
-  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
+  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
@@ -682,8 +682,8 @@ Unit Typechecker::AnalyzeAddition::operator()(
     ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
   std::unique_ptr statement_ir{
       std::make_unique<StatementIR>(Addition{concrete_left, concrete_right})};
-  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
-  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
+  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
@@ -691,13 +691,13 @@ Unit Typechecker::AnalyzeSubtraction::operator()(
     ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
   std::unique_ptr statement_ir{std::make_unique<StatementIR>(
       Subtraction{concrete_left, concrete_right})};
-  std::size_t statement_idx{checker.frames.back()->output.intermediate.size()};
-  checker.frames.back()->output.intermediate.push_back(std::move(statement_ir));
+  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
+  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
   return ExpressionIR<double>{statement_idx};
 }
 
 void Typechecker::AnalyzeStatement::operator()(InitializeVariable statement) {
-  auto &local_scope{checker.frames.back()->output.local_scope};
+  auto &local_scope{checker.frames.back().output->local_scope};
   std::size_t local_offset = std::distance(
       local_scope.begin(), local_scope.find(statement.variable_name));
   Datatype initializer_type{
@@ -708,7 +708,7 @@ void Typechecker::AnalyzeStatement::operator()(InitializeVariable statement) {
 void Typechecker::AnalyzeStatement::operator()(ReturnStatementIR statement) {
   Datatype return_type{statement.argument.visit(AnalyzeUnit{checker})
                            .visit(AnalyzeReturnStatement{checker})};
-  checker.frames.back()->output.return_type = return_type;
+  checker.frames.back().output->return_type = return_type;
 }
 
 void Typechecker::AnalyzeStatement::operator()(
@@ -717,13 +717,13 @@ void Typechecker::AnalyzeStatement::operator()(
 }
 
 void Typechecker::AnalyzeStatement::operator()(Unit unit) {
-  checker.frames.back()->output.program.push_back(
+  checker.frames.back().output->program.push_back(
       unit.visit(AnalyzeUnit{checker}));
 }
 
 Datatype
 Typechecker::AnalyzeReturnStatement::operator()(ConcreteUnit<double> unit_alt) {
-  checker.frames.back()->output.program.push_back(
+  checker.frames.back().output->program.push_back(
       ReturnStatement<double>{unit_alt});
   return NumberType{};
 }
@@ -734,54 +734,133 @@ void Typechecker::analyze_statement(Statement model_stmt) {
 
 void Analyzer::analyze_definition() {
   for (const FunctionDefinition *nested_definition :
-       frames.back()->model->nested_functions) {
-    frames.push_back(std::make_unique<AnalyzerFrame>(nested_definition));
+       frames.back().model->nested_functions) {
+    frames.emplace_back(nested_definition,
+                        std::make_shared<FunctionDefinition>());
+    correspondence[frames.back().model] = frames.back().output.get();
     analyze_definition();
-    machine.function_definitions.push_back(
-        std::make_shared<FunctionDefinition>(std::move(frames.back()->output)));
+    machine.function_definitions.push_back(std::move(frames.back().output));
     frames.pop_back();
-    frames.back()->output.nested_functions.push_back(
+    frames.back().output->nested_functions.push_back(
         machine.function_definitions.back().get());
   }
-  frames.back()->output.replicate(*frames.back()->model);
-  for (Statement model_stmt : frames.back()->model->program)
+  frames.back().output->replicate(*frames.back().model);
+  for (Statement model_stmt : frames.back().model->program)
     analyze_statement(model_stmt);
 }
 
 void Analyzer::analyze() {
   definitions.swap(machine.function_definitions);
-  frames.push_back(
-      std::make_unique<AnalyzerFrame>(machine.main_function.get()));
+  frames.emplace_back(machine.main_function.get(),
+                      std::make_shared<FunctionDefinition>());
+  correspondence[frames.back().model] = frames.back().output.get();
   analyze_definition();
-  machine.main_function =
-      std::make_shared<FunctionDefinition>(std::move(frames.back()->output));
+  machine.main_function = std::move(frames.back().output);
   frames.pop_back();
 }
 
 template <typename T>
 void Inliner::AnalyzeStatement::operator()(InitializeScope<T> statement) {
-  std::size_t statement_idx{inliner.frames.back()->output.program.size()};
-  inliner.frames.back()->output.program.push_back(statement);
+  std::size_t statement_idx{inliner.frames.back().output->program.size()};
+  inliner.frames.back().output->program.push_back(statement);
   ConcreteUnit<T> unit{statement.rvalue.visit(AnalyzeUnit<T>{inliner})};
-  Statement &output_stmt{inliner.frames.back()->output.program[statement_idx]};
+  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
   std::get<InitializeScope<T>>(output_stmt).rvalue = unit;
+}
+
+template <typename T>
+void Inliner::AnalyzeStatement::operator()(ReturnStatement<T> statement) {
+  std::size_t statement_idx{inliner.frames.back().output->program.size()};
+  inliner.frames.back().output->program.push_back(statement);
+  ConcreteUnit<T> unit{statement.argument.visit(AnalyzeUnit<T>{inliner})};
+  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
+  std::get<ReturnStatement<T>>(output_stmt).argument = unit;
+}
+
+void Inliner::AnalyzeStatement::operator()(ExpressionIR<std::monostate> unit) {
+  const StatementIR *statement{
+      inliner.frames.back().model->intermediate[unit.intermediate_idx].get()};
+  statement->visit(AnalyzeExpression{inliner});
+}
+
+void Inliner::AnalyzeStatement::operator()(Unit statement) {
+  statement.visit(*this);
 }
 
 template <typename T>
 ConcreteUnit<T> Inliner::AnalyzeUnit<T>::operator()(ExpressionIR<T> unit) {
   const StatementIR *statement{
-      inliner.frames.back()->model->intermediate[unit.intermediate_idx].get()};
+      inliner.frames.back().model->intermediate[unit.intermediate_idx].get()};
   statement->visit(AnalyzeExpression{inliner});
   return Interim<T>{};
 }
 
 void Inliner::AnalyzeExpression::operator()(const Addition &expression) {
-  expression.left.visit(AnalyzeUnit<double>{inliner});
-  expression.right.visit(AnalyzeUnit<double>{inliner});
+  std::size_t statement_idx{inliner.frames.back().output->program.size()};
+  inliner.frames.back().output->program.push_back(expression);
+  ConcreteUnit<double> unit_left{
+      expression.left.visit(AnalyzeUnit<double>{inliner})};
+  ConcreteUnit<double> unit_right{
+      expression.right.visit(AnalyzeUnit<double>{inliner})};
+  Addition &output_stmt{
+      std::get<Addition>(inliner.frames.back().output->program[statement_idx])};
+  output_stmt.left = unit_left;
+  output_stmt.right = unit_right;
+}
+
+void Inliner::AnalyzeExpression::operator()(const Subtraction &expression) {
+  std::size_t statement_idx{inliner.frames.back().output->program.size()};
+  inliner.frames.back().output->program.push_back(expression);
+  ConcreteUnit<double> unit_left{
+      expression.left.visit(AnalyzeUnit<double>{inliner})};
+  ConcreteUnit<double> unit_right{
+      expression.right.visit(AnalyzeUnit<double>{inliner})};
+  Subtraction &output_stmt{std::get<Subtraction>(
+      inliner.frames.back().output->program[statement_idx])};
+  output_stmt.left = unit_left;
+  output_stmt.right = unit_right;
 }
 
 void Inliner::AnalyzeExpression::operator()(const StringLength &expression) {
-  assert(0);
+  std::size_t statement_idx{inliner.frames.back().output->program.size()};
+  inliner.frames.back().output->program.push_back(expression);
+  ConcreteUnit<const CompactString *> unit{
+      expression.argument.visit(AnalyzeUnit<const CompactString *>{inliner})};
+  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
+  std::get<StringLength>(output_stmt).argument = unit;
+}
+
+void Inliner::AnalyzeExpression::operator()(const ConsoleLogIR &expression) {
+  inliner.frames.back().output->program.push_back(
+      ConsoleLog{expression.arguments.size()});
+  for (ConcreteUnit<const CompactString *> argument : expression.arguments) {
+    std::size_t statement_idx{inliner.frames.back().output->program.size()};
+    inliner.frames.back().output->program.emplace_back();
+    ConcreteUnit<const CompactString *> unit{
+        argument.visit(AnalyzeUnit<const CompactString *>{inliner})};
+    if (not std::holds_alternative<Interim<const CompactString *>>(unit))
+      inliner.frames.back().output->program[statement_idx].emplace<Unit>(unit);
+    else {
+      auto it = inliner.frames.back().output->program.begin() + statement_idx;
+      inliner.frames.back().output->program.erase(it);
+    }
+  }
+}
+
+void Inliner::AnalyzeExpression::operator()(const FunctionCallIR &expression) {
+  auto callee_it = inliner.correspondence.find(expression.callee);
+  assert(callee_it != inliner.correspondence.end());
+  FunctionCall function_call{callee_it->second, 0};
+  inliner.frames.back().output->program.push_back(function_call);
+}
+
+template <typename T>
+void Inliner::AnalyzeExpression::operator()(const Stringify<T> &expression) {
+  std::size_t statement_idx{inliner.frames.back().output->program.size()};
+  inliner.frames.back().output->program.push_back(expression);
+  ConcreteUnit<T> unit{expression.argument.visit(AnalyzeUnit<T>{inliner})};
+  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
+  std::get<Stringify<T>>(output_stmt).argument = unit;
 }
 
 void Inliner::analyze_statement(Statement model_stmt) {
