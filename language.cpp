@@ -1,6 +1,6 @@
 #include <algorithm>
 #include <cassert>
-#include <functional>
+#include <new>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -449,9 +449,6 @@ void Parser::parse_variable_decl() {
   curr_definition->local_scope.try_emplace(variable_name);
 }
 
-Machine::Machine()
-    : resource{std::make_unique<std::pmr::monotonic_buffer_resource>()} {}
-
 std::u16string Machine::stringify(std::monostate) { return u"undefined"; }
 
 std::u16string Machine::stringify(std::u16string_view permanent_string) {
@@ -485,7 +482,20 @@ std::u16string Machine::stringify(IntrinsicFunction intrinsic_function) {
   return u"<unimplemented>";
 }
 
-void Machine::evaluate() {}
+void Machine::EvaluateStatement::operator()(ConsoleLog statement) { assert(0); }
+
+void Machine::evaluate() {
+  current_frame = &runtime_memory->function_frames.emplace_back();
+  current_frame->program_iter = main_function->program.begin();
+  current_frame->definition = main_function.get();
+  current_frame->own_scope = runtime_memory->structures.emplace_back(
+      main_function->local_scope.size());
+  while (current_frame->program_iter != main_function->program.end()) {
+    const Statement &statement{*current_frame->program_iter};
+    ++current_frame->program_iter;
+    statement.visit(EvaluateStatement{*this});
+  }
+}
 
 void Machine::collect_console_messages(std::stop_token stopper,
                                        std::list<ConsoleMessage> &message_box) {
@@ -865,5 +875,56 @@ void Inliner::AnalyzeExpression::operator()(const Stringify<T> &expression) {
 
 void Inliner::analyze_statement(Statement model_stmt) {
   model_stmt.visit(AnalyzeStatement{*this});
+}
+
+template <typename T>
+RawStatement::RawStatement(T stmt_alt) : type_idx{stmt_type<T>} {
+  ::new (buffer) T{};
+}
+
+RawStatement::~RawStatement() {
+  switch (type_idx) {
+  case stmt_type<Unit>:
+    std::launder(reinterpret_cast<Unit *>(buffer))->~Unit();
+    break;
+  case stmt_type<StringConcat>:
+    std::launder(reinterpret_cast<StringConcat *>(buffer))->~StringConcat();
+    break;
+  case stmt_type<StringLength>:
+    std::launder(reinterpret_cast<StringLength *>(buffer))->~StringLength();
+    break;
+  case stmt_type<Addition>:
+    std::launder(reinterpret_cast<Addition *>(buffer))->~Addition();
+    break;
+  case stmt_type<Subtraction>:
+    std::launder(reinterpret_cast<Subtraction *>(buffer))->~Subtraction();
+    break;
+  case stmt_type<ConsoleLog>:
+    std::launder(reinterpret_cast<ConsoleLog *>(buffer))->~ConsoleLog();
+    break;
+  case stmt_type<InitializeScope<const CompactString *>>:
+    std::launder(
+        reinterpret_cast<InitializeScope<const CompactString *> *>(buffer))
+        ->~InitializeScope();
+    break;
+  case stmt_type<InitializeScope<double>>:
+    std::launder(reinterpret_cast<InitializeScope<double> *>(buffer))
+        ->~InitializeScope();
+    break;
+  case stmt_type<ReturnStatement<double>>:
+    std::launder(reinterpret_cast<ReturnStatement<double> *>(buffer))
+        ->~ReturnStatement();
+    break;
+  case stmt_type<const StatementIR *>:
+    break;
+  case stmt_type<Stringify<double>>:
+    std::launder(reinterpret_cast<Stringify<double> *>(buffer))->~Stringify();
+    break;
+  case stmt_type<FunctionCall>:
+    std::launder(reinterpret_cast<FunctionCall *>(buffer))->~FunctionCall();
+    break;
+  default:
+    std::unreachable();
+  }
 }
 } // namespace Manadrain

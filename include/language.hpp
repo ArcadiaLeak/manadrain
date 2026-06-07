@@ -241,6 +241,74 @@ using Statement =
                  InitializeScope<double>, ReturnStatement<double>,
                  const StatementIR *, Stringify<double>, FunctionCall>;
 
+inline constexpr std::size_t stmt_align =
+    std::max({alignof(Unit), alignof(StringConcat), alignof(StringLength),
+              alignof(Addition), alignof(Subtraction), alignof(ConsoleLog),
+              alignof(InitializeScope<const CompactString *>),
+              alignof(InitializeScope<double>),
+              alignof(ReturnStatement<double>), alignof(const StatementIR *),
+              alignof(Stringify<double>), alignof(FunctionCall)});
+inline constexpr std::size_t stmt_size =
+    std::max({sizeof(Unit), sizeof(StringConcat), sizeof(StringLength),
+              sizeof(Addition), sizeof(Subtraction), sizeof(ConsoleLog),
+              sizeof(InitializeScope<const CompactString *>),
+              sizeof(InitializeScope<double>), sizeof(ReturnStatement<double>),
+              sizeof(const StatementIR *), sizeof(Stringify<double>),
+              sizeof(FunctionCall)});
+
+template <typename T> inline constexpr std::size_t stmt_type{0};
+template <> inline constexpr std::size_t stmt_type<Unit>{1};
+template <> inline constexpr std::size_t stmt_type<StringConcat>{2};
+template <> inline constexpr std::size_t stmt_type<StringLength>{3};
+template <> inline constexpr std::size_t stmt_type<Addition>{4};
+template <> inline constexpr std::size_t stmt_type<Subtraction>{5};
+template <> inline constexpr std::size_t stmt_type<ConsoleLog>{6};
+template <>
+inline constexpr std::size_t stmt_type<InitializeScope<const CompactString *>>{
+    7};
+template <> inline constexpr std::size_t stmt_type<InitializeScope<double>>{8};
+template <> inline constexpr std::size_t stmt_type<ReturnStatement<double>>{9};
+template <> inline constexpr std::size_t stmt_type<const StatementIR *>{10};
+template <> inline constexpr std::size_t stmt_type<Stringify<double>>{11};
+template <> inline constexpr std::size_t stmt_type<FunctionCall>{12};
+
+struct RawStatement {
+  std::size_t type_idx;
+  alignas(stmt_align) std::byte buffer[stmt_size];
+
+  RawStatement(const RawStatement &other) = delete;
+  RawStatement &operator=(const RawStatement &other) = delete;
+  RawStatement(RawStatement &&other) noexcept = delete;
+  RawStatement &operator=(RawStatement &&other) noexcept = delete;
+
+  template <typename T> RawStatement(T stmt_alt);
+  ~RawStatement();
+
+  template <typename T, typename Self, typename F>
+  auto &&dispatch(this Self &&self, F &&functor) {
+    using PerfectT =
+        std::conditional_t<std::is_const_v<std::remove_reference_t<Self>>,
+                           std::add_const_t<T>, T>;
+    auto *laundered_ptr =
+        std::launder(reinterpret_cast<PerfectT *>(self.buffer));
+    return std::forward<F>(functor)(std::forward_like<Self>(*laundered_ptr));
+  }
+
+  template <typename Self, typename F>
+  auto &&visit(this Self &&self, F &&functor) {
+    switch (self.tag) {
+    case 1:
+      return std::forward<Self>(self).template dispatch<int>(
+          std::forward<F>(functor));
+    case 2:
+      return std::forward<Self>(self).template dispatch<double>(
+          std::forward<F>(functor));
+    default:
+      std::unreachable();
+    }
+  }
+};
+
 struct FunctionDefinition {
   Datatype return_type;
   std::optional<Identifier> function_name;
@@ -255,6 +323,14 @@ struct FunctionDefinition {
                           Identifier identifier) const;
 };
 
+struct FunctionFrame {
+  const FunctionDefinition *definition;
+  std::vector<Statement>::const_iterator program_iter;
+  std::span<Value> own_scope;
+  std::span<FunctionFrame *> closure;
+  Value return_val;
+};
+
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
@@ -264,13 +340,18 @@ struct ConsoleMessage {
   std::string encode_for_print() const;
 };
 
+struct RuntimeMemory {
+  std::pmr::monotonic_buffer_resource resource{65536};
+  std::pmr::list<FunctionFrame> function_frames{&resource};
+  std::pmr::list<std::pmr::vector<FunctionFrame *>> scope_traces{&resource};
+  std::pmr::list<std::pmr::vector<Value>> structures{&resource};
+};
+
 class Parser;
 class Analyzer;
 
 class Machine {
 public:
-  Machine();
-
   void collect_console_messages(std::stop_token stopper,
                                 std::list<ConsoleMessage> &message_box);
   void evaluate();
@@ -282,13 +363,16 @@ private:
   std::vector<std::shared_ptr<const ObjectShape>> object_shapes;
   std::vector<std::shared_ptr<const CompactString>> permanent_strings;
 
-  std::unique_ptr<std::pmr::monotonic_buffer_resource> resource;
-
-  void initialize_descriptors(FunctionFrame &function_frame);
-
+  std::indirect<RuntimeMemory> runtime_memory;
   std::indirect<std::mutex> console_mutex;
   std::indirect<std::condition_variable_any> console_condition;
   std::list<ConsoleMessage> console_messages;
+
+  struct EvaluateStatement {
+    Machine &machine;
+    void operator()(ConsoleLog statement);
+    template <typename T> void operator()(T statement) { std::unreachable(); }
+  };
 
   std::u16string stringify(std::monostate);
   std::u16string stringify(std::u16string_view permanent_string);

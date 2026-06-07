@@ -43,6 +43,8 @@ int main(int argc, char *argv[]) {
   Manadrain::Inliner inliner{machine};
   inliner.analyze();
 
+  machine.evaluate();
+
   auto console_printer = [&](std::stop_token stopper) {
     std::list<Manadrain::ConsoleMessage> messages{};
     machine.collect_console_messages(stopper, messages);
