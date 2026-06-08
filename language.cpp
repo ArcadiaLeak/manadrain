@@ -8,7 +8,7 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static const std::unordered_map<std::string_view, Keyword> keyword_atlas{
+static const std::flat_map<std::string_view, Keyword> keyword_atlas{
     {"const", Keyword::K_CONST},       {"let", Keyword::K_LET},
     {"var", Keyword::K_VAR},           {"class", Keyword::K_CLASS},
     {"function", Keyword::K_FUNCTION}, {"return", Keyword::K_RETURN},
@@ -21,14 +21,14 @@ static const std::unordered_map<std::string_view, Keyword> keyword_atlas{
     {"for", Keyword::K_FOR},           {"do", Keyword::K_DO},
     {"break", Keyword::K_BREAK},       {"continue", Keyword::K_CONTINUE},
     {"switch", Keyword::K_SWITCH},     {"typeof", Keyword::K_TYPEOF}};
-static const std::unordered_map<std::string_view, std::size_t> identifier_atlas{
+static const std::flat_map<std::string_view, std::size_t> identifier_atlas{
     {"console", OFFSET_console},
     {"log", OFFSET_log},
     {"length", OFFSET_length}};
-static const std::array permanent_identifiers{
+static const std::array persistent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::optional<char32_t> Parser::forward() {
+std::optional<char32_t> Compiler::forward() {
   if (position >= text_buffer->size())
     backtrace.push_back(std::nullopt);
   else {
@@ -42,7 +42,7 @@ std::optional<char32_t> Parser::forward() {
   return backtrace.back();
 }
 
-std::generator<std::optional<char32_t>> Parser::traverse_text() {
+std::generator<std::optional<char32_t>> Compiler::traverse_text() {
   while (1)
     co_yield forward();
 }
@@ -61,19 +61,19 @@ std::inplace_vector<char16_t, 2> traverse_u16(ucs4_t cp) {
   return {std::from_range, buffer | std::views::take(advance)};
 }
 
-void Parser::backward() {
+void Compiler::backward() {
   std::optional<char32_t> behind{backtrace.back()};
   position -= std::ranges::distance(
       behind | std::views::transform(traverse_u8) | std::views::join);
   backtrace.pop_back();
 }
 
-void Parser::backward(std::size_t N) {
+void Compiler::backward(std::size_t N) {
   for (int i = 0; i < N; ++i)
     backward();
 }
 
-Token Parser::tokenize_identifier(char32_t leading) {
+Token Compiler::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -85,20 +85,17 @@ Token Parser::tokenize_identifier(char32_t leading) {
   auto iter_reserved = keyword_atlas.find(identifier_str);
   if (iter_reserved != keyword_atlas.end())
     return iter_reserved->second;
-  auto iter_permanent = identifier_atlas.find(identifier_str);
-  if (iter_permanent != identifier_atlas.end())
-    return Identifier{iter_permanent->second};
-  if (atom_atlas.contains(identifier_str))
-    return atom_atlas[identifier_str];
-  atom_pool.push_back(std::make_shared<std::string>(std::move(identifier_str)));
-  std::string_view identifier_view{*atom_pool.back()};
-  atom_atlas[identifier_view] =
-      Identifier{permanent_identifiers.size() + atom_pool.size() - 1};
-  return atom_atlas[identifier_view];
+  auto iter_persistent = identifier_atlas.find(identifier_str);
+  if (iter_persistent != identifier_atlas.end())
+    return Identifier{iter_persistent->second};
+  Identifier identifier{persistent_identifiers.size() + atom_atlas.size() - 1};
+  auto emplace_ret =
+      atom_atlas.try_emplace(std::move(identifier_str), identifier);
+  return emplace_ret.first->second;
 }
 
-Token Parser::tokenize_string_literal(char32_t separator) {
-  std::u16string literal_str{};
+Token Compiler::tokenize_string_literal(char32_t separator) {
+  std::u16string u16_literal{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
   };
@@ -108,27 +105,21 @@ Token Parser::tokenize_string_literal(char32_t separator) {
     if (leading == '\r' && forward() != '\n')
       backward();
     if (not leading || leading == '\r' || leading == '\n')
-      throw ScriptError{UnexpectedStringEnd{}};
-    literal_str.append_range(traverse_u16(*leading));
+      throw UnexpectedStringEnd{};
+    u16_literal.append_range(traverse_u16(*leading));
   }
-  auto [atlas_it, did_insert] =
-      string_atlas.try_emplace(std::move(literal_str));
-  if (not did_insert)
-    return atlas_it->second;
-  std::shared_ptr compact_string{std::make_shared<CompactString>()};
-  if (std::ranges::all_of(atlas_it->first,
-                          [](char16_t ch) { return ch < 128; })) {
+  if (std::ranges::all_of(u16_literal, [](char16_t ch) { return ch < 128; })) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
-    auto ascii_string = atlas_it->first | std::views::transform(cast_to_ascii);
-    compact_string->ascii = {std::from_range, ascii_string};
-  } else
-    compact_string->unicode = atlas_it->first;
-  atlas_it->second = compact_string.get();
-  machine.permanent_strings.push_back(std::move(compact_string));
-  return atlas_it->second;
+    auto ascii_string = u16_literal | std::views::transform(cast_to_ascii);
+    auto [string_iter, _] =
+        token_strings.emplace(std::from_range, ascii_string);
+    return *string_iter;
+  }
+  auto [u16string_iter, _] = token_u16strings.emplace(std::move(u16_literal));
+  return *u16string_iter;
 }
 
-Token Parser::tokenize_numeric_literal(char32_t leading) {
+Token Compiler::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -145,7 +136,7 @@ Token Parser::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-void Parser::tokenize() {
+void Compiler::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -191,183 +182,250 @@ void Parser::tokenize() {
       last_token = tokenize_numeric_literal(leading);
       return;
     }
-    throw ScriptError{UnexpectedToken{}};
+    throw UnexpectedToken{};
   }
   last_token = std::monostate{};
 }
 
-void Parser::assert_punct(char32_t must_be) {
+void Compiler::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
-  throw ScriptError{MissingPunctuation{must_be}};
+  throw MissingPunctuation{must_be};
 }
 
-void Parser::parse_text() {
-  curr_definition = std::make_unique<FunctionDefinition>();
+void Compiler::parse_text() {
   while (1) {
     tokenize();
     if (std::holds_alternative<std::monostate>(last_token))
       break;
-    parse_statement();
+    entry_module.parse_statement();
   }
-  machine.main_function = std::move(curr_definition);
 }
 
-Unit Parser::parse_object_literal() {
-  std::shared_ptr object_shape{std::make_shared<ObjectShape>()};
-  std::size_t statement_idx{curr_definition->intermediate.size()};
-  StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
-      std::make_unique<StatementIR>())};
-  ObjectExpressionIR &object_expression{
-      statement_ir.emplace<ObjectExpressionIR>()};
-  object_expression.object_shape = object_shape.get();
-  tokenize();
-  while (last_token != Token{U'}'}) {
-    if (not std::holds_alternative<Identifier>(last_token))
-      throw ScriptError{InvalidPropertyName{}};
-    Identifier property_name{std::get<Identifier>(last_token)};
-    object_shape->properties.try_emplace(property_name);
-    tokenize();
-    std::size_t initializer_idx{curr_definition->intermediate.size()};
-    StatementIR &initializer_ir{*curr_definition->intermediate.emplace_back(
-        std::make_unique<StatementIR>())};
-    InitializeMember &initialize_member{
-        initializer_ir.emplace<InitializeMember>(property_name)};
-    if (last_token == Token{U':'}) {
-      tokenize();
-      initialize_member.rvalue = parse_expression();
-    }
-    object_expression.properties.push_back(
-        ExpressionIR<std::monostate>{initializer_idx});
-    if (last_token != Token{U','})
-      break;
-    tokenize();
-  }
-  assert_punct('}');
-  machine.object_shapes.push_back(std::move(object_shape));
-  return ExpressionIR<std::monostate>{statement_idx};
-}
-
-Unit Parser::parse_primary_expr() {
-  return last_token.visit([this](auto t) -> Unit {
-    if constexpr (std::is_same_v<decltype(t), const CompactString *> ||
-                  std::is_same_v<decltype(t), Identifier> ||
-                  std::is_same_v<decltype(t), std::int64_t> ||
-                  std::is_same_v<decltype(t), double>)
-      return t;
-    if constexpr (std::is_same_v<decltype(t), Keyword>)
-      if (t == Keyword::K_FUNCTION)
-        return parse_function_decl();
-    if constexpr (std::is_same_v<decltype(t), char32_t>)
-      if (t == '{')
-        return parse_object_literal();
-    throw ScriptError{UnexpectedToken{}};
-  });
-}
-
-Unit Parser::parse_call_expr(Unit callee) {
-  std::size_t statement_idx{curr_definition->intermediate.size()};
-  StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
-      std::make_unique<StatementIR>())};
-  FunctionCallAST &expression{statement_ir.emplace<FunctionCallAST>()};
-  expression.callee = callee;
-  while (1) {
-    tokenize();
-    if (last_token == Token{U')'})
-      break;
-    expression.arguments.emplace_back(parse_expression());
-    if (last_token == Token{U')'})
-      break;
-    assert_punct(',');
-  }
-  return ExpressionIR<std::monostate>{statement_idx};
-}
-
-Unit Parser::parse_member_expr(Unit object) {
-  tokenize();
-  if (not std::holds_alternative<Identifier>(last_token))
-    throw ScriptError{MissingFieldName{}};
-  Identifier field_name{std::get<Identifier>(last_token)};
-  std::size_t statement_idx{curr_definition->intermediate.size()};
-  curr_definition->intermediate.push_back(
-      std::make_unique<StatementIR>(MemberExpression{object, field_name}));
-  return ExpressionIR<std::monostate>{statement_idx};
-}
-
-Unit Parser::parse_postfix_expr() {
-  Unit postfix_unit{};
-  std::optional postfix_opt{parse_primary_expr()};
-  while (postfix_opt) {
-    postfix_unit = *postfix_opt;
-    tokenize();
-    std::optional<Unit> ahead{};
-    if (last_token == Token{U'.'})
-      ahead = parse_member_expr(postfix_unit);
-    else if (last_token == Token{U'('})
-      ahead = parse_call_expr(postfix_unit);
-    postfix_opt = ahead;
-  }
-  return postfix_unit;
-}
-
-Unit Parser::parse_additive_expr() {
-  Unit unit_left{parse_postfix_expr()};
-  if (last_token != Token{U'+'} && last_token != Token{U'-'})
-    return unit_left;
-  char32_t binary_op{std::get<char32_t>(last_token)};
-  tokenize();
-  Unit unit_right{parse_postfix_expr()};
-  std::size_t statement_idx{curr_definition->intermediate.size()};
-  curr_definition->intermediate.push_back(std::make_unique<StatementIR>(
-      BinaryExpression{unit_left, unit_right, binary_op}));
-  return ExpressionIR<std::monostate>{statement_idx};
-}
-
-Unit Parser::parse_logical_disjunct() {
-  Unit unit_left{parse_additive_expr()};
-  while (last_token == Token{Operator::LOGICAL_DISJUNCT}) {
-    Operator op{std::get<Operator>(last_token)};
-    tokenize();
-    Unit unit_right{parse_additive_expr()};
-    std::size_t statement_idx{curr_definition->intermediate.size()};
-    curr_definition->intermediate.push_back(std::make_unique<StatementIR>(
-        LogicalExpression{unit_left, unit_right, op}));
-    unit_left = ExpressionIR<std::monostate>{statement_idx};
-  }
-  return unit_left;
-}
-
-Unit Parser::parse_assign_expr() {
-  Unit unit_left{parse_logical_disjunct()};
-  if (last_token != Token{U'='})
-    return unit_left;
-  tokenize();
-  Unit unit_right{parse_assign_expr()};
-  std::size_t statement_idx{curr_definition->intermediate.size()};
-  curr_definition->intermediate.push_back(
-      std::make_unique<StatementIR>(AssignExpression{unit_left, unit_right}));
-  return ExpressionIR<std::monostate>{statement_idx};
-}
-
-Unit Parser::parse_expression() { return parse_assign_expr(); }
-
-void Parser::parse_function_stmt() {
-  const FunctionDefinition *nested_def{parse_function_decl()};
-  if (not nested_def->function_name)
-    throw ScriptError{MissingFunctionName{}};
-  bool duplicate_exists = std::ranges::contains(
-      curr_definition->nested_functions, nested_def->function_name,
-      [](auto el) { return el->function_name; });
+void Compiler::ExecutionBoundary::parse_function_stmt() {
+  Compiler::FunctionDefinition definition{compiler};
+  definition.parse_function_decl();
+  if (not definition.function_name)
+    throw MissingFunctionName{};
+  bool duplicate_exists =
+      std::ranges::contains(nested_functions, definition.function_name,
+                            [](const auto &el) { return el.function_name; });
   if (duplicate_exists)
-    throw ScriptError{DuplicateDeclaration{}};
-  curr_definition->nested_functions.push_back(nested_def);
+    throw DuplicateDeclaration{};
+  nested_functions.push_back(std::move(definition));
 }
 
-void Parser::parse_statement() {
+void Compiler::ExecutionBoundary::parse_variable_decl() {
+  compiler.tokenize();
+  if (not std::holds_alternative<Identifier>(compiler.last_token))
+    throw MissingVariableName{};
+  Identifier variable_name{std::get<Identifier>(compiler.last_token)};
+  compiler.tokenize();
+  compiler.assert_punct('=');
+  compiler.tokenize();
+  std::unique_ptr initialize_variable{std::make_unique<InitializeVariable>()};
+  initialize_variable->variable_name = variable_name;
+  initialize_variable->rvalue = parse_expression();
+  program.push_back(std::move(initialize_variable));
+  compiler.assert_punct(';');
+  if (local_scope.contains(variable_name))
+    throw DuplicateDeclaration{};
+  local_scope.try_emplace(variable_name);
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_expression() {
+  return parse_assign_expr();
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_postfix_expr() {
+  std::unique_ptr postfix_expr{
+      compiler.last_token.visit(ParsePrimaryExpression{*this})};
+  auto parse_postfix = [&](char32_t punct) -> std::unique_ptr<Expression> {
+    switch (punct) {
+    case '.':
+      return parse_member_expr(std::move(postfix_expr));
+    case '(':
+      return parse_call_expr(std::move(postfix_expr));
+    default:
+      return nullptr;
+    }
+  };
+  while (1) {
+    compiler.tokenize();
+    if (not std::holds_alternative<char32_t>(compiler.last_token))
+      break;
+    std::unique_ptr ahead{
+        parse_postfix(std::get<char32_t>(compiler.last_token))};
+    if (not ahead)
+      break;
+    postfix_expr = std::move(ahead);
+  }
+  return postfix_expr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_call_expr(
+    std::unique_ptr<Compiler::Expression> callee) {
+  std::unique_ptr expression{std::make_unique<FunctionCall>()};
+  expression->callee = std::move(callee);
+  while (1) {
+    compiler.tokenize();
+    if (compiler.last_token == Token{U')'})
+      break;
+    expression->arguments.push_back(parse_expression());
+    if (compiler.last_token == Token{U')'})
+      break;
+    compiler.assert_punct(',');
+  }
+  return expression;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_member_expr(
+    std::unique_ptr<Compiler::Expression> object) {
+  compiler.tokenize();
+  if (not std::holds_alternative<Identifier>(compiler.last_token))
+    throw MissingFieldName{};
+  Identifier field_name{std::get<Identifier>(compiler.last_token)};
+  std::unique_ptr expression{std::make_unique<MemberExpression>()};
+  expression->object = std::move(object);
+  expression->property = field_name;
+  return expression;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_additive_expr() {
+  std::unique_ptr expr_left{parse_postfix_expr()};
+  if (compiler.last_token != Token{U'+'} && compiler.last_token != Token{U'-'})
+    return expr_left;
+  std::unique_ptr expression{std::make_unique<BinaryExpression>()};
+  expression->op = std::get<char32_t>(compiler.last_token);
+  compiler.tokenize();
+  expression->left = std::move(expr_left);
+  expression->right = parse_postfix_expr();
+  return expression;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_assign_expr() {
+  std::unique_ptr expr_left{parse_logical_disjunct()};
+  if (compiler.last_token != Token{U'='})
+    return expr_left;
+  compiler.tokenize();
+  std::unique_ptr expression{std::make_unique<AssignExpression>()};
+  expression->left = std::move(expr_left);
+  expression->right = parse_assign_expr();
+  return expression;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_logical_disjunct() {
+  std::unique_ptr expr_left{parse_additive_expr()};
+  while (compiler.last_token == Token{Operator::LOGICAL_DISJUNCT}) {
+    std::unique_ptr expression{std::make_unique<LogicalExpression>()};
+    expression->op = std::get<Operator>(compiler.last_token);
+    compiler.tokenize();
+    expression->left = std::move(expr_left);
+    expression->right = parse_additive_expr();
+    expr_left = std::move(expression);
+  }
+  return expr_left;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::parse_object_literal() {
+  std::unique_ptr expression{std::make_unique<ObjectExpression>()};
+  compiler.tokenize();
+  while (compiler.last_token != Token{U'}'}) {
+    if (not std::holds_alternative<Identifier>(compiler.last_token))
+      throw InvalidPropertyName{};
+    Identifier property_name{std::get<Identifier>(compiler.last_token)};
+    expression->object_shape.properties.try_emplace(property_name);
+    compiler.tokenize();
+    expression->keys.push_back(property_name);
+    std::unique_ptr<Expression> initializer{};
+    if (compiler.last_token == Token{U':'}) {
+      compiler.tokenize();
+      initializer = parse_expression();
+    }
+    expression->values.push_back(std::move(initializer));
+    if (compiler.last_token != Token{U','})
+      break;
+    compiler.tokenize();
+  }
+  compiler.assert_punct('}');
+  return expression;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+    std::monostate) {
+  throw UnexpectedToken{};
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(Operator op) {
+  throw UnexpectedToken{};
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+    char32_t punct) {
+  if (punct == '{')
+    return boundary.parse_object_literal();
+  else
+    throw UnexpectedToken{};
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+    std::int64_t number) {
+  std::unique_ptr num_literal{std::make_unique<NumericLiteral>()};
+  num_literal->val = static_cast<double>(number);
+  return num_literal;
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(double number) {
+  std::unique_ptr num_literal{std::make_unique<NumericLiteral>()};
+  num_literal->val = number;
+  return num_literal;
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+    Keyword keyword) {
+  if (keyword == Keyword::K_FUNCTION) {
+    Compiler::FunctionDefinition definition{boundary.compiler};
+    definition.parse_function_decl();
+    boundary.nested_functions.push_back(std::move(definition));
+  }
+  throw UnexpectedToken{};
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+    Identifier identifier) {
+  std::unique_ptr variable_accessor{std::make_unique<VariableAccessor>()};
+  variable_accessor->identifier = identifier;
+  return variable_accessor;
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+    std::string_view ascii) {
+  std::unique_ptr ascii_literal{std::make_unique<AsciiLiteral>()};
+  ascii_literal->val = ascii;
+  return ascii_literal;
+}
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+    std::u16string_view unicode) {
+  std::unique_ptr unicode_literal{std::make_unique<UnicodeLiteral>()};
+  unicode_literal->val = unicode;
+  return unicode_literal;
+}
+
+void Compiler::FunctionDefinition::parse_statement() {
   Keyword keyword{};
-  if (std::holds_alternative<Keyword>(last_token))
-    keyword = std::get<Keyword>(last_token);
+  if (std::holds_alternative<Keyword>(compiler.last_token))
+    keyword = std::get<Keyword>(compiler.last_token);
   switch (keyword) {
   case Keyword::K_FUNCTION:
     parse_function_stmt();
@@ -376,555 +434,73 @@ void Parser::parse_statement() {
     parse_variable_decl();
     return;
   case Keyword::K_RETURN: {
-    tokenize();
-    StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
-        std::make_unique<StatementIR>())};
-    statement_ir.emplace<ReturnStatementIR>(parse_expression());
-    curr_definition->program.push_back(&statement_ir);
-    assert_punct(';');
+    compiler.tokenize();
+    std::unique_ptr statement{std::make_unique<ReturnStatement>()};
+    statement->argument = parse_expression();
+    program.push_back(std::move(statement));
+    compiler.assert_punct(';');
     return;
   }
   default:
-    curr_definition->program.push_back(parse_expression());
-    assert_punct(';');
+    std::unique_ptr statement{std::make_unique<ExpressionStatement>()};
+    statement->argument = parse_expression();
+    program.push_back(std::move(statement));
+    compiler.assert_punct(';');
     return;
   }
 }
 
-const FunctionDefinition *Parser::parse_function_decl() {
-  tokenize();
-  Identifier *function_name{std::get_if<Identifier>(&last_token)};
-  std::unique_ptr definition{std::make_unique<FunctionDefinition>()};
-  if (function_name) {
-    definition->function_name = *function_name;
-    tokenize();
+void Compiler::ModuleDefinition::parse_statement() {
+  Keyword keyword{};
+  if (std::holds_alternative<Keyword>(compiler.last_token))
+    keyword = std::get<Keyword>(compiler.last_token);
+  switch (keyword) {
+  case Keyword::K_FUNCTION:
+    parse_function_stmt();
+    return;
+  case Keyword::K_LET:
+    parse_variable_decl();
+    return;
+  default:
+    std::unique_ptr statement{std::make_unique<ExpressionStatement>()};
+    statement->argument = parse_expression();
+    program.push_back(std::move(statement));
+    compiler.assert_punct(';');
+    return;
   }
-  assert_punct('(');
-  while (1) {
-    tokenize();
-    if (last_token == Token{U')'})
-      break;
-    Identifier *parameter{std::get_if<Identifier>(&last_token)};
-    if (not parameter)
-      throw ScriptError{MissingFormalParameter{}};
-    definition->local_scope.try_emplace(*parameter);
-    definition->arguments.push_back(*parameter);
-    tokenize();
-    if (last_token == Token{U')'})
-      break;
-    assert_punct(',');
+}
+
+void Compiler::FunctionDefinition::parse_function_decl() {
+  compiler.tokenize();
+  if (std::holds_alternative<Identifier>(compiler.last_token)) {
+    function_name = std::get<Identifier>(compiler.last_token);
+    compiler.tokenize();
   }
-  tokenize();
-  assert_punct('{');
-  curr_definition.swap(definition);
+  compiler.assert_punct('(');
   while (1) {
-    tokenize();
-    if (std::holds_alternative<std::monostate>(last_token))
-      throw ScriptError{MissingPunctuation{'}'}};
-    char32_t *alter_ptr{std::get_if<char32_t>(&last_token)};
+    compiler.tokenize();
+    if (compiler.last_token == Token{U')'})
+      break;
+    if (not std::holds_alternative<Identifier>(compiler.last_token))
+      throw MissingFormalParameter{};
+    Identifier parameter{std::get<Identifier>(compiler.last_token)};
+    local_scope.try_emplace(parameter);
+    arguments.push_back(parameter);
+    compiler.tokenize();
+    if (compiler.last_token == Token{U')'})
+      break;
+    compiler.assert_punct(',');
+  }
+  compiler.tokenize();
+  compiler.assert_punct('{');
+  while (1) {
+    compiler.tokenize();
+    if (std::holds_alternative<std::monostate>(compiler.last_token))
+      throw MissingPunctuation{'}'};
+    char32_t *alter_ptr{std::get_if<char32_t>(&compiler.last_token)};
     if (alter_ptr && *alter_ptr == '}')
       break;
     parse_statement();
-  }
-  curr_definition.swap(definition);
-  return machine.function_definitions.emplace_back(std::move(definition)).get();
-}
-
-void Parser::parse_variable_decl() {
-  tokenize();
-  if (not std::holds_alternative<Identifier>(last_token))
-    throw ScriptError{MissingVariableName{}};
-  Identifier variable_name{std::get<Identifier>(last_token)};
-  tokenize();
-  assert_punct('=');
-  tokenize();
-  Unit rvalue_unit{parse_expression()};
-  StatementIR &statement_ir{*curr_definition->intermediate.emplace_back(
-      std::make_unique<StatementIR>())};
-  statement_ir.emplace<InitializeVariable>(variable_name, rvalue_unit);
-  curr_definition->program.push_back(&statement_ir);
-  assert_punct(';');
-  if (curr_definition->local_scope.contains(variable_name))
-    throw ScriptError{DuplicateDeclaration{}};
-  curr_definition->local_scope.try_emplace(variable_name);
-}
-
-std::u16string Machine::stringify(std::monostate) { return u"undefined"; }
-
-std::u16string Machine::stringify(std::u16string_view permanent_string) {
-  return std::u16string(permanent_string);
-}
-
-std::u16string Machine::stringify(std::int64_t number) {
-  static constexpr int buffer_size =
-      std::numeric_limits<std::int64_t>::digits10 + 2;
-  std::array<char, buffer_size> buffer{};
-  auto [ptr, ec] =
-      std::to_chars(buffer.data(), buffer.data() + buffer.size(), number);
-  assert(ec == std::errc{});
-  std::size_t message_size{
-      static_cast<std::size_t>(std::distance(buffer.data(), ptr))};
-  std::string_view message_view{buffer.data(), message_size};
-  return {std::from_range, message_view};
-}
-
-std::u16string Machine::stringify(double number) { return u"<unimplemented>"; }
-
-std::u16string Machine::stringify(FunctionFrame *function_frame) {
-  return u"<unimplemented>";
-}
-
-std::u16string Machine::stringify(ObjectInstance *object_instance) {
-  return u"<unimplemented>";
-}
-
-std::u16string Machine::stringify(IntrinsicFunction intrinsic_function) {
-  return u"<unimplemented>";
-}
-
-void Machine::EvaluateStatement::operator()(ConsoleLog statement) { assert(0); }
-
-void Machine::evaluate() {
-  current_frame = &runtime_memory->function_frames.emplace_back();
-  current_frame->program_iter = main_function->program.begin();
-  current_frame->definition = main_function.get();
-  current_frame->own_scope = runtime_memory->structures.emplace_back(
-      main_function->local_scope.size());
-  while (current_frame->program_iter != main_function->program.end()) {
-    const Statement &statement{*current_frame->program_iter};
-    ++current_frame->program_iter;
-    statement.visit(EvaluateStatement{*this});
-  }
-}
-
-void Machine::collect_console_messages(std::stop_token stopper,
-                                       std::list<ConsoleMessage> &message_box) {
-  auto check_messages = [&] { return console_messages.size() > 0; };
-  std::unique_lock console_lock{*console_mutex};
-  console_condition->wait(console_lock, stopper, check_messages);
-  console_messages.swap(message_box);
-}
-
-static std::inplace_vector<std::uint8_t, 3>
-encode_u16_for_print(std::uint16_t uchar) {
-  std::array<std::uint8_t, 3> buffer{};
-  std::size_t buffer_len{buffer.size()};
-  uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
-  assert(result != nullptr);
-  return {std::from_range, buffer | std::views::take(buffer_len)};
-}
-
-std::string ConsoleMessage::encode_for_print() const {
-  std::string u8_message{};
-  for (char16_t uchar : content)
-    u8_message.append_range(encode_u16_for_print(uchar));
-  return u8_message;
-}
-
-template <typename T>
-Unit analyze_scope_access(std::size_t scope_offset, std::size_t local_offset) {
-  std::unreachable();
-}
-
-template <>
-Unit analyze_scope_access<StringType>(std::size_t scope_offset,
-                                      std::size_t local_offset) {
-  return ScopeAccessor<const CompactString *>{scope_offset, local_offset};
-}
-
-template <>
-Unit analyze_scope_access<NumberType>(std::size_t scope_offset,
-                                      std::size_t local_offset) {
-  return ScopeAccessor<double>{scope_offset, local_offset};
-}
-
-Unit FunctionDefinition::analyze_identifier(std::size_t scope_offset,
-                                            Identifier identifier) const {
-  if (auto it = std::ranges::find(nested_functions, identifier,
-                                  [](auto el) { return el->function_name; });
-      it != nested_functions.end())
-    return *it;
-  else if (local_scope.contains(identifier)) {
-    std::size_t local_offset =
-        std::distance(local_scope.begin(), local_scope.find(identifier));
-    auto deduce_concrete = [&](auto datatype_alt) {
-      return analyze_scope_access<decltype(datatype_alt)>(scope_offset,
-                                                          local_offset);
-    };
-    return local_scope.values()[local_offset].visit(deduce_concrete);
-  } else
-    return std::monostate{};
-}
-
-void FunctionDefinition::replicate(const FunctionDefinition &model) {
-  std::tie(function_name, arguments, local_scope) =
-      std::make_tuple(model.function_name, model.arguments, model.local_scope);
-}
-
-Datatype Typechecker::AnalyzeInitializer::operator()(
-    ConcreteUnit<const CompactString *> unit_alt) {
-  checker.frames.back().output->program.push_back(
-      InitializeScope<const CompactString *>{local_offset, unit_alt});
-  return StringType{};
-}
-
-Datatype
-Typechecker::AnalyzeInitializer::operator()(ConcreteUnit<double> unit_alt) {
-  checker.frames.back().output->program.push_back(
-      InitializeScope<double>{local_offset, unit_alt});
-  return NumberType{};
-}
-
-Datatype Typechecker::AnalyzeInitializer::operator()(
-    ExpressionIR<std::monostate> unit_alt) {
-  return checker.frames.back()
-      .model->intermediate[unit_alt.intermediate_idx]
-      ->visit(AnalyzeExpression{checker})
-      .visit(*this);
-}
-
-Unit Typechecker::AnalyzeUnit::operator()(std::int64_t number) {
-  return static_cast<double>(number);
-}
-
-Unit Typechecker::AnalyzeUnit::operator()(Identifier identifier) {
-  for (std::ptrdiff_t i = checker.frames.size() - 1; i >= 0; --i) {
-    Unit concrete_unit{
-        checker.frames[i].output->analyze_identifier(i, identifier)};
-    if (not concrete_unit.index())
-      continue;
-    return concrete_unit;
-  }
-  if (identifier.offset == OFFSET_console)
-    return IntrinsicObject::O_CONSOLE;
-  throw ScriptError{InvalidVariableAccess{}};
-}
-
-Unit Typechecker::AnalyzeUnit::operator()(
-    ExpressionIR<std::monostate> expression_ir) {
-  std::size_t intermediate_idx{expression_ir.intermediate_idx};
-  return checker.frames.back().model->intermediate[intermediate_idx]->visit(
-      AnalyzeExpression{checker});
-}
-
-Unit Typechecker::AnalyzeMemberAccess::operator()(
-    ConcreteUnit<const CompactString *> concrete_object) {
-  std::unique_ptr statement_ir{
-      std::make_unique<StatementIR>(StringLength{concrete_object})};
-  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
-  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
-  return ExpressionIR<double>{statement_idx};
-}
-
-Unit Typechecker::AnalyzeMemberAccess::operator()(
-    IntrinsicObject concrete_object) {
-  if (concrete_object == IntrinsicObject::O_CONSOLE &&
-      identifier.offset == OFFSET_log)
-    return IntrinsicFunction::F_LOG;
-  throw ScriptError{InvalidPropertyAccess{}};
-}
-
-Unit Typechecker::AnalyzeExpression::operator()(
-    const MemberExpression &expression) {
-  Unit concrete_object{expression.object.visit(AnalyzeUnit{checker})};
-  return concrete_object.visit(
-      AnalyzeMemberAccess{checker, expression.property});
-}
-
-Unit Typechecker::AnalyzeExpression::operator()(
-    const BinaryExpression &expression) {
-  Unit concrete_left{expression.left.visit(AnalyzeUnit{checker})};
-  Unit concrete_right{expression.right.visit(AnalyzeUnit{checker})};
-  switch (expression.op) {
-  case '+':
-    return std::visit(AnalyzeAddition{checker}, concrete_left, concrete_right);
-  case '-':
-    return std::visit(AnalyzeSubtraction{checker}, concrete_left,
-                      concrete_right);
-  default:
-    std::unreachable();
-  }
-}
-
-Unit Typechecker::AnalyzeExpression::operator()(
-    const FunctionCallAST &expression) {
-  return expression.callee.visit(AnalyzeUnit{checker})
-      .visit(AnalyzeFunctionCall{checker, std::move(expression.arguments)});
-}
-
-Unit Typechecker::AnalyzeFunctionCall::operator()(
-    const FunctionDefinition *callee) {
-  return callee->return_type.visit(
-      AnalyzeFunctionReturn{checker, FunctionCallIR{callee}});
-}
-
-Unit Typechecker::AnalyzeFunctionCall::operator()(IntrinsicFunction callee) {
-  auto inject_stringify = [&](Unit argument) {
-    return argument.visit(AnalyzeUnit{checker}).visit(InjectStringify{checker});
-  };
-  std::vector log_arguments{
-      std::from_range, arguments | std::views::transform(inject_stringify)};
-  std::unique_ptr statement_ir{
-      std::make_unique<StatementIR>(ConsoleLogIR{std::move(log_arguments)})};
-  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
-  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
-  return ExpressionIR<std::monostate>{statement_idx};
-}
-
-ConcreteUnit<const CompactString *>
-Typechecker::InjectStringify::operator()(ConcreteUnit<double> number_unit) {
-  std::unique_ptr statement_ir{
-      std::make_unique<StatementIR>(Stringify{number_unit})};
-  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
-  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
-  return ExpressionIR<const CompactString *>{statement_idx};
-}
-
-Unit Typechecker::AnalyzeFunctionReturn::operator()(NumberType) {
-  std::unique_ptr statement_ir{
-      std::make_unique<StatementIR>(std::move(function_call_ir))};
-  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
-  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
-  return ExpressionIR<double>{statement_idx};
-}
-
-Unit Typechecker::AnalyzeAddition::operator()(
-    ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
-  std::unique_ptr statement_ir{
-      std::make_unique<StatementIR>(Addition{concrete_left, concrete_right})};
-  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
-  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
-  return ExpressionIR<double>{statement_idx};
-}
-
-Unit Typechecker::AnalyzeSubtraction::operator()(
-    ConcreteUnit<double> concrete_left, ConcreteUnit<double> concrete_right) {
-  std::unique_ptr statement_ir{std::make_unique<StatementIR>(
-      Subtraction{concrete_left, concrete_right})};
-  std::size_t statement_idx{checker.frames.back().output->intermediate.size()};
-  checker.frames.back().output->intermediate.push_back(std::move(statement_ir));
-  return ExpressionIR<double>{statement_idx};
-}
-
-void Typechecker::AnalyzeStatement::operator()(InitializeVariable statement) {
-  auto &local_scope{checker.frames.back().output->local_scope};
-  std::size_t local_offset = std::distance(
-      local_scope.begin(), local_scope.find(statement.variable_name));
-  Datatype initializer_type{
-      statement.rvalue.visit(AnalyzeInitializer{checker, local_offset})};
-  local_scope[statement.variable_name] = initializer_type;
-}
-
-void Typechecker::AnalyzeStatement::operator()(ReturnStatementIR statement) {
-  Datatype return_type{statement.argument.visit(AnalyzeUnit{checker})
-                           .visit(AnalyzeReturnStatement{checker})};
-  checker.frames.back().output->return_type = return_type;
-}
-
-void Typechecker::AnalyzeStatement::operator()(
-    const StatementIR *statement_ir) {
-  statement_ir->visit(AnalyzeStatement{checker});
-}
-
-void Typechecker::AnalyzeStatement::operator()(Unit unit) {
-  checker.frames.back().output->program.push_back(
-      unit.visit(AnalyzeUnit{checker}));
-}
-
-Datatype
-Typechecker::AnalyzeReturnStatement::operator()(ConcreteUnit<double> unit_alt) {
-  checker.frames.back().output->program.push_back(
-      ReturnStatement<double>{unit_alt});
-  return NumberType{};
-}
-
-void Typechecker::analyze_statement(Statement model_stmt) {
-  model_stmt.visit(AnalyzeStatement{*this});
-}
-
-void Analyzer::analyze_definition() {
-  for (const FunctionDefinition *nested_definition :
-       frames.back().model->nested_functions) {
-    frames.emplace_back(nested_definition,
-                        std::make_shared<FunctionDefinition>());
-    correspondence[frames.back().model] = frames.back().output.get();
-    analyze_definition();
-    machine.function_definitions.push_back(std::move(frames.back().output));
-    frames.pop_back();
-    frames.back().output->nested_functions.push_back(
-        machine.function_definitions.back().get());
-  }
-  frames.back().output->replicate(*frames.back().model);
-  for (Statement model_stmt : frames.back().model->program)
-    analyze_statement(model_stmt);
-}
-
-void Analyzer::analyze() {
-  definitions.swap(machine.function_definitions);
-  frames.emplace_back(machine.main_function.get(),
-                      std::make_shared<FunctionDefinition>());
-  correspondence[frames.back().model] = frames.back().output.get();
-  analyze_definition();
-  machine.main_function = std::move(frames.back().output);
-  frames.pop_back();
-}
-
-template <typename T>
-void Inliner::AnalyzeStatement::operator()(InitializeScope<T> statement) {
-  std::size_t statement_idx{inliner.frames.back().output->program.size()};
-  inliner.frames.back().output->program.push_back(statement);
-  ConcreteUnit<T> unit{statement.rvalue.visit(AnalyzeUnit<T>{inliner})};
-  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
-  std::get<InitializeScope<T>>(output_stmt).rvalue = unit;
-}
-
-template <typename T>
-void Inliner::AnalyzeStatement::operator()(ReturnStatement<T> statement) {
-  std::size_t statement_idx{inliner.frames.back().output->program.size()};
-  inliner.frames.back().output->program.push_back(statement);
-  ConcreteUnit<T> unit{statement.argument.visit(AnalyzeUnit<T>{inliner})};
-  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
-  std::get<ReturnStatement<T>>(output_stmt).argument = unit;
-}
-
-void Inliner::AnalyzeStatement::operator()(ExpressionIR<std::monostate> unit) {
-  const StatementIR *statement{
-      inliner.frames.back().model->intermediate[unit.intermediate_idx].get()};
-  statement->visit(AnalyzeExpression{inliner});
-}
-
-void Inliner::AnalyzeStatement::operator()(Unit statement) {
-  statement.visit(*this);
-}
-
-template <typename T>
-ConcreteUnit<T> Inliner::AnalyzeUnit<T>::operator()(ExpressionIR<T> unit) {
-  const StatementIR *statement{
-      inliner.frames.back().model->intermediate[unit.intermediate_idx].get()};
-  statement->visit(AnalyzeExpression{inliner});
-  return Interim<T>{};
-}
-
-void Inliner::AnalyzeExpression::operator()(const Addition &expression) {
-  std::size_t statement_idx{inliner.frames.back().output->program.size()};
-  inliner.frames.back().output->program.push_back(expression);
-  ConcreteUnit<double> unit_left{
-      expression.left.visit(AnalyzeUnit<double>{inliner})};
-  ConcreteUnit<double> unit_right{
-      expression.right.visit(AnalyzeUnit<double>{inliner})};
-  Addition &output_stmt{
-      std::get<Addition>(inliner.frames.back().output->program[statement_idx])};
-  output_stmt.left = unit_left;
-  output_stmt.right = unit_right;
-}
-
-void Inliner::AnalyzeExpression::operator()(const Subtraction &expression) {
-  std::size_t statement_idx{inliner.frames.back().output->program.size()};
-  inliner.frames.back().output->program.push_back(expression);
-  ConcreteUnit<double> unit_left{
-      expression.left.visit(AnalyzeUnit<double>{inliner})};
-  ConcreteUnit<double> unit_right{
-      expression.right.visit(AnalyzeUnit<double>{inliner})};
-  Subtraction &output_stmt{std::get<Subtraction>(
-      inliner.frames.back().output->program[statement_idx])};
-  output_stmt.left = unit_left;
-  output_stmt.right = unit_right;
-}
-
-void Inliner::AnalyzeExpression::operator()(const StringLength &expression) {
-  std::size_t statement_idx{inliner.frames.back().output->program.size()};
-  inliner.frames.back().output->program.push_back(expression);
-  ConcreteUnit<const CompactString *> unit{
-      expression.argument.visit(AnalyzeUnit<const CompactString *>{inliner})};
-  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
-  std::get<StringLength>(output_stmt).argument = unit;
-}
-
-void Inliner::AnalyzeExpression::operator()(const ConsoleLogIR &expression) {
-  inliner.frames.back().output->program.push_back(
-      ConsoleLog{expression.arguments.size()});
-  for (ConcreteUnit<const CompactString *> argument : expression.arguments) {
-    std::size_t statement_idx{inliner.frames.back().output->program.size()};
-    inliner.frames.back().output->program.emplace_back();
-    ConcreteUnit<const CompactString *> unit{
-        argument.visit(AnalyzeUnit<const CompactString *>{inliner})};
-    if (not std::holds_alternative<Interim<const CompactString *>>(unit))
-      inliner.frames.back().output->program[statement_idx].emplace<Unit>(unit);
-    else {
-      auto it = inliner.frames.back().output->program.begin() + statement_idx;
-      inliner.frames.back().output->program.erase(it);
-    }
-  }
-}
-
-void Inliner::AnalyzeExpression::operator()(const FunctionCallIR &expression) {
-  auto callee_it = inliner.correspondence.find(expression.callee);
-  assert(callee_it != inliner.correspondence.end());
-  FunctionCall function_call{callee_it->second, 0};
-  inliner.frames.back().output->program.push_back(function_call);
-}
-
-template <typename T>
-void Inliner::AnalyzeExpression::operator()(const Stringify<T> &expression) {
-  std::size_t statement_idx{inliner.frames.back().output->program.size()};
-  inliner.frames.back().output->program.push_back(expression);
-  ConcreteUnit<T> unit{expression.argument.visit(AnalyzeUnit<T>{inliner})};
-  Statement &output_stmt{inliner.frames.back().output->program[statement_idx]};
-  std::get<Stringify<T>>(output_stmt).argument = unit;
-}
-
-void Inliner::analyze_statement(Statement model_stmt) {
-  model_stmt.visit(AnalyzeStatement{*this});
-}
-
-template <typename T>
-RawStatement::RawStatement(T stmt_alt) : type_idx{stmt_type<T>} {
-  ::new (buffer) T{};
-}
-
-RawStatement::~RawStatement() {
-  switch (type_idx) {
-  case stmt_type<Unit>:
-    std::launder(reinterpret_cast<Unit *>(buffer))->~Unit();
-    break;
-  case stmt_type<StringConcat>:
-    std::launder(reinterpret_cast<StringConcat *>(buffer))->~StringConcat();
-    break;
-  case stmt_type<StringLength>:
-    std::launder(reinterpret_cast<StringLength *>(buffer))->~StringLength();
-    break;
-  case stmt_type<Addition>:
-    std::launder(reinterpret_cast<Addition *>(buffer))->~Addition();
-    break;
-  case stmt_type<Subtraction>:
-    std::launder(reinterpret_cast<Subtraction *>(buffer))->~Subtraction();
-    break;
-  case stmt_type<ConsoleLog>:
-    std::launder(reinterpret_cast<ConsoleLog *>(buffer))->~ConsoleLog();
-    break;
-  case stmt_type<InitializeScope<const CompactString *>>:
-    std::launder(
-        reinterpret_cast<InitializeScope<const CompactString *> *>(buffer))
-        ->~InitializeScope();
-    break;
-  case stmt_type<InitializeScope<double>>:
-    std::launder(reinterpret_cast<InitializeScope<double> *>(buffer))
-        ->~InitializeScope();
-    break;
-  case stmt_type<ReturnStatement<double>>:
-    std::launder(reinterpret_cast<ReturnStatement<double> *>(buffer))
-        ->~ReturnStatement();
-    break;
-  case stmt_type<const StatementIR *>:
-    break;
-  case stmt_type<Stringify<double>>:
-    std::launder(reinterpret_cast<Stringify<double> *>(buffer))->~Stringify();
-    break;
-  case stmt_type<FunctionCall>:
-    std::launder(reinterpret_cast<FunctionCall *>(buffer))->~FunctionCall();
-    break;
-  default:
-    std::unreachable();
   }
 }
 } // namespace Manadrain

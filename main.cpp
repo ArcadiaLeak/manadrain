@@ -32,31 +32,11 @@ int main(int argc, char *argv[]) {
 
   Manadrain::Machine machine{};
 
-  Manadrain::Parser parser{machine};
+  Manadrain::Compiler compiler{machine};
   std::unique_ptr text_buffer{std::make_unique<std::vector<std::uint8_t>>(
       std::from_range, std::ranges::istream_view<std::uint8_t>{file})};
-  parser.text_buffer = std::move(text_buffer);
-  parser.parse_text();
-
-  Manadrain::Typechecker typechecker{machine};
-  typechecker.analyze();
-  Manadrain::Inliner inliner{machine};
-  inliner.analyze();
-
-  machine.evaluate();
-
-  auto console_printer = [&](std::stop_token stopper) {
-    std::list<Manadrain::ConsoleMessage> messages{};
-    machine.collect_console_messages(stopper, messages);
-    for (const Manadrain::ConsoleMessage &message : messages)
-      std::println("{}", message.encode_for_print());
-  };
-  auto console_worker = [&](std::stop_token stopper) {
-    do
-      console_printer(stopper);
-    while (not stopper.stop_requested());
-  };
-  std::jthread console_thread{console_worker};
+  compiler.text_buffer = std::move(text_buffer);
+  compiler.parse_text();
 
   return 0;
 }
