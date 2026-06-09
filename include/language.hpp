@@ -58,6 +58,10 @@ class MissingVariableName final : public CompilationError {
 public:
   MissingVariableName() : CompilationError{"missing variable name!"} {}
 };
+class MissingMethod final : public CompilationError {
+public:
+  MissingMethod() : CompilationError{"missing method!"} {}
+};
 class InvalidVariableAccess final : public CompilationError {
 public:
   InvalidVariableAccess() : CompilationError{"invalid variable access!"} {}
@@ -117,24 +121,8 @@ using Token =
     std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
                  Keyword, Identifier, std::string_view, std::u16string_view>;
 
-struct ObjectShape;
-
-enum class IntrinsicFunction { F_LOG };
-enum class IntrinsicObject { O_CONSOLE };
-struct VoidType {};
-struct NumberType {};
-struct StringType {};
-struct LambdaType {};
-struct AnyType {};
-using Datatype = std::variant<VoidType, NumberType, StringType, LambdaType,
-                              AnyType, const ObjectShape *, IntrinsicObject>;
-
 struct FunctionFrame;
 struct ObjectInstance;
-
-struct ObjectShape {
-  std::flat_map<Identifier, Datatype> properties;
-};
 
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
@@ -146,20 +134,76 @@ class Compiler {
 public:
   Compiler(Machine &m) : machine{m} {}
 
+  struct ObjectShape;
   class ExecutionBoundary;
   class FunctionDefinition;
+
+  enum class IntrinsicObject { O_CONSOLE };
+  struct VoidType {};
+  struct NumberType {};
+  struct StringType {};
+  struct LambdaType {};
+  struct AnyType {};
+  using ValueType = std::variant<VoidType, NumberType, StringType, LambdaType,
+                                 AnyType, const ObjectShape *, IntrinsicObject>;
+
+  struct ObjectShape {
+    std::flat_map<Identifier, ValueType> properties;
+  };
+
+  class CalleeExpression;
+
+  struct FindMethod {
+    Identifier identifier;
+    std::unique_ptr<CalleeExpression> operator()(VoidType);
+    std::unique_ptr<CalleeExpression> operator()(NumberType);
+    std::unique_ptr<CalleeExpression> operator()(StringType);
+    std::unique_ptr<CalleeExpression> operator()(LambdaType);
+    std::unique_ptr<CalleeExpression> operator()(AnyType);
+    std::unique_ptr<CalleeExpression>
+    operator()(const ObjectShape *object_shape);
+    std::unique_ptr<CalleeExpression>
+    operator()(IntrinsicObject intrinsic_object);
+  };
 
   class Expression {
   public:
     virtual ~Expression() = default;
 
-    virtual Datatype datatype() const = 0;
+    virtual ValueType datatype() const = 0;
 
     virtual std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const = 0;
+    analyze_as_value(ExecutionBoundary &boundary) const = 0;
 
-    // virtual std::unique_ptr<Expression>
-    // analyze_as_callee(ExecutionBoundary &boundary) const = 0;
+    virtual std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const = 0;
+  };
+
+  struct InjectStringify {
+    std::unique_ptr<Expression> expression;
+    std::unique_ptr<Expression> operator()(VoidType);
+    std::unique_ptr<Expression> operator()(NumberType);
+    std::unique_ptr<Expression> operator()(StringType);
+    std::unique_ptr<Expression> operator()(LambdaType);
+    std::unique_ptr<Expression> operator()(AnyType);
+    std::unique_ptr<Expression> operator()(const ObjectShape *object_shape);
+    std::unique_ptr<Expression> operator()(IntrinsicObject intrinsic_object);
+  };
+
+  class CalleeExpression : public Expression {
+  public:
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    virtual void analyze_arguments(
+        ExecutionBoundary &boundary,
+        std::span<const std::unique_ptr<Expression>> arguments) = 0;
   };
 
   class AliasedFunctionCall final : public Expression {
@@ -167,33 +211,37 @@ public:
     std::unique_ptr<Expression> callee;
     std::vector<std::unique_ptr<Expression>> arguments;
 
-    Datatype datatype() const override { std::unreachable(); }
+    ValueType datatype() const override { std::unreachable(); }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
-  class DirectFunctionCall final : public Expression {
+  class DirectFunctionCall final : public CalleeExpression {
   public:
     const FunctionDefinition *callee;
     std::vector<Identifier> passed_identifiers;
     std::vector<std::unique_ptr<Expression>> passed_values;
 
-    Datatype datatype() const override { return callee->return_type; }
-    std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
-      std::unreachable();
-    }
+    ValueType datatype() const override { return callee->return_type; }
+
+    void analyze_arguments(
+        ExecutionBoundary &boundary,
+        std::span<const std::unique_ptr<Expression>> arguments) override;
   };
 
-  class ConsoleLogCall final : public Expression {
+  class ConsoleLogCall final : public CalleeExpression {
   public:
     std::vector<std::unique_ptr<Expression>> arguments;
 
-    Datatype datatype() const override { return VoidType{}; }
-    std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
-      std::unreachable();
-    }
+    ValueType datatype() const override { return VoidType{}; }
+
+    void analyze_arguments(
+        ExecutionBoundary &boundary,
+        std::span<const std::unique_ptr<Expression>> arguments) override;
   };
 
   class ObjectExpression final : public Expression {
@@ -202,9 +250,13 @@ public:
     std::vector<Identifier> keys;
     std::vector<std::unique_ptr<Expression>> values;
 
-    Datatype datatype() const override { std::unreachable(); }
+    ValueType datatype() const override { std::unreachable(); }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -214,18 +266,39 @@ public:
     std::unique_ptr<Expression> object;
     Identifier property;
 
-    Datatype datatype() const override { std::unreachable(); }
+    ValueType datatype() const override { std::unreachable(); }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override;
   };
 
   class StringLength final : public Expression {
   public:
     std::unique_ptr<Expression> argument;
 
-    Datatype datatype() const override { return NumberType{}; }
+    ValueType datatype() const override { return NumberType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class StringifyNumber final : public Expression {
+  public:
+    std::unique_ptr<Expression> argument;
+
+    ValueType datatype() const override { return StringType{}; }
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -236,9 +309,13 @@ public:
     std::unique_ptr<Expression> right;
     char32_t op;
 
-    Datatype datatype() const override { return NumberType{}; }
+    ValueType datatype() const override { return NumberType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class LogicalExpression final : public Expression {
@@ -247,9 +324,13 @@ public:
     std::unique_ptr<Expression> right;
     Operator op;
 
-    Datatype datatype() const override { std::unreachable(); }
+    ValueType datatype() const override { std::unreachable(); }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -259,9 +340,13 @@ public:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
 
-    Datatype datatype() const override { std::unreachable(); }
+    ValueType datatype() const override { std::unreachable(); }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -270,58 +355,80 @@ public:
   public:
     double val;
 
-    Datatype datatype() const override { return NumberType{}; }
+    ValueType datatype() const override { return NumberType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class AsciiLiteral final : public Expression {
   public:
     std::string val;
 
-    Datatype datatype() const override { return StringType{}; }
+    ValueType datatype() const override { return StringType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class UnicodeLiteral final : public Expression {
   public:
     std::u16string val;
 
-    Datatype datatype() const override { return StringType{}; }
+    ValueType datatype() const override { return StringType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class VariableAccessor final : public Expression {
   public:
     Identifier identifier;
 
-    Datatype datatype() const override { std::unreachable(); }
+    ValueType datatype() const override { std::unreachable(); }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override;
   };
 
   class ScopeAccessor final : public Expression {
   public:
-    Datatype local_type;
+    ValueType local_type;
     std::size_t scope_offset;
     std::size_t local_offset;
 
-    Datatype datatype() const override { return local_type; }
+    ValueType datatype() const override { return local_type; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
+    analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     };
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class IntrinsicAccessor final : public Expression {
   public:
     IntrinsicObject object_type;
 
-    Datatype datatype() const override { return object_type; }
+    ValueType datatype() const override { return object_type; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -365,8 +472,6 @@ public:
     analyze(ExecutionBoundary &boundary) const override;
   };
 
-  class FunctionDefinition;
-
   class ExecutionBoundary {
   public:
     ExecutionBoundary(Compiler &c) : compiler{c} {}
@@ -377,10 +482,10 @@ public:
     std::list<FunctionDefinition> inner_functions;
     const FunctionDefinition *find_function(Identifier identifier) const;
 
-    std::flat_map<Identifier, Datatype> local_scope;
+    std::flat_map<Identifier, ValueType> local_scope;
     std::unique_ptr<ScopeAccessor> find_local(Identifier identifier) const;
 
-    Datatype return_type;
+    ValueType return_type;
     virtual bool allows_return_stmt() const = 0;
 
     void parse_statement();
@@ -425,7 +530,6 @@ public:
 
     std::optional<Identifier> function_name;
     std::vector<Identifier> arguments;
-    Datatype return_type;
 
     bool allows_return_stmt() const override { return 1; }
     void parse_function_decl();
@@ -470,11 +574,6 @@ private:
 class Machine {
 public:
   void evaluate();
-
-  struct FunctionDefinition {
-    Datatype return_type;
-    std::flat_map<Identifier, Datatype> local_scope;
-  };
 
 private:
   friend class Compiler;

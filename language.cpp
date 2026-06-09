@@ -489,7 +489,7 @@ Compiler::InitializeVariable::analyze(ExecutionBoundary &boundary) const {
   std::unique_ptr initialize_scope{std::make_unique<InitializeScope>()};
   initialize_scope->local_offset = std::distance(
       boundary.local_scope.begin(), boundary.local_scope.find(variable_name));
-  initialize_scope->rvalue = rvalue->analyze(boundary);
+  initialize_scope->rvalue = rvalue->analyze_as_value(boundary);
   boundary.local_scope[variable_name] = initialize_scope->rvalue->datatype();
   return initialize_scope;
 }
@@ -497,7 +497,7 @@ Compiler::InitializeVariable::analyze(ExecutionBoundary &boundary) const {
 std::unique_ptr<Compiler::Statement>
 Compiler::ExpressionStatement::analyze(ExecutionBoundary &boundary) const {
   std::unique_ptr expression_stmt{std::make_unique<ExpressionStatement>()};
-  expression_stmt->argument = argument->analyze(boundary);
+  expression_stmt->argument = argument->analyze_as_value(boundary);
   return expression_stmt;
 }
 
@@ -506,13 +506,14 @@ Compiler::ReturnStatement::analyze(ExecutionBoundary &boundary) const {
   if (not boundary.allows_return_stmt())
     throw InvalidReturnStatement{};
   std::unique_ptr return_stmt{std::make_unique<ReturnStatement>()};
-  return_stmt->argument = argument->analyze(boundary);
+  return_stmt->argument = argument->analyze_as_value(boundary);
   boundary.return_type = return_stmt->argument->datatype();
   return return_stmt;
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::VariableAccessor::analyze(ExecutionBoundary &boundary) const {
+Compiler::VariableAccessor::analyze_as_value(
+    ExecutionBoundary &boundary) const {
   const ExecutionBoundary *current{&boundary};
   for (std::size_t i = 0; current; ++i) {
     std::unique_ptr<ScopeAccessor> accessor{current->find_local(identifier)};
@@ -532,40 +533,42 @@ Compiler::VariableAccessor::analyze(ExecutionBoundary &boundary) const {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::AsciiLiteral::analyze(ExecutionBoundary &boundary) const {
+Compiler::AsciiLiteral::analyze_as_value(ExecutionBoundary &boundary) const {
   std::unique_ptr copycat{std::make_unique<AsciiLiteral>()};
   copycat->val = val;
   return copycat;
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::UnicodeLiteral::analyze(ExecutionBoundary &boundary) const {
+Compiler::UnicodeLiteral::analyze_as_value(ExecutionBoundary &boundary) const {
   std::unique_ptr copycat{std::make_unique<UnicodeLiteral>()};
   copycat->val = val;
   return copycat;
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::NumericLiteral::analyze(ExecutionBoundary &boundary) const {
+Compiler::NumericLiteral::analyze_as_value(ExecutionBoundary &boundary) const {
   std::unique_ptr copycat{std::make_unique<NumericLiteral>()};
   copycat->val = val;
   return copycat;
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::BinaryExpression::analyze(ExecutionBoundary &boundary) const {
+Compiler::BinaryExpression::analyze_as_value(
+    ExecutionBoundary &boundary) const {
   std::unique_ptr binary_expr{std::make_unique<BinaryExpression>()};
   binary_expr->op = op;
-  binary_expr->left = left->analyze(boundary);
-  binary_expr->right = right->analyze(boundary);
+  binary_expr->left = left->analyze_as_value(boundary);
+  binary_expr->right = right->analyze_as_value(boundary);
   assert(std::holds_alternative<NumberType>(binary_expr->left->datatype()) &&
          std::holds_alternative<NumberType>(binary_expr->right->datatype()));
   return binary_expr;
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::MemberExpression::analyze(ExecutionBoundary &boundary) const {
-  std::unique_ptr object_expr{object->analyze(boundary)};
+Compiler::MemberExpression::analyze_as_value(
+    ExecutionBoundary &boundary) const {
+  std::unique_ptr object_expr{object->analyze_as_value(boundary)};
   if (std::holds_alternative<StringType>(object_expr->datatype()) &&
       property.offset == OFFSET_length) {
     std::unique_ptr string_length{std::make_unique<StringLength>()};
@@ -576,8 +579,51 @@ Compiler::MemberExpression::analyze(ExecutionBoundary &boundary) const {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::AliasedFunctionCall::analyze(ExecutionBoundary &boundary) const {
-  return nullptr;
+Compiler::AliasedFunctionCall::analyze_as_value(
+    ExecutionBoundary &boundary) const {
+  std::unique_ptr callee_expression{callee->analyze_as_callee(boundary)};
+  callee_expression->analyze_arguments(boundary, arguments);
+  return callee_expression;
+}
+
+void Compiler::DirectFunctionCall::analyze_arguments(
+    ExecutionBoundary &boundary,
+    std::span<const std::unique_ptr<Expression>> arguments) {}
+
+void Compiler::ConsoleLogCall::analyze_arguments(
+    ExecutionBoundary &boundary,
+    std::span<const std::unique_ptr<Expression>> positional_args) {
+  auto stringify_argument = [&boundary](const auto &argument) {
+    std::unique_ptr analyzed_arg{argument->analyze_as_value(boundary)};
+    ValueType argument_type{analyzed_arg->datatype()};
+    return argument_type.visit(InjectStringify{std::move(analyzed_arg)});
+  };
+  auto stringified_args =
+      positional_args | std::views::transform(stringify_argument);
+  arguments = {std::from_range, stringified_args};
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::MemberExpression::analyze_as_callee(
+    ExecutionBoundary &boundary) const {
+  std::unique_ptr analyzed_object{object->analyze_as_value(boundary)};
+  return analyzed_object->datatype().visit(FindMethod{property});
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::VariableAccessor::analyze_as_callee(
+    ExecutionBoundary &boundary) const {
+  const ExecutionBoundary *current{&boundary};
+  while (1) {
+    const FunctionDefinition *definition{current->find_function(identifier)};
+    if (not definition)
+      current = current->parent_boundary;
+    if (not current)
+      throw InvalidVariableAccess{};
+    std::unique_ptr direct_call{std::make_unique<DirectFunctionCall>()};
+    direct_call->callee = definition;
+    return direct_call;
+  }
 }
 
 std::unique_ptr<Compiler::ScopeAccessor>
@@ -608,5 +654,80 @@ void Compiler::ExecutionBoundary::analyze() {
   }
   for (auto &statement : program)
     statement = statement->analyze(*this);
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::FindMethod::operator()(VoidType) {
+  throw MissingMethod{};
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::FindMethod::operator()(NumberType) {
+  throw MissingMethod{};
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::FindMethod::operator()(StringType) {
+  throw MissingMethod{};
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::FindMethod::operator()(LambdaType) {
+  throw MissingMethod{};
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::FindMethod::operator()(AnyType) {
+  throw MissingMethod{};
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::FindMethod::operator()(const ObjectShape *object_shape) {
+  throw MissingMethod{};
+}
+
+std::unique_ptr<Compiler::CalleeExpression>
+Compiler::FindMethod::operator()(IntrinsicObject intrinsic_object) {
+  if (intrinsic_object == IntrinsicObject::O_CONSOLE)
+    if (identifier.offset == OFFSET_log)
+      return std::make_unique<ConsoleLogCall>();
+  throw MissingMethod{};
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::InjectStringify::operator()(VoidType) {
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::InjectStringify::operator()(NumberType) {
+  std::unique_ptr stringify_number{std::make_unique<StringifyNumber>()};
+  stringify_number->argument = std::move(expression);
+  return stringify_number;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::InjectStringify::operator()(StringType) {
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::InjectStringify::operator()(LambdaType) {
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::InjectStringify::operator()(AnyType) {
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::InjectStringify::operator()(const ObjectShape *object_shape) {
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::InjectStringify::operator()(IntrinsicObject intrinsic_object) {
+  return nullptr;
 }
 } // namespace Manadrain
