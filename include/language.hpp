@@ -58,6 +58,10 @@ class MissingVariableName final : public CompilationError {
 public:
   MissingVariableName() : CompilationError{"missing variable name!"} {}
 };
+class InvalidVariableAccess final : public CompilationError {
+public:
+  InvalidVariableAccess() : CompilationError{"invalid variable access!"} {}
+};
 
 enum class Keyword {
   MONOSTATE,
@@ -137,15 +141,28 @@ class Machine;
 class Compiler {
 public:
   Compiler(Machine &m) : machine{m} {}
+
+  class ExecutionBoundary;
+
   class Expression {
   public:
     virtual ~Expression() = default;
+
+    virtual Datatype datatype() const = 0;
+    virtual std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const = 0;
   };
 
   class FunctionCall final : public Expression {
   public:
     std::unique_ptr<Expression> callee;
     std::vector<std::unique_ptr<Expression>> arguments;
+
+    Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class ObjectExpression final : public Expression {
@@ -153,12 +170,24 @@ public:
     ObjectShape object_shape;
     std::vector<Identifier> keys;
     std::vector<std::unique_ptr<Expression>> values;
+
+    Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class MemberExpression final : public Expression {
   public:
     std::unique_ptr<Expression> object;
     Identifier property;
+
+    Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class BinaryExpression final : public Expression {
@@ -166,6 +195,12 @@ public:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
     char32_t op;
+
+    Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class LogicalExpression final : public Expression {
@@ -173,53 +208,119 @@ public:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
     Operator op;
+
+    Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class AssignExpression final : public Expression {
   public:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
+
+    Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class NumericLiteral final : public Expression {
   public:
     double val;
+
+    Datatype datatype() const override { return NumberType{}; }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class AsciiLiteral final : public Expression {
   public:
     std::string val;
+
+    Datatype datatype() const override { return StringType{}; }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class UnicodeLiteral final : public Expression {
   public:
     std::u16string val;
+
+    Datatype datatype() const override { return StringType{}; }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class VariableAccessor final : public Expression {
   public:
     Identifier identifier;
+
+    Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override;
+  };
+
+  class ScopeAccessor final : public Expression {
+  public:
+    Datatype local_type;
+    std::size_t scope_offset;
+    std::size_t local_offset;
+
+    Datatype datatype() const override { return local_type; }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    };
+  };
+
+  class IntrinsicAccessor final : public Expression {
+  public:
+    IntrinsicObject object_type;
+
+    Datatype datatype() const override { return object_type; }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class Statement {
   public:
     virtual ~Statement() = default;
+    virtual std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const = 0;
   };
 
   class InitializeVariable final : public Statement {
   public:
     Identifier variable_name;
     std::unique_ptr<Expression> rvalue;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override;
   };
 
   class ExpressionStatement final : public Statement {
   public:
     std::unique_ptr<Expression> argument;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override;
   };
 
   class ReturnStatement final : public Statement {
   public:
     std::unique_ptr<Expression> argument;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override;
   };
 
   class FunctionDefinition;
@@ -228,6 +329,7 @@ public:
   public:
     ExecutionBoundary(Compiler &c) : compiler{c} {}
 
+    const ExecutionBoundary *parent;
     std::flat_map<Identifier, Datatype> local_scope;
     std::list<FunctionDefinition> nested_functions;
     std::vector<std::unique_ptr<Statement>> program;
@@ -264,6 +366,10 @@ public:
       std::unique_ptr<Expression> operator()(std::string_view ascii);
       std::unique_ptr<Expression> operator()(std::u16string_view unicode);
     };
+
+    friend class VariableAccessor;
+    std::unique_ptr<Expression> analyze_identifier(std::size_t scope_offset,
+                                                   Identifier identifier) const;
   };
 
   class FunctionDefinition final : public ExecutionBoundary {

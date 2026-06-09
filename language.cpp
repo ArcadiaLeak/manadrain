@@ -503,4 +503,49 @@ void Compiler::FunctionDefinition::parse_function_decl() {
     parse_statement();
   }
 }
+
+std::unique_ptr<Compiler::Statement>
+Compiler::InitializeVariable::analyze(ExecutionBoundary &boundary) const {
+  std::size_t local_offset = std::distance(
+      boundary.local_scope.begin(), boundary.local_scope.find(variable_name));
+  rvalue->analyze(boundary);
+  Datatype initializer_type{};
+  boundary.local_scope[variable_name] = initializer_type;
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Statement>
+Compiler::ExpressionStatement::analyze(ExecutionBoundary &boundary) const {
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Statement>
+Compiler::ReturnStatement::analyze(ExecutionBoundary &boundary) const {
+  return nullptr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::VariableAccessor::analyze(ExecutionBoundary &boundary) const {
+  const ExecutionBoundary *cur_boundary{&boundary};
+  for (std::size_t i = 0; cur_boundary; ++i) {
+    std::unique_ptr<Expression> expression{
+        cur_boundary->analyze_identifier(i, identifier)};
+    if (not expression)
+      cur_boundary = cur_boundary->parent;
+    else
+      return expression;
+  }
+  if (identifier.offset == OFFSET_console) {
+    std::unique_ptr accessor{std::make_unique<IntrinsicAccessor>()};
+    accessor->object_type = IntrinsicObject::O_CONSOLE;
+    return std::move(accessor);
+  }
+  throw InvalidVariableAccess{};
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::ExecutionBoundary::analyze_identifier(std::size_t scope_offset,
+                                                Identifier identifier) const {
+  return nullptr;
+}
 } // namespace Manadrain
