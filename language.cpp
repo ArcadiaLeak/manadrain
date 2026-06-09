@@ -209,11 +209,11 @@ void Compiler::ExecutionBoundary::parse_function_stmt() {
   if (not definition.function_name)
     throw MissingFunctionName{};
   bool duplicate_exists =
-      std::ranges::contains(nested_functions, definition.function_name,
+      std::ranges::contains(inner_functions, definition.function_name,
                             [](const auto &el) { return el.function_name; });
   if (duplicate_exists)
     throw DuplicateDeclaration{};
-  nested_functions.push_back(std::move(definition));
+  inner_functions.push_back(std::move(definition));
 }
 
 void Compiler::ExecutionBoundary::parse_variable_decl() {
@@ -269,7 +269,7 @@ Compiler::ExecutionBoundary::parse_postfix_expr() {
 std::unique_ptr<Compiler::Expression>
 Compiler::ExecutionBoundary::parse_call_expr(
     std::unique_ptr<Compiler::Expression> callee) {
-  std::unique_ptr expression{std::make_unique<FunctionCall>()};
+  std::unique_ptr expression{std::make_unique<AliasedFunctionCall>()};
   expression->callee = std::move(callee);
   while (1) {
     compiler.tokenize();
@@ -396,7 +396,7 @@ Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
   if (keyword == Keyword::K_FUNCTION) {
     Compiler::FunctionDefinition definition{boundary.compiler};
     definition.parse_function_decl();
-    boundary.nested_functions.push_back(std::move(definition));
+    boundary.inner_functions.push_back(std::move(definition));
   }
   throw UnexpectedToken{};
 }
@@ -422,7 +422,7 @@ Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
   return unicode_literal;
 }
 
-void Compiler::FunctionDefinition::parse_statement() {
+void Compiler::ExecutionBoundary::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(compiler.last_token))
     keyword = std::get<Keyword>(compiler.last_token);
@@ -441,26 +441,6 @@ void Compiler::FunctionDefinition::parse_statement() {
     compiler.assert_punct(';');
     return;
   }
-  default:
-    std::unique_ptr statement{std::make_unique<ExpressionStatement>()};
-    statement->argument = parse_expression();
-    program.push_back(std::move(statement));
-    compiler.assert_punct(';');
-    return;
-  }
-}
-
-void Compiler::ModuleDefinition::parse_statement() {
-  Keyword keyword{};
-  if (std::holds_alternative<Keyword>(compiler.last_token))
-    keyword = std::get<Keyword>(compiler.last_token);
-  switch (keyword) {
-  case Keyword::K_FUNCTION:
-    parse_function_stmt();
-    return;
-  case Keyword::K_LET:
-    parse_variable_decl();
-    return;
   default:
     std::unique_ptr statement{std::make_unique<ExpressionStatement>()};
     statement->argument = parse_expression();
@@ -506,34 +486,42 @@ void Compiler::FunctionDefinition::parse_function_decl() {
 
 std::unique_ptr<Compiler::Statement>
 Compiler::InitializeVariable::analyze(ExecutionBoundary &boundary) const {
-  std::size_t local_offset = std::distance(
+  std::unique_ptr initialize_scope{std::make_unique<InitializeScope>()};
+  initialize_scope->local_offset = std::distance(
       boundary.local_scope.begin(), boundary.local_scope.find(variable_name));
-  rvalue->analyze(boundary);
-  Datatype initializer_type{};
-  boundary.local_scope[variable_name] = initializer_type;
-  return nullptr;
+  initialize_scope->rvalue = rvalue->analyze(boundary);
+  boundary.local_scope[variable_name] = initialize_scope->rvalue->datatype();
+  return initialize_scope;
 }
 
 std::unique_ptr<Compiler::Statement>
 Compiler::ExpressionStatement::analyze(ExecutionBoundary &boundary) const {
-  return nullptr;
+  std::unique_ptr expression_stmt{std::make_unique<ExpressionStatement>()};
+  expression_stmt->argument = argument->analyze(boundary);
+  return expression_stmt;
 }
 
 std::unique_ptr<Compiler::Statement>
 Compiler::ReturnStatement::analyze(ExecutionBoundary &boundary) const {
-  return nullptr;
+  if (not boundary.allows_return_stmt())
+    throw InvalidReturnStatement{};
+  std::unique_ptr return_stmt{std::make_unique<ReturnStatement>()};
+  return_stmt->argument = argument->analyze(boundary);
+  boundary.return_type = return_stmt->argument->datatype();
+  return return_stmt;
 }
 
 std::unique_ptr<Compiler::Expression>
 Compiler::VariableAccessor::analyze(ExecutionBoundary &boundary) const {
-  const ExecutionBoundary *cur_boundary{&boundary};
-  for (std::size_t i = 0; cur_boundary; ++i) {
-    std::unique_ptr<Expression> expression{
-        cur_boundary->analyze_identifier(i, identifier)};
-    if (not expression)
-      cur_boundary = cur_boundary->parent;
-    else
-      return expression;
+  const ExecutionBoundary *current{&boundary};
+  for (std::size_t i = 0; current; ++i) {
+    std::unique_ptr<ScopeAccessor> accessor{current->find_local(identifier)};
+    if (not accessor)
+      current = current->parent_boundary;
+    else {
+      accessor->scope_offset = i;
+      return accessor;
+    }
   }
   if (identifier.offset == OFFSET_console) {
     std::unique_ptr accessor{std::make_unique<IntrinsicAccessor>()};
@@ -544,8 +532,81 @@ Compiler::VariableAccessor::analyze(ExecutionBoundary &boundary) const {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::analyze_identifier(std::size_t scope_offset,
-                                                Identifier identifier) const {
+Compiler::AsciiLiteral::analyze(ExecutionBoundary &boundary) const {
+  std::unique_ptr copycat{std::make_unique<AsciiLiteral>()};
+  copycat->val = val;
+  return copycat;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::UnicodeLiteral::analyze(ExecutionBoundary &boundary) const {
+  std::unique_ptr copycat{std::make_unique<UnicodeLiteral>()};
+  copycat->val = val;
+  return copycat;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::NumericLiteral::analyze(ExecutionBoundary &boundary) const {
+  std::unique_ptr copycat{std::make_unique<NumericLiteral>()};
+  copycat->val = val;
+  return copycat;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::BinaryExpression::analyze(ExecutionBoundary &boundary) const {
+  std::unique_ptr binary_expr{std::make_unique<BinaryExpression>()};
+  binary_expr->op = op;
+  binary_expr->left = left->analyze(boundary);
+  binary_expr->right = right->analyze(boundary);
+  assert(std::holds_alternative<NumberType>(binary_expr->left->datatype()) &&
+         std::holds_alternative<NumberType>(binary_expr->right->datatype()));
+  return binary_expr;
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::MemberExpression::analyze(ExecutionBoundary &boundary) const {
+  std::unique_ptr object_expr{object->analyze(boundary)};
+  if (std::holds_alternative<StringType>(object_expr->datatype()) &&
+      property.offset == OFFSET_length) {
+    std::unique_ptr string_length{std::make_unique<StringLength>()};
+    string_length->argument = std::move(object_expr);
+    return string_length;
+  }
+  std::unreachable();
+}
+
+std::unique_ptr<Compiler::Expression>
+Compiler::AliasedFunctionCall::analyze(ExecutionBoundary &boundary) const {
   return nullptr;
+}
+
+std::unique_ptr<Compiler::ScopeAccessor>
+Compiler::ExecutionBoundary::find_local(Identifier identifier) const {
+  if (not local_scope.contains(identifier))
+    return nullptr;
+  std::size_t local_offset =
+      std::distance(local_scope.begin(), local_scope.find(identifier));
+  std::unique_ptr accessor{std::make_unique<ScopeAccessor>()};
+  accessor->local_type = local_scope.values()[local_offset];
+  accessor->local_offset = local_offset;
+  return accessor;
+}
+
+const Compiler::FunctionDefinition *
+Compiler::ExecutionBoundary::find_function(Identifier identifier) const {
+  auto by_name = [](const auto &def) { return def.function_name; };
+  auto function_it = std::ranges::find(inner_functions, identifier, by_name);
+  return function_it == inner_functions.end() ? nullptr : &(*function_it);
+}
+
+void Compiler::analyze_program() { entry_module.analyze(); }
+
+void Compiler::ExecutionBoundary::analyze() {
+  for (auto &definition : inner_functions) {
+    definition.parent_boundary = this;
+    definition.analyze();
+  }
+  for (auto &statement : program)
+    statement = statement->analyze(*this);
 }
 } // namespace Manadrain

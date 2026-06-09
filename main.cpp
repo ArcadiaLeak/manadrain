@@ -37,6 +37,7 @@ int main(int argc, char *argv[]) {
       std::from_range, std::ranges::istream_view<std::uint8_t>{file})};
   compiler.text_buffer = std::move(text_buffer);
   compiler.parse_text();
+  compiler.analyze_program();
 
   return 0;
 }

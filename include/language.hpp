@@ -62,6 +62,10 @@ class InvalidVariableAccess final : public CompilationError {
 public:
   InvalidVariableAccess() : CompilationError{"invalid variable access!"} {}
 };
+class InvalidReturnStatement final : public CompilationError {
+public:
+  InvalidReturnStatement() : CompilationError{"invalid return statement!"} {}
+};
 
 enum class Keyword {
   MONOSTATE,
@@ -117,13 +121,13 @@ struct ObjectShape;
 
 enum class IntrinsicFunction { F_LOG };
 enum class IntrinsicObject { O_CONSOLE };
+struct VoidType {};
 struct NumberType {};
 struct StringType {};
 struct LambdaType {};
 struct AnyType {};
-using Datatype =
-    std::variant<std::monostate, NumberType, StringType, LambdaType, AnyType,
-                 const ObjectShape *, IntrinsicObject>;
+using Datatype = std::variant<VoidType, NumberType, StringType, LambdaType,
+                              AnyType, const ObjectShape *, IntrinsicObject>;
 
 struct FunctionFrame;
 struct ObjectInstance;
@@ -143,22 +147,49 @@ public:
   Compiler(Machine &m) : machine{m} {}
 
   class ExecutionBoundary;
+  class FunctionDefinition;
 
   class Expression {
   public:
     virtual ~Expression() = default;
 
     virtual Datatype datatype() const = 0;
+
     virtual std::unique_ptr<Expression>
     analyze(ExecutionBoundary &boundary) const = 0;
+
+    // virtual std::unique_ptr<Expression>
+    // analyze_as_callee(ExecutionBoundary &boundary) const = 0;
   };
 
-  class FunctionCall final : public Expression {
+  class AliasedFunctionCall final : public Expression {
   public:
     std::unique_ptr<Expression> callee;
     std::vector<std::unique_ptr<Expression>> arguments;
 
     Datatype datatype() const override { std::unreachable(); }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override;
+  };
+
+  class DirectFunctionCall final : public Expression {
+  public:
+    const FunctionDefinition *callee;
+    std::vector<Identifier> passed_identifiers;
+    std::vector<std::unique_ptr<Expression>> passed_values;
+
+    Datatype datatype() const override { return callee->return_type; }
+    std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class ConsoleLogCall final : public Expression {
+  public:
+    std::vector<std::unique_ptr<Expression>> arguments;
+
+    Datatype datatype() const override { return VoidType{}; }
     std::unique_ptr<Expression>
     analyze(ExecutionBoundary &boundary) const override {
       std::unreachable();
@@ -185,6 +216,15 @@ public:
 
     Datatype datatype() const override { std::unreachable(); }
     std::unique_ptr<Expression>
+    analyze(ExecutionBoundary &boundary) const override;
+  };
+
+  class StringLength final : public Expression {
+  public:
+    std::unique_ptr<Expression> argument;
+
+    Datatype datatype() const override { return NumberType{}; }
+    std::unique_ptr<Expression>
     analyze(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
@@ -196,11 +236,9 @@ public:
     std::unique_ptr<Expression> right;
     char32_t op;
 
-    Datatype datatype() const override { std::unreachable(); }
+    Datatype datatype() const override { return NumberType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
-      std::unreachable();
-    }
+    analyze(ExecutionBoundary &boundary) const override;
   };
 
   class LogicalExpression final : public Expression {
@@ -234,9 +272,7 @@ public:
 
     Datatype datatype() const override { return NumberType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
-      std::unreachable();
-    }
+    analyze(ExecutionBoundary &boundary) const override;
   };
 
   class AsciiLiteral final : public Expression {
@@ -245,9 +281,7 @@ public:
 
     Datatype datatype() const override { return StringType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
-      std::unreachable();
-    }
+    analyze(ExecutionBoundary &boundary) const override;
   };
 
   class UnicodeLiteral final : public Expression {
@@ -256,9 +290,7 @@ public:
 
     Datatype datatype() const override { return StringType{}; }
     std::unique_ptr<Expression>
-    analyze(ExecutionBoundary &boundary) const override {
-      std::unreachable();
-    }
+    analyze(ExecutionBoundary &boundary) const override;
   };
 
   class VariableAccessor final : public Expression {
@@ -309,6 +341,16 @@ public:
     analyze(ExecutionBoundary &boundary) const override;
   };
 
+  class InitializeScope final : public Statement {
+  public:
+    std::size_t local_offset;
+    std::unique_ptr<Expression> rvalue;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    };
+  };
+
   class ExpressionStatement final : public Statement {
   public:
     std::unique_ptr<Expression> argument;
@@ -329,15 +371,24 @@ public:
   public:
     ExecutionBoundary(Compiler &c) : compiler{c} {}
 
-    const ExecutionBoundary *parent;
-    std::flat_map<Identifier, Datatype> local_scope;
-    std::list<FunctionDefinition> nested_functions;
+    const ExecutionBoundary *parent_boundary;
     std::vector<std::unique_ptr<Statement>> program;
+
+    std::list<FunctionDefinition> inner_functions;
+    const FunctionDefinition *find_function(Identifier identifier) const;
+
+    std::flat_map<Identifier, Datatype> local_scope;
+    std::unique_ptr<ScopeAccessor> find_local(Identifier identifier) const;
+
+    Datatype return_type;
+    virtual bool allows_return_stmt() const = 0;
+
+    void parse_statement();
+    void analyze();
 
   protected:
     Compiler &compiler;
 
-    virtual void parse_statement() = 0;
     void parse_function_stmt();
     void parse_variable_decl();
 
@@ -366,10 +417,6 @@ public:
       std::unique_ptr<Expression> operator()(std::string_view ascii);
       std::unique_ptr<Expression> operator()(std::u16string_view unicode);
     };
-
-    friend class VariableAccessor;
-    std::unique_ptr<Expression> analyze_identifier(std::size_t scope_offset,
-                                                   Identifier identifier) const;
   };
 
   class FunctionDefinition final : public ExecutionBoundary {
@@ -380,19 +427,19 @@ public:
     std::vector<Identifier> arguments;
     Datatype return_type;
 
-    void parse_statement() override;
+    bool allows_return_stmt() const override { return 1; }
     void parse_function_decl();
   };
 
   class ModuleDefinition final : public ExecutionBoundary {
   public:
     ModuleDefinition(Compiler &c) : ExecutionBoundary{c} {}
-
-    void parse_statement() override;
+    bool allows_return_stmt() const override { return 0; }
   };
 
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
+  void analyze_program();
 
 private:
   Machine &machine;
