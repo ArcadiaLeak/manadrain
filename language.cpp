@@ -484,6 +484,10 @@ void Compiler::FunctionDefinition::parse_function_decl() {
   }
 }
 
+Compiler::ExecutionBoundary::ExecutionBoundary(Compiler &c) : compiler{c} {
+  output_boundary = std::make_unique<Machine::ExecutionBoundary>();
+}
+
 std::unique_ptr<Compiler::Statement>
 Compiler::InitializeVariable::analyze(ExecutionBoundary &boundary) const {
   std::unique_ptr initialize_scope{std::make_unique<InitializeScope>()};
@@ -730,4 +734,135 @@ std::unique_ptr<Compiler::Expression>
 Compiler::InjectStringify::operator()(IntrinsicObject intrinsic_object) {
   return nullptr;
 }
+
+std::list<std::uint64_t>
+Compiler::InitializeScope::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{StatementKind{StmtInitialize{}}.index(),
+                                  local_offset};
+  output.splice(output.end(), rvalue->serialize(boundary));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::ExpressionStatement::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{StatementKind{StmtExpression{}}.index()};
+  output.splice(output.end(), argument->serialize(boundary));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::ReturnStatement::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{StatementKind{StmtReturn{}}.index()};
+  output.splice(output.end(), argument->serialize(boundary));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::DirectFunctionCall::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{
+      ExpressionKind{ExprFunctionCall{}}.index(),
+      reinterpret_cast<std::uintptr_t>(callee->output_boundary.get())};
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::ConsoleLogCall::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{ExpressionKind{ExprConsole{}}.index(),
+                                  arguments.size()};
+  for (const auto &argument : arguments)
+    output.splice(output.end(), argument->serialize(boundary));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::StringLength::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{ExpressionKind{ExprStringLength{}}.index()};
+  output.splice(output.end(), argument->serialize(boundary));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::StringifyNumber::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{
+      ExpressionKind{ExprStringifyNumber{}}.index()};
+  output.splice(output.end(), argument->serialize(boundary));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::BinaryExpression::serialize(ExecutionBoundary &boundary) const {
+  ExpressionKind expression_kind{};
+  switch (op) {
+  case '+':
+    expression_kind.emplace<ExprBinary<BinaryOperation::OP_ADD>>();
+    break;
+  case '-':
+    expression_kind.emplace<ExprBinary<BinaryOperation::OP_SUB>>();
+    break;
+  }
+  std::list<std::uint64_t> output{expression_kind.index()};
+  output.splice(output.end(), left->serialize(boundary));
+  output.splice(output.end(), right->serialize(boundary));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::NumericLiteral::serialize(ExecutionBoundary &boundary) const {
+  return {ExpressionKind{ExprLiteral{}}.index(),
+          std::bit_cast<std::uint64_t>(val)};
+}
+
+std::list<std::uint64_t>
+Compiler::AsciiLiteral::serialize(ExecutionBoundary &boundary) const {
+  std::list<std::uint64_t> output{ExpressionKind{ExprLiteral{}}.index()};
+  const MachineString *string_ptr{boundary.push_string_literal(val)};
+  output.push_back(reinterpret_cast<std::uintptr_t>(string_ptr));
+  return output;
+}
+
+std::list<std::uint64_t>
+Compiler::UnicodeLiteral::serialize(ExecutionBoundary &boundary) const {
+  return {};
+}
+
+std::list<std::uint64_t>
+Compiler::ScopeAccessor::serialize(ExecutionBoundary &boundary) const {
+  return {ExpressionKind{ExprScopeAccess{}}.index(), scope_offset,
+          local_offset};
+}
+
+void Compiler::ExecutionBoundary::serialize() {
+  for (auto &definition : inner_functions)
+    definition.serialize();
+  std::list<std::uint64_t> output{};
+  for (const auto &statement : program)
+    output.splice(output.end(), statement->serialize(*this));
+  output_boundary->program = {std::from_range, output};
+}
+
+void Compiler::ExecutionBoundary::export_serial_program() {
+  for (auto &definition : inner_functions)
+    definition.export_serial_program();
+  compiler.machine.boundaries.push_back(std::move(output_boundary));
+}
+
+void Compiler::write_serial_program() {
+  entry_module.serialize();
+  entry_module.export_serial_program();
+}
+
+const MachineString *
+Compiler::ExecutionBoundary::push_string_literal(std::string_view ascii) {
+  auto [literal_it, _] =
+      compiler.machine.string_literals.emplace(std::string{ascii});
+  return &(*literal_it);
+}
+
+const MachineString *
+Compiler::ExecutionBoundary::push_string_literal(std::u16string_view unicode) {
+  auto [u16literal_it, _] =
+      compiler.machine.string_literals.emplace(std::u16string{unicode});
+  return &(*u16literal_it);
+}
+
 } // namespace Manadrain

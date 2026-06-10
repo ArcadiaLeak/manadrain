@@ -38,6 +38,7 @@ int main(int argc, char *argv[]) {
   compiler.text_buffer = std::move(text_buffer);
   compiler.parse_text();
   compiler.analyze_program();
+  compiler.write_serial_program();
 
   return 0;
 }

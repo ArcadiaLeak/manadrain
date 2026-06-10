@@ -121,36 +121,67 @@ using Token =
     std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
                  Keyword, Identifier, std::string_view, std::u16string_view>;
 
-struct FunctionFrame;
-struct ObjectInstance;
+struct VoidType {};
+struct NumberType {};
+struct StringType {};
+struct LambdaType {};
+struct AnyType {};
+struct ObjectShape;
+enum class IntrinsicObject { O_CONSOLE };
+using ValueType = std::variant<VoidType, NumberType, StringType, LambdaType,
+                               AnyType, const ObjectShape *, IntrinsicObject>;
+struct ObjectShape {
+  std::flat_map<Identifier, ValueType> properties;
+};
 
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
-class Machine;
+enum class BinaryOperation { OP_ADD, OP_SUB };
+enum class ValueKind { V_NUMBER, V_STRING, V_VOID };
+
+struct ExprLiteral {};
+struct ExprScopeAccess {};
+template <BinaryOperation> struct ExprBinary {};
+struct ExprFunctionCall {};
+struct ExprConsole {};
+struct ExprStringLength {};
+struct ExprStringifyNumber {};
+using ExpressionKind =
+    std::variant<std::monostate, ExprLiteral, ExprScopeAccess,
+                 ExprBinary<BinaryOperation::OP_ADD>,
+                 ExprBinary<BinaryOperation::OP_SUB>, ExprFunctionCall,
+                 ExprConsole, ExprStringLength, ExprStringifyNumber>;
+
+struct StmtInitialize {};
+struct StmtExpression {};
+struct StmtReturn {};
+using StatementKind = std::variant<StmtInitialize, StmtExpression, StmtReturn>;
+
+using MachineString = std::variant<std::string, std::u16string>;
+
+class Machine {
+public:
+  void evaluate();
+
+  class ExecutionBoundary {
+  public:
+    std::flat_map<Identifier, ValueType> local_scope;
+    std::vector<std::uint64_t> program;
+  };
+
+  const ExecutionBoundary *main_boundary;
+  std::vector<std::unique_ptr<ExecutionBoundary>> boundaries;
+  std::set<MachineString> string_literals;
+};
 
 class Compiler {
 public:
   Compiler(Machine &m) : machine{m} {}
 
-  struct ObjectShape;
   class ExecutionBoundary;
   class FunctionDefinition;
-
-  enum class IntrinsicObject { O_CONSOLE };
-  struct VoidType {};
-  struct NumberType {};
-  struct StringType {};
-  struct LambdaType {};
-  struct AnyType {};
-  using ValueType = std::variant<VoidType, NumberType, StringType, LambdaType,
-                                 AnyType, const ObjectShape *, IntrinsicObject>;
-
-  struct ObjectShape {
-    std::flat_map<Identifier, ValueType> properties;
-  };
-
   class CalleeExpression;
 
   struct FindMethod {
@@ -177,6 +208,9 @@ public:
 
     virtual std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const = 0;
+
+    virtual std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const = 0;
   };
 
   struct InjectStringify {
@@ -212,10 +246,17 @@ public:
     std::vector<std::unique_ptr<Expression>> arguments;
 
     ValueType datatype() const override { std::unreachable(); }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override;
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -231,6 +272,9 @@ public:
     void analyze_arguments(
         ExecutionBoundary &boundary,
         std::span<const std::unique_ptr<Expression>> arguments) override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class ConsoleLogCall final : public CalleeExpression {
@@ -242,6 +286,9 @@ public:
     void analyze_arguments(
         ExecutionBoundary &boundary,
         std::span<const std::unique_ptr<Expression>> arguments) override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class ObjectExpression final : public Expression {
@@ -251,12 +298,19 @@ public:
     std::vector<std::unique_ptr<Expression>> values;
 
     ValueType datatype() const override { std::unreachable(); }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -267,10 +321,17 @@ public:
     Identifier property;
 
     ValueType datatype() const override { std::unreachable(); }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override;
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class StringLength final : public Expression {
@@ -278,14 +339,19 @@ public:
     std::unique_ptr<Expression> argument;
 
     ValueType datatype() const override { return NumberType{}; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class StringifyNumber final : public Expression {
@@ -293,14 +359,19 @@ public:
     std::unique_ptr<Expression> argument;
 
     ValueType datatype() const override { return StringType{}; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class BinaryExpression final : public Expression {
@@ -310,12 +381,17 @@ public:
     char32_t op;
 
     ValueType datatype() const override { return NumberType{}; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override;
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class LogicalExpression final : public Expression {
@@ -325,12 +401,19 @@ public:
     Operator op;
 
     ValueType datatype() const override { std::unreachable(); }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -341,12 +424,19 @@ public:
     std::unique_ptr<Expression> right;
 
     ValueType datatype() const override { std::unreachable(); }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -356,12 +446,17 @@ public:
     double val;
 
     ValueType datatype() const override { return NumberType{}; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override;
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class AsciiLiteral final : public Expression {
@@ -369,12 +464,17 @@ public:
     std::string val;
 
     ValueType datatype() const override { return StringType{}; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override;
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class UnicodeLiteral final : public Expression {
@@ -382,12 +482,17 @@ public:
     std::u16string val;
 
     ValueType datatype() const override { return StringType{}; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override;
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class VariableAccessor final : public Expression {
@@ -395,10 +500,17 @@ public:
     Identifier identifier;
 
     ValueType datatype() const override { std::unreachable(); }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override;
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class ScopeAccessor final : public Expression {
@@ -408,14 +520,19 @@ public:
     std::size_t local_offset;
 
     ValueType datatype() const override { return local_type; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     };
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class IntrinsicAccessor final : public Expression {
@@ -423,12 +540,19 @@ public:
     IntrinsicObject object_type;
 
     ValueType datatype() const override { return object_type; }
+
     std::unique_ptr<Expression>
     analyze_as_value(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
+
     std::unique_ptr<CalleeExpression>
     analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -438,6 +562,8 @@ public:
     virtual ~Statement() = default;
     virtual std::unique_ptr<Statement>
     analyze(ExecutionBoundary &boundary) const = 0;
+    virtual std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const = 0;
   };
 
   class InitializeVariable final : public Statement {
@@ -446,6 +572,10 @@ public:
     std::unique_ptr<Expression> rvalue;
     std::unique_ptr<Statement>
     analyze(ExecutionBoundary &boundary) const override;
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
   };
 
   class InitializeScope final : public Statement {
@@ -456,6 +586,8 @@ public:
     analyze(ExecutionBoundary &boundary) const override {
       std::unreachable();
     };
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class ExpressionStatement final : public Statement {
@@ -463,6 +595,8 @@ public:
     std::unique_ptr<Expression> argument;
     std::unique_ptr<Statement>
     analyze(ExecutionBoundary &boundary) const override;
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class ReturnStatement final : public Statement {
@@ -470,13 +604,16 @@ public:
     std::unique_ptr<Expression> argument;
     std::unique_ptr<Statement>
     analyze(ExecutionBoundary &boundary) const override;
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
   };
 
   class ExecutionBoundary {
   public:
-    ExecutionBoundary(Compiler &c) : compiler{c} {}
+    ExecutionBoundary(Compiler &c);
 
     const ExecutionBoundary *parent_boundary;
+    std::unique_ptr<Machine::ExecutionBoundary> output_boundary;
     std::vector<std::unique_ptr<Statement>> program;
 
     std::list<FunctionDefinition> inner_functions;
@@ -490,6 +627,11 @@ public:
 
     void parse_statement();
     void analyze();
+    void serialize();
+    void export_serial_program();
+
+    const MachineString *push_string_literal(std::string_view ascii);
+    const MachineString *push_string_literal(std::u16string_view unicode);
 
   protected:
     Compiler &compiler;
@@ -544,6 +686,7 @@ public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
   void parse_text();
   void analyze_program();
+  void write_serial_program();
 
 private:
   Machine &machine;
@@ -569,13 +712,5 @@ private:
   void tokenize();
 
   ModuleDefinition entry_module{*this};
-};
-
-class Machine {
-public:
-  void evaluate();
-
-private:
-  friend class Compiler;
 };
 } // namespace Manadrain
