@@ -173,7 +173,7 @@ using StatementKind =
 
 using MachineString = std::variant<std::string, std::u16string>;
 struct ConsoleMessage {
-  MachineString content;
+  std::vector<MachineString> parts;
   std::string encode_for_print() const;
 };
 
@@ -225,6 +225,7 @@ private:
   void evaluate_statement();
 
   struct EvaluateExpression {
+    Machine &machine;
     std::uint64_t operator()(std::monostate) { std::unreachable(); }
     std::uint64_t operator()(ExprLiteral);
     std::uint64_t operator()(ExprScopeAccess);
@@ -1672,19 +1673,34 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprFunctionCall) {
   return 0;
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) { return 0; }
+std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) {
+  std::size_t n_args{*machine.current_frame->program_iter++};
+  std::vector<MachineString> message_parts(n_args);
+  for (MachineString &message_part : message_parts) {
+    std::uint64_t expr_value{machine.evaluate_expression()};
+    message_part = *reinterpret_cast<const MachineString *>(expr_value);
+  }
+  {
+    std::lock_guard console_lock{machine.console_mutex};
+    machine.console_messages.emplace_back(std::move(message_parts));
+  }
+  machine.console_condition.notify_one();
+  return 0;
+}
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprStringLength) {
   return 0;
 }
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprStringifyNumber) {
+  std::uint64_t expr_value{machine.evaluate_expression()};
+  double number{std::bit_cast<double>(expr_value)};
   return 0;
 }
 
 std::uint64_t Machine::evaluate_expression() {
   return from_index<ExpressionKind>(*current_frame->program_iter++)
-      .visit(EvaluateExpression{});
+      .visit(EvaluateExpression{*this});
 }
 
 void Machine::evaluate() {
@@ -1699,8 +1715,8 @@ void Machine::evaluate() {
 
 std::list<ConsoleMessage>
 Machine::collect_console_messages(std::stop_token stopper) {
-  auto check_messages = [&] { return console_messages.size() > 0; };
   std::unique_lock console_lock{console_mutex};
+  auto check_messages = [&] { return console_messages.size() > 0; };
   console_condition.wait(console_lock, stopper, check_messages);
   std::list<ConsoleMessage> message_box{};
   console_messages.swap(message_box);
@@ -1727,14 +1743,18 @@ struct EncodeMachineString {
 };
 
 std::string ConsoleMessage::encode_for_print() const {
-  return content.visit(EncodeMachineString{});
+  auto encode_message_part = [](const MachineString &machine_string) {
+    return machine_string.visit(EncodeMachineString{});
+  };
+  auto encoded_parts = parts | std::views::transform(encode_message_part) |
+                       std::views::join_with(' ');
+  return {std::from_range, encoded_parts};
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
-
+Language::~Language() = default;
 Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
-Language::~Language() = default;
 
 void Language::compile_and_execute() {
   Manadrain::Compiler compiler{*machine};
