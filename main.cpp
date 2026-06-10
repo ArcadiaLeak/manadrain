@@ -1,13 +1,9 @@
 #include <cassert>
 #include <filesystem>
 #include <fstream>
-#include <inplace_vector>
 #include <iostream>
 #include <print>
 #include <ranges>
-#include <thread>
-
-#include <unistr.h>
 
 #include "language.hpp"
 
@@ -30,15 +26,11 @@ int main(int argc, char *argv[]) {
   }
   file >> std::noskipws;
 
-  Manadrain::Machine machine{};
-
-  Manadrain::Compiler compiler{machine};
+  Manadrain::Language language{};
   std::unique_ptr text_buffer{std::make_unique<std::vector<std::uint8_t>>(
       std::from_range, std::ranges::istream_view<std::uint8_t>{file})};
-  compiler.text_buffer = std::move(text_buffer);
-  compiler.parse_text();
-  compiler.analyze_program();
-  compiler.write_serial_program();
+  language.text_buffer = std::move(text_buffer);
+  language.compile_and_execute();
 
   return 0;
 }

@@ -1,6 +1,24 @@
 #include <algorithm>
 #include <cassert>
+#include <condition_variable>
+#include <cstdint>
+#include <flat_map>
+#include <generator>
+#include <inplace_vector>
+#include <list>
+#include <map>
+#include <memory>
+#include <memory_resource>
+#include <meta>
+#include <mutex>
 #include <new>
+#include <optional>
+#include <print>
+#include <ranges>
+#include <set>
+#include <thread>
+#include <variant>
+#include <vector>
 
 #include <unictype.h>
 #include <unistr.h>
@@ -8,6 +26,755 @@
 #include "language.hpp"
 
 namespace Manadrain {
+class CompilationError : public std::runtime_error {
+public:
+  CompilationError(const char *msg) : std::runtime_error{msg} {}
+  CompilationError() : std::runtime_error{"compilation error!"} {}
+};
+class UnexpectedStringEnd final : public CompilationError {
+public:
+  UnexpectedStringEnd() : CompilationError{"unexpected string end!"} {}
+};
+class UnexpectedToken final : public CompilationError {
+public:
+  UnexpectedToken() : CompilationError{"unexpected token!"} {}
+};
+class MissingPunctuation final : public CompilationError {
+public:
+  MissingPunctuation(char32_t ch)
+      : CompilationError{"missing punctuation!"}, must_be{ch} {}
+  char32_t must_be;
+};
+class MissingFormalParameter final : public CompilationError {
+public:
+  MissingFormalParameter() : CompilationError{"missing formal parameter!"} {}
+};
+class MissingFunctionName final : public CompilationError {
+public:
+  MissingFunctionName() : CompilationError{"missing function_name!"} {}
+};
+class DuplicateDeclaration final : public CompilationError {
+public:
+  DuplicateDeclaration() : CompilationError{"duplicate declaration!"} {}
+};
+class MissingFieldName final : public CompilationError {
+public:
+  MissingFieldName() : CompilationError{"missing field name!"} {}
+};
+class InvalidPropertyName final : public CompilationError {
+public:
+  InvalidPropertyName() : CompilationError{"invalid property name!"} {}
+};
+class MissingVariableName final : public CompilationError {
+public:
+  MissingVariableName() : CompilationError{"missing variable name!"} {}
+};
+class MissingMethod final : public CompilationError {
+public:
+  MissingMethod() : CompilationError{"missing method!"} {}
+};
+class InvalidVariableAccess final : public CompilationError {
+public:
+  InvalidVariableAccess() : CompilationError{"invalid variable access!"} {}
+};
+class InvalidReturnStatement final : public CompilationError {
+public:
+  InvalidReturnStatement() : CompilationError{"invalid return statement!"} {}
+};
+
+enum class Keyword {
+  MONOSTATE,
+  K_CONST,
+  K_LET,
+  K_VAR,
+  K_CLASS,
+  K_FUNCTION,
+  K_RETURN,
+  K_IMPORT,
+  K_EXPORT,
+  K_FROM,
+  K_AS,
+  K_DEFAULT,
+  K_UNDEFINED,
+  K_NULL,
+  K_TRUE,
+  K_FALSE,
+  K_IF,
+  K_ELSE,
+  K_WHILE,
+  K_FOR,
+  K_DO,
+  K_BREAK,
+  K_CONTINUE,
+  K_SWITCH,
+  K_TYPEOF
+};
+enum class Operator {
+  DOUBLE_EQUALS,
+  TRIPLE_EQUALS,
+  BANG_EQUALS,
+  BANG_DOUBLE_EQUALS,
+  DIVIDE_ASSIGN,
+  BITWISE_CONJUNCT_ASSIGN,
+  LOGICAL_CONJUNCT_ASSIGN,
+  LOGICAL_CONJUNCT,
+  BITWISE_DISJUNCT_ASSIGN,
+  LOGICAL_DISJUNCT_ASSIGN,
+  LOGICAL_DISJUNCT
+};
+
+struct Identifier {
+  std::size_t offset;
+  auto operator<=>(const Identifier &) const = default;
+};
+
+using Token =
+    std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
+                 Keyword, Identifier, std::string_view, std::u16string_view>;
+
+struct VoidType {};
+struct NumberType {};
+struct StringType {};
+struct LambdaType {};
+struct AnyType {};
+struct ObjectShape;
+enum class IntrinsicObject { O_CONSOLE };
+using ValueType = std::variant<VoidType, NumberType, StringType, LambdaType,
+                               AnyType, const ObjectShape *, IntrinsicObject>;
+struct ObjectShape {
+  std::flat_map<Identifier, ValueType> properties;
+};
+
+inline constexpr std::size_t OFFSET_console{0};
+inline constexpr std::size_t OFFSET_log{1};
+inline constexpr std::size_t OFFSET_length{2};
+
+enum class BinaryOperation { OP_ADD, OP_SUB };
+enum class ValueKind { V_NUMBER, V_STRING, V_VOID };
+
+struct ExprLiteral {};
+struct ExprScopeAccess {};
+template <BinaryOperation> struct ExprBinary {};
+struct ExprFunctionCall {};
+struct ExprConsole {};
+struct ExprStringLength {};
+struct ExprStringifyNumber {};
+using ExpressionKind =
+    std::variant<std::monostate, ExprLiteral, ExprScopeAccess,
+                 ExprBinary<BinaryOperation::OP_ADD>,
+                 ExprBinary<BinaryOperation::OP_SUB>, ExprFunctionCall,
+                 ExprConsole, ExprStringLength, ExprStringifyNumber>;
+
+struct StmtInitialize {};
+struct StmtExpression {};
+struct StmtReturn {};
+using StatementKind =
+    std::variant<std::monostate, StmtInitialize, StmtExpression, StmtReturn>;
+
+using MachineString = std::variant<std::string, std::u16string>;
+struct ConsoleMessage {
+  MachineString content;
+  std::string encode_for_print() const;
+};
+
+class Machine {
+public:
+  Machine();
+  std::list<ConsoleMessage> collect_console_messages(std::stop_token stopper);
+  void evaluate();
+
+  class ExecutionBoundary {
+  public:
+    std::flat_map<Identifier, ValueType> local_scope;
+    std::vector<std::uint64_t> program;
+  };
+
+  const ExecutionBoundary *program_entry;
+  std::vector<std::unique_ptr<ExecutionBoundary>> boundaries;
+  std::set<MachineString> string_literals;
+
+private:
+  struct ExecutionFrame {
+    const ExecutionBoundary *boundary;
+    std::vector<std::uint64_t>::const_iterator program_iter;
+    std::span<std::uint64_t> own_scope;
+    std::span<ExecutionFrame *> closure;
+    std::uint64_t return_val;
+  };
+
+  struct RuntimeMemory {
+    std::pmr::monotonic_buffer_resource resource{65536};
+    std::pmr::list<ExecutionFrame> execution_frames{&resource};
+    std::pmr::list<std::pmr::vector<ExecutionFrame *>> scope_traces{&resource};
+    std::pmr::list<std::pmr::vector<std::uint64_t>> structures{&resource};
+  };
+
+  ExecutionFrame *current_frame;
+  std::unique_ptr<RuntimeMemory> runtime_memory;
+  std::mutex console_mutex;
+  std::condition_variable_any console_condition;
+  std::list<ConsoleMessage> console_messages;
+
+  struct EvaluateStatement {
+    Machine &machine;
+    void operator()(std::monostate) { std::unreachable(); }
+    void operator()(StmtInitialize);
+    void operator()(StmtExpression);
+    void operator()(StmtReturn);
+  };
+  void evaluate_statement();
+
+  struct EvaluateExpression {
+    std::uint64_t operator()(std::monostate) { std::unreachable(); }
+    std::uint64_t operator()(ExprLiteral);
+    std::uint64_t operator()(ExprScopeAccess);
+    template <BinaryOperation P> std::uint64_t operator()(ExprBinary<P>);
+    std::uint64_t operator()(ExprFunctionCall);
+    std::uint64_t operator()(ExprConsole);
+    std::uint64_t operator()(ExprStringLength);
+    std::uint64_t operator()(ExprStringifyNumber);
+  };
+  std::uint64_t evaluate_expression();
+};
+
+class Compiler {
+public:
+  Compiler(Machine &m) : machine{m} {}
+
+  class ExecutionBoundary;
+  class FunctionDefinition;
+  class CalleeExpression;
+
+  struct FindMethod {
+    Identifier identifier;
+    std::unique_ptr<CalleeExpression> operator()(VoidType);
+    std::unique_ptr<CalleeExpression> operator()(NumberType);
+    std::unique_ptr<CalleeExpression> operator()(StringType);
+    std::unique_ptr<CalleeExpression> operator()(LambdaType);
+    std::unique_ptr<CalleeExpression> operator()(AnyType);
+    std::unique_ptr<CalleeExpression>
+    operator()(const ObjectShape *object_shape);
+    std::unique_ptr<CalleeExpression>
+    operator()(IntrinsicObject intrinsic_object);
+  };
+
+  class Expression {
+  public:
+    virtual ~Expression() = default;
+
+    virtual ValueType datatype() const = 0;
+
+    virtual std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const = 0;
+
+    virtual std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const = 0;
+
+    virtual std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const = 0;
+  };
+
+  struct InjectStringify {
+    std::unique_ptr<Expression> expression;
+    std::unique_ptr<Expression> operator()(VoidType);
+    std::unique_ptr<Expression> operator()(NumberType);
+    std::unique_ptr<Expression> operator()(StringType);
+    std::unique_ptr<Expression> operator()(LambdaType);
+    std::unique_ptr<Expression> operator()(AnyType);
+    std::unique_ptr<Expression> operator()(const ObjectShape *object_shape);
+    std::unique_ptr<Expression> operator()(IntrinsicObject intrinsic_object);
+  };
+
+  class CalleeExpression : public Expression {
+  public:
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    virtual void analyze_arguments(
+        ExecutionBoundary &boundary,
+        std::span<const std::unique_ptr<Expression>> arguments) = 0;
+  };
+
+  class AliasedFunctionCall final : public Expression {
+  public:
+    std::unique_ptr<Expression> callee;
+    std::vector<std::unique_ptr<Expression>> arguments;
+
+    ValueType datatype() const override { std::unreachable(); }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class DirectFunctionCall final : public CalleeExpression {
+  public:
+    const FunctionDefinition *callee;
+    std::vector<Identifier> passed_identifiers;
+    std::vector<std::unique_ptr<Expression>> passed_values;
+
+    ValueType datatype() const override { return callee->return_type; }
+
+    void analyze_arguments(
+        ExecutionBoundary &boundary,
+        std::span<const std::unique_ptr<Expression>> arguments) override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class ConsoleLogCall final : public CalleeExpression {
+  public:
+    std::vector<std::unique_ptr<Expression>> arguments;
+
+    ValueType datatype() const override { return VoidType{}; }
+
+    void analyze_arguments(
+        ExecutionBoundary &boundary,
+        std::span<const std::unique_ptr<Expression>> arguments) override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class ObjectExpression final : public Expression {
+  public:
+    ObjectShape object_shape;
+    std::vector<Identifier> keys;
+    std::vector<std::unique_ptr<Expression>> values;
+
+    ValueType datatype() const override { std::unreachable(); }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class MemberExpression final : public Expression {
+  public:
+    std::unique_ptr<Expression> object;
+    Identifier property;
+
+    ValueType datatype() const override { std::unreachable(); }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class StringLength final : public Expression {
+  public:
+    std::unique_ptr<Expression> argument;
+
+    ValueType datatype() const override { return NumberType{}; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class StringifyNumber final : public Expression {
+  public:
+    std::unique_ptr<Expression> argument;
+
+    ValueType datatype() const override { return StringType{}; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class BinaryExpression final : public Expression {
+  public:
+    std::unique_ptr<Expression> left;
+    std::unique_ptr<Expression> right;
+    char32_t op;
+
+    ValueType datatype() const override { return NumberType{}; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class LogicalExpression final : public Expression {
+  public:
+    std::unique_ptr<Expression> left;
+    std::unique_ptr<Expression> right;
+    Operator op;
+
+    ValueType datatype() const override { std::unreachable(); }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class AssignExpression final : public Expression {
+  public:
+    std::unique_ptr<Expression> left;
+    std::unique_ptr<Expression> right;
+
+    ValueType datatype() const override { std::unreachable(); }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class NumericLiteral final : public Expression {
+  public:
+    double val;
+
+    ValueType datatype() const override { return NumberType{}; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class AsciiLiteral final : public Expression {
+  public:
+    std::string val;
+
+    ValueType datatype() const override { return StringType{}; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class UnicodeLiteral final : public Expression {
+  public:
+    std::u16string val;
+
+    ValueType datatype() const override { return StringType{}; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class VariableAccessor final : public Expression {
+  public:
+    Identifier identifier;
+
+    ValueType datatype() const override { std::unreachable(); }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override;
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override;
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class ScopeAccessor final : public Expression {
+  public:
+    ValueType local_type;
+    std::size_t scope_offset;
+    std::size_t local_offset;
+
+    ValueType datatype() const override { return local_type; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    };
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class IntrinsicAccessor final : public Expression {
+  public:
+    IntrinsicObject object_type;
+
+    ValueType datatype() const override { return object_type; }
+
+    std::unique_ptr<Expression>
+    analyze_as_value(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::unique_ptr<CalleeExpression>
+    analyze_as_callee(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class Statement {
+  public:
+    virtual ~Statement() = default;
+    virtual std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const = 0;
+    virtual std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const = 0;
+  };
+
+  class InitializeVariable final : public Statement {
+  public:
+    Identifier variable_name;
+    std::unique_ptr<Expression> rvalue;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override;
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    }
+  };
+
+  class InitializeScope final : public Statement {
+  public:
+    std::size_t local_offset;
+    std::unique_ptr<Expression> rvalue;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override {
+      std::unreachable();
+    };
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class ExpressionStatement final : public Statement {
+  public:
+    std::unique_ptr<Expression> argument;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override;
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class ReturnStatement final : public Statement {
+  public:
+    std::unique_ptr<Expression> argument;
+    std::unique_ptr<Statement>
+    analyze(ExecutionBoundary &boundary) const override;
+    std::list<std::uint64_t>
+    serialize(ExecutionBoundary &boundary) const override;
+  };
+
+  class ExecutionBoundary {
+  public:
+    ExecutionBoundary(Compiler &c);
+
+    const ExecutionBoundary *parent_boundary;
+    std::unique_ptr<Machine::ExecutionBoundary> output_boundary;
+    std::vector<std::unique_ptr<Statement>> program;
+
+    std::list<FunctionDefinition> inner_functions;
+    const FunctionDefinition *find_function(Identifier identifier) const;
+
+    std::flat_map<Identifier, ValueType> local_scope;
+    std::unique_ptr<ScopeAccessor> find_local(Identifier identifier) const;
+
+    ValueType return_type;
+    virtual bool allows_return_stmt() const = 0;
+
+    void parse_statement();
+    void analyze();
+    void serialize();
+    void export_serial_program();
+
+    const MachineString *push_string_literal(std::string_view ascii);
+    const MachineString *push_string_literal(std::u16string_view unicode);
+
+  protected:
+    Compiler &compiler;
+
+    void parse_function_stmt();
+    void parse_variable_decl();
+
+    std::unique_ptr<Expression> parse_expression();
+
+    std::unique_ptr<Expression> parse_assign_expr();
+    std::unique_ptr<Expression> parse_logical_disjunct();
+    std::unique_ptr<Expression> parse_additive_expr();
+    std::unique_ptr<Expression> parse_object_literal();
+
+    std::unique_ptr<Expression>
+    parse_member_expr(std::unique_ptr<Expression> callee);
+    std::unique_ptr<Expression>
+    parse_call_expr(std::unique_ptr<Expression> callee);
+    std::unique_ptr<Expression> parse_postfix_expr();
+
+    struct ParsePrimaryExpression {
+      ExecutionBoundary &boundary;
+      std::unique_ptr<Expression> operator()(std::monostate);
+      std::unique_ptr<Expression> operator()(char32_t punct);
+      std::unique_ptr<Expression> operator()(std::int64_t number);
+      std::unique_ptr<Expression> operator()(double number);
+      std::unique_ptr<Expression> operator()(Operator op);
+      std::unique_ptr<Expression> operator()(Keyword keyword);
+      std::unique_ptr<Expression> operator()(Identifier identifier);
+      std::unique_ptr<Expression> operator()(std::string_view ascii);
+      std::unique_ptr<Expression> operator()(std::u16string_view unicode);
+    };
+  };
+
+  class FunctionDefinition final : public ExecutionBoundary {
+  public:
+    FunctionDefinition(Compiler &c) : ExecutionBoundary{c} {}
+
+    std::optional<Identifier> function_name;
+    std::vector<Identifier> arguments;
+
+    bool allows_return_stmt() const override { return 1; }
+    void parse_function_decl();
+  };
+
+  class ModuleDefinition final : public ExecutionBoundary {
+  public:
+    ModuleDefinition(Compiler &c) : ExecutionBoundary{c} {}
+    bool allows_return_stmt() const override { return 0; }
+  };
+
+  std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
+  void parse_text();
+  void analyze_program();
+  void write_serial_program();
+
+private:
+  Machine &machine;
+
+  std::map<std::string, Identifier> atom_atlas;
+  std::set<std::string> token_strings;
+  std::set<std::u16string> token_u16strings;
+
+  std::size_t position;
+  std::vector<std::optional<char32_t>> backtrace;
+
+  std::generator<std::optional<char32_t>> traverse_text();
+  std::optional<char32_t> forward();
+  void backward();
+  void backward(std::size_t N);
+
+  Token tokenize_identifier(char32_t leading);
+  Token tokenize_string_literal(char32_t separator);
+  Token tokenize_numeric_literal(char32_t leading);
+
+  Token last_token;
+  void assert_punct(char32_t must_be);
+  void tokenize();
+
+  ModuleDefinition entry_module{*this};
+};
+
 static const std::flat_map<std::string_view, Keyword> keyword_atlas{
     {"const", Keyword::K_CONST},       {"let", Keyword::K_LET},
     {"var", Keyword::K_VAR},           {"class", Keyword::K_CLASS},
@@ -847,6 +1614,7 @@ void Compiler::ExecutionBoundary::export_serial_program() {
 }
 
 void Compiler::write_serial_program() {
+  machine.program_entry = entry_module.output_boundary.get();
   entry_module.serialize();
   entry_module.export_serial_program();
 }
@@ -865,4 +1633,129 @@ Compiler::ExecutionBoundary::push_string_literal(std::u16string_view unicode) {
   return &(*u16literal_it);
 }
 
+Machine::Machine() { runtime_memory = std::make_unique<RuntimeMemory>(); }
+
+void Machine::EvaluateStatement::operator()(StmtInitialize) {}
+
+void Machine::EvaluateStatement::operator()(StmtExpression) {
+  machine.evaluate_expression();
+}
+
+void Machine::EvaluateStatement::operator()(StmtReturn) {}
+
+template <typename T> static T from_index(std::uint64_t alternative_idx) {
+  template for (constexpr std::size_t I :
+                std::views::iota(1u, std::meta::variant_size(^^T))) {
+    if (I == alternative_idx)
+      return T{std::in_place_index<I>};
+  }
+  return std::monostate{};
+}
+
+void Machine::evaluate_statement() {
+  from_index<StatementKind>(*current_frame->program_iter++)
+      .visit(EvaluateStatement{*this});
+}
+
+std::uint64_t Machine::EvaluateExpression::operator()(ExprLiteral) { return 0; }
+
+std::uint64_t Machine::EvaluateExpression::operator()(ExprScopeAccess) {
+  return 0;
+}
+
+template <BinaryOperation P>
+std::uint64_t Machine::EvaluateExpression::operator()(ExprBinary<P>) {
+  return 0;
+}
+
+std::uint64_t Machine::EvaluateExpression::operator()(ExprFunctionCall) {
+  return 0;
+}
+
+std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) { return 0; }
+
+std::uint64_t Machine::EvaluateExpression::operator()(ExprStringLength) {
+  return 0;
+}
+
+std::uint64_t Machine::EvaluateExpression::operator()(ExprStringifyNumber) {
+  return 0;
+}
+
+std::uint64_t Machine::evaluate_expression() {
+  return from_index<ExpressionKind>(*current_frame->program_iter++)
+      .visit(EvaluateExpression{});
+}
+
+void Machine::evaluate() {
+  current_frame = &runtime_memory->execution_frames.emplace_back();
+  current_frame->program_iter = program_entry->program.begin();
+  current_frame->boundary = program_entry;
+  current_frame->own_scope = runtime_memory->structures.emplace_back(
+      program_entry->local_scope.size());
+  while (current_frame->program_iter != program_entry->program.end())
+    evaluate_statement();
+}
+
+std::list<ConsoleMessage>
+Machine::collect_console_messages(std::stop_token stopper) {
+  auto check_messages = [&] { return console_messages.size() > 0; };
+  std::unique_lock console_lock{console_mutex};
+  console_condition.wait(console_lock, stopper, check_messages);
+  std::list<ConsoleMessage> message_box{};
+  console_messages.swap(message_box);
+  return message_box;
+}
+
+static std::inplace_vector<std::uint8_t, 3>
+encode_u16_for_print(std::uint16_t uchar) {
+  std::array<std::uint8_t, 3> buffer{};
+  std::size_t buffer_len{buffer.size()};
+  uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
+  assert(result != nullptr);
+  return {std::from_range, buffer | std::views::take(buffer_len)};
+}
+
+struct EncodeMachineString {
+  std::string operator()(std::string_view ascii) { return std::string{ascii}; }
+  std::string operator()(std::u16string_view unicode) {
+    auto encoded_message = unicode |
+                           std::views::transform(encode_u16_for_print) |
+                           std::views::join;
+    return std::string{std::from_range, encoded_message};
+  }
+};
+
+std::string ConsoleMessage::encode_for_print() const {
+  return content.visit(EncodeMachineString{});
+}
+
+Language::Language() { machine = std::make_unique<Machine>(); }
+
+Language::Language(Language &&other) noexcept = default;
+Language &Language::operator=(Language &&other) noexcept = default;
+Language::~Language() = default;
+
+void Language::compile_and_execute() {
+  Manadrain::Compiler compiler{*machine};
+  compiler.text_buffer = std::move(text_buffer);
+  compiler.parse_text();
+  compiler.analyze_program();
+  compiler.write_serial_program();
+
+  machine->evaluate();
+
+  auto console_printer = [&](std::stop_token stopper) {
+    std::list<Manadrain::ConsoleMessage> messages{
+        machine->collect_console_messages(stopper)};
+    for (const Manadrain::ConsoleMessage &message : messages)
+      std::println("{}", message.encode_for_print());
+  };
+  auto console_worker = [&](std::stop_token stopper) {
+    do
+      console_printer(stopper);
+    while (not stopper.stop_requested());
+  };
+  std::jthread console_thread{console_worker};
+}
 } // namespace Manadrain
