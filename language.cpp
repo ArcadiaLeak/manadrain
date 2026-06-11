@@ -191,34 +191,34 @@ public:
   std::list<ConsoleMessage> collect_console_messages(std::stop_token stopper);
   void evaluate();
 
-  class ExecutionBoundary {
+  class RuntimeBoundary {
   public:
-    std::flat_map<Identifier, ValueType> local_scope;
+    std::size_t local_size;
     std::vector<std::uint64_t> program;
   };
 
-  const ExecutionBoundary *program_entry;
-  std::vector<std::unique_ptr<ExecutionBoundary>> boundaries;
+  const RuntimeBoundary *program_entry;
+  std::vector<std::unique_ptr<RuntimeBoundary>> boundaries;
   std::set<MachineString> string_literals;
 
 private:
-  struct ExecutionFrame {
-    const ExecutionBoundary *boundary;
+  struct RuntimeFrame {
+    const RuntimeBoundary *boundary;
     std::vector<std::uint64_t>::const_iterator program_iter;
     std::span<std::uint64_t> own_scope;
-    std::span<ExecutionFrame *> closure;
+    std::span<RuntimeFrame *> closure;
     std::uint64_t return_val;
   };
 
   struct RuntimeMemory {
     std::pmr::monotonic_buffer_resource resource{65536};
-    std::pmr::list<ExecutionFrame> execution_frames{&resource};
-    std::pmr::list<std::pmr::vector<ExecutionFrame *>> scope_traces{&resource};
+    std::pmr::list<RuntimeFrame> runtime_frames{&resource};
+    std::pmr::list<std::pmr::vector<RuntimeFrame *>> scope_traces{&resource};
     std::pmr::list<std::pmr::vector<std::uint64_t>> structures{&resource};
     std::pmr::list<MachineString> strings{&resource};
   };
 
-  ExecutionFrame *current_frame;
+  RuntimeFrame *current_frame;
   std::unique_ptr<RuntimeMemory> runtime_memory;
   std::mutex console_mutex;
   std::condition_variable_any console_condition;
@@ -246,14 +246,14 @@ private:
   };
   std::uint64_t evaluate_expression();
 
-  std::uint64_t evaluate_function_call(const ExecutionBoundary *boundary);
+  std::uint64_t evaluate_function_call(const RuntimeBoundary *boundary);
 };
 
 class Compiler {
 public:
   Compiler(Machine &m) : machine{m} {}
 
-  class ExecutionBoundary;
+  class AbstractBoundary;
   class FunctionDefinition;
   class CalleeExpression;
 
@@ -276,18 +276,18 @@ public:
     virtual ValueType datatype() const = 0;
 
     virtual std::unique_ptr<Expression>
-    analyze_as_lvalue(ExecutionBoundary &boundary) const {
+    analyze_as_lvalue(AbstractBoundary &boundary) const {
       throw InvalidAssignment{};
     }
 
     virtual std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const = 0;
+    analyze_as_rvalue(AbstractBoundary &boundary) const = 0;
 
     virtual std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const = 0;
+    analyze_as_callee(AbstractBoundary &boundary) const = 0;
 
     virtual std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const = 0;
+    serialize(AbstractBoundary &boundary) const = 0;
   };
 
   struct InjectStringify {
@@ -304,16 +304,16 @@ public:
   class CalleeExpression : public Expression {
   public:
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override {
+    analyze_as_rvalue(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     virtual void analyze_arguments(
-        ExecutionBoundary &boundary,
+        AbstractBoundary &boundary,
         std::span<const std::unique_ptr<Expression>> arguments) = 0;
   };
 
@@ -325,15 +325,15 @@ public:
     ValueType datatype() const override { std::unreachable(); }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -347,11 +347,11 @@ public:
     ValueType datatype() const override { return callee->return_type; }
 
     void analyze_arguments(
-        ExecutionBoundary &boundary,
+        AbstractBoundary &boundary,
         std::span<const std::unique_ptr<Expression>> arguments) override;
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class ConsoleLogCall final : public CalleeExpression {
@@ -361,11 +361,11 @@ public:
     ValueType datatype() const override { return VoidType{}; }
 
     void analyze_arguments(
-        ExecutionBoundary &boundary,
+        AbstractBoundary &boundary,
         std::span<const std::unique_ptr<Expression>> arguments) override;
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class ObjectExpression final : public Expression {
@@ -377,17 +377,17 @@ public:
     ValueType datatype() const override { std::unreachable(); }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override {
+    analyze_as_rvalue(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -400,13 +400,13 @@ public:
     ValueType datatype() const override { std::unreachable(); }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override;
+    analyze_as_callee(AbstractBoundary &boundary) const override;
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -418,17 +418,17 @@ public:
     ValueType datatype() const override { return NumberType{}; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override {
+    analyze_as_rvalue(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class StringifyNumber final : public Expression {
@@ -438,17 +438,17 @@ public:
     ValueType datatype() const override { return StringType{}; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override {
+    analyze_as_rvalue(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class BinaryExpression final : public Expression {
@@ -460,15 +460,15 @@ public:
     ValueType datatype() const override { return NumberType{}; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class LogicalExpression final : public Expression {
@@ -480,15 +480,15 @@ public:
     ValueType datatype() const override { return right->datatype(); }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -501,15 +501,15 @@ public:
     ValueType datatype() const override { std::unreachable(); }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -521,15 +521,15 @@ public:
     ValueType datatype() const override { return NumberType{}; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class AsciiLiteral final : public Expression {
@@ -539,15 +539,15 @@ public:
     ValueType datatype() const override { return StringType{}; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class UnicodeLiteral final : public Expression {
@@ -557,15 +557,15 @@ public:
     ValueType datatype() const override { return StringType{}; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class VariableAccessor final : public Expression {
@@ -575,16 +575,16 @@ public:
     ValueType datatype() const override { std::unreachable(); }
 
     std::unique_ptr<Expression>
-    analyze_as_lvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_lvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override;
+    analyze_as_callee(AbstractBoundary &boundary) const override;
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -598,17 +598,17 @@ public:
     ValueType datatype() const override { return local_type; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override {
+    analyze_as_rvalue(AbstractBoundary &boundary) const override {
       std::unreachable();
     };
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class IntrinsicAccessor final : public Expression {
@@ -618,17 +618,17 @@ public:
     ValueType datatype() const override { return object_type; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override {
+    analyze_as_rvalue(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -637,9 +637,9 @@ public:
   public:
     virtual ~Statement() = default;
     virtual std::unique_ptr<Statement>
-    analyze(ExecutionBoundary &boundary) const = 0;
+    analyze(AbstractBoundary &boundary) const = 0;
     virtual std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const = 0;
+    serialize(AbstractBoundary &boundary) const = 0;
   };
 
   class InitializeVariable final : public Statement {
@@ -647,9 +647,9 @@ public:
     Identifier variable_name;
     std::unique_ptr<Expression> rvalue;
     std::unique_ptr<Statement>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze(AbstractBoundary &boundary) const override;
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
@@ -659,43 +659,43 @@ public:
     std::size_t local_offset;
     std::unique_ptr<Expression> rvalue;
     std::unique_ptr<Statement>
-    analyze(ExecutionBoundary &boundary) const override {
+    analyze(AbstractBoundary &boundary) const override {
       std::unreachable();
     };
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class ExpressionStatement final : public Statement {
   public:
     std::unique_ptr<Expression> argument;
     std::unique_ptr<Statement>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze(AbstractBoundary &boundary) const override;
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
   class ReturnStatement final : public Statement {
   public:
     std::unique_ptr<Expression> argument;
     std::unique_ptr<Statement>
-    analyze(ExecutionBoundary &boundary) const override;
+    analyze(AbstractBoundary &boundary) const override;
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override;
+    serialize(AbstractBoundary &boundary) const override;
   };
 
-  class ExecutionBoundary {
+  class AbstractBoundary {
   public:
-    ExecutionBoundary(Compiler &c);
+    AbstractBoundary(Compiler &c);
 
-    ExecutionBoundary *parent_boundary;
-    std::unique_ptr<Machine::ExecutionBoundary> output_boundary;
+    AbstractBoundary *parent_boundary;
+    std::unique_ptr<Machine::RuntimeBoundary> output_boundary;
     std::vector<std::unique_ptr<Statement>> program;
 
     std::list<FunctionDefinition> inner_functions;
     FunctionDefinition *find_function(Identifier identifier);
 
-    std::flat_map<Identifier, ValueType> local_scope;
+    std::flat_map<Identifier, ValueType> local_layout;
     std::unique_ptr<ScopeAccessor> find_local(Identifier identifier) const;
 
     ValueType return_type;
@@ -729,7 +729,7 @@ public:
     std::unique_ptr<Expression> parse_postfix_expr();
 
     struct ParsePrimaryExpression {
-      ExecutionBoundary &boundary;
+      AbstractBoundary &boundary;
       std::unique_ptr<Expression> operator()(std::monostate);
       std::unique_ptr<Expression> operator()(char32_t punct);
       std::unique_ptr<Expression> operator()(std::int64_t number);
@@ -745,9 +745,9 @@ public:
     void analyze_inner_functions();
   };
 
-  class FunctionDefinition final : public ExecutionBoundary {
+  class FunctionDefinition final : public AbstractBoundary {
   public:
-    FunctionDefinition(Compiler &c) : ExecutionBoundary{c} {}
+    FunctionDefinition(Compiler &c) : AbstractBoundary{c} {}
 
     enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
     AnalyzerMark analyzer_mark;
@@ -770,22 +770,22 @@ public:
     ValueType datatype() const override { return LambdaType{}; }
 
     std::unique_ptr<Expression>
-    analyze_as_rvalue(ExecutionBoundary &boundary) const override;
+    analyze_as_rvalue(AbstractBoundary &boundary) const override;
 
     std::unique_ptr<CalleeExpression>
-    analyze_as_callee(ExecutionBoundary &boundary) const override {
+    analyze_as_callee(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
 
     std::list<std::uint64_t>
-    serialize(ExecutionBoundary &boundary) const override {
+    serialize(AbstractBoundary &boundary) const override {
       std::unreachable();
     }
   };
 
-  class ModuleDefinition final : public ExecutionBoundary {
+  class ModuleDefinition final : public AbstractBoundary {
   public:
-    ModuleDefinition(Compiler &c) : ExecutionBoundary{c} {}
+    ModuleDefinition(Compiler &c) : AbstractBoundary{c} {}
     bool allows_return_stmt() const override { return 0; }
   };
 
@@ -1015,7 +1015,7 @@ void Compiler::parse_text() {
   }
 }
 
-void Compiler::ExecutionBoundary::parse_function_stmt() {
+void Compiler::AbstractBoundary::parse_function_stmt() {
   FunctionDefinition definition{compiler};
   definition.parse_function_decl();
   if (not definition.function_name)
@@ -1028,7 +1028,7 @@ void Compiler::ExecutionBoundary::parse_function_stmt() {
   inner_functions.push_back(std::move(definition));
 }
 
-void Compiler::ExecutionBoundary::parse_variable_decl() {
+void Compiler::AbstractBoundary::parse_variable_decl() {
   compiler.tokenize();
   if (not std::holds_alternative<Identifier>(compiler.last_token))
     throw MissingVariableName{};
@@ -1041,18 +1041,18 @@ void Compiler::ExecutionBoundary::parse_variable_decl() {
   initialize_variable->rvalue = parse_expression();
   program.push_back(std::move(initialize_variable));
   compiler.assert_punct(';');
-  if (local_scope.contains(variable_name))
+  if (local_layout.contains(variable_name))
     throw DuplicateDeclaration{};
-  local_scope.try_emplace(variable_name);
+  local_layout.try_emplace(variable_name);
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_expression() {
+Compiler::AbstractBoundary::parse_expression() {
   return parse_assign_expr();
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_postfix_expr() {
+Compiler::AbstractBoundary::parse_postfix_expr() {
   std::unique_ptr postfix_expr{
       compiler.last_token.visit(ParsePrimaryExpression{*this})};
   auto parse_postfix = [&](char32_t punct) -> std::unique_ptr<Expression> {
@@ -1079,7 +1079,7 @@ Compiler::ExecutionBoundary::parse_postfix_expr() {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_call_expr(
+Compiler::AbstractBoundary::parse_call_expr(
     std::unique_ptr<Compiler::Expression> callee) {
   std::unique_ptr expression{std::make_unique<AliasedFunctionCall>()};
   expression->callee = std::move(callee);
@@ -1096,7 +1096,7 @@ Compiler::ExecutionBoundary::parse_call_expr(
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_member_expr(
+Compiler::AbstractBoundary::parse_member_expr(
     std::unique_ptr<Compiler::Expression> object) {
   compiler.tokenize();
   if (not std::holds_alternative<Identifier>(compiler.last_token))
@@ -1109,7 +1109,7 @@ Compiler::ExecutionBoundary::parse_member_expr(
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_additive_expr() {
+Compiler::AbstractBoundary::parse_additive_expr() {
   std::unique_ptr expr_left{parse_postfix_expr()};
   if (compiler.last_token != Token{U'+'} && compiler.last_token != Token{U'-'})
     return expr_left;
@@ -1122,7 +1122,7 @@ Compiler::ExecutionBoundary::parse_additive_expr() {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_assign_expr() {
+Compiler::AbstractBoundary::parse_assign_expr() {
   std::unique_ptr expr_left{parse_logical_disjunct()};
   if (compiler.last_token != Token{U'='})
     return expr_left;
@@ -1134,7 +1134,7 @@ Compiler::ExecutionBoundary::parse_assign_expr() {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_logical_disjunct() {
+Compiler::AbstractBoundary::parse_logical_disjunct() {
   std::unique_ptr expr_left{parse_additive_expr()};
   while (compiler.last_token == Token{Operator::LOGICAL_DISJUNCT}) {
     std::unique_ptr expression{std::make_unique<LogicalExpression>()};
@@ -1148,7 +1148,7 @@ Compiler::ExecutionBoundary::parse_logical_disjunct() {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::parse_object_literal() {
+Compiler::AbstractBoundary::parse_object_literal() {
   std::unique_ptr expression{std::make_unique<ObjectExpression>()};
   compiler.tokenize();
   while (compiler.last_token != Token{U'}'}) {
@@ -1173,37 +1173,35 @@ Compiler::ExecutionBoundary::parse_object_literal() {
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
-    std::monostate) {
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(std::monostate) {
   throw UnexpectedToken{};
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(Operator op) {
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(Operator op) {
   throw UnexpectedToken{};
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
-    char32_t punct) {
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(char32_t punct) {
   if (punct == '{')
     return boundary.parse_object_literal();
   else
     throw UnexpectedToken{};
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(
     std::int64_t number) {
   std::unique_ptr num_literal{std::make_unique<NumericLiteral>()};
   num_literal->val = static_cast<double>(number);
   return num_literal;
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(double number) {
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(double number) {
   std::unique_ptr num_literal{std::make_unique<NumericLiteral>()};
   num_literal->val = number;
   return num_literal;
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(
     Keyword keyword) {
   if (keyword == Keyword::K_FUNCTION) {
     FunctionDefinition &definition{
@@ -1216,28 +1214,28 @@ Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
   throw UnexpectedToken{};
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(
     Identifier identifier) {
   std::unique_ptr variable_accessor{std::make_unique<VariableAccessor>()};
   variable_accessor->identifier = identifier;
   return variable_accessor;
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(
     std::string_view ascii) {
   std::unique_ptr ascii_literal{std::make_unique<AsciiLiteral>()};
   ascii_literal->val = ascii;
   return ascii_literal;
 }
 std::unique_ptr<Compiler::Expression>
-Compiler::ExecutionBoundary::ParsePrimaryExpression::operator()(
+Compiler::AbstractBoundary::ParsePrimaryExpression::operator()(
     std::u16string_view unicode) {
   std::unique_ptr unicode_literal{std::make_unique<UnicodeLiteral>()};
   unicode_literal->val = unicode;
   return unicode_literal;
 }
 
-void Compiler::ExecutionBoundary::parse_statement() {
+void Compiler::AbstractBoundary::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(compiler.last_token))
     keyword = std::get<Keyword>(compiler.last_token);
@@ -1279,7 +1277,7 @@ void Compiler::FunctionDefinition::parse_function_decl() {
     if (not std::holds_alternative<Identifier>(compiler.last_token))
       throw MissingFormalParameter{};
     Identifier parameter{std::get<Identifier>(compiler.last_token)};
-    local_scope.try_emplace(parameter);
+    local_layout.try_emplace(parameter);
     arguments.push_back(parameter);
     compiler.tokenize();
     if (compiler.last_token == Token{U')'})
@@ -1299,29 +1297,29 @@ void Compiler::FunctionDefinition::parse_function_decl() {
   }
 }
 
-Compiler::ExecutionBoundary::ExecutionBoundary(Compiler &c) : compiler{c} {
-  output_boundary = std::make_unique<Machine::ExecutionBoundary>();
+Compiler::AbstractBoundary::AbstractBoundary(Compiler &c) : compiler{c} {
+  output_boundary = std::make_unique<Machine::RuntimeBoundary>();
 }
 
 std::unique_ptr<Compiler::Statement>
-Compiler::InitializeVariable::analyze(ExecutionBoundary &boundary) const {
+Compiler::InitializeVariable::analyze(AbstractBoundary &boundary) const {
   std::unique_ptr initialize_scope{std::make_unique<InitializeScope>()};
   initialize_scope->local_offset = std::distance(
-      boundary.local_scope.begin(), boundary.local_scope.find(variable_name));
+      boundary.local_layout.begin(), boundary.local_layout.find(variable_name));
   initialize_scope->rvalue = rvalue->analyze_as_rvalue(boundary);
-  boundary.local_scope[variable_name] = initialize_scope->rvalue->datatype();
+  boundary.local_layout[variable_name] = initialize_scope->rvalue->datatype();
   return initialize_scope;
 }
 
 std::unique_ptr<Compiler::Statement>
-Compiler::ExpressionStatement::analyze(ExecutionBoundary &boundary) const {
+Compiler::ExpressionStatement::analyze(AbstractBoundary &boundary) const {
   std::unique_ptr expression_stmt{std::make_unique<ExpressionStatement>()};
   expression_stmt->argument = argument->analyze_as_rvalue(boundary);
   return expression_stmt;
 }
 
 std::unique_ptr<Compiler::Statement>
-Compiler::ReturnStatement::analyze(ExecutionBoundary &boundary) const {
+Compiler::ReturnStatement::analyze(AbstractBoundary &boundary) const {
   if (not boundary.allows_return_stmt())
     throw InvalidReturnStatement{};
   std::unique_ptr return_stmt{std::make_unique<ReturnStatement>()};
@@ -1332,8 +1330,8 @@ Compiler::ReturnStatement::analyze(ExecutionBoundary &boundary) const {
 
 std::unique_ptr<Compiler::Expression>
 Compiler::VariableAccessor::analyze_as_rvalue(
-    ExecutionBoundary &boundary) const {
-  const ExecutionBoundary *current{&boundary};
+    AbstractBoundary &boundary) const {
+  const AbstractBoundary *current{&boundary};
   for (std::size_t i = 0; current; ++i) {
     std::unique_ptr<ScopeAccessor> accessor{current->find_local(identifier)};
     if (not accessor)
@@ -1353,8 +1351,8 @@ Compiler::VariableAccessor::analyze_as_rvalue(
 
 std::unique_ptr<Compiler::Expression>
 Compiler::VariableAccessor::analyze_as_lvalue(
-    ExecutionBoundary &boundary) const {
-  const ExecutionBoundary *current{&boundary};
+    AbstractBoundary &boundary) const {
+  const AbstractBoundary *current{&boundary};
   std::unique_ptr<ScopeAccessor> accessor{};
   for (std::size_t i = 0; 1; ++i) {
     if (accessor) {
@@ -1370,21 +1368,21 @@ Compiler::VariableAccessor::analyze_as_lvalue(
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::AsciiLiteral::analyze_as_rvalue(ExecutionBoundary &boundary) const {
+Compiler::AsciiLiteral::analyze_as_rvalue(AbstractBoundary &boundary) const {
   std::unique_ptr copycat{std::make_unique<AsciiLiteral>()};
   copycat->val = val;
   return copycat;
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::UnicodeLiteral::analyze_as_rvalue(ExecutionBoundary &boundary) const {
+Compiler::UnicodeLiteral::analyze_as_rvalue(AbstractBoundary &boundary) const {
   std::unique_ptr copycat{std::make_unique<UnicodeLiteral>()};
   copycat->val = val;
   return copycat;
 }
 
 std::unique_ptr<Compiler::Expression>
-Compiler::NumericLiteral::analyze_as_rvalue(ExecutionBoundary &boundary) const {
+Compiler::NumericLiteral::analyze_as_rvalue(AbstractBoundary &boundary) const {
   std::unique_ptr copycat{std::make_unique<NumericLiteral>()};
   copycat->val = val;
   return copycat;
@@ -1392,7 +1390,7 @@ Compiler::NumericLiteral::analyze_as_rvalue(ExecutionBoundary &boundary) const {
 
 std::unique_ptr<Compiler::Expression>
 Compiler::BinaryExpression::analyze_as_rvalue(
-    ExecutionBoundary &boundary) const {
+    AbstractBoundary &boundary) const {
   std::unique_ptr binary_expr{std::make_unique<BinaryExpression>()};
   binary_expr->op = op;
   binary_expr->left = left->analyze_as_rvalue(boundary);
@@ -1406,17 +1404,20 @@ Compiler::BinaryExpression::analyze_as_rvalue(
 
 std::unique_ptr<Compiler::Expression>
 Compiler::LogicalExpression::analyze_as_rvalue(
-    ExecutionBoundary &boundary) const {
+    AbstractBoundary &boundary) const {
   std::unique_ptr logical_expr{std::make_unique<LogicalExpression>()};
   logical_expr->op = op;
   logical_expr->left = left->analyze_as_rvalue(boundary);
   logical_expr->right = right->analyze_as_rvalue(boundary);
+  ValueType datatype_left{logical_expr->left->datatype()};
+  ValueType datatype_right{logical_expr->right->datatype()};
+  assert(datatype_left.index() == datatype_right.index());
   return logical_expr;
 }
 
 std::unique_ptr<Compiler::Expression>
 Compiler::AssignExpression::analyze_as_rvalue(
-    ExecutionBoundary &boundary) const {
+    AbstractBoundary &boundary) const {
   std::unique_ptr assign_expr{std::make_unique<AssignExpression>()};
   assign_expr->left = left->analyze_as_lvalue(boundary);
   assign_expr->right = right->analyze_as_rvalue(boundary);
@@ -1425,13 +1426,13 @@ Compiler::AssignExpression::analyze_as_rvalue(
 
 std::unique_ptr<Compiler::Expression>
 Compiler::LambdaExpression::analyze_as_rvalue(
-    ExecutionBoundary &boundary) const {
+    AbstractBoundary &boundary) const {
   return nullptr;
 }
 
 std::unique_ptr<Compiler::Expression>
 Compiler::MemberExpression::analyze_as_rvalue(
-    ExecutionBoundary &boundary) const {
+    AbstractBoundary &boundary) const {
   std::unique_ptr object_expr{object->analyze_as_rvalue(boundary)};
   if (std::holds_alternative<StringType>(object_expr->datatype()) &&
       property.offset == OFFSET_length) {
@@ -1444,18 +1445,18 @@ Compiler::MemberExpression::analyze_as_rvalue(
 
 std::unique_ptr<Compiler::Expression>
 Compiler::AliasedFunctionCall::analyze_as_rvalue(
-    ExecutionBoundary &boundary) const {
+    AbstractBoundary &boundary) const {
   std::unique_ptr callee_expression{callee->analyze_as_callee(boundary)};
   callee_expression->analyze_arguments(boundary, arguments);
   return callee_expression;
 }
 
 void Compiler::DirectFunctionCall::analyze_arguments(
-    ExecutionBoundary &boundary,
+    AbstractBoundary &boundary,
     std::span<const std::unique_ptr<Expression>> arguments) {}
 
 void Compiler::ConsoleLogCall::analyze_arguments(
-    ExecutionBoundary &boundary,
+    AbstractBoundary &boundary,
     std::span<const std::unique_ptr<Expression>> positional_args) {
   auto stringify_argument = [&boundary](const auto &argument) {
     std::unique_ptr analyzed_arg{argument->analyze_as_rvalue(boundary)};
@@ -1469,15 +1470,15 @@ void Compiler::ConsoleLogCall::analyze_arguments(
 
 std::unique_ptr<Compiler::CalleeExpression>
 Compiler::MemberExpression::analyze_as_callee(
-    ExecutionBoundary &boundary) const {
+    AbstractBoundary &boundary) const {
   std::unique_ptr analyzed_object{object->analyze_as_rvalue(boundary)};
   return analyzed_object->datatype().visit(FindMethod{property});
 }
 
 std::unique_ptr<Compiler::CalleeExpression>
 Compiler::VariableAccessor::analyze_as_callee(
-    ExecutionBoundary &boundary) const {
-  ExecutionBoundary *current{&boundary};
+    AbstractBoundary &boundary) const {
+  AbstractBoundary *current{&boundary};
   while (1) {
     FunctionDefinition *definition{current->find_function(identifier)};
     if (not definition)
@@ -1492,19 +1493,19 @@ Compiler::VariableAccessor::analyze_as_callee(
 }
 
 std::unique_ptr<Compiler::ScopeAccessor>
-Compiler::ExecutionBoundary::find_local(Identifier identifier) const {
-  if (not local_scope.contains(identifier))
+Compiler::AbstractBoundary::find_local(Identifier identifier) const {
+  if (not local_layout.contains(identifier))
     return nullptr;
   std::size_t local_offset =
-      std::distance(local_scope.begin(), local_scope.find(identifier));
+      std::distance(local_layout.begin(), local_layout.find(identifier));
   std::unique_ptr accessor{std::make_unique<ScopeAccessor>()};
-  accessor->local_type = local_scope.values()[local_offset];
+  accessor->local_type = local_layout.values()[local_offset];
   accessor->local_offset = local_offset;
   return accessor;
 }
 
 Compiler::FunctionDefinition *
-Compiler::ExecutionBoundary::find_function(Identifier identifier) {
+Compiler::AbstractBoundary::find_function(Identifier identifier) {
   auto by_name = [](const auto &def) { return def.function_name; };
   auto function_it = std::ranges::find(inner_functions, identifier, by_name);
   return function_it == inner_functions.end() ? nullptr : &(*function_it);
@@ -1512,12 +1513,12 @@ Compiler::ExecutionBoundary::find_function(Identifier identifier) {
 
 void Compiler::analyze_program() { entry_module.analyze(); }
 
-void Compiler::ExecutionBoundary::analyze_statements() {
+void Compiler::AbstractBoundary::analyze_statements() {
   for (auto &statement : program)
     statement = statement->analyze(*this);
 }
 
-void Compiler::ExecutionBoundary::analyze_inner_functions() {
+void Compiler::AbstractBoundary::analyze_inner_functions() {
   for (auto &definition : inner_functions) {
     definition.parent_boundary = this;
     definition.analyze();
@@ -1526,10 +1527,10 @@ void Compiler::ExecutionBoundary::analyze_inner_functions() {
 
 void Compiler::FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
-    local_scope.find(argument)->second = AnyType{};
+    local_layout.find(argument)->second = AnyType{};
 }
 
-void Compiler::ExecutionBoundary::analyze() {
+void Compiler::AbstractBoundary::analyze() {
   analyze_statements();
   analyze_inner_functions();
 }
@@ -1626,7 +1627,7 @@ Compiler::InjectStringify::operator()(IntrinsicObject intrinsic_object) {
 }
 
 std::list<std::uint64_t>
-Compiler::InitializeScope::serialize(ExecutionBoundary &boundary) const {
+Compiler::InitializeScope::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{StatementKind{StmtInitialize{}}.index(),
                                   local_offset};
   output.splice(output.end(), rvalue->serialize(boundary));
@@ -1634,21 +1635,21 @@ Compiler::InitializeScope::serialize(ExecutionBoundary &boundary) const {
 }
 
 std::list<std::uint64_t>
-Compiler::ExpressionStatement::serialize(ExecutionBoundary &boundary) const {
+Compiler::ExpressionStatement::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{StatementKind{StmtExpression{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
-Compiler::ReturnStatement::serialize(ExecutionBoundary &boundary) const {
+Compiler::ReturnStatement::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{StatementKind{StmtReturn{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
-Compiler::DirectFunctionCall::serialize(ExecutionBoundary &boundary) const {
+Compiler::DirectFunctionCall::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{
       ExpressionKind{ExprFunctionCall{}}.index(),
       reinterpret_cast<std::uintptr_t>(callee->output_boundary.get())};
@@ -1656,7 +1657,7 @@ Compiler::DirectFunctionCall::serialize(ExecutionBoundary &boundary) const {
 }
 
 std::list<std::uint64_t>
-Compiler::ConsoleLogCall::serialize(ExecutionBoundary &boundary) const {
+Compiler::ConsoleLogCall::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{ExpressionKind{ExprConsole{}}.index(),
                                   arguments.size()};
   for (const auto &argument : arguments)
@@ -1665,14 +1666,14 @@ Compiler::ConsoleLogCall::serialize(ExecutionBoundary &boundary) const {
 }
 
 std::list<std::uint64_t>
-Compiler::StringLength::serialize(ExecutionBoundary &boundary) const {
+Compiler::StringLength::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{ExpressionKind{ExprStringLength{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
-Compiler::StringifyNumber::serialize(ExecutionBoundary &boundary) const {
+Compiler::StringifyNumber::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{
       ExpressionKind{ExprStringifyNumber{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
@@ -1680,7 +1681,7 @@ Compiler::StringifyNumber::serialize(ExecutionBoundary &boundary) const {
 }
 
 std::list<std::uint64_t>
-Compiler::BinaryExpression::serialize(ExecutionBoundary &boundary) const {
+Compiler::BinaryExpression::serialize(AbstractBoundary &boundary) const {
   ExpressionKind expression_kind{};
   switch (op) {
   case '+':
@@ -1697,13 +1698,13 @@ Compiler::BinaryExpression::serialize(ExecutionBoundary &boundary) const {
 }
 
 std::list<std::uint64_t>
-Compiler::NumericLiteral::serialize(ExecutionBoundary &boundary) const {
+Compiler::NumericLiteral::serialize(AbstractBoundary &boundary) const {
   return {ExpressionKind{ExprLiteral{}}.index(),
           std::bit_cast<std::uint64_t>(val)};
 }
 
 std::list<std::uint64_t>
-Compiler::AsciiLiteral::serialize(ExecutionBoundary &boundary) const {
+Compiler::AsciiLiteral::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{ExpressionKind{ExprLiteral{}}.index()};
   const MachineString *string_ptr{boundary.push_string_literal(val)};
   output.push_back(reinterpret_cast<std::uintptr_t>(string_ptr));
@@ -1711,27 +1712,27 @@ Compiler::AsciiLiteral::serialize(ExecutionBoundary &boundary) const {
 }
 
 std::list<std::uint64_t>
-Compiler::UnicodeLiteral::serialize(ExecutionBoundary &boundary) const {
+Compiler::UnicodeLiteral::serialize(AbstractBoundary &boundary) const {
   return {};
 }
 
 std::list<std::uint64_t>
-Compiler::ScopeAccessor::serialize(ExecutionBoundary &boundary) const {
+Compiler::ScopeAccessor::serialize(AbstractBoundary &boundary) const {
   return {ExpressionKind{ExprScopeAccess{}}.index(), scope_offset,
           local_offset};
 }
 
-void Compiler::ExecutionBoundary::serialize() {
+void Compiler::AbstractBoundary::serialize() {
   for (auto &definition : inner_functions)
     definition.serialize();
   std::list<std::uint64_t> output{};
   for (const auto &statement : program)
     output.splice(output.end(), statement->serialize(*this));
-  output_boundary->local_scope = local_scope;
+  output_boundary->local_size = local_layout.size();
   output_boundary->program = {std::from_range, output};
 }
 
-void Compiler::ExecutionBoundary::export_serial_program() {
+void Compiler::AbstractBoundary::export_serial_program() {
   for (auto &definition : inner_functions)
     definition.export_serial_program();
   compiler.machine.boundaries.push_back(std::move(output_boundary));
@@ -1744,14 +1745,14 @@ void Compiler::write_serial_program() {
 }
 
 const MachineString *
-Compiler::ExecutionBoundary::push_string_literal(std::string_view ascii) {
+Compiler::AbstractBoundary::push_string_literal(std::string_view ascii) {
   auto [literal_it, _] =
       compiler.machine.string_literals.emplace(std::string{ascii});
   return &(*literal_it);
 }
 
 const MachineString *
-Compiler::ExecutionBoundary::push_string_literal(std::u16string_view unicode) {
+Compiler::AbstractBoundary::push_string_literal(std::u16string_view unicode) {
   auto [u16literal_it, _] =
       compiler.machine.string_literals.emplace(std::u16string{unicode});
   return &(*u16literal_it);
@@ -1814,7 +1815,7 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprBinary<P>) {
 }
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprFunctionCall) {
-  const ExecutionBoundary *boundary{reinterpret_cast<const ExecutionBoundary *>(
+  const RuntimeBoundary *boundary{reinterpret_cast<const RuntimeBoundary *>(
       *machine.current_frame->program_iter++)};
   return machine.evaluate_function_call(boundary);
 }
@@ -1860,17 +1861,16 @@ std::uint64_t Machine::evaluate_expression() {
       .visit(EvaluateExpression{*this});
 }
 
-std::uint64_t
-Machine::evaluate_function_call(const ExecutionBoundary *boundary) {
+std::uint64_t Machine::evaluate_function_call(const RuntimeBoundary *boundary) {
   auto scope_trace = std::ranges::concat_view{
       std::ranges::single_view{current_frame}, current_frame->closure};
-  current_frame = &runtime_memory->execution_frames.emplace_back();
+  current_frame = &runtime_memory->runtime_frames.emplace_back();
   current_frame->boundary = boundary;
   current_frame->closure =
       runtime_memory->scope_traces.emplace_back(std::from_range, scope_trace);
   current_frame->program_iter = boundary->program.begin();
   current_frame->own_scope =
-      runtime_memory->structures.emplace_back(boundary->local_scope.size());
+      runtime_memory->structures.emplace_back(boundary->local_size);
   while (current_frame->program_iter != boundary->program.end())
     evaluate_statement();
   std::uint64_t return_val{current_frame->return_val};
@@ -1879,11 +1879,11 @@ Machine::evaluate_function_call(const ExecutionBoundary *boundary) {
 }
 
 void Machine::evaluate() {
-  current_frame = &runtime_memory->execution_frames.emplace_back();
+  current_frame = &runtime_memory->runtime_frames.emplace_back();
   current_frame->program_iter = program_entry->program.begin();
   current_frame->boundary = program_entry;
-  current_frame->own_scope = runtime_memory->structures.emplace_back(
-      program_entry->local_scope.size());
+  current_frame->own_scope =
+      runtime_memory->structures.emplace_back(program_entry->local_size);
   while (current_frame->program_iter != program_entry->program.end())
     evaluate_statement();
 }
