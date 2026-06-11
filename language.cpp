@@ -207,6 +207,7 @@ private:
     std::pmr::list<ExecutionFrame> execution_frames{&resource};
     std::pmr::list<std::pmr::vector<ExecutionFrame *>> scope_traces{&resource};
     std::pmr::list<std::pmr::vector<std::uint64_t>> structures{&resource};
+    std::pmr::list<MachineString> strings{&resource};
   };
 
   ExecutionFrame *current_frame;
@@ -236,6 +237,8 @@ private:
     std::uint64_t operator()(ExprStringifyNumber);
   };
   std::uint64_t evaluate_expression();
+
+  std::uint64_t evaluate_function_call(const ExecutionBoundary *boundary);
 };
 
 class Compiler {
@@ -1605,6 +1608,7 @@ void Compiler::ExecutionBoundary::serialize() {
   std::list<std::uint64_t> output{};
   for (const auto &statement : program)
     output.splice(output.end(), statement->serialize(*this));
+  output_boundary->local_scope = local_scope;
   output_boundary->program = {std::from_range, output};
 }
 
@@ -1636,13 +1640,20 @@ Compiler::ExecutionBoundary::push_string_literal(std::u16string_view unicode) {
 
 Machine::Machine() { runtime_memory = std::make_unique<RuntimeMemory>(); }
 
-void Machine::EvaluateStatement::operator()(StmtInitialize) {}
+void Machine::EvaluateStatement::operator()(StmtInitialize) {
+  std::size_t local_offset{
+      static_cast<std::size_t>(*machine.current_frame->program_iter++)};
+  machine.current_frame->own_scope[local_offset] =
+      machine.evaluate_expression();
+}
 
 void Machine::EvaluateStatement::operator()(StmtExpression) {
   machine.evaluate_expression();
 }
 
-void Machine::EvaluateStatement::operator()(StmtReturn) {}
+void Machine::EvaluateStatement::operator()(StmtReturn) {
+  machine.current_frame->return_val = machine.evaluate_expression();
+}
 
 template <typename T> static T from_index(std::uint64_t alternative_idx) {
   template for (constexpr std::size_t I :
@@ -1658,19 +1669,35 @@ void Machine::evaluate_statement() {
       .visit(EvaluateStatement{*this});
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprLiteral) { return 0; }
+std::uint64_t Machine::EvaluateExpression::operator()(ExprLiteral) {
+  return *machine.current_frame->program_iter++;
+}
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprScopeAccess) {
-  return 0;
+  std::size_t scope_offset{
+      static_cast<std::size_t>(*machine.current_frame->program_iter++)};
+  std::size_t local_offset{
+      static_cast<std::size_t>(*machine.current_frame->program_iter++)};
+  auto zero_offset = std::ranges::single_view{machine.current_frame};
+  auto complete_closure =
+      std::ranges::concat_view{zero_offset, machine.current_frame->closure};
+  return complete_closure[scope_offset]->own_scope[local_offset];
 }
 
 template <BinaryOperation P>
 std::uint64_t Machine::EvaluateExpression::operator()(ExprBinary<P>) {
-  return 0;
+  double lhs{std::bit_cast<double>(machine.evaluate_expression())};
+  double rhs{std::bit_cast<double>(machine.evaluate_expression())};
+  if constexpr (P == BinaryOperation::OP_ADD)
+    return std::bit_cast<std::uint64_t>(lhs + rhs);
+  if constexpr (P == BinaryOperation::OP_SUB)
+    return std::bit_cast<std::uint64_t>(lhs - rhs);
 }
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprFunctionCall) {
-  return 0;
+  const ExecutionBoundary *boundary{reinterpret_cast<const ExecutionBoundary *>(
+      *machine.current_frame->program_iter++)};
+  return machine.evaluate_function_call(boundary);
 }
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) {
@@ -1689,18 +1716,47 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) {
 }
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprStringLength) {
-  return 0;
+  const MachineString *machine_string{
+      reinterpret_cast<const MachineString *>(machine.evaluate_expression())};
+  std::size_t string_length{
+      machine_string->visit([](auto str) { return str.size(); })};
+  return std::bit_cast<std::uint64_t>(static_cast<double>(string_length));
 }
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprStringifyNumber) {
   std::uint64_t expr_value{machine.evaluate_expression()};
   double number{std::bit_cast<double>(expr_value)};
-  return 0;
+  std::string buffer(24, '\0');
+  auto [ptr, ec] =
+      std::to_chars(buffer.data(), buffer.data() + buffer.size(), number);
+  assert(ec == std::errc{});
+  buffer.resize(ptr - buffer.data());
+  const MachineString *machine_string{
+      &machine.runtime_memory->strings.emplace_back(std::move(buffer))};
+  return reinterpret_cast<std::uintptr_t>(machine_string);
 }
 
 std::uint64_t Machine::evaluate_expression() {
   return from_index<ExpressionKind>(*current_frame->program_iter++)
       .visit(EvaluateExpression{*this});
+}
+
+std::uint64_t
+Machine::evaluate_function_call(const ExecutionBoundary *boundary) {
+  auto scope_trace = std::ranges::concat_view{
+      std::ranges::single_view{current_frame}, current_frame->closure};
+  current_frame = &runtime_memory->execution_frames.emplace_back();
+  current_frame->boundary = boundary;
+  current_frame->closure =
+      runtime_memory->scope_traces.emplace_back(std::from_range, scope_trace);
+  current_frame->program_iter = boundary->program.begin();
+  current_frame->own_scope =
+      runtime_memory->structures.emplace_back(boundary->local_scope.size());
+  while (current_frame->program_iter != boundary->program.end())
+    evaluate_statement();
+  std::uint64_t return_val{current_frame->return_val};
+  current_frame = current_frame->closure.front();
+  return return_val;
 }
 
 void Machine::evaluate() {
