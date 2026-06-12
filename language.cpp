@@ -57,21 +57,25 @@ class DuplicateDeclaration final : public CompilationError {
 public:
   DuplicateDeclaration() : CompilationError{"duplicate declaration!"} {}
 };
-class MissingFieldName final : public CompilationError {
+class MissingPropertyName final : public CompilationError {
 public:
-  MissingFieldName() : CompilationError{"missing field name!"} {}
+  MissingPropertyName() : CompilationError{"missing property name!"} {}
 };
 class InvalidPropertyName final : public CompilationError {
 public:
   InvalidPropertyName() : CompilationError{"invalid property name!"} {}
 };
+class InvalidPropertyAccess final : public CompilationError {
+public:
+  InvalidPropertyAccess() : CompilationError{"invalid property access!"} {}
+};
 class MissingVariableName final : public CompilationError {
 public:
   MissingVariableName() : CompilationError{"missing variable name!"} {}
 };
-class MissingMethod final : public CompilationError {
+class InvalidMethodAccess final : public CompilationError {
 public:
-  MissingMethod() : CompilationError{"missing method!"} {}
+  InvalidMethodAccess() : CompilationError{"invalid method access!"} {}
 };
 class InvalidVariableAccess final : public CompilationError {
 public:
@@ -140,38 +144,27 @@ using Token =
     std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
                  Keyword, Identifier, std::string_view, std::u16string_view>;
 
-struct VoidType {};
-struct NumberType {};
-struct StringType {};
-struct LambdaType {};
-struct AnyType {};
-struct ObjectShape;
-enum class IntrinsicObject { O_CONSOLE };
-using ValueType = std::variant<VoidType, NumberType, StringType, LambdaType,
-                               AnyType, const ObjectShape *, IntrinsicObject>;
-struct ObjectShape {
-  std::flat_map<Identifier, ValueType> properties;
-};
+using VariantString = std::variant<std::string, std::u16string>;
 
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
 enum class BinaryOperation { OP_ADD, OP_SUB };
-enum class ValueKind { V_NUMBER, V_STRING, V_VOID };
+template <BinaryOperation> struct ExprBinary {};
 
 struct ExprLiteral {};
 struct ExprScopeAccess {};
-template <BinaryOperation> struct ExprBinary {};
 struct ExprFunctionCall {};
 struct ExprConsole {};
-struct ExprStringLength {};
-struct ExprStringifyNumber {};
+struct ExprLengthIntrinsic {};
+struct ExprPrintIntrinsic {};
+
 using ExpressionKind =
     std::variant<std::monostate, ExprLiteral, ExprScopeAccess,
                  ExprBinary<BinaryOperation::OP_ADD>,
                  ExprBinary<BinaryOperation::OP_SUB>, ExprFunctionCall,
-                 ExprConsole, ExprStringLength, ExprStringifyNumber>;
+                 ExprConsole, ExprLengthIntrinsic, ExprPrintIntrinsic>;
 
 struct StmtInitialize {};
 struct StmtExpression {};
@@ -179,9 +172,8 @@ struct StmtReturn {};
 using StatementKind =
     std::variant<std::monostate, StmtInitialize, StmtExpression, StmtReturn>;
 
-using MachineString = std::variant<std::string, std::u16string>;
 struct ConsoleMessage {
-  std::vector<MachineString> parts;
+  std::vector<VariantString> parts;
   std::string encode_for_print() const;
 };
 
@@ -193,19 +185,19 @@ public:
 
   class RuntimeBoundary {
   public:
-    std::size_t local_size;
+    std::size_t local_space;
     std::vector<std::uint64_t> program;
   };
 
   const RuntimeBoundary *program_entry;
   std::vector<std::unique_ptr<RuntimeBoundary>> boundaries;
-  std::set<MachineString> string_literals;
+  std::set<VariantString> string_literals;
 
 private:
   struct RuntimeFrame {
     const RuntimeBoundary *boundary;
     std::vector<std::uint64_t>::const_iterator program_iter;
-    std::span<std::uint64_t> own_scope;
+    std::span<std::uint64_t> local_memory;
     std::span<RuntimeFrame *> closure;
     std::uint64_t return_val;
   };
@@ -215,7 +207,7 @@ private:
     std::pmr::list<RuntimeFrame> runtime_frames{&resource};
     std::pmr::list<std::pmr::vector<RuntimeFrame *>> scope_traces{&resource};
     std::pmr::list<std::pmr::vector<std::uint64_t>> structures{&resource};
-    std::pmr::list<MachineString> strings{&resource};
+    std::pmr::list<VariantString> strings{&resource};
   };
 
   RuntimeFrame *current_frame;
@@ -241,8 +233,8 @@ private:
     template <BinaryOperation P> std::uint64_t operator()(ExprBinary<P>);
     std::uint64_t operator()(ExprFunctionCall);
     std::uint64_t operator()(ExprConsole);
-    std::uint64_t operator()(ExprStringLength);
-    std::uint64_t operator()(ExprStringifyNumber);
+    std::uint64_t operator()(ExprLengthIntrinsic);
+    std::uint64_t operator()(ExprPrintIntrinsic);
   };
   std::uint64_t evaluate_expression();
 
@@ -255,25 +247,178 @@ public:
 
   class AbstractBoundary;
   class FunctionDefinition;
+  class Expression;
   class CalleeExpression;
 
-  struct FindMethod {
-    Identifier identifier;
-    std::unique_ptr<CalleeExpression> operator()(VoidType);
-    std::unique_ptr<CalleeExpression> operator()(NumberType);
-    std::unique_ptr<CalleeExpression> operator()(StringType);
-    std::unique_ptr<CalleeExpression> operator()(LambdaType);
-    std::unique_ptr<CalleeExpression> operator()(AnyType);
+  class ValueType {
+  public:
+    virtual ~ValueType() = default;
+    virtual std::size_t runtime_space() const = 0;
+    virtual std::unique_ptr<CalleeExpression>
+    find_method(Identifier identifier) const = 0;
+    virtual std::unique_ptr<Expression>
+    find_property(std::unique_ptr<Expression> &expression,
+                  Identifier identifier) const = 0;
+    virtual std::unique_ptr<Expression>
+    stringify(std::unique_ptr<Expression> expression) const = 0;
+    virtual std::unique_ptr<ValueType> clone() const = 0;
+  };
+
+  class NumberType final : public ValueType {
+  public:
+    std::size_t runtime_space() const override { return sizeof(double); }
     std::unique_ptr<CalleeExpression>
-    operator()(const ObjectShape *object_shape);
+    find_method(Identifier identifier) const override {
+      return nullptr;
+    }
+    std::unique_ptr<Expression>
+    find_property(std::unique_ptr<Expression> &expression,
+                  Identifier identifier) const override {
+      return nullptr;
+    }
+    std::unique_ptr<Expression>
+    stringify(std::unique_ptr<Expression> expression) const override;
+    std::unique_ptr<ValueType> clone() const override {
+      return std::make_unique<NumberType>();
+    }
+  };
+
+  class StringType final : public ValueType {
+  public:
+    std::size_t runtime_space() const override {
+      return sizeof(const VariantString *);
+    }
     std::unique_ptr<CalleeExpression>
-    operator()(IntrinsicObject intrinsic_object);
+    find_method(Identifier identifier) const override {
+      return nullptr;
+    }
+    std::unique_ptr<Expression>
+    find_property(std::unique_ptr<Expression> &expression,
+                  Identifier identifier) const override {
+      if (identifier.offset != OFFSET_length)
+        return nullptr;
+      std::unique_ptr length_intrinsic{std::make_unique<LengthIntrinsic>()};
+      length_intrinsic->argument = std::move(expression);
+      return length_intrinsic;
+    }
+    std::unique_ptr<Expression>
+    stringify(std::unique_ptr<Expression> expression) const override {
+      return nullptr;
+    }
+    std::unique_ptr<ValueType> clone() const override {
+      return std::make_unique<StringType>();
+    }
+  };
+
+  class LambdaType final : public ValueType {
+  public:
+    std::size_t runtime_space() const override { std::unreachable(); }
+    std::unique_ptr<CalleeExpression>
+    find_method(Identifier identifier) const override {
+      return nullptr;
+    }
+    std::unique_ptr<Expression>
+    find_property(std::unique_ptr<Expression> &expression,
+                  Identifier identifier) const override {
+      return nullptr;
+    }
+    std::unique_ptr<Expression>
+    stringify(std::unique_ptr<Expression> expression) const override {
+      return nullptr;
+    }
+    std::unique_ptr<ValueType> clone() const override {
+      return std::make_unique<LambdaType>();
+    }
+  };
+
+  class AnyType final : public ValueType {
+  public:
+    std::size_t runtime_space() const override { std::unreachable(); }
+    std::unique_ptr<CalleeExpression>
+    find_method(Identifier identifier) const override {
+      return nullptr;
+    }
+    std::unique_ptr<Expression>
+    find_property(std::unique_ptr<Expression> &expression,
+                  Identifier identifier) const override {
+      return nullptr;
+    }
+    std::unique_ptr<Expression>
+    stringify(std::unique_ptr<Expression> expression) const override {
+      return nullptr;
+    }
+    std::unique_ptr<ValueType> clone() const override {
+      return std::make_unique<AnyType>();
+    }
+  };
+
+  struct ObjectShape {
+    std::flat_map<Identifier, std::unique_ptr<ValueType>> properties;
+  };
+  class ObjectType final : public ValueType {
+  private:
+    const ObjectShape *object_shape;
+
+  public:
+    std::size_t runtime_space() const override { std::unreachable(); }
+
+    std::unique_ptr<CalleeExpression>
+    find_method(Identifier identifier) const override {
+      return nullptr;
+    }
+
+    std::unique_ptr<Expression>
+    find_property(std::unique_ptr<Expression> &expression,
+                  Identifier identifier) const override {
+      return nullptr;
+    }
+
+    std::unique_ptr<Expression>
+    stringify(std::unique_ptr<Expression> expression) const override {
+      return nullptr;
+    }
+
+    std::unique_ptr<ValueType> clone() const override {
+      std::unique_ptr cloned_instance{std::make_unique<ObjectType>()};
+      cloned_instance->object_shape = object_shape;
+      return cloned_instance;
+    }
+  };
+
+  enum class IntrinsicObject { O_CONSOLE };
+  class IntrinsicType final : public ValueType {
+  private:
+    IntrinsicObject intrinsic_object;
+
+  public:
+    IntrinsicType() = default;
+    IntrinsicType(IntrinsicObject io) : intrinsic_object{io} {}
+
+    std::size_t runtime_space() const override { std::unreachable(); }
+
+    std::unique_ptr<CalleeExpression>
+    find_method(Identifier identifier) const override;
+
+    std::unique_ptr<Expression>
+    find_property(std::unique_ptr<Expression> &expression,
+                  Identifier identifier) const override {
+      return nullptr;
+    }
+
+    std::unique_ptr<Expression>
+    stringify(std::unique_ptr<Expression> expression) const override {
+      return nullptr;
+    }
+
+    std::unique_ptr<ValueType> clone() const override {
+      return std::make_unique<IntrinsicType>(intrinsic_object);
+    }
   };
 
   class Expression {
   public:
     virtual ~Expression() = default;
-    virtual ValueType datatype() const = 0;
+    virtual const ValueType *datatype() const = 0;
 
     virtual std::unique_ptr<Expression>
     analyze_as_lvalue(AbstractBoundary &boundary) const {
@@ -288,17 +433,6 @@ public:
 
     virtual std::list<std::uint64_t>
     serialize(AbstractBoundary &boundary) const = 0;
-  };
-
-  struct InjectStringify {
-    std::unique_ptr<Expression> expression;
-    std::unique_ptr<Expression> operator()(VoidType);
-    std::unique_ptr<Expression> operator()(NumberType);
-    std::unique_ptr<Expression> operator()(StringType);
-    std::unique_ptr<Expression> operator()(LambdaType);
-    std::unique_ptr<Expression> operator()(AnyType);
-    std::unique_ptr<Expression> operator()(const ObjectShape *object_shape);
-    std::unique_ptr<Expression> operator()(IntrinsicObject intrinsic_object);
   };
 
   class CalleeExpression : public Expression {
@@ -322,7 +456,7 @@ public:
     std::unique_ptr<Expression> callee;
     std::vector<std::unique_ptr<Expression>> arguments;
 
-    ValueType datatype() const override { std::unreachable(); }
+    const ValueType *datatype() const override { std::unreachable(); }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -344,7 +478,9 @@ public:
     std::vector<Identifier> passed_identifiers;
     std::vector<std::unique_ptr<Expression>> passed_values;
 
-    ValueType datatype() const override { return callee->return_type; }
+    const ValueType *datatype() const override {
+      return callee->return_type.get();
+    }
 
     void analyze_arguments(
         AbstractBoundary &boundary,
@@ -358,7 +494,7 @@ public:
   public:
     std::vector<std::unique_ptr<Expression>> arguments;
 
-    ValueType datatype() const override { return VoidType{}; }
+    const ValueType *datatype() const override { return nullptr; }
 
     void analyze_arguments(
         AbstractBoundary &boundary,
@@ -374,7 +510,7 @@ public:
     std::vector<Identifier> keys;
     std::vector<std::unique_ptr<Expression>> values;
 
-    ValueType datatype() const override { std::unreachable(); }
+    const ValueType *datatype() const override { return nullptr; }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override {
@@ -397,7 +533,7 @@ public:
     std::unique_ptr<Expression> object;
     Identifier property;
 
-    ValueType datatype() const override { std::unreachable(); }
+    const ValueType *datatype() const override { return nullptr; }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -411,11 +547,14 @@ public:
     }
   };
 
-  class StringLength final : public Expression {
+  class LengthIntrinsic final : public Expression {
   public:
     std::unique_ptr<Expression> argument;
 
-    ValueType datatype() const override { return NumberType{}; }
+    const ValueType *datatype() const override {
+      static const NumberType number_type{};
+      return &number_type;
+    }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override {
@@ -431,11 +570,14 @@ public:
     serialize(AbstractBoundary &boundary) const override;
   };
 
-  class StringifyNumber final : public Expression {
+  class PrintIntrinsic final : public Expression {
   public:
     std::unique_ptr<Expression> argument;
 
-    ValueType datatype() const override { return StringType{}; }
+    const ValueType *datatype() const override {
+      static const StringType string_type{};
+      return &string_type;
+    }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override {
@@ -457,7 +599,10 @@ public:
     std::unique_ptr<Expression> right;
     char32_t op;
 
-    ValueType datatype() const override { return NumberType{}; }
+    const ValueType *datatype() const override {
+      static const NumberType number_type{};
+      return &number_type;
+    }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -477,7 +622,7 @@ public:
     std::unique_ptr<Expression> right;
     Operator op;
 
-    ValueType datatype() const override { return right->datatype(); }
+    const ValueType *datatype() const override { return right->datatype(); }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -498,7 +643,7 @@ public:
     std::unique_ptr<Expression> left;
     std::unique_ptr<Expression> right;
 
-    ValueType datatype() const override { std::unreachable(); }
+    const ValueType *datatype() const override { return nullptr; }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -518,7 +663,10 @@ public:
   public:
     double val;
 
-    ValueType datatype() const override { return NumberType{}; }
+    const ValueType *datatype() const override {
+      static const NumberType number_type{};
+      return &number_type;
+    }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -536,7 +684,10 @@ public:
   public:
     std::string val;
 
-    ValueType datatype() const override { return StringType{}; }
+    const ValueType *datatype() const override {
+      static const StringType string_type{};
+      return &string_type;
+    }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -554,7 +705,10 @@ public:
   public:
     std::u16string val;
 
-    ValueType datatype() const override { return StringType{}; }
+    const ValueType *datatype() const override {
+      static const StringType string_type{};
+      return &string_type;
+    }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -572,7 +726,7 @@ public:
   public:
     Identifier identifier;
 
-    ValueType datatype() const override { std::unreachable(); }
+    const ValueType *datatype() const override { return nullptr; }
 
     std::unique_ptr<Expression>
     analyze_as_lvalue(AbstractBoundary &boundary) const override;
@@ -591,11 +745,11 @@ public:
 
   class ScopeAccessor final : public Expression {
   public:
-    ValueType local_type;
+    std::unique_ptr<ValueType> local_type;
     std::size_t scope_offset;
     std::size_t local_offset;
 
-    ValueType datatype() const override { return local_type; }
+    const ValueType *datatype() const override { return local_type.get(); }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override {
@@ -613,9 +767,9 @@ public:
 
   class IntrinsicAccessor final : public Expression {
   public:
-    IntrinsicObject object_type;
+    IntrinsicType object_type;
 
-    ValueType datatype() const override { return object_type; }
+    const ValueType *datatype() const override { return &object_type; }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override {
@@ -695,10 +849,10 @@ public:
     std::list<FunctionDefinition> inner_functions;
     FunctionDefinition *find_function(Identifier identifier);
 
-    std::flat_map<Identifier, ValueType> local_layout;
+    std::flat_map<Identifier, std::unique_ptr<ValueType>> local_layout;
     std::unique_ptr<ScopeAccessor> find_local(Identifier identifier) const;
 
-    ValueType return_type;
+    std::unique_ptr<ValueType> return_type;
     virtual bool allows_return_stmt() const = 0;
 
     void parse_statement();
@@ -706,8 +860,8 @@ public:
     void serialize();
     void export_serial_program();
 
-    const MachineString *push_string_literal(std::string_view ascii);
-    const MachineString *push_string_literal(std::u16string_view unicode);
+    const VariantString *push_string_literal(std::string_view ascii);
+    const VariantString *push_string_literal(std::u16string_view unicode);
 
   protected:
     Compiler &compiler;
@@ -767,7 +921,10 @@ public:
   public:
     LambdaExpression(FunctionDefinition &d) : definition{d} {}
     FunctionDefinition &definition;
-    ValueType datatype() const override { return LambdaType{}; }
+    const ValueType *datatype() const override {
+      static const LambdaType lambda_type{};
+      return &lambda_type;
+    }
 
     std::unique_ptr<Expression>
     analyze_as_rvalue(AbstractBoundary &boundary) const override;
@@ -1100,7 +1257,7 @@ Compiler::AbstractBoundary::parse_member_expr(
     std::unique_ptr<Compiler::Expression> object) {
   compiler.tokenize();
   if (not std::holds_alternative<Identifier>(compiler.last_token))
-    throw MissingFieldName{};
+    throw MissingPropertyName{};
   Identifier field_name{std::get<Identifier>(compiler.last_token)};
   std::unique_ptr expression{std::make_unique<MemberExpression>()};
   expression->object = std::move(object);
@@ -1307,7 +1464,8 @@ Compiler::InitializeVariable::analyze(AbstractBoundary &boundary) const {
   initialize_scope->local_offset = std::distance(
       boundary.local_layout.begin(), boundary.local_layout.find(variable_name));
   initialize_scope->rvalue = rvalue->analyze_as_rvalue(boundary);
-  boundary.local_layout[variable_name] = initialize_scope->rvalue->datatype();
+  boundary.local_layout[variable_name] =
+      initialize_scope->rvalue->datatype()->clone();
   return initialize_scope;
 }
 
@@ -1324,7 +1482,7 @@ Compiler::ReturnStatement::analyze(AbstractBoundary &boundary) const {
     throw InvalidReturnStatement{};
   std::unique_ptr return_stmt{std::make_unique<ReturnStatement>()};
   return_stmt->argument = argument->analyze_as_rvalue(boundary);
-  boundary.return_type = return_stmt->argument->datatype();
+  boundary.return_type = return_stmt->argument->datatype()->clone();
   return return_stmt;
 }
 
@@ -1343,7 +1501,7 @@ Compiler::VariableAccessor::analyze_as_rvalue(
   }
   if (identifier.offset == OFFSET_console) {
     std::unique_ptr accessor{std::make_unique<IntrinsicAccessor>()};
-    accessor->object_type = IntrinsicObject::O_CONSOLE;
+    accessor->object_type = IntrinsicType{IntrinsicObject::O_CONSOLE};
     return std::move(accessor);
   }
   throw InvalidVariableAccess{};
@@ -1395,10 +1553,10 @@ Compiler::BinaryExpression::analyze_as_rvalue(
   binary_expr->op = op;
   binary_expr->left = left->analyze_as_rvalue(boundary);
   binary_expr->right = right->analyze_as_rvalue(boundary);
-  ValueType datatype_left{binary_expr->left->datatype()};
-  ValueType datatype_right{binary_expr->right->datatype()};
-  assert(std::holds_alternative<NumberType>(datatype_left) &&
-         std::holds_alternative<NumberType>(datatype_right));
+  const ValueType *datatype_left{binary_expr->left->datatype()};
+  const ValueType *datatype_right{binary_expr->right->datatype()};
+  assert(typeid(*datatype_left) == typeid(NumberType) &&
+         typeid(*datatype_right) == typeid(NumberType));
   return binary_expr;
 }
 
@@ -1409,9 +1567,9 @@ Compiler::LogicalExpression::analyze_as_rvalue(
   logical_expr->op = op;
   logical_expr->left = left->analyze_as_rvalue(boundary);
   logical_expr->right = right->analyze_as_rvalue(boundary);
-  ValueType datatype_left{logical_expr->left->datatype()};
-  ValueType datatype_right{logical_expr->right->datatype()};
-  assert(datatype_left.index() == datatype_right.index());
+  const ValueType *datatype_left{logical_expr->left->datatype()};
+  const ValueType *datatype_right{logical_expr->right->datatype()};
+  assert(typeid(*datatype_left) == typeid(*datatype_right));
   return logical_expr;
 }
 
@@ -1433,14 +1591,8 @@ Compiler::LambdaExpression::analyze_as_rvalue(
 std::unique_ptr<Compiler::Expression>
 Compiler::MemberExpression::analyze_as_rvalue(
     AbstractBoundary &boundary) const {
-  std::unique_ptr object_expr{object->analyze_as_rvalue(boundary)};
-  if (std::holds_alternative<StringType>(object_expr->datatype()) &&
-      property.offset == OFFSET_length) {
-    std::unique_ptr string_length{std::make_unique<StringLength>()};
-    string_length->argument = std::move(object_expr);
-    return string_length;
-  }
-  std::unreachable();
+  std::unique_ptr analyzed_object{object->analyze_as_rvalue(boundary)};
+  return analyzed_object->datatype()->find_property(analyzed_object, property);
 }
 
 std::unique_ptr<Compiler::Expression>
@@ -1460,8 +1612,8 @@ void Compiler::ConsoleLogCall::analyze_arguments(
     std::span<const std::unique_ptr<Expression>> positional_args) {
   auto stringify_argument = [&boundary](const auto &argument) {
     std::unique_ptr analyzed_arg{argument->analyze_as_rvalue(boundary)};
-    ValueType argument_type{analyzed_arg->datatype()};
-    return argument_type.visit(InjectStringify{std::move(analyzed_arg)});
+    const ValueType *argument_type{analyzed_arg->datatype()};
+    return argument_type->stringify(std::move(analyzed_arg));
   };
   auto stringified_args =
       positional_args | std::views::transform(stringify_argument);
@@ -1472,7 +1624,11 @@ std::unique_ptr<Compiler::CalleeExpression>
 Compiler::MemberExpression::analyze_as_callee(
     AbstractBoundary &boundary) const {
   std::unique_ptr analyzed_object{object->analyze_as_rvalue(boundary)};
-  return analyzed_object->datatype().visit(FindMethod{property});
+  std::unique_ptr callee_expr{
+      analyzed_object->datatype()->find_method(property)};
+  if (not callee_expr)
+    throw InvalidMethodAccess{};
+  return callee_expr;
 }
 
 std::unique_ptr<Compiler::CalleeExpression>
@@ -1499,7 +1655,7 @@ Compiler::AbstractBoundary::find_local(Identifier identifier) const {
   std::size_t local_offset =
       std::distance(local_layout.begin(), local_layout.find(identifier));
   std::unique_ptr accessor{std::make_unique<ScopeAccessor>()};
-  accessor->local_type = local_layout.values()[local_offset];
+  accessor->local_type = local_layout.values()[local_offset]->clone();
   accessor->local_offset = local_offset;
   return accessor;
 }
@@ -1527,7 +1683,7 @@ void Compiler::AbstractBoundary::analyze_inner_functions() {
 
 void Compiler::FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
-    local_layout.find(argument)->second = AnyType{};
+    local_layout.find(argument)->second = std::make_unique<AnyType>();
 }
 
 void Compiler::AbstractBoundary::analyze() {
@@ -1552,78 +1708,19 @@ void Compiler::FunctionDefinition::analyze() {
 }
 
 std::unique_ptr<Compiler::CalleeExpression>
-Compiler::FindMethod::operator()(VoidType) {
-  throw MissingMethod{};
+Compiler::IntrinsicType::find_method(Identifier identifier) const {
+  if (intrinsic_object != IntrinsicObject::O_CONSOLE)
+    return nullptr;
+  if (identifier.offset != OFFSET_log)
+    return nullptr;
+  return std::make_unique<ConsoleLogCall>();
 }
 
-std::unique_ptr<Compiler::CalleeExpression>
-Compiler::FindMethod::operator()(NumberType) {
-  throw MissingMethod{};
-}
-
-std::unique_ptr<Compiler::CalleeExpression>
-Compiler::FindMethod::operator()(StringType) {
-  throw MissingMethod{};
-}
-
-std::unique_ptr<Compiler::CalleeExpression>
-Compiler::FindMethod::operator()(LambdaType) {
-  throw MissingMethod{};
-}
-
-std::unique_ptr<Compiler::CalleeExpression>
-Compiler::FindMethod::operator()(AnyType) {
-  throw MissingMethod{};
-}
-
-std::unique_ptr<Compiler::CalleeExpression>
-Compiler::FindMethod::operator()(const ObjectShape *object_shape) {
-  throw MissingMethod{};
-}
-
-std::unique_ptr<Compiler::CalleeExpression>
-Compiler::FindMethod::operator()(IntrinsicObject intrinsic_object) {
-  if (intrinsic_object == IntrinsicObject::O_CONSOLE)
-    if (identifier.offset == OFFSET_log)
-      return std::make_unique<ConsoleLogCall>();
-  throw MissingMethod{};
-}
-
-std::unique_ptr<Compiler::Expression>
-Compiler::InjectStringify::operator()(VoidType) {
-  return nullptr;
-}
-
-std::unique_ptr<Compiler::Expression>
-Compiler::InjectStringify::operator()(NumberType) {
-  std::unique_ptr stringify_number{std::make_unique<StringifyNumber>()};
+std::unique_ptr<Compiler::Expression> Compiler::NumberType::stringify(
+    std::unique_ptr<Compiler::Expression> expression) const {
+  std::unique_ptr stringify_number{std::make_unique<PrintIntrinsic>()};
   stringify_number->argument = std::move(expression);
   return stringify_number;
-}
-
-std::unique_ptr<Compiler::Expression>
-Compiler::InjectStringify::operator()(StringType) {
-  return nullptr;
-}
-
-std::unique_ptr<Compiler::Expression>
-Compiler::InjectStringify::operator()(LambdaType) {
-  return nullptr;
-}
-
-std::unique_ptr<Compiler::Expression>
-Compiler::InjectStringify::operator()(AnyType) {
-  return nullptr;
-}
-
-std::unique_ptr<Compiler::Expression>
-Compiler::InjectStringify::operator()(const ObjectShape *object_shape) {
-  return nullptr;
-}
-
-std::unique_ptr<Compiler::Expression>
-Compiler::InjectStringify::operator()(IntrinsicObject intrinsic_object) {
-  return nullptr;
 }
 
 std::list<std::uint64_t>
@@ -1666,16 +1763,16 @@ Compiler::ConsoleLogCall::serialize(AbstractBoundary &boundary) const {
 }
 
 std::list<std::uint64_t>
-Compiler::StringLength::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{ExpressionKind{ExprStringLength{}}.index()};
+Compiler::LengthIntrinsic::serialize(AbstractBoundary &boundary) const {
+  std::list<std::uint64_t> output{
+      ExpressionKind{ExprLengthIntrinsic{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
-Compiler::StringifyNumber::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{
-      ExpressionKind{ExprStringifyNumber{}}.index()};
+Compiler::PrintIntrinsic::serialize(AbstractBoundary &boundary) const {
+  std::list<std::uint64_t> output{ExpressionKind{ExprPrintIntrinsic{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
@@ -1706,7 +1803,7 @@ Compiler::NumericLiteral::serialize(AbstractBoundary &boundary) const {
 std::list<std::uint64_t>
 Compiler::AsciiLiteral::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{ExpressionKind{ExprLiteral{}}.index()};
-  const MachineString *string_ptr{boundary.push_string_literal(val)};
+  const VariantString *string_ptr{boundary.push_string_literal(val)};
   output.push_back(reinterpret_cast<std::uintptr_t>(string_ptr));
   return output;
 }
@@ -1728,7 +1825,7 @@ void Compiler::AbstractBoundary::serialize() {
   std::list<std::uint64_t> output{};
   for (const auto &statement : program)
     output.splice(output.end(), statement->serialize(*this));
-  output_boundary->local_size = local_layout.size();
+  output_boundary->local_space = local_layout.size();
   output_boundary->program = {std::from_range, output};
 }
 
@@ -1744,14 +1841,14 @@ void Compiler::write_serial_program() {
   entry_module.export_serial_program();
 }
 
-const MachineString *
+const VariantString *
 Compiler::AbstractBoundary::push_string_literal(std::string_view ascii) {
   auto [literal_it, _] =
       compiler.machine.string_literals.emplace(std::string{ascii});
   return &(*literal_it);
 }
 
-const MachineString *
+const VariantString *
 Compiler::AbstractBoundary::push_string_literal(std::u16string_view unicode) {
   auto [u16literal_it, _] =
       compiler.machine.string_literals.emplace(std::u16string{unicode});
@@ -1763,7 +1860,7 @@ Machine::Machine() { runtime_memory = std::make_unique<RuntimeMemory>(); }
 void Machine::EvaluateStatement::operator()(StmtInitialize) {
   std::size_t local_offset{
       static_cast<std::size_t>(*machine.current_frame->program_iter++)};
-  machine.current_frame->own_scope[local_offset] =
+  machine.current_frame->local_memory[local_offset] =
       machine.evaluate_expression();
 }
 
@@ -1801,7 +1898,7 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprScopeAccess) {
   auto zero_offset = std::ranges::single_view{machine.current_frame};
   auto complete_closure =
       std::ranges::concat_view{zero_offset, machine.current_frame->closure};
-  return complete_closure[scope_offset]->own_scope[local_offset];
+  return complete_closure[scope_offset]->local_memory[local_offset];
 }
 
 template <BinaryOperation P>
@@ -1822,10 +1919,10 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprFunctionCall) {
 
 std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) {
   std::size_t n_args{*machine.current_frame->program_iter++};
-  std::vector<MachineString> message_parts(n_args);
-  for (MachineString &message_part : message_parts) {
+  std::vector<VariantString> message_parts(n_args);
+  for (VariantString &message_part : message_parts) {
     std::uint64_t expr_value{machine.evaluate_expression()};
-    message_part = *reinterpret_cast<const MachineString *>(expr_value);
+    message_part = *reinterpret_cast<const VariantString *>(expr_value);
   }
   {
     std::lock_guard console_lock{machine.console_mutex};
@@ -1835,15 +1932,15 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) {
   return 0;
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprStringLength) {
-  const MachineString *machine_string{
-      reinterpret_cast<const MachineString *>(machine.evaluate_expression())};
+std::uint64_t Machine::EvaluateExpression::operator()(ExprLengthIntrinsic) {
+  const VariantString *machine_string{
+      reinterpret_cast<const VariantString *>(machine.evaluate_expression())};
   std::size_t string_length{
       machine_string->visit([](auto str) { return str.size(); })};
   return std::bit_cast<std::uint64_t>(static_cast<double>(string_length));
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprStringifyNumber) {
+std::uint64_t Machine::EvaluateExpression::operator()(ExprPrintIntrinsic) {
   std::uint64_t expr_value{machine.evaluate_expression()};
   double number{std::bit_cast<double>(expr_value)};
   std::string buffer(24, '\0');
@@ -1851,7 +1948,7 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprStringifyNumber) {
       std::to_chars(buffer.data(), buffer.data() + buffer.size(), number);
   assert(ec == std::errc{});
   buffer.resize(ptr - buffer.data());
-  const MachineString *machine_string{
+  const VariantString *machine_string{
       &machine.runtime_memory->strings.emplace_back(std::move(buffer))};
   return reinterpret_cast<std::uintptr_t>(machine_string);
 }
@@ -1869,8 +1966,8 @@ std::uint64_t Machine::evaluate_function_call(const RuntimeBoundary *boundary) {
   current_frame->closure =
       runtime_memory->scope_traces.emplace_back(std::from_range, scope_trace);
   current_frame->program_iter = boundary->program.begin();
-  current_frame->own_scope =
-      runtime_memory->structures.emplace_back(boundary->local_size);
+  current_frame->local_memory =
+      runtime_memory->structures.emplace_back(boundary->local_space);
   while (current_frame->program_iter != boundary->program.end())
     evaluate_statement();
   std::uint64_t return_val{current_frame->return_val};
@@ -1882,8 +1979,8 @@ void Machine::evaluate() {
   current_frame = &runtime_memory->runtime_frames.emplace_back();
   current_frame->program_iter = program_entry->program.begin();
   current_frame->boundary = program_entry;
-  current_frame->own_scope =
-      runtime_memory->structures.emplace_back(program_entry->local_size);
+  current_frame->local_memory =
+      runtime_memory->structures.emplace_back(program_entry->local_space);
   while (current_frame->program_iter != program_entry->program.end())
     evaluate_statement();
 }
@@ -1907,7 +2004,7 @@ encode_u16_for_print(std::uint16_t uchar) {
   return {std::from_range, buffer | std::views::take(buffer_len)};
 }
 
-struct EncodeMachineString {
+struct EncodeVariantString {
   std::string operator()(std::string_view ascii) { return std::string{ascii}; }
   std::string operator()(std::u16string_view unicode) {
     auto encoded_message = unicode |
@@ -1918,8 +2015,8 @@ struct EncodeMachineString {
 };
 
 std::string ConsoleMessage::encode_for_print() const {
-  auto encode_message_part = [](const MachineString &machine_string) {
-    return machine_string.visit(EncodeMachineString{});
+  auto encode_message_part = [](const VariantString &machine_string) {
+    return machine_string.visit(EncodeVariantString{});
   };
   auto encoded_parts = parts | std::views::transform(encode_message_part) |
                        std::views::join_with(' ');
