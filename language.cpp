@@ -150,27 +150,28 @@ inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
-enum class BinaryOperation { OP_ADD, OP_SUB };
-template <BinaryOperation> struct ExprBinary {};
+enum class BinaryOperator { OP_ADD, OP_SUB };
 
-struct ExprLiteral {};
-struct ExprScopeAccess {};
-struct ExprFunctionCall {};
-struct ExprConsole {};
-struct ExprLengthIntrinsic {};
-struct ExprPrintIntrinsic {};
+namespace serial {
+template <BinaryOperator P> struct BinaryExpression {};
+struct LiteralExpression {};
+struct ScopeAccessor {};
+struct FunctionCall {};
+struct ConsoleExpression {};
+struct LengthIntrinsic {};
+struct PrintIntrinsic {};
+using Expression =
+    std::variant<std::monostate, LiteralExpression, ScopeAccessor,
+                 BinaryExpression<BinaryOperator::OP_ADD>,
+                 BinaryExpression<BinaryOperator::OP_SUB>, FunctionCall,
+                 ConsoleExpression, LengthIntrinsic, PrintIntrinsic>;
 
-using ExpressionKind =
-    std::variant<std::monostate, ExprLiteral, ExprScopeAccess,
-                 ExprBinary<BinaryOperation::OP_ADD>,
-                 ExprBinary<BinaryOperation::OP_SUB>, ExprFunctionCall,
-                 ExprConsole, ExprLengthIntrinsic, ExprPrintIntrinsic>;
-
-struct StmtInitialize {};
-struct StmtExpression {};
-struct StmtReturn {};
-using StatementKind =
-    std::variant<std::monostate, StmtInitialize, StmtExpression, StmtReturn>;
+struct InitializeScope {};
+struct ExpressionStatement {};
+struct ReturnStatement {};
+using Statement = std::variant<std::monostate, InitializeScope,
+                               ExpressionStatement, ReturnStatement>;
+}; // namespace serial
 
 struct ConsoleMessage {
   std::vector<VariantString> parts;
@@ -219,22 +220,23 @@ private:
   struct EvaluateStatement {
     Machine &machine;
     void operator()(std::monostate) { std::unreachable(); }
-    void operator()(StmtInitialize);
-    void operator()(StmtExpression);
-    void operator()(StmtReturn);
+    void operator()(serial::InitializeScope);
+    void operator()(serial::ExpressionStatement);
+    void operator()(serial::ReturnStatement);
   };
   void evaluate_statement();
 
   struct EvaluateExpression {
     Machine &machine;
     std::uint64_t operator()(std::monostate) { std::unreachable(); }
-    std::uint64_t operator()(ExprLiteral);
-    std::uint64_t operator()(ExprScopeAccess);
-    template <BinaryOperation P> std::uint64_t operator()(ExprBinary<P>);
-    std::uint64_t operator()(ExprFunctionCall);
-    std::uint64_t operator()(ExprConsole);
-    std::uint64_t operator()(ExprLengthIntrinsic);
-    std::uint64_t operator()(ExprPrintIntrinsic);
+    std::uint64_t operator()(serial::LiteralExpression);
+    std::uint64_t operator()(serial::ScopeAccessor);
+    template <BinaryOperator P>
+    std::uint64_t operator()(serial::BinaryExpression<P>);
+    std::uint64_t operator()(serial::FunctionCall);
+    std::uint64_t operator()(serial::ConsoleExpression);
+    std::uint64_t operator()(serial::LengthIntrinsic);
+    std::uint64_t operator()(serial::PrintIntrinsic);
   };
   std::uint64_t evaluate_expression();
 
@@ -294,13 +296,7 @@ public:
     }
     std::unique_ptr<Expression>
     find_property(std::unique_ptr<Expression> &expression,
-                  Identifier identifier) const override {
-      if (identifier.offset != OFFSET_length)
-        return nullptr;
-      std::unique_ptr length_intrinsic{std::make_unique<LengthIntrinsic>()};
-      length_intrinsic->argument = std::move(expression);
-      return length_intrinsic;
-    }
+                  Identifier identifier) const override;
     std::unique_ptr<Expression>
     stringify(std::unique_ptr<Expression> expression) const override {
       return nullptr;
@@ -1707,6 +1703,20 @@ void Compiler::FunctionDefinition::analyze() {
   }
 }
 
+std::unique_ptr<Compiler::Expression>
+Compiler::StringType::find_property(std::unique_ptr<Expression> &expression,
+                                    Identifier identifier) const {
+  switch (identifier.offset) {
+  case OFFSET_length: {
+    std::unique_ptr length_intrinsic{std::make_unique<LengthIntrinsic>()};
+    length_intrinsic->argument = std::move(expression);
+    return length_intrinsic;
+  }
+  default:
+    return nullptr;
+  }
+}
+
 std::unique_ptr<Compiler::CalleeExpression>
 Compiler::IntrinsicType::find_method(Identifier identifier) const {
   if (intrinsic_object != IntrinsicObject::O_CONSOLE)
@@ -1725,22 +1735,24 @@ std::unique_ptr<Compiler::Expression> Compiler::NumberType::stringify(
 
 std::list<std::uint64_t>
 Compiler::InitializeScope::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{StatementKind{StmtInitialize{}}.index(),
-                                  local_offset};
+  std::list<std::uint64_t> output{
+      serial::Statement{serial::InitializeScope{}}.index(), local_offset};
   output.splice(output.end(), rvalue->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
 Compiler::ExpressionStatement::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{StatementKind{StmtExpression{}}.index()};
+  std::list<std::uint64_t> output{
+      serial::Statement{serial::ExpressionStatement{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
 Compiler::ReturnStatement::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{StatementKind{StmtReturn{}}.index()};
+  std::list<std::uint64_t> output{
+      serial::Statement{serial::ReturnStatement{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
@@ -1748,15 +1760,16 @@ Compiler::ReturnStatement::serialize(AbstractBoundary &boundary) const {
 std::list<std::uint64_t>
 Compiler::DirectFunctionCall::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{
-      ExpressionKind{ExprFunctionCall{}}.index(),
+      serial::Expression{serial::FunctionCall{}}.index(),
       reinterpret_cast<std::uintptr_t>(callee->output_boundary.get())};
   return output;
 }
 
 std::list<std::uint64_t>
 Compiler::ConsoleLogCall::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{ExpressionKind{ExprConsole{}}.index(),
-                                  arguments.size()};
+  std::list<std::uint64_t> output{
+      serial::Expression{serial::ConsoleExpression{}}.index(),
+      arguments.size()};
   for (const auto &argument : arguments)
     output.splice(output.end(), argument->serialize(boundary));
   return output;
@@ -1765,27 +1778,28 @@ Compiler::ConsoleLogCall::serialize(AbstractBoundary &boundary) const {
 std::list<std::uint64_t>
 Compiler::LengthIntrinsic::serialize(AbstractBoundary &boundary) const {
   std::list<std::uint64_t> output{
-      ExpressionKind{ExprLengthIntrinsic{}}.index()};
+      serial::Expression{serial::LengthIntrinsic{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
 Compiler::PrintIntrinsic::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{ExpressionKind{ExprPrintIntrinsic{}}.index()};
+  std::list<std::uint64_t> output{
+      serial::Expression{serial::PrintIntrinsic{}}.index()};
   output.splice(output.end(), argument->serialize(boundary));
   return output;
 }
 
 std::list<std::uint64_t>
 Compiler::BinaryExpression::serialize(AbstractBoundary &boundary) const {
-  ExpressionKind expression_kind{};
+  serial::Expression expression_kind{};
   switch (op) {
   case '+':
-    expression_kind.emplace<ExprBinary<BinaryOperation::OP_ADD>>();
+    expression_kind.emplace<serial::BinaryExpression<BinaryOperator::OP_ADD>>();
     break;
   case '-':
-    expression_kind.emplace<ExprBinary<BinaryOperation::OP_SUB>>();
+    expression_kind.emplace<serial::BinaryExpression<BinaryOperator::OP_SUB>>();
     break;
   }
   std::list<std::uint64_t> output{expression_kind.index()};
@@ -1796,13 +1810,14 @@ Compiler::BinaryExpression::serialize(AbstractBoundary &boundary) const {
 
 std::list<std::uint64_t>
 Compiler::NumericLiteral::serialize(AbstractBoundary &boundary) const {
-  return {ExpressionKind{ExprLiteral{}}.index(),
+  return {serial::Expression{serial::LiteralExpression{}}.index(),
           std::bit_cast<std::uint64_t>(val)};
 }
 
 std::list<std::uint64_t>
 Compiler::AsciiLiteral::serialize(AbstractBoundary &boundary) const {
-  std::list<std::uint64_t> output{ExpressionKind{ExprLiteral{}}.index()};
+  std::list<std::uint64_t> output{
+      serial::Expression{serial::LiteralExpression{}}.index()};
   const VariantString *string_ptr{boundary.push_string_literal(val)};
   output.push_back(reinterpret_cast<std::uintptr_t>(string_ptr));
   return output;
@@ -1815,7 +1830,7 @@ Compiler::UnicodeLiteral::serialize(AbstractBoundary &boundary) const {
 
 std::list<std::uint64_t>
 Compiler::ScopeAccessor::serialize(AbstractBoundary &boundary) const {
-  return {ExpressionKind{ExprScopeAccess{}}.index(), scope_offset,
+  return {serial::Expression{serial::ScopeAccessor{}}.index(), scope_offset,
           local_offset};
 }
 
@@ -1857,18 +1872,18 @@ Compiler::AbstractBoundary::push_string_literal(std::u16string_view unicode) {
 
 Machine::Machine() { runtime_memory = std::make_unique<RuntimeMemory>(); }
 
-void Machine::EvaluateStatement::operator()(StmtInitialize) {
+void Machine::EvaluateStatement::operator()(serial::InitializeScope) {
   std::size_t local_offset{
       static_cast<std::size_t>(*machine.current_frame->program_iter++)};
   machine.current_frame->local_memory[local_offset] =
       machine.evaluate_expression();
 }
 
-void Machine::EvaluateStatement::operator()(StmtExpression) {
+void Machine::EvaluateStatement::operator()(serial::ExpressionStatement) {
   machine.evaluate_expression();
 }
 
-void Machine::EvaluateStatement::operator()(StmtReturn) {
+void Machine::EvaluateStatement::operator()(serial::ReturnStatement) {
   machine.current_frame->return_val = machine.evaluate_expression();
 }
 
@@ -1882,15 +1897,16 @@ template <typename T> static T from_index(std::uint64_t alternative_idx) {
 }
 
 void Machine::evaluate_statement() {
-  from_index<StatementKind>(*current_frame->program_iter++)
+  from_index<serial::Statement>(*current_frame->program_iter++)
       .visit(EvaluateStatement{*this});
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprLiteral) {
+std::uint64_t
+Machine::EvaluateExpression::operator()(serial::LiteralExpression) {
   return *machine.current_frame->program_iter++;
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprScopeAccess) {
+std::uint64_t Machine::EvaluateExpression::operator()(serial::ScopeAccessor) {
   std::size_t scope_offset{
       static_cast<std::size_t>(*machine.current_frame->program_iter++)};
   std::size_t local_offset{
@@ -1901,23 +1917,25 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprScopeAccess) {
   return complete_closure[scope_offset]->local_memory[local_offset];
 }
 
-template <BinaryOperation P>
-std::uint64_t Machine::EvaluateExpression::operator()(ExprBinary<P>) {
+template <BinaryOperator P>
+std::uint64_t
+Machine::EvaluateExpression::operator()(serial::BinaryExpression<P>) {
   double lhs{std::bit_cast<double>(machine.evaluate_expression())};
   double rhs{std::bit_cast<double>(machine.evaluate_expression())};
-  if constexpr (P == BinaryOperation::OP_ADD)
+  if constexpr (P == BinaryOperator::OP_ADD)
     return std::bit_cast<std::uint64_t>(lhs + rhs);
-  if constexpr (P == BinaryOperation::OP_SUB)
+  if constexpr (P == BinaryOperator::OP_SUB)
     return std::bit_cast<std::uint64_t>(lhs - rhs);
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprFunctionCall) {
+std::uint64_t Machine::EvaluateExpression::operator()(serial::FunctionCall) {
   const RuntimeBoundary *boundary{reinterpret_cast<const RuntimeBoundary *>(
       *machine.current_frame->program_iter++)};
   return machine.evaluate_function_call(boundary);
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) {
+std::uint64_t
+Machine::EvaluateExpression::operator()(serial::ConsoleExpression) {
   std::size_t n_args{*machine.current_frame->program_iter++};
   std::vector<VariantString> message_parts(n_args);
   for (VariantString &message_part : message_parts) {
@@ -1932,7 +1950,7 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprConsole) {
   return 0;
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprLengthIntrinsic) {
+std::uint64_t Machine::EvaluateExpression::operator()(serial::LengthIntrinsic) {
   const VariantString *machine_string{
       reinterpret_cast<const VariantString *>(machine.evaluate_expression())};
   std::size_t string_length{
@@ -1940,7 +1958,7 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprLengthIntrinsic) {
   return std::bit_cast<std::uint64_t>(static_cast<double>(string_length));
 }
 
-std::uint64_t Machine::EvaluateExpression::operator()(ExprPrintIntrinsic) {
+std::uint64_t Machine::EvaluateExpression::operator()(serial::PrintIntrinsic) {
   std::uint64_t expr_value{machine.evaluate_expression()};
   double number{std::bit_cast<double>(expr_value)};
   std::string buffer(24, '\0');
@@ -1954,7 +1972,7 @@ std::uint64_t Machine::EvaluateExpression::operator()(ExprPrintIntrinsic) {
 }
 
 std::uint64_t Machine::evaluate_expression() {
-  return from_index<ExpressionKind>(*current_frame->program_iter++)
+  return from_index<serial::Expression>(*current_frame->program_iter++)
       .visit(EvaluateExpression{*this});
 }
 
