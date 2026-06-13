@@ -182,19 +182,27 @@ class ValueType {
 protected:
   ValueType() = default;
 };
-class ScopeAccessor final : public ValueType {};
-using VariantType = std::variant<ScopeAccessor>;
+class ObjectShape;
+
+using VariantType = std::variant<std::monostate>;
+class ObjectShape {
+public:
+  std::flat_map<Identifier, VariantType> properties;
+};
 
 using VariantString = std::variant<std::string, std::u16string>;
 
 struct AnyExpression;
 struct AnyStatement;
+
 class FunctionDefinition;
+class ScopeAccessor;
 
 class LexicalBoundary {
 public:
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
-  virtual ScopeAccessor find_local(Identifier identifier) const = 0;
+  virtual std::optional<ScopeAccessor>
+  find_local(Identifier identifier) const = 0;
 };
 
 template <typename T> class AbstractBoundary : public LexicalBoundary {
@@ -207,7 +215,7 @@ public:
   FunctionDefinition *find_function(Identifier identifier) override;
 
   std::flat_map<Identifier, VariantType> local_layout;
-  ScopeAccessor find_local(Identifier identifier) const override;
+  std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
 
   void serialize();
 
@@ -282,6 +290,20 @@ protected:
   Expression() = default;
 };
 
+class AliasedFunctionCall final : public Expression {
+public:
+  AliasedFunctionCall(AnyExpression &&c);
+  std::indirect<AnyExpression> callee;
+  std::list<AnyExpression> arguments;
+};
+
+class MemberExpression final : public Expression {
+public:
+  MemberExpression(AnyExpression &&obj);
+  std::indirect<AnyExpression> object;
+  Identifier property;
+};
+
 class AssignExpression final : public Expression {
 public:
   AssignExpression(AnyExpression &&l, AnyExpression &&r);
@@ -299,19 +321,78 @@ public:
 
 class BinaryExpression final : public Expression {
 public:
+  BinaryExpression(AnyExpression &&l, AnyExpression &&r);
   std::indirect<AnyExpression> left;
   std::indirect<AnyExpression> right;
   char32_t op;
 };
 
-struct AnyExpression {
-  std::variant<AssignExpression, LogicalExpression, BinaryExpression> alt;
+class ObjectExpression final : public Expression {
+public:
+  ObjectExpression() = default;
+  ObjectShape object_shape;
+  std::vector<Identifier> keys;
+  std::vector<std::optional<AnyExpression>> values;
 };
+
+class VariableAccessor final : public Expression {
+public:
+  VariableAccessor() = default;
+  Identifier identifier;
+};
+
+class ScopeAccessor final : public Expression {
+public:
+  ScopeAccessor() = default;
+  VariantType local_type;
+  std::array<std::size_t, 2> location;
+};
+
+class NumericLiteral final : public Expression {
+public:
+  NumericLiteral() = default;
+  double val;
+};
+
+class AsciiLiteral final : public Expression {
+public:
+  AsciiLiteral() = default;
+  std::string val;
+};
+
+class UnicodeLiteral final : public Expression {
+public:
+  UnicodeLiteral() = default;
+  std::u16string val;
+};
+
+class LambdaExpression final : public Expression {
+public:
+  LambdaExpression() = default;
+  FunctionDefinition *definition;
+};
+
+struct AnyExpression {
+  std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
+               AliasedFunctionCall, MemberExpression, AssignExpression,
+               LogicalExpression, BinaryExpression, ObjectExpression,
+               VariableAccessor, ScopeAccessor, LambdaExpression>
+      alt;
+};
+
+AliasedFunctionCall::AliasedFunctionCall(AnyExpression &&c)
+    : callee{std::move(c)} {};
+
+MemberExpression::MemberExpression(AnyExpression &&obj)
+    : object{std::move(obj)} {};
 
 AssignExpression::AssignExpression(AnyExpression &&l, AnyExpression &&r)
     : left{std::move(l)}, right{std::move(r)} {};
 
 LogicalExpression::LogicalExpression(AnyExpression &&l, AnyExpression &&r)
+    : left{std::move(l)}, right{std::move(r)} {};
+
+BinaryExpression::BinaryExpression(AnyExpression &&l, AnyExpression &&r)
     : left{std::move(l)}, right{std::move(r)} {};
 
 class Statement {
@@ -530,6 +611,40 @@ void Tokenizer::assert_punct(char32_t must_be) {
   throw MissingPunctuation{must_be};
 }
 
+void FunctionParser::parse_function_decl() {
+  tokenizer.tokenize();
+  if (std::holds_alternative<Identifier>(tokenizer.last_token)) {
+    boundary.function_name = std::get<Identifier>(tokenizer.last_token);
+    tokenizer.tokenize();
+  }
+  tokenizer.assert_punct('(');
+  while (1) {
+    tokenizer.tokenize();
+    if (tokenizer.last_token == Token{U')'})
+      break;
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+      throw MissingFormalParameter{};
+    Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
+    boundary.local_layout.try_emplace(parameter);
+    boundary.arguments.push_back(parameter);
+    tokenizer.tokenize();
+    if (tokenizer.last_token == Token{U')'})
+      break;
+    tokenizer.assert_punct(',');
+  }
+  tokenizer.tokenize();
+  tokenizer.assert_punct('{');
+  while (1) {
+    tokenizer.tokenize();
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+      throw MissingPunctuation{'}'};
+    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
+    if (alter_ptr && *alter_ptr == '}')
+      break;
+    parse_statement();
+  }
+}
+
 template <typename T> void Parser<T>::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(tokenizer.last_token))
@@ -598,6 +713,10 @@ template <typename T> void Parser<T>::parse_variable_decl() {
   boundary.local_layout.try_emplace(variable_name);
 }
 
+template <typename T> AnyExpression Parser<T>::parse_expression() {
+  return parse_assign_expression();
+}
+
 template <typename T> AnyExpression Parser<T>::parse_logical_disjunct() {
   AnyExpression left_expression{parse_additive_expression()};
 right_expression: {
@@ -631,38 +750,142 @@ seek_postfix:
   }
 }
 
-void FunctionParser::parse_function_decl() {
-  tokenizer.tokenize();
-  if (std::holds_alternative<Identifier>(tokenizer.last_token)) {
-    boundary.function_name = std::get<Identifier>(tokenizer.last_token);
-    tokenizer.tokenize();
-  }
-  tokenizer.assert_punct('(');
+template <typename T>
+void Parser<T>::parse_function_call(AnyExpression &expression) {
+  AliasedFunctionCall &function_call{
+      expression.alt.emplace<AliasedFunctionCall>(std::move(expression))};
   while (1) {
     tokenizer.tokenize();
     if (tokenizer.last_token == Token{U')'})
-      break;
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
-      throw MissingFormalParameter{};
-    Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
-    boundary.local_layout.try_emplace(parameter);
-    boundary.arguments.push_back(parameter);
-    tokenizer.tokenize();
+      return;
+    function_call.arguments.push_back(parse_expression());
     if (tokenizer.last_token == Token{U')'})
-      break;
+      return;
     tokenizer.assert_punct(',');
   }
+}
+
+template <typename T>
+void Parser<T>::parse_member_expression(AnyExpression &expression) {
   tokenizer.tokenize();
-  tokenizer.assert_punct('{');
-  while (1) {
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+    throw MissingPropertyName{};
+  Identifier field_name{std::get<Identifier>(tokenizer.last_token)};
+  MemberExpression &member_expression{
+      expression.alt.emplace<MemberExpression>(std::move(expression))};
+  member_expression.property = field_name;
+}
+
+template <typename T> AnyExpression Parser<T>::parse_additive_expression() {
+  AnyExpression left_expression{parse_postfix_expression()};
+  if (tokenizer.last_token != Token{U'+'} &&
+      tokenizer.last_token != Token{U'-'})
+    return left_expression;
+  char32_t binary_op{std::get<char32_t>(tokenizer.last_token)};
+  tokenizer.tokenize();
+  BinaryExpression &expression{left_expression.alt.emplace<BinaryExpression>(
+      std::move(left_expression), parse_postfix_expression())};
+  expression.op = binary_op;
+  return left_expression;
+}
+
+template <typename T> AnyExpression Parser<T>::parse_object_literal() {
+  ObjectExpression object_expression{};
+  tokenizer.tokenize();
+  while (tokenizer.last_token != Token{U'}'}) {
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+      throw InvalidPropertyName{};
+    Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
+    object_expression.object_shape.properties.try_emplace(property_name);
     tokenizer.tokenize();
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
-      throw MissingPunctuation{'}'};
-    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
-    if (alter_ptr && *alter_ptr == '}')
+    object_expression.keys.push_back(property_name);
+    std::optional<AnyExpression> initializer{};
+    if (tokenizer.last_token == Token{U':'}) {
+      tokenizer.tokenize();
+      initializer = parse_expression();
+    }
+    object_expression.values.push_back(std::move(initializer));
+    if (tokenizer.last_token != Token{U','})
       break;
-    parse_statement();
+    tokenizer.tokenize();
   }
+  tokenizer.assert_punct('}');
+  return AnyExpression{std::move(object_expression)};
+}
+
+template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
+  struct TokenVisitor {
+    Parser<T> &parser;
+    AnyExpression operator()(std::monostate) { throw UnexpectedToken{}; }
+    AnyExpression operator()(char32_t punct) {
+      if (punct == '{')
+        return parser.parse_object_literal();
+      else
+        throw UnexpectedToken{};
+    }
+    AnyExpression operator()(std::int64_t number) {
+      NumericLiteral num_literal{};
+      num_literal.val = static_cast<double>(number);
+      return AnyExpression{num_literal};
+    }
+    AnyExpression operator()(double number) {
+      NumericLiteral numeric_literal{};
+      numeric_literal.val = number;
+      return AnyExpression{numeric_literal};
+    }
+    AnyExpression operator()(Operator op) { throw UnexpectedToken{}; }
+    AnyExpression operator()(Keyword keyword) {
+      switch (keyword) {
+      case Keyword::K_FUNCTION: {
+        FunctionDefinition &definition{
+            parser.boundary.inner_functions.emplace_back()};
+        FunctionParser function_parser{definition, parser.tokenizer};
+        function_parser.parse_function_decl();
+        LambdaExpression lambda_expression{};
+        lambda_expression.definition = &definition;
+        return AnyExpression{lambda_expression};
+      }
+      default:
+        throw UnexpectedToken{};
+      }
+    }
+    AnyExpression operator()(Identifier identifier) {
+      VariableAccessor variable_accessor{};
+      variable_accessor.identifier = identifier;
+      return AnyExpression{variable_accessor};
+    }
+    AnyExpression operator()(std::string_view ascii) {
+      AsciiLiteral ascii_literal{};
+      ascii_literal.val = ascii;
+      return AnyExpression{ascii_literal};
+    }
+    AnyExpression operator()(std::u16string_view unicode) {
+      UnicodeLiteral unicode_literal{};
+      unicode_literal.val = unicode;
+      return AnyExpression{unicode_literal};
+    }
+  };
+  return tokenizer.last_token.visit(TokenVisitor{*this});
+}
+
+template <typename T>
+std::optional<ScopeAccessor>
+AbstractBoundary<T>::find_local(Identifier identifier) const {
+  if (not local_layout.contains(identifier))
+    return std::nullopt;
+  std::size_t local_offset =
+      std::distance(local_layout.begin(), local_layout.find(identifier));
+  ScopeAccessor accessor{};
+  accessor.local_type = local_layout.values()[local_offset];
+  std::get<1>(accessor.location) = local_offset;
+  return accessor;
+}
+
+template <typename T>
+FunctionDefinition *AbstractBoundary<T>::find_function(Identifier identifier) {
+  auto by_name = [](const auto &def) { return def.function_name; };
+  auto function_it = std::ranges::find(inner_functions, identifier, by_name);
+  return function_it == inner_functions.end() ? nullptr : &(*function_it);
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
