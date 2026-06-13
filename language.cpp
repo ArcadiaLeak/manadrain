@@ -181,16 +181,75 @@ private:
 class ValueType {
 protected:
   ValueType() = default;
+  virtual std::size_t type_size() const = 0;
 };
 class ObjectShape;
 
-using VariantType = std::variant<std::monostate>;
+class NumberType final : public ValueType {
+  std::size_t type_size() const override { return sizeof(double); }
+};
+
+class RuntimeStringView {
+public:
+  virtual std::size_t size() const = 0;
+};
+class AsciiStringView final : public RuntimeStringView {
+public:
+  AsciiStringView(std::string_view sv) : ascii_view{sv} {}
+  std::size_t size() const override { return ascii_view.size(); }
+
+private:
+  std::string_view ascii_view;
+};
+class UnicodeStringView final : public RuntimeStringView {
+public:
+  UnicodeStringView(std::u16string_view sv) : unicode_view{sv} {}
+  std::size_t size() const override { return unicode_view.size(); }
+
+private:
+  std::u16string_view unicode_view;
+};
+using VariantStringView = std::variant<AsciiStringView, UnicodeStringView>;
+class StringType final : public ValueType {
+  std::size_t type_size() const override { return sizeof(VariantStringView); }
+};
+
+struct LambdaDescriptor {};
+class LambdaType final : public ValueType {
+  std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
+};
+
+using VariantType = std::variant<NumberType, StringType, LambdaType>;
+
 class ObjectShape {
 public:
   std::flat_map<Identifier, VariantType> properties;
 };
 
-using VariantString = std::variant<std::string, std::u16string>;
+class RuntimeString {
+public:
+  virtual std::string normalize() const = 0;
+  virtual VariantStringView sv() const = 0;
+};
+class AsciiString final : public RuntimeString {
+public:
+  AsciiString(std::string s) : ascii{std::move(s)} {}
+  std::string normalize() const override { return ascii; }
+  VariantStringView sv() const override { return AsciiStringView{ascii}; }
+
+private:
+  std::string ascii;
+};
+class UnicodeString final : public RuntimeString {
+public:
+  UnicodeString(std::u16string s) : unicode{std::move(s)} {}
+  std::string normalize() const override;
+  VariantStringView sv() const override { return UnicodeStringView{unicode}; }
+
+private:
+  std::u16string unicode;
+};
+using VariantString = std::variant<AsciiString, UnicodeString>;
 
 struct AnyExpression;
 struct AnyStatement;
@@ -218,9 +277,6 @@ public:
   std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
 
   void serialize();
-
-  const VariantString *push_string_literal(std::string_view ascii);
-  const VariantString *push_string_literal(std::u16string_view unicode);
 
 protected:
   AbstractBoundary() = default;
@@ -369,7 +425,7 @@ public:
 class LambdaExpression final : public Expression {
 public:
   LambdaExpression() = default;
-  FunctionDefinition *definition;
+  FunctionDefinition definition;
 };
 
 struct AnyExpression {
@@ -444,6 +500,20 @@ static const std::flat_map<std::string_view, std::size_t> identifier_atlas{
     {"length", OFFSET_length}};
 static const std::array persistent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
+
+std::string UnicodeString::normalize() const {
+  auto encode_u16 =
+      [](std::uint16_t uchar) -> std::inplace_vector<std::uint8_t, 3> {
+    std::array<std::uint8_t, 3> buffer{};
+    std::size_t buffer_len{buffer.size()};
+    uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
+    assert(result != nullptr);
+    return {std::from_range, buffer | std::views::take(buffer_len)};
+  };
+  auto encoded_message =
+      unicode | std::views::transform(encode_u16) | std::views::join;
+  return std::string{std::from_range, encoded_message};
+}
 
 std::optional<char32_t> Tokenizer::forward() {
   if (position >= text_buffer->size())
@@ -837,12 +907,10 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
     AnyExpression operator()(Keyword keyword) {
       switch (keyword) {
       case Keyword::K_FUNCTION: {
-        FunctionDefinition &definition{
-            parser.boundary.inner_functions.emplace_back()};
-        FunctionParser function_parser{definition, parser.tokenizer};
-        function_parser.parse_function_decl();
         LambdaExpression lambda_expression{};
-        lambda_expression.definition = &definition;
+        FunctionParser function_parser{lambda_expression.definition,
+                                       parser.tokenizer};
+        function_parser.parse_function_decl();
         return AnyExpression{lambda_expression};
       }
       default:
