@@ -184,26 +184,33 @@ private:
 };
 
 using VariantString = std::variant<std::string, std::u16string>;
-class Statement;
+struct AnyExpression;
+struct AnyStatement;
 
 class ValueType {};
 class ScopeAccessor final : ValueType {};
+using AnyValueType = std::variant<ScopeAccessor>;
 
 class LexicalBlock {
 public:
+  virtual ~LexicalBlock() = default;
+  LexicalBlock(LexicalBlock &&) noexcept = default;
+  LexicalBlock &operator=(LexicalBlock &&) noexcept = default;
+  LexicalBlock() = default;
+
   class Parser;
 
   LexicalBlock *parent_block;
-  std::vector<std::unique_ptr<Statement>> program;
+  std::list<AnyStatement> program;
   std::vector<std::byte> bytecode;
 
   std::list<FunctionDefinition> inner_functions;
   FunctionDefinition *find_function(Identifier identifier);
 
-  std::flat_map<Identifier, std::unique_ptr<ValueType>> local_layout;
+  std::flat_map<Identifier, AnyValueType> local_layout;
   ScopeAccessor find_local(Identifier identifier) const;
 
-  std::unique_ptr<ValueType> return_type;
+  AnyValueType return_type;
 
   void analyze();
   void serialize();
@@ -220,40 +227,59 @@ class Expression {};
 
 class AssignExpression final : public Expression {
 public:
-  std::unique_ptr<Expression> left;
-  std::unique_ptr<Expression> right;
+  AssignExpression(AnyExpression &&l, AnyExpression &&r);
+  std::indirect<AnyExpression> left;
+  std::indirect<AnyExpression> right;
 };
 
 class LogicalExpression final : public Expression {
 public:
-  std::unique_ptr<Expression> left;
-  std::unique_ptr<Expression> right;
+  LogicalExpression(AnyExpression &&l, AnyExpression &&r);
+  std::indirect<AnyExpression> left;
+  std::indirect<AnyExpression> right;
   Operator op;
 };
 
 class BinaryExpression final : public Expression {
 public:
-  std::unique_ptr<Expression> left;
-  std::unique_ptr<Expression> right;
+  std::indirect<AnyExpression> left;
+  std::indirect<AnyExpression> right;
   char32_t op;
 };
+
+struct AnyExpression {
+  std::variant<AssignExpression, LogicalExpression, BinaryExpression> alt;
+};
+
+AssignExpression::AssignExpression(AnyExpression &&l, AnyExpression &&r)
+    : left{std::move(l)}, right{std::move(r)} {};
+
+LogicalExpression::LogicalExpression(AnyExpression &&l, AnyExpression &&r)
+    : left{std::move(l)}, right{std::move(r)} {};
 
 class Statement {};
 
 class InitializeVariable final : public Statement {
 public:
+  InitializeVariable(AnyExpression v) : rvalue{v} {};
   Identifier variable_name;
-  std::unique_ptr<Expression> rvalue;
+  std::indirect<AnyExpression> rvalue;
 };
 
 class ReturnStatement final : public Statement {
 public:
-  std::unique_ptr<Expression> argument;
+  ReturnStatement(AnyExpression e) : argument{std::move(e)} {};
+  std::indirect<AnyExpression> argument;
 };
 
 class ExpressionStatement final : public Statement {
 public:
-  std::unique_ptr<Expression> argument;
+  ExpressionStatement(AnyExpression e) : argument{std::move(e)} {};
+  std::indirect<AnyExpression> argument;
+};
+
+struct AnyStatement {
+  std::variant<InitializeVariable, ReturnStatement, ExpressionStatement> alt;
 };
 
 class FunctionDefinition final : public LexicalBlock {
@@ -273,25 +299,24 @@ private:
 
 class LexicalBlock::Parser {
 public:
+  virtual ~Parser() = default;
   Parser(LexicalBlock &b, Tokenizer &t) : block{b}, tokenizer{t} {}
 
   void parse_statement();
   void parse_function_stmt();
   void parse_variable_decl();
 
-  std::unique_ptr<Expression> parse_expression() {
-    return parse_assign_expression();
-  }
-  std::unique_ptr<Expression> parse_primary_expression();
+  AnyExpression parse_expression() { return parse_assign_expression(); }
+  AnyExpression parse_primary_expression();
 
-  std::unique_ptr<Expression> parse_assign_expression();
-  std::unique_ptr<Expression> parse_logical_disjunct();
-  std::unique_ptr<Expression> parse_additive_expression();
-  std::unique_ptr<Expression> parse_object_literal();
+  AnyExpression parse_assign_expression();
+  AnyExpression parse_logical_disjunct();
+  AnyExpression parse_additive_expression();
+  AnyExpression parse_object_literal();
 
-  void parse_member_expression(std::unique_ptr<Expression> &expression);
-  void parse_function_call(std::unique_ptr<Expression> &expression);
-  std::unique_ptr<Expression> parse_postfix_expression();
+  void parse_member_expression(AnyExpression &expression);
+  void parse_function_call(AnyExpression &expression);
+  AnyExpression parse_postfix_expression();
 
 protected:
   LexicalBlock &block;
@@ -508,18 +533,17 @@ void LexicalBlock::Parser::parse_statement() {
     return;
   case Keyword::K_RETURN: {
     tokenizer.tokenize();
-    std::unique_ptr statement{std::make_unique<ReturnStatement>()};
-    statement->argument = parse_expression();
-    block.program.push_back(std::move(statement));
+    ReturnStatement statement{parse_expression()};
+    block.program.emplace_back(std::move(statement));
     tokenizer.assert_punct(';');
     return;
   }
-  default:
-    std::unique_ptr statement{std::make_unique<ExpressionStatement>()};
-    statement->argument = parse_expression();
-    block.program.push_back(std::move(statement));
+  default: {
+    ExpressionStatement statement{parse_expression()};
+    block.program.emplace_back(std::move(statement));
     tokenizer.assert_punct(';');
     return;
+  }
   }
 }
 
@@ -537,15 +561,14 @@ void LexicalBlock::Parser::parse_function_stmt() {
   block.inner_functions.push_back(std::move(definition));
 }
 
-std::unique_ptr<Expression> LexicalBlock::Parser::parse_assign_expression() {
-  std::unique_ptr expr_left{parse_logical_disjunct()};
+AnyExpression LexicalBlock::Parser::parse_assign_expression() {
+  AnyExpression left_expression{parse_logical_disjunct()};
   if (tokenizer.last_token != Token{U'='})
-    return expr_left;
+    return left_expression;
   tokenizer.tokenize();
-  std::unique_ptr expression{std::make_unique<AssignExpression>()};
-  expression->left = std::move(expr_left);
-  expression->right = parse_assign_expression();
-  return expression;
+  AssignExpression expression{std::move(left_expression),
+                              parse_assign_expression()};
+  return AnyExpression{expression};
 }
 
 void LexicalBlock::Parser::parse_variable_decl() {
@@ -556,30 +579,29 @@ void LexicalBlock::Parser::parse_variable_decl() {
   tokenizer.tokenize();
   tokenizer.assert_punct('=');
   tokenizer.tokenize();
-  std::unique_ptr initialize_variable{std::make_unique<InitializeVariable>()};
-  initialize_variable->variable_name = variable_name;
-  initialize_variable->rvalue = parse_expression();
-  block.program.push_back(std::move(initialize_variable));
+  InitializeVariable initialize_variable{parse_expression()};
+  initialize_variable.variable_name = variable_name;
+  block.program.emplace_back(std::move(initialize_variable));
   tokenizer.assert_punct(';');
   if (block.local_layout.contains(variable_name))
     throw DuplicateDeclaration{};
   block.local_layout.try_emplace(variable_name);
 }
 
-std::unique_ptr<Expression> LexicalBlock::Parser::parse_logical_disjunct() {
-  std::unique_ptr left_expression{parse_additive_expression()};
+AnyExpression LexicalBlock::Parser::parse_logical_disjunct() {
+  AnyExpression left_expression{parse_additive_expression()};
   while (tokenizer.last_token == Token{Operator::LOGICAL_DISJUNCT}) {
-    std::unique_ptr expression{std::make_unique<LogicalExpression>()};
-    expression->op = std::get<Operator>(tokenizer.last_token);
+    Operator logical_op{std::get<Operator>(tokenizer.last_token)};
     tokenizer.tokenize();
-    expression->left = std::move(left_expression);
-    expression->right = parse_additive_expression();
-    left_expression = std::move(expression);
+    LogicalExpression expression{std::move(left_expression),
+                                 parse_additive_expression()};
+    expression.op = logical_op;
+    left_expression.alt.emplace<LogicalExpression>(std::move(expression));
   }
   return left_expression;
 }
 
-std::unique_ptr<Expression> LexicalBlock::Parser::parse_additive_expression() {
+AnyExpression LexicalBlock::Parser::parse_additive_expression() {
   std::unique_ptr left_expression{parse_postfix_expression()};
   if (tokenizer.last_token != Token{U'+'} &&
       tokenizer.last_token != Token{U'-'})
@@ -592,7 +614,7 @@ std::unique_ptr<Expression> LexicalBlock::Parser::parse_additive_expression() {
   return expression;
 }
 
-std::unique_ptr<Expression> LexicalBlock::Parser::parse_postfix_expression() {
+AnyExpression LexicalBlock::Parser::parse_postfix_expression() {
   std::unique_ptr postfix_expression{parse_primary_expression()};
   bool hit_default{};
   while (not hit_default) {
