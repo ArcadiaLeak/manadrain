@@ -150,15 +150,17 @@ inline constexpr std::size_t OFFSET_length{2};
 
 class Machine {};
 
-class Compiler {
-public:
-  Compiler(Machine &m) : machine{m} {}
+class LexicalBlock;
+class FunctionDefinition;
 
+class Tokenizer {
+public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
-  void parse_text();
 
 private:
-  Machine &machine;
+  friend class Language;
+  friend class LexicalBlock;
+  friend class FunctionDefinition;
 
   std::map<std::string, Identifier> atom_atlas;
   std::set<std::string> token_strings;
@@ -181,6 +183,132 @@ private:
   void tokenize();
 };
 
+using VariantString = std::variant<std::string, std::u16string>;
+class Statement;
+
+class ValueType {};
+class ScopeAccessor final : ValueType {};
+
+class LexicalBlock {
+public:
+  class Parser;
+
+  LexicalBlock *parent_block;
+  std::vector<std::unique_ptr<Statement>> program;
+  std::vector<std::byte> bytecode;
+
+  std::list<FunctionDefinition> inner_functions;
+  FunctionDefinition *find_function(Identifier identifier);
+
+  std::flat_map<Identifier, std::unique_ptr<ValueType>> local_layout;
+  ScopeAccessor find_local(Identifier identifier) const;
+
+  std::unique_ptr<ValueType> return_type;
+
+  void analyze();
+  void serialize();
+
+  const VariantString *push_string_literal(std::string_view ascii);
+  const VariantString *push_string_literal(std::u16string_view unicode);
+
+protected:
+  void analyze_statements();
+  void analyze_inner_functions();
+};
+
+class Expression {};
+
+class AssignExpression final : public Expression {
+public:
+  std::unique_ptr<Expression> left;
+  std::unique_ptr<Expression> right;
+};
+
+class LogicalExpression final : public Expression {
+public:
+  std::unique_ptr<Expression> left;
+  std::unique_ptr<Expression> right;
+  Operator op;
+};
+
+class BinaryExpression final : public Expression {
+public:
+  std::unique_ptr<Expression> left;
+  std::unique_ptr<Expression> right;
+  char32_t op;
+};
+
+class Statement {};
+
+class InitializeVariable final : public Statement {
+public:
+  Identifier variable_name;
+  std::unique_ptr<Expression> rvalue;
+};
+
+class ReturnStatement final : public Statement {
+public:
+  std::unique_ptr<Expression> argument;
+};
+
+class ExpressionStatement final : public Statement {
+public:
+  std::unique_ptr<Expression> argument;
+};
+
+class FunctionDefinition final : public LexicalBlock {
+public:
+  class Parser;
+
+  enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
+  AnalyzerMark analyzer_mark;
+  std::optional<Identifier> function_name;
+  std::vector<Identifier> arguments;
+
+  void analyze();
+
+private:
+  void analyze_formal_parameters();
+};
+
+class LexicalBlock::Parser {
+public:
+  Parser(LexicalBlock &b, Tokenizer &t) : block{b}, tokenizer{t} {}
+
+  void parse_statement();
+  void parse_function_stmt();
+  void parse_variable_decl();
+
+  std::unique_ptr<Expression> parse_expression() {
+    return parse_assign_expression();
+  }
+  std::unique_ptr<Expression> parse_primary_expression();
+
+  std::unique_ptr<Expression> parse_assign_expression();
+  std::unique_ptr<Expression> parse_logical_disjunct();
+  std::unique_ptr<Expression> parse_additive_expression();
+  std::unique_ptr<Expression> parse_object_literal();
+
+  void parse_member_expression(std::unique_ptr<Expression> &expression);
+  void parse_function_call(std::unique_ptr<Expression> &expression);
+  std::unique_ptr<Expression> parse_postfix_expression();
+
+protected:
+  LexicalBlock &block;
+  Tokenizer &tokenizer;
+};
+
+class FunctionDefinition::Parser final : public LexicalBlock::Parser {
+public:
+  Parser(FunctionDefinition &d, Tokenizer &t) : LexicalBlock::Parser{d, t} {}
+  void parse_function_decl();
+
+private:
+  FunctionDefinition &definition() {
+    return static_cast<FunctionDefinition &>(block);
+  }
+};
+
 static const std::flat_map<std::string_view, Keyword> keyword_atlas{
     {"const", Keyword::K_CONST},       {"let", Keyword::K_LET},
     {"var", Keyword::K_VAR},           {"class", Keyword::K_CLASS},
@@ -201,7 +329,7 @@ static const std::flat_map<std::string_view, std::size_t> identifier_atlas{
 static const std::array persistent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::optional<char32_t> Compiler::forward() {
+std::optional<char32_t> Tokenizer::forward() {
   if (position >= text_buffer->size())
     backtrace.push_back(std::nullopt);
   else {
@@ -215,7 +343,7 @@ std::optional<char32_t> Compiler::forward() {
   return backtrace.back();
 }
 
-std::generator<std::optional<char32_t>> Compiler::traverse_text() {
+std::generator<std::optional<char32_t>> Tokenizer::traverse_text() {
   while (1)
     co_yield forward();
 }
@@ -234,19 +362,19 @@ std::inplace_vector<char16_t, 2> traverse_u16(ucs4_t cp) {
   return {std::from_range, buffer | std::views::take(advance)};
 }
 
-void Compiler::backward() {
+void Tokenizer::backward() {
   std::optional<char32_t> behind{backtrace.back()};
   position -= std::ranges::distance(
       behind | std::views::transform(traverse_u8) | std::views::join);
   backtrace.pop_back();
 }
 
-void Compiler::backward(std::size_t N) {
+void Tokenizer::backward(std::size_t N) {
   for (int i = 0; i < N; ++i)
     backward();
 }
 
-Token Compiler::tokenize_identifier(char32_t leading) {
+Token Tokenizer::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -267,7 +395,7 @@ Token Compiler::tokenize_identifier(char32_t leading) {
   return emplace_ret.first->second;
 }
 
-Token Compiler::tokenize_string_literal(char32_t separator) {
+Token Tokenizer::tokenize_string_literal(char32_t separator) {
   std::u16string u16_literal{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
@@ -292,7 +420,7 @@ Token Compiler::tokenize_string_literal(char32_t separator) {
   return *u16string_iter;
 }
 
-Token Compiler::tokenize_numeric_literal(char32_t leading) {
+Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -309,7 +437,7 @@ Token Compiler::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-void Compiler::tokenize() {
+void Tokenizer::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -360,19 +488,163 @@ void Compiler::tokenize() {
   last_token = std::monostate{};
 }
 
-void Compiler::assert_punct(char32_t must_be) {
+void Tokenizer::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
   throw MissingPunctuation{must_be};
 }
 
-void Compiler::parse_text() {
-  while (1) {
-    tokenize();
-    if (std::holds_alternative<std::monostate>(last_token))
+void LexicalBlock::Parser::parse_statement() {
+  Keyword keyword{};
+  if (std::holds_alternative<Keyword>(tokenizer.last_token))
+    keyword = std::get<Keyword>(tokenizer.last_token);
+  switch (keyword) {
+  case Keyword::K_FUNCTION:
+    parse_function_stmt();
+    return;
+  case Keyword::K_LET:
+    parse_variable_decl();
+    return;
+  case Keyword::K_RETURN: {
+    tokenizer.tokenize();
+    std::unique_ptr statement{std::make_unique<ReturnStatement>()};
+    statement->argument = parse_expression();
+    block.program.push_back(std::move(statement));
+    tokenizer.assert_punct(';');
+    return;
+  }
+  default:
+    std::unique_ptr statement{std::make_unique<ExpressionStatement>()};
+    statement->argument = parse_expression();
+    block.program.push_back(std::move(statement));
+    tokenizer.assert_punct(';');
+    return;
+  }
+}
+
+void LexicalBlock::Parser::parse_function_stmt() {
+  FunctionDefinition definition{};
+  FunctionDefinition::Parser definition_parser{definition, tokenizer};
+  definition_parser.parse_function_decl();
+  if (not definition.function_name)
+    throw MissingFunctionName{};
+  bool duplicate_exists =
+      std::ranges::contains(block.inner_functions, definition.function_name,
+                            [](const auto &el) { return el.function_name; });
+  if (duplicate_exists)
+    throw DuplicateDeclaration{};
+  block.inner_functions.push_back(std::move(definition));
+}
+
+std::unique_ptr<Expression> LexicalBlock::Parser::parse_assign_expression() {
+  std::unique_ptr expr_left{parse_logical_disjunct()};
+  if (tokenizer.last_token != Token{U'='})
+    return expr_left;
+  tokenizer.tokenize();
+  std::unique_ptr expression{std::make_unique<AssignExpression>()};
+  expression->left = std::move(expr_left);
+  expression->right = parse_assign_expression();
+  return expression;
+}
+
+void LexicalBlock::Parser::parse_variable_decl() {
+  tokenizer.tokenize();
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+    throw MissingVariableName{};
+  Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
+  tokenizer.tokenize();
+  tokenizer.assert_punct('=');
+  tokenizer.tokenize();
+  std::unique_ptr initialize_variable{std::make_unique<InitializeVariable>()};
+  initialize_variable->variable_name = variable_name;
+  initialize_variable->rvalue = parse_expression();
+  block.program.push_back(std::move(initialize_variable));
+  tokenizer.assert_punct(';');
+  if (block.local_layout.contains(variable_name))
+    throw DuplicateDeclaration{};
+  block.local_layout.try_emplace(variable_name);
+}
+
+std::unique_ptr<Expression> LexicalBlock::Parser::parse_logical_disjunct() {
+  std::unique_ptr left_expression{parse_additive_expression()};
+  while (tokenizer.last_token == Token{Operator::LOGICAL_DISJUNCT}) {
+    std::unique_ptr expression{std::make_unique<LogicalExpression>()};
+    expression->op = std::get<Operator>(tokenizer.last_token);
+    tokenizer.tokenize();
+    expression->left = std::move(left_expression);
+    expression->right = parse_additive_expression();
+    left_expression = std::move(expression);
+  }
+  return left_expression;
+}
+
+std::unique_ptr<Expression> LexicalBlock::Parser::parse_additive_expression() {
+  std::unique_ptr left_expression{parse_postfix_expression()};
+  if (tokenizer.last_token != Token{U'+'} &&
+      tokenizer.last_token != Token{U'-'})
+    return left_expression;
+  std::unique_ptr expression{std::make_unique<BinaryExpression>()};
+  expression->op = std::get<char32_t>(tokenizer.last_token);
+  tokenizer.tokenize();
+  expression->left = std::move(left_expression);
+  expression->right = parse_postfix_expression();
+  return expression;
+}
+
+std::unique_ptr<Expression> LexicalBlock::Parser::parse_postfix_expression() {
+  std::unique_ptr postfix_expression{parse_primary_expression()};
+  bool hit_default{};
+  while (not hit_default) {
+    tokenizer.tokenize();
+    if (not std::holds_alternative<char32_t>(tokenizer.last_token))
       break;
-    // entry_module.parse_statement();
+    switch (std::get<char32_t>(tokenizer.last_token)) {
+    case '.':
+      parse_member_expression(postfix_expression);
+      break;
+    case '(':
+      parse_function_call(postfix_expression);
+      break;
+    default:
+      hit_default = 1;
+      break;
+    }
+  }
+  return postfix_expression;
+}
+
+void FunctionDefinition::Parser::parse_function_decl() {
+  tokenizer.tokenize();
+  if (std::holds_alternative<Identifier>(tokenizer.last_token)) {
+    definition().function_name = std::get<Identifier>(tokenizer.last_token);
+    tokenizer.tokenize();
+  }
+  tokenizer.assert_punct('(');
+  while (1) {
+    tokenizer.tokenize();
+    if (tokenizer.last_token == Token{U')'})
+      break;
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+      throw MissingFormalParameter{};
+    Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
+    block.local_layout.try_emplace(parameter);
+    definition().arguments.push_back(parameter);
+    tokenizer.tokenize();
+    if (tokenizer.last_token == Token{U')'})
+      break;
+    tokenizer.assert_punct(',');
+  }
+  tokenizer.tokenize();
+  tokenizer.assert_punct('{');
+  while (1) {
+    tokenizer.tokenize();
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+      throw MissingPunctuation{'}'};
+    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
+    if (alter_ptr && *alter_ptr == '}')
+      break;
+    parse_statement();
   }
 }
 
@@ -382,7 +654,16 @@ Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
 void Language::compile_and_execute() {
-  Manadrain::Compiler compiler{*machine};
-  compiler.text_buffer = std::move(text_buffer);
+  Tokenizer tokenizer{};
+  tokenizer.text_buffer = std::move(text_buffer);
+
+  LexicalBlock block{};
+  LexicalBlock::Parser block_parser{block, tokenizer};
+  while (1) {
+    tokenizer.tokenize();
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+      break;
+    block_parser.parse_statement();
+  }
 }
 } // namespace Manadrain
