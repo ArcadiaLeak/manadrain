@@ -93,6 +93,96 @@ public:
   UnresolvableCircularity() : CompilationError{"unresolvable circularity!"} {}
 };
 
+template <typename T> class Pool {
+public:
+  class UniqueToken {
+  public:
+    ~UniqueToken();
+    UniqueToken(const UniqueToken &) = delete;
+    UniqueToken &operator=(const UniqueToken &) = delete;
+    UniqueToken(UniqueToken &&another) noexcept;
+    UniqueToken &operator=(UniqueToken &&another) noexcept;
+
+  private:
+    UniqueToken(Pool *p, std::size_t i) noexcept : owner{p}, token_id{i} {}
+    Pool *owner;
+    std::size_t token_id;
+
+    friend class Pool;
+    std::size_t id() const noexcept { return token_id; }
+  };
+
+  Pool(const Pool &) = delete;
+  Pool &operator=(const Pool &) = delete;
+  Pool() = default;
+
+  UniqueToken create_token();
+
+  void push(const UniqueToken &token, T obj);
+  template <typename... Args>
+  T &emplace(const UniqueToken &token, Args &&...args);
+
+private:
+  void dispose_token(std::size_t color_id);
+
+  std::atomic<std::size_t> next_token_id{0};
+  std::mutex registry_mutex;
+  std::flat_map<std::size_t, std::list<T>> registry;
+};
+
+template <typename T>
+Pool<T>::UniqueToken::UniqueToken(UniqueToken &&another) noexcept
+    : owner{another.owner}, token_id{another.token_id} {
+  another.owner = nullptr;
+}
+
+template <typename T>
+Pool<T>::UniqueToken &
+Pool<T>::UniqueToken::operator=(UniqueToken &&another) noexcept {
+  if (this == &another)
+    return *this;
+  if (owner)
+    owner->dispose_token(token_id);
+  owner = another.owner;
+  token_id = another.token_id;
+  another.owner = nullptr;
+  return *this;
+}
+
+template <typename T> Pool<T>::UniqueToken::~UniqueToken() {
+  if (owner)
+    owner->dispose_token(token_id);
+}
+
+template <typename T> Pool<T>::UniqueToken Pool<T>::create_token() {
+  std::size_t id{next_token_id.fetch_add(1, std::memory_order_relaxed)};
+  return UniqueToken{this, id};
+}
+
+template <typename T> void Pool<T>::push(const UniqueToken &token, T obj) {
+  std::lock_guard lock{registry_mutex};
+  registry[token.id()].push_front(std::move(obj));
+}
+
+template <typename T>
+template <typename... Args>
+T &Pool<T>::emplace(const UniqueToken &token, Args &&...args) {
+  std::lock_guard lock{registry_mutex};
+  return registry[token.id()].emplace_front(std::forward<Args>(args)...);
+}
+
+template <typename T> void Pool<T>::dispose_token(std::size_t token_id) {
+  std::list<T> dispose_target{};
+  {
+    std::lock_guard lock{registry_mutex};
+    auto entry_it = registry.find(token_id);
+    if (entry_it == registry.end())
+      return;
+    entry_it->second.swap(dispose_target);
+    registry.erase(entry_it);
+  }
+}
+
 enum class Keyword {
   MONOSTATE,
   K_CONST,
@@ -237,6 +327,7 @@ template <typename T> void Atlas<T>::dispose_token(std::size_t token_id) {
 
 using VariantString = std::variant<std::string, std::u16string>;
 static Atlas<VariantString> string_atlas{};
+using StringsToken = const Atlas<VariantString>::UniqueToken;
 
 using Token =
     std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
@@ -249,7 +340,6 @@ inline constexpr std::size_t OFFSET_length{2};
 class Tokenizer {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
-  std::optional<Atlas<VariantString>::UniqueToken> strings_token;
 
 private:
   friend class Language;
@@ -257,6 +347,7 @@ private:
   friend class FunctionParser;
 
   std::flat_map<std::string, Identifier> atom_atlas;
+  std::shared_ptr<StringsToken> strings_token;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -312,6 +403,8 @@ private:
   std::u16string_view unicode_view;
 };
 
+struct VariantType;
+
 using VariantStringView = std::variant<AsciiStringView, UnicodeStringView>;
 class StringType final : public ValueType {
   std::size_t type_size() const override { return sizeof(VariantStringView); }
@@ -319,10 +412,13 @@ class StringType final : public ValueType {
 
 struct LambdaDescriptor {};
 class LambdaType final : public ValueType {
+  std::span<VariantType> signature;
   std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
 };
 
-using VariantType = std::variant<NumberType, StringType, LambdaType>;
+struct VariantType {
+  std::variant<NumberType, StringType, LambdaType> alt;
+};
 
 class ObjectShape {
 public:
@@ -407,6 +503,10 @@ protected:
   Parser(T &b, Tokenizer &t) : boundary{b}, tokenizer{t} {}
   T &boundary;
   Tokenizer &tokenizer;
+
+private:
+  friend class Language;
+  std::shared_ptr<StringsToken> strings_token;
 };
 
 class FunctionParser final : public Parser<FunctionDefinition> {
@@ -491,13 +591,13 @@ public:
 class AsciiLiteral final : public Expression {
 public:
   AsciiLiteral() = default;
-  std::string val;
+  std::string_view val_view;
 };
 
 class UnicodeLiteral final : public Expression {
 public:
   UnicodeLiteral() = default;
-  std::u16string val;
+  std::u16string_view val_view;
 };
 
 class LambdaExpression final : public Expression {
@@ -1001,14 +1101,14 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
       variable_accessor.identifier = identifier;
       return AnyExpression{variable_accessor};
     }
-    AnyExpression operator()(std::string_view ascii) {
+    AnyExpression operator()(std::string_view ascii_view) {
       AsciiLiteral ascii_literal{};
-      ascii_literal.val = ascii;
+      ascii_literal.val_view = ascii_view;
       return AnyExpression{ascii_literal};
     }
-    AnyExpression operator()(std::u16string_view unicode) {
+    AnyExpression operator()(std::u16string_view unicode_view) {
       UnicodeLiteral unicode_literal{};
-      unicode_literal.val = unicode;
+      unicode_literal.val_view = unicode_view;
       return AnyExpression{unicode_literal};
     }
   };
@@ -1041,12 +1141,17 @@ Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
 void Language::compile_and_execute() {
+  std::shared_ptr strings_token{
+      std::make_shared<StringsToken>(string_atlas.create_token())};
+
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
-  tokenizer.strings_token = string_atlas.create_token();
+  tokenizer.strings_token = strings_token;
 
   ModuleDefinition definition{};
   ModuleParser parser{definition, tokenizer};
+  parser.strings_token = strings_token;
+
   while (1) {
     tokenizer.tokenize();
     if (std::holds_alternative<std::monostate>(tokenizer.last_token))
