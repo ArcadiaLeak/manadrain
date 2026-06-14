@@ -121,6 +121,7 @@ enum class Keyword {
   K_SWITCH,
   K_TYPEOF
 };
+
 enum class Operator {
   DOUBLE_EQUALS,
   TRIPLE_EQUALS,
@@ -140,23 +141,73 @@ struct Identifier {
   auto operator<=>(const Identifier &) const = default;
 };
 
-struct Token {
-  using Alternative =
-      std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
-                   Keyword, Identifier, std::string, std::u16string>;
-  Alternative alt;
+class ColoredObject {
+public:
+  explicit ColoredObject(std::size_t c) : color{c} {}
+  virtual ~ColoredObject() = default;
+  std::size_t get_color() const noexcept { return color; }
 
-  Token() = default;
-  Token(Alternative a) : alt{std::move(a)} {}
-
-  Token(const Token &other) = delete;
-  Token &operator=(const Token &other) = delete;
-
-  Token(Token &&other) noexcept = default;
-  Token &operator=(Token &&other) noexcept = default;
-
-  bool operator==(const Token &) const = default;
+protected:
+  const std::size_t color;
 };
+
+class ColoredHeap {
+public:
+  std::size_t create_color() {
+    return color_counter.fetch_add(1, std::memory_order_relaxed);
+  }
+  template <typename T> T *keep(std::unique_ptr<T> obj);
+  std::size_t dispose_color(std::size_t color);
+
+private:
+  std::atomic<std::size_t> color_counter{0};
+  std::mutex registry_mutex;
+  std::unordered_map<std::size_t, std::vector<std::unique_ptr<ColoredObject>>>
+      registry;
+  void swap_color(std::size_t color,
+                  std::vector<std::unique_ptr<ColoredObject>> &destination);
+};
+
+template <typename T> T *ColoredHeap::keep(std::unique_ptr<T> obj) {
+  std::lock_guard lock{registry_mutex};
+  std::size_t color{obj->get_color()};
+  T *object_pointer{obj.get()};
+  registry[color].push_back(std::move(obj));
+  return object_pointer;
+}
+
+void ColoredHeap::swap_color(
+    std::size_t color,
+    std::vector<std::unique_ptr<ColoredObject>> &destination) {
+  std::lock_guard lock{registry_mutex};
+  auto registry_node = registry.extract(color);
+  if (not registry_node.empty())
+    registry_node.mapped().swap(destination);
+}
+
+std::size_t ColoredHeap::dispose_color(std::size_t color) {
+  std::vector<std::unique_ptr<ColoredObject>> disposed{};
+  swap_color(color, disposed);
+  return disposed.size();
+}
+
+static ColoredHeap colored_heap{};
+
+class StringAscii final : public ColoredObject {
+public:
+  StringAscii(std::size_t c) : ColoredObject{c} {}
+  std::string ascii;
+};
+
+class StringUnicode final : public ColoredObject {
+public:
+  StringUnicode(std::size_t c) : ColoredObject{c} {}
+  std::u16string unicode;
+};
+
+using Token =
+    std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
+                 Keyword, Identifier, std::string_view, std::u16string_view>;
 
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
@@ -165,6 +216,7 @@ inline constexpr std::size_t OFFSET_length{2};
 class Tokenizer {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
+  std::size_t heap_color;
 
 private:
   friend class Language;
@@ -238,27 +290,7 @@ class LambdaType final : public ValueType {
   std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
 };
 
-struct VariantType {
-  using Alternative = std::variant<NumberType, StringType, LambdaType>;
-  Alternative alt;
-
-  VariantType() = default;
-  VariantType(Alternative a) : alt{std::move(a)} {}
-
-  VariantType(const VariantType &other) = delete;
-  VariantType &operator=(const VariantType &other) = delete;
-
-  VariantType(VariantType &&other) noexcept = default;
-  VariantType &operator=(VariantType &&other) noexcept = default;
-
-  bool operator==(const VariantType &) const = default;
-
-  VariantType clone() const {
-    VariantType cloned_type{};
-    cloned_type.alt = alt;
-    return cloned_type;
-  }
-};
+using VariantType = std::variant<NumberType, StringType, LambdaType>;
 
 class ObjectShape {
 public:
@@ -443,21 +475,11 @@ public:
 };
 
 struct AnyExpression {
-  using Alternative =
-      std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
-                   AliasedFunctionCall, MemberExpression, AssignExpression,
-                   LogicalExpression, BinaryExpression, ObjectExpression,
-                   VariableAccessor, ScopeAccessor, LambdaExpression>;
-  Alternative alt;
-
-  AnyExpression() = default;
-  AnyExpression(Alternative a) : alt{std::move(a)} {}
-
-  AnyExpression(const AnyExpression &other) = delete;
-  AnyExpression &operator=(const AnyExpression &other) = delete;
-
-  AnyExpression(AnyExpression &&other) noexcept = default;
-  AnyExpression &operator=(AnyExpression &&other) noexcept = default;
+  std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
+               AliasedFunctionCall, MemberExpression, AssignExpression,
+               LogicalExpression, BinaryExpression, ObjectExpression,
+               VariableAccessor, ScopeAccessor, LambdaExpression>
+      alt;
 };
 
 AliasedFunctionCall::AliasedFunctionCall(AnyExpression &&c)
@@ -482,7 +504,7 @@ protected:
 
 class InitializeVariable final : public Statement {
 public:
-  InitializeVariable(AnyExpression v) : rvalue{std::move(v)} {};
+  InitializeVariable(AnyExpression v) : rvalue{v} {};
   Identifier variable_name;
   std::indirect<AnyExpression> rvalue;
 };
@@ -500,18 +522,7 @@ public:
 };
 
 struct AnyStatement {
-  using Alternative =
-      std::variant<InitializeVariable, ReturnStatement, ExpressionStatement>;
-  Alternative alt;
-
-  AnyStatement() = default;
-  AnyStatement(Alternative a) : alt{std::move(a)} {}
-
-  AnyStatement(const AnyStatement &other) = delete;
-  AnyStatement &operator=(const AnyStatement &other) = delete;
-
-  AnyStatement(AnyStatement &&other) noexcept = default;
-  AnyStatement &operator=(AnyStatement &&other) noexcept = default;
+  std::variant<InitializeVariable, ReturnStatement, ExpressionStatement> alt;
 };
 
 class Machine {};
@@ -606,14 +617,14 @@ Token Tokenizer::tokenize_identifier(char32_t leading) {
   backward();
   auto iter_reserved = keyword_atlas.find(identifier_str);
   if (iter_reserved != keyword_atlas.end())
-    return Token{iter_reserved->second};
+    return iter_reserved->second;
   auto iter_persistent = identifier_atlas.find(identifier_str);
   if (iter_persistent != identifier_atlas.end())
-    return Token{Identifier{iter_persistent->second}};
+    return Identifier{iter_persistent->second};
   Identifier identifier{persistent_identifiers.size() + atom_atlas.size() - 1};
   auto emplace_ret =
       atom_atlas.try_emplace(std::move(identifier_str), identifier);
-  return Token{emplace_ret.first->second};
+  return emplace_ret.first->second;
 }
 
 Token Tokenizer::tokenize_string_literal(char32_t separator) {
@@ -633,9 +644,13 @@ Token Tokenizer::tokenize_string_literal(char32_t separator) {
   if (std::ranges::all_of(u16_literal, [](char16_t ch) { return ch < 128; })) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
     auto ascii_string = u16_literal | std::views::transform(cast_to_ascii);
-    return Token{std::string{std::from_range, ascii_string}};
+    std::unique_ptr string_object{std::make_unique<StringAscii>(heap_color)};
+    string_object->ascii = {std::from_range, ascii_string};
+    return colored_heap.keep(std::move(string_object))->ascii;
   }
-  return Token{std::move(u16_literal)};
+  std::unique_ptr string_object{std::make_unique<StringUnicode>(heap_color)};
+  string_object->unicode = std::move(u16_literal);
+  return colored_heap.keep(std::move(string_object))->unicode;
 }
 
 Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
@@ -652,7 +667,7 @@ Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::int64_t num_literal{};
   std::from_chars(numeric_str.data(), numeric_str.data() + numeric_str.size(),
                   num_literal);
-  return Token{num_literal};
+  return num_literal;
 }
 
 void Tokenizer::tokenize() {
@@ -679,7 +694,7 @@ void Tokenizer::tokenize() {
     headbuf = {leading};
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
-      last_token = Token{Operator::LOGICAL_DISJUNCT};
+      last_token = Operator::LOGICAL_DISJUNCT;
       return;
     } else
       backward();
@@ -694,7 +709,7 @@ void Tokenizer::tokenize() {
     static const std::array legal_punct{std::to_array<char32_t>(
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
-      last_token = Token{leading};
+      last_token = leading;
       return;
     }
     if (std::isdigit(leading)) {
@@ -703,11 +718,11 @@ void Tokenizer::tokenize() {
     }
     throw UnexpectedToken{};
   }
-  last_token = Token{std::monostate{}};
+  last_token = std::monostate{};
 }
 
 void Tokenizer::assert_punct(char32_t must_be) {
-  char32_t *alter_ptr = std::get_if<char32_t>(&last_token.alt);
+  char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
     return;
   throw MissingPunctuation{must_be};
@@ -715,8 +730,8 @@ void Tokenizer::assert_punct(char32_t must_be) {
 
 void FunctionParser::parse_function_decl() {
   tokenizer.tokenize();
-  if (std::holds_alternative<Identifier>(tokenizer.last_token.alt)) {
-    boundary.function_name = std::get<Identifier>(tokenizer.last_token.alt);
+  if (std::holds_alternative<Identifier>(tokenizer.last_token)) {
+    boundary.function_name = std::get<Identifier>(tokenizer.last_token);
     tokenizer.tokenize();
   }
   tokenizer.assert_punct('(');
@@ -724,9 +739,9 @@ void FunctionParser::parse_function_decl() {
     tokenizer.tokenize();
     if (tokenizer.last_token == Token{U')'})
       break;
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
       throw MissingFormalParameter{};
-    Identifier parameter{std::get<Identifier>(tokenizer.last_token.alt)};
+    Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
     boundary.local_layout.try_emplace(parameter);
     boundary.arguments.push_back(parameter);
     tokenizer.tokenize();
@@ -738,9 +753,9 @@ void FunctionParser::parse_function_decl() {
   tokenizer.assert_punct('{');
   while (1) {
     tokenizer.tokenize();
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token.alt))
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
       throw MissingPunctuation{'}'};
-    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token.alt)};
+    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
     if (alter_ptr && *alter_ptr == '}')
       break;
     parse_statement();
@@ -749,8 +764,8 @@ void FunctionParser::parse_function_decl() {
 
 template <typename T> void Parser<T>::parse_statement() {
   Keyword keyword{};
-  if (std::holds_alternative<Keyword>(tokenizer.last_token.alt))
-    keyword = std::get<Keyword>(tokenizer.last_token.alt);
+  if (std::holds_alternative<Keyword>(tokenizer.last_token))
+    keyword = std::get<Keyword>(tokenizer.last_token);
   switch (keyword) {
   case Keyword::K_FUNCTION:
     parse_function_stmt();
@@ -795,14 +810,14 @@ template <typename T> AnyExpression Parser<T>::parse_assign_expression() {
   tokenizer.tokenize();
   AssignExpression expression{std::move(left_expression),
                               parse_assign_expression()};
-  return AnyExpression{std::move(expression)};
+  return AnyExpression{expression};
 }
 
 template <typename T> void Parser<T>::parse_variable_decl() {
   tokenizer.tokenize();
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
     throw MissingVariableName{};
-  Identifier variable_name{std::get<Identifier>(tokenizer.last_token.alt)};
+  Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
   tokenizer.tokenize();
   tokenizer.assert_punct('=');
   tokenizer.tokenize();
@@ -824,7 +839,7 @@ template <typename T> AnyExpression Parser<T>::parse_logical_disjunct() {
 right_expression: {
   if (tokenizer.last_token != Token{Operator::LOGICAL_DISJUNCT})
     return left_expression;
-  Operator logical_op{std::get<Operator>(tokenizer.last_token.alt)};
+  Operator logical_op{std::get<Operator>(tokenizer.last_token)};
   tokenizer.tokenize();
   LogicalExpression expression{std::move(left_expression),
                                parse_additive_expression()};
@@ -838,9 +853,9 @@ template <typename T> AnyExpression Parser<T>::parse_postfix_expression() {
   AnyExpression postfix_expression{parse_primary_expression()};
 seek_postfix:
   tokenizer.tokenize();
-  if (not std::holds_alternative<char32_t>(tokenizer.last_token.alt))
+  if (not std::holds_alternative<char32_t>(tokenizer.last_token))
     return postfix_expression;
-  switch (std::get<char32_t>(tokenizer.last_token.alt)) {
+  switch (std::get<char32_t>(tokenizer.last_token)) {
   case '.':
     parse_member_expression(postfix_expression);
     goto seek_postfix;
@@ -870,9 +885,9 @@ void Parser<T>::parse_function_call(AnyExpression &expression) {
 template <typename T>
 void Parser<T>::parse_member_expression(AnyExpression &expression) {
   tokenizer.tokenize();
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
     throw MissingPropertyName{};
-  Identifier field_name{std::get<Identifier>(tokenizer.last_token.alt)};
+  Identifier field_name{std::get<Identifier>(tokenizer.last_token)};
   MemberExpression &member_expression{
       expression.alt.emplace<MemberExpression>(std::move(expression))};
   member_expression.property = field_name;
@@ -883,7 +898,7 @@ template <typename T> AnyExpression Parser<T>::parse_additive_expression() {
   if (tokenizer.last_token != Token{U'+'} &&
       tokenizer.last_token != Token{U'-'})
     return left_expression;
-  char32_t binary_op{std::get<char32_t>(tokenizer.last_token.alt)};
+  char32_t binary_op{std::get<char32_t>(tokenizer.last_token)};
   tokenizer.tokenize();
   BinaryExpression &expression{left_expression.alt.emplace<BinaryExpression>(
       std::move(left_expression), parse_postfix_expression())};
@@ -895,9 +910,9 @@ template <typename T> AnyExpression Parser<T>::parse_object_literal() {
   ObjectExpression object_expression{};
   tokenizer.tokenize();
   while (tokenizer.last_token != Token{U'}'}) {
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
       throw InvalidPropertyName{};
-    Identifier property_name{std::get<Identifier>(tokenizer.last_token.alt)};
+    Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
     object_expression.object_shape.properties.try_emplace(property_name);
     tokenizer.tokenize();
     object_expression.keys.push_back(property_name);
@@ -943,7 +958,7 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
         FunctionParser function_parser{lambda_expression.definition,
                                        parser.tokenizer};
         function_parser.parse_function_decl();
-        return AnyExpression{std::move(lambda_expression)};
+        return AnyExpression{lambda_expression};
       }
       default:
         throw UnexpectedToken{};
@@ -954,18 +969,18 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
       variable_accessor.identifier = identifier;
       return AnyExpression{variable_accessor};
     }
-    AnyExpression operator()(std::string &ascii) {
+    AnyExpression operator()(std::string_view ascii) {
       AsciiLiteral ascii_literal{};
-      ascii_literal.val = std::move(ascii);
+      ascii_literal.val = ascii;
       return AnyExpression{ascii_literal};
     }
-    AnyExpression operator()(std::u16string &unicode) {
+    AnyExpression operator()(std::u16string_view unicode) {
       UnicodeLiteral unicode_literal{};
-      unicode_literal.val = std::move(unicode);
+      unicode_literal.val = unicode;
       return AnyExpression{unicode_literal};
     }
   };
-  return tokenizer.last_token.alt.visit(TokenVisitor{*this});
+  return tokenizer.last_token.visit(TokenVisitor{*this});
 }
 
 template <typename T>
@@ -976,7 +991,7 @@ AbstractBoundary<T>::find_local(Identifier identifier) const {
   std::size_t local_offset =
       std::distance(local_layout.begin(), local_layout.find(identifier));
   ScopeAccessor accessor{};
-  accessor.local_type = local_layout.values()[local_offset].clone();
+  accessor.local_type = local_layout.values()[local_offset];
   std::get<1>(accessor.location) = local_offset;
   return accessor;
 }
@@ -996,12 +1011,13 @@ Language &Language::operator=(Language &&other) noexcept = default;
 void Language::compile_and_execute() {
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
+  tokenizer.heap_color = colored_heap.create_color();
 
   ModuleDefinition definition{};
   ModuleParser parser{definition, tokenizer};
   while (1) {
     tokenizer.tokenize();
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token.alt))
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
       break;
     parser.parse_statement();
   }
