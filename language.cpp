@@ -140,9 +140,23 @@ struct Identifier {
   auto operator<=>(const Identifier &) const = default;
 };
 
-using Token =
-    std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
-                 Keyword, Identifier, std::string_view, std::u16string_view>;
+struct Token {
+  using Alternative =
+      std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
+                   Keyword, Identifier, std::string, std::u16string>;
+  Alternative alt;
+
+  Token() = default;
+  Token(Alternative a) : alt{std::move(a)} {}
+
+  Token(const Token &other) = delete;
+  Token &operator=(const Token &other) = delete;
+
+  Token(Token &&other) noexcept = default;
+  Token &operator=(Token &&other) noexcept = default;
+
+  bool operator==(const Token &) const = default;
+};
 
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
@@ -158,8 +172,6 @@ private:
   friend class FunctionParser;
 
   std::map<std::string, Identifier> atom_atlas;
-  std::set<std::string> token_strings;
-  std::set<std::u16string> token_u16strings;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -189,29 +201,36 @@ class NumberType final : public ValueType {
   std::size_t type_size() const override { return sizeof(double); }
 };
 
-class RuntimeStringView {
+class StringViewInterface {
 public:
+  virtual std::string normalize() const = 0;
   virtual std::size_t size() const = 0;
 };
-class AsciiStringView final : public RuntimeStringView {
+
+class StringViewAscii final : public StringViewInterface {
 public:
-  AsciiStringView(std::string_view sv) : ascii_view{sv} {}
+  StringViewAscii(std::string_view sv) : ascii_view{sv} {}
+  std::string normalize() const override { return std::string{ascii_view}; }
   std::size_t size() const override { return ascii_view.size(); }
 
 private:
   std::string_view ascii_view;
 };
-class UnicodeStringView final : public RuntimeStringView {
+
+class StringViewUnicode final : public StringViewInterface {
 public:
-  UnicodeStringView(std::u16string_view sv) : unicode_view{sv} {}
+  StringViewUnicode(std::u16string_view sv) : unicode_view{sv} {}
+  std::string normalize() const override;
   std::size_t size() const override { return unicode_view.size(); }
 
 private:
   std::u16string_view unicode_view;
 };
-using VariantStringView = std::variant<AsciiStringView, UnicodeStringView>;
+
+using StringViewVariant = std::variant<StringViewAscii, StringViewUnicode>;
+
 class StringType final : public ValueType {
-  std::size_t type_size() const override { return sizeof(VariantStringView); }
+  std::size_t type_size() const override { return sizeof(StringViewVariant); }
 };
 
 struct LambdaDescriptor {};
@@ -219,37 +238,32 @@ class LambdaType final : public ValueType {
   std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
 };
 
-using VariantType = std::variant<NumberType, StringType, LambdaType>;
+struct VariantType {
+  using Alternative = std::variant<NumberType, StringType, LambdaType>;
+  Alternative alt;
+
+  VariantType() = default;
+  VariantType(Alternative a) : alt{std::move(a)} {}
+
+  VariantType(const VariantType &other) = delete;
+  VariantType &operator=(const VariantType &other) = delete;
+
+  VariantType(VariantType &&other) noexcept = default;
+  VariantType &operator=(VariantType &&other) noexcept = default;
+
+  bool operator==(const VariantType &) const = default;
+
+  VariantType clone() const {
+    VariantType cloned_type{};
+    cloned_type.alt = alt;
+    return cloned_type;
+  }
+};
 
 class ObjectShape {
 public:
   std::flat_map<Identifier, VariantType> properties;
 };
-
-class RuntimeString {
-public:
-  virtual std::string normalize() const = 0;
-  virtual VariantStringView sv() const = 0;
-};
-class AsciiString final : public RuntimeString {
-public:
-  AsciiString(std::string s) : ascii{std::move(s)} {}
-  std::string normalize() const override { return ascii; }
-  VariantStringView sv() const override { return AsciiStringView{ascii}; }
-
-private:
-  std::string ascii;
-};
-class UnicodeString final : public RuntimeString {
-public:
-  UnicodeString(std::u16string s) : unicode{std::move(s)} {}
-  std::string normalize() const override;
-  VariantStringView sv() const override { return UnicodeStringView{unicode}; }
-
-private:
-  std::u16string unicode;
-};
-using VariantString = std::variant<AsciiString, UnicodeString>;
 
 struct AnyExpression;
 struct AnyStatement;
@@ -429,11 +443,21 @@ public:
 };
 
 struct AnyExpression {
-  std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
-               AliasedFunctionCall, MemberExpression, AssignExpression,
-               LogicalExpression, BinaryExpression, ObjectExpression,
-               VariableAccessor, ScopeAccessor, LambdaExpression>
-      alt;
+  using Alternative =
+      std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
+                   AliasedFunctionCall, MemberExpression, AssignExpression,
+                   LogicalExpression, BinaryExpression, ObjectExpression,
+                   VariableAccessor, ScopeAccessor, LambdaExpression>;
+  Alternative alt;
+
+  AnyExpression() = default;
+  AnyExpression(Alternative a) : alt{std::move(a)} {}
+
+  AnyExpression(const AnyExpression &other) = delete;
+  AnyExpression &operator=(const AnyExpression &other) = delete;
+
+  AnyExpression(AnyExpression &&other) noexcept = default;
+  AnyExpression &operator=(AnyExpression &&other) noexcept = default;
 };
 
 AliasedFunctionCall::AliasedFunctionCall(AnyExpression &&c)
@@ -458,7 +482,7 @@ protected:
 
 class InitializeVariable final : public Statement {
 public:
-  InitializeVariable(AnyExpression v) : rvalue{v} {};
+  InitializeVariable(AnyExpression v) : rvalue{std::move(v)} {};
   Identifier variable_name;
   std::indirect<AnyExpression> rvalue;
 };
@@ -476,7 +500,18 @@ public:
 };
 
 struct AnyStatement {
-  std::variant<InitializeVariable, ReturnStatement, ExpressionStatement> alt;
+  using Alternative =
+      std::variant<InitializeVariable, ReturnStatement, ExpressionStatement>;
+  Alternative alt;
+
+  AnyStatement() = default;
+  AnyStatement(Alternative a) : alt{std::move(a)} {}
+
+  AnyStatement(const AnyStatement &other) = delete;
+  AnyStatement &operator=(const AnyStatement &other) = delete;
+
+  AnyStatement(AnyStatement &&other) noexcept = default;
+  AnyStatement &operator=(AnyStatement &&other) noexcept = default;
 };
 
 class Machine {};
@@ -501,7 +536,7 @@ static const std::flat_map<std::string_view, std::size_t> identifier_atlas{
 static const std::array persistent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::string UnicodeString::normalize() const {
+std::string StringViewUnicode::normalize() const {
   auto encode_u16 =
       [](std::uint16_t uchar) -> std::inplace_vector<std::uint8_t, 3> {
     std::array<std::uint8_t, 3> buffer{};
@@ -511,7 +546,7 @@ std::string UnicodeString::normalize() const {
     return {std::from_range, buffer | std::views::take(buffer_len)};
   };
   auto encoded_message =
-      unicode | std::views::transform(encode_u16) | std::views::join;
+      unicode_view | std::views::transform(encode_u16) | std::views::join;
   return std::string{std::from_range, encoded_message};
 }
 
@@ -571,14 +606,14 @@ Token Tokenizer::tokenize_identifier(char32_t leading) {
   backward();
   auto iter_reserved = keyword_atlas.find(identifier_str);
   if (iter_reserved != keyword_atlas.end())
-    return iter_reserved->second;
+    return Token{iter_reserved->second};
   auto iter_persistent = identifier_atlas.find(identifier_str);
   if (iter_persistent != identifier_atlas.end())
-    return Identifier{iter_persistent->second};
+    return Token{Identifier{iter_persistent->second}};
   Identifier identifier{persistent_identifiers.size() + atom_atlas.size() - 1};
   auto emplace_ret =
       atom_atlas.try_emplace(std::move(identifier_str), identifier);
-  return emplace_ret.first->second;
+  return Token{emplace_ret.first->second};
 }
 
 Token Tokenizer::tokenize_string_literal(char32_t separator) {
@@ -598,12 +633,9 @@ Token Tokenizer::tokenize_string_literal(char32_t separator) {
   if (std::ranges::all_of(u16_literal, [](char16_t ch) { return ch < 128; })) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
     auto ascii_string = u16_literal | std::views::transform(cast_to_ascii);
-    auto [string_iter, _] =
-        token_strings.emplace(std::from_range, ascii_string);
-    return *string_iter;
+    return Token{std::string{std::from_range, ascii_string}};
   }
-  auto [u16string_iter, _] = token_u16strings.emplace(std::move(u16_literal));
-  return *u16string_iter;
+  return Token{std::move(u16_literal)};
 }
 
 Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
@@ -620,7 +652,7 @@ Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::int64_t num_literal{};
   std::from_chars(numeric_str.data(), numeric_str.data() + numeric_str.size(),
                   num_literal);
-  return num_literal;
+  return Token{num_literal};
 }
 
 void Tokenizer::tokenize() {
@@ -647,7 +679,7 @@ void Tokenizer::tokenize() {
     headbuf = {leading};
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
-      last_token = Operator::LOGICAL_DISJUNCT;
+      last_token = Token{Operator::LOGICAL_DISJUNCT};
       return;
     } else
       backward();
@@ -662,7 +694,7 @@ void Tokenizer::tokenize() {
     static const std::array legal_punct{std::to_array<char32_t>(
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
-      last_token = leading;
+      last_token = Token{leading};
       return;
     }
     if (std::isdigit(leading)) {
@@ -671,11 +703,11 @@ void Tokenizer::tokenize() {
     }
     throw UnexpectedToken{};
   }
-  last_token = std::monostate{};
+  last_token = Token{std::monostate{}};
 }
 
 void Tokenizer::assert_punct(char32_t must_be) {
-  char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
+  char32_t *alter_ptr = std::get_if<char32_t>(&last_token.alt);
   if (alter_ptr && *alter_ptr == must_be)
     return;
   throw MissingPunctuation{must_be};
@@ -683,8 +715,8 @@ void Tokenizer::assert_punct(char32_t must_be) {
 
 void FunctionParser::parse_function_decl() {
   tokenizer.tokenize();
-  if (std::holds_alternative<Identifier>(tokenizer.last_token)) {
-    boundary.function_name = std::get<Identifier>(tokenizer.last_token);
+  if (std::holds_alternative<Identifier>(tokenizer.last_token.alt)) {
+    boundary.function_name = std::get<Identifier>(tokenizer.last_token.alt);
     tokenizer.tokenize();
   }
   tokenizer.assert_punct('(');
@@ -692,9 +724,9 @@ void FunctionParser::parse_function_decl() {
     tokenizer.tokenize();
     if (tokenizer.last_token == Token{U')'})
       break;
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
       throw MissingFormalParameter{};
-    Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
+    Identifier parameter{std::get<Identifier>(tokenizer.last_token.alt)};
     boundary.local_layout.try_emplace(parameter);
     boundary.arguments.push_back(parameter);
     tokenizer.tokenize();
@@ -706,9 +738,9 @@ void FunctionParser::parse_function_decl() {
   tokenizer.assert_punct('{');
   while (1) {
     tokenizer.tokenize();
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token.alt))
       throw MissingPunctuation{'}'};
-    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
+    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token.alt)};
     if (alter_ptr && *alter_ptr == '}')
       break;
     parse_statement();
@@ -717,8 +749,8 @@ void FunctionParser::parse_function_decl() {
 
 template <typename T> void Parser<T>::parse_statement() {
   Keyword keyword{};
-  if (std::holds_alternative<Keyword>(tokenizer.last_token))
-    keyword = std::get<Keyword>(tokenizer.last_token);
+  if (std::holds_alternative<Keyword>(tokenizer.last_token.alt))
+    keyword = std::get<Keyword>(tokenizer.last_token.alt);
   switch (keyword) {
   case Keyword::K_FUNCTION:
     parse_function_stmt();
@@ -763,14 +795,14 @@ template <typename T> AnyExpression Parser<T>::parse_assign_expression() {
   tokenizer.tokenize();
   AssignExpression expression{std::move(left_expression),
                               parse_assign_expression()};
-  return AnyExpression{expression};
+  return AnyExpression{std::move(expression)};
 }
 
 template <typename T> void Parser<T>::parse_variable_decl() {
   tokenizer.tokenize();
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
     throw MissingVariableName{};
-  Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
+  Identifier variable_name{std::get<Identifier>(tokenizer.last_token.alt)};
   tokenizer.tokenize();
   tokenizer.assert_punct('=');
   tokenizer.tokenize();
@@ -792,7 +824,7 @@ template <typename T> AnyExpression Parser<T>::parse_logical_disjunct() {
 right_expression: {
   if (tokenizer.last_token != Token{Operator::LOGICAL_DISJUNCT})
     return left_expression;
-  Operator logical_op{std::get<Operator>(tokenizer.last_token)};
+  Operator logical_op{std::get<Operator>(tokenizer.last_token.alt)};
   tokenizer.tokenize();
   LogicalExpression expression{std::move(left_expression),
                                parse_additive_expression()};
@@ -806,9 +838,9 @@ template <typename T> AnyExpression Parser<T>::parse_postfix_expression() {
   AnyExpression postfix_expression{parse_primary_expression()};
 seek_postfix:
   tokenizer.tokenize();
-  if (not std::holds_alternative<char32_t>(tokenizer.last_token))
+  if (not std::holds_alternative<char32_t>(tokenizer.last_token.alt))
     return postfix_expression;
-  switch (std::get<char32_t>(tokenizer.last_token)) {
+  switch (std::get<char32_t>(tokenizer.last_token.alt)) {
   case '.':
     parse_member_expression(postfix_expression);
     goto seek_postfix;
@@ -838,9 +870,9 @@ void Parser<T>::parse_function_call(AnyExpression &expression) {
 template <typename T>
 void Parser<T>::parse_member_expression(AnyExpression &expression) {
   tokenizer.tokenize();
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
     throw MissingPropertyName{};
-  Identifier field_name{std::get<Identifier>(tokenizer.last_token)};
+  Identifier field_name{std::get<Identifier>(tokenizer.last_token.alt)};
   MemberExpression &member_expression{
       expression.alt.emplace<MemberExpression>(std::move(expression))};
   member_expression.property = field_name;
@@ -851,7 +883,7 @@ template <typename T> AnyExpression Parser<T>::parse_additive_expression() {
   if (tokenizer.last_token != Token{U'+'} &&
       tokenizer.last_token != Token{U'-'})
     return left_expression;
-  char32_t binary_op{std::get<char32_t>(tokenizer.last_token)};
+  char32_t binary_op{std::get<char32_t>(tokenizer.last_token.alt)};
   tokenizer.tokenize();
   BinaryExpression &expression{left_expression.alt.emplace<BinaryExpression>(
       std::move(left_expression), parse_postfix_expression())};
@@ -863,9 +895,9 @@ template <typename T> AnyExpression Parser<T>::parse_object_literal() {
   ObjectExpression object_expression{};
   tokenizer.tokenize();
   while (tokenizer.last_token != Token{U'}'}) {
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token.alt))
       throw InvalidPropertyName{};
-    Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
+    Identifier property_name{std::get<Identifier>(tokenizer.last_token.alt)};
     object_expression.object_shape.properties.try_emplace(property_name);
     tokenizer.tokenize();
     object_expression.keys.push_back(property_name);
@@ -911,7 +943,7 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
         FunctionParser function_parser{lambda_expression.definition,
                                        parser.tokenizer};
         function_parser.parse_function_decl();
-        return AnyExpression{lambda_expression};
+        return AnyExpression{std::move(lambda_expression)};
       }
       default:
         throw UnexpectedToken{};
@@ -922,18 +954,18 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
       variable_accessor.identifier = identifier;
       return AnyExpression{variable_accessor};
     }
-    AnyExpression operator()(std::string_view ascii) {
+    AnyExpression operator()(std::string &ascii) {
       AsciiLiteral ascii_literal{};
-      ascii_literal.val = ascii;
+      ascii_literal.val = std::move(ascii);
       return AnyExpression{ascii_literal};
     }
-    AnyExpression operator()(std::u16string_view unicode) {
+    AnyExpression operator()(std::u16string &unicode) {
       UnicodeLiteral unicode_literal{};
-      unicode_literal.val = unicode;
+      unicode_literal.val = std::move(unicode);
       return AnyExpression{unicode_literal};
     }
   };
-  return tokenizer.last_token.visit(TokenVisitor{*this});
+  return tokenizer.last_token.alt.visit(TokenVisitor{*this});
 }
 
 template <typename T>
@@ -944,7 +976,7 @@ AbstractBoundary<T>::find_local(Identifier identifier) const {
   std::size_t local_offset =
       std::distance(local_layout.begin(), local_layout.find(identifier));
   ScopeAccessor accessor{};
-  accessor.local_type = local_layout.values()[local_offset];
+  accessor.local_type = local_layout.values()[local_offset].clone();
   std::get<1>(accessor.location) = local_offset;
   return accessor;
 }
@@ -969,7 +1001,7 @@ void Language::compile_and_execute() {
   ModuleParser parser{definition, tokenizer};
   while (1) {
     tokenizer.tokenize();
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token.alt))
       break;
     parser.parse_statement();
   }
