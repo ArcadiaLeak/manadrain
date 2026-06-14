@@ -6,7 +6,6 @@
 #include <generator>
 #include <inplace_vector>
 #include <list>
-#include <map>
 #include <memory>
 #include <memory_resource>
 #include <meta>
@@ -141,69 +140,103 @@ struct Identifier {
   auto operator<=>(const Identifier &) const = default;
 };
 
-class ColoredObject {
+template <typename T> class Atlas {
 public:
-  explicit ColoredObject(std::size_t c) : color{c} {}
-  virtual ~ColoredObject() = default;
-  std::size_t get_color() const noexcept { return color; }
+  class UniqueToken {
+  public:
+    ~UniqueToken();
+    UniqueToken(const UniqueToken &) = delete;
+    UniqueToken &operator=(const UniqueToken &) = delete;
+    UniqueToken(UniqueToken &&another) noexcept;
+    UniqueToken &operator=(UniqueToken &&another) noexcept;
 
-protected:
-  const std::size_t color;
-};
+  private:
+    UniqueToken(Atlas *p, std::size_t i) noexcept : owner{p}, token_id{i} {}
+    Atlas *owner;
+    std::size_t token_id;
 
-class ColoredHeap {
-public:
-  std::size_t create_color() {
-    return color_counter.fetch_add(1, std::memory_order_relaxed);
-  }
-  template <typename T> T *keep(std::unique_ptr<T> obj);
-  std::size_t dispose_color(std::size_t color);
+    friend class Atlas;
+    std::size_t id() const noexcept { return token_id; }
+  };
+
+  Atlas(const Atlas &) = delete;
+  Atlas &operator=(const Atlas &) = delete;
+  Atlas() = default;
+
+  UniqueToken create_token();
+
+  std::pair<typename std::set<T>::iterator, bool>
+  insert(const UniqueToken &token, T obj);
+  template <typename... Args>
+  std::pair<typename std::set<T>::iterator, bool>
+  emplace(const UniqueToken &token, Args &&...args);
 
 private:
-  std::atomic<std::size_t> color_counter{0};
+  void dispose_token(std::size_t color_id);
+
+  std::atomic<std::size_t> next_token_id{0};
   std::mutex registry_mutex;
-  std::unordered_map<std::size_t, std::vector<std::unique_ptr<ColoredObject>>>
-      registry;
-  void swap_color(std::size_t color,
-                  std::vector<std::unique_ptr<ColoredObject>> &destination);
+  std::flat_map<std::size_t, std::set<T>> registry;
 };
 
-template <typename T> T *ColoredHeap::keep(std::unique_ptr<T> obj) {
+template <typename T>
+Atlas<T>::UniqueToken::UniqueToken(UniqueToken &&another) noexcept
+    : owner{another.owner}, token_id{another.token_id} {
+  another.owner = nullptr;
+}
+
+template <typename T>
+Atlas<T>::UniqueToken &
+Atlas<T>::UniqueToken::operator=(UniqueToken &&another) noexcept {
+  if (this == &another)
+    return *this;
+  if (owner)
+    owner->dispose_token(token_id);
+  owner = another.owner;
+  token_id = another.token_id;
+  another.owner = nullptr;
+  return *this;
+}
+
+template <typename T> Atlas<T>::UniqueToken::~UniqueToken() {
+  if (owner)
+    owner->dispose_token(token_id);
+}
+
+template <typename T> Atlas<T>::UniqueToken Atlas<T>::create_token() {
+  std::size_t id{next_token_id.fetch_add(1, std::memory_order_relaxed)};
+  return UniqueToken{this, id};
+}
+
+template <typename T>
+std::pair<typename std::set<T>::iterator, bool>
+Atlas<T>::insert(const UniqueToken &token, T obj) {
   std::lock_guard lock{registry_mutex};
-  std::size_t color{obj->get_color()};
-  T *object_pointer{obj.get()};
-  registry[color].push_back(std::move(obj));
-  return object_pointer;
+  return registry[token.id()].insert(std::move(obj));
 }
 
-void ColoredHeap::swap_color(
-    std::size_t color,
-    std::vector<std::unique_ptr<ColoredObject>> &destination) {
+template <typename T>
+template <typename... Args>
+std::pair<typename std::set<T>::iterator, bool>
+Atlas<T>::emplace(const UniqueToken &token, Args &&...args) {
   std::lock_guard lock{registry_mutex};
-  auto registry_node = registry.extract(color);
-  if (not registry_node.empty())
-    registry_node.mapped().swap(destination);
+  return registry[token.id()].emplace(std::forward<Args>(args)...);
 }
 
-std::size_t ColoredHeap::dispose_color(std::size_t color) {
-  std::vector<std::unique_ptr<ColoredObject>> disposed{};
-  swap_color(color, disposed);
-  return disposed.size();
+template <typename T> void Atlas<T>::dispose_token(std::size_t token_id) {
+  std::set<T> dispose_target{};
+  {
+    std::lock_guard lock{registry_mutex};
+    auto entry_it = registry.find(token_id);
+    if (entry_it == registry.end())
+      return;
+    entry_it->second.swap(dispose_target);
+    registry.erase(entry_it);
+  }
 }
 
-static ColoredHeap colored_heap{};
-
-class StringAscii final : public ColoredObject {
-public:
-  StringAscii(std::size_t c) : ColoredObject{c} {}
-  std::string ascii;
-};
-
-class StringUnicode final : public ColoredObject {
-public:
-  StringUnicode(std::size_t c) : ColoredObject{c} {}
-  std::u16string unicode;
-};
+using VariantString = std::variant<std::string, std::u16string>;
+static Atlas<VariantString> string_atlas{};
 
 using Token =
     std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
@@ -216,14 +249,14 @@ inline constexpr std::size_t OFFSET_length{2};
 class Tokenizer {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
-  std::size_t heap_color;
+  std::optional<Atlas<VariantString>::UniqueToken> strings_token;
 
 private:
   friend class Language;
   template <typename T> friend class Parser;
   friend class FunctionParser;
 
-  std::map<std::string, Identifier> atom_atlas;
+  std::flat_map<std::string, Identifier> atom_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -253,15 +286,15 @@ class NumberType final : public ValueType {
   std::size_t type_size() const override { return sizeof(double); }
 };
 
-class StringViewInterface {
+class AbstractStringView {
 public:
   virtual std::string normalize() const = 0;
   virtual std::size_t size() const = 0;
 };
 
-class StringViewAscii final : public StringViewInterface {
+class AsciiStringView final : public AbstractStringView {
 public:
-  StringViewAscii(std::string_view sv) : ascii_view{sv} {}
+  AsciiStringView(std::string_view sv) : ascii_view{sv} {}
   std::string normalize() const override { return std::string{ascii_view}; }
   std::size_t size() const override { return ascii_view.size(); }
 
@@ -269,9 +302,9 @@ private:
   std::string_view ascii_view;
 };
 
-class StringViewUnicode final : public StringViewInterface {
+class UnicodeStringView final : public AbstractStringView {
 public:
-  StringViewUnicode(std::u16string_view sv) : unicode_view{sv} {}
+  UnicodeStringView(std::u16string_view sv) : unicode_view{sv} {}
   std::string normalize() const override;
   std::size_t size() const override { return unicode_view.size(); }
 
@@ -279,10 +312,9 @@ private:
   std::u16string_view unicode_view;
 };
 
-using StringViewVariant = std::variant<StringViewAscii, StringViewUnicode>;
-
+using VariantStringView = std::variant<AsciiStringView, UnicodeStringView>;
 class StringType final : public ValueType {
-  std::size_t type_size() const override { return sizeof(StringViewVariant); }
+  std::size_t type_size() const override { return sizeof(VariantStringView); }
 };
 
 struct LambdaDescriptor {};
@@ -547,7 +579,7 @@ static const std::flat_map<std::string_view, std::size_t> identifier_atlas{
 static const std::array persistent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::string StringViewUnicode::normalize() const {
+std::string UnicodeStringView::normalize() const {
   auto encode_u16 =
       [](std::uint16_t uchar) -> std::inplace_vector<std::uint8_t, 3> {
     std::array<std::uint8_t, 3> buffer{};
@@ -644,13 +676,13 @@ Token Tokenizer::tokenize_string_literal(char32_t separator) {
   if (std::ranges::all_of(u16_literal, [](char16_t ch) { return ch < 128; })) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
     auto ascii_string = u16_literal | std::views::transform(cast_to_ascii);
-    std::unique_ptr string_object{std::make_unique<StringAscii>(heap_color)};
-    string_object->ascii = {std::from_range, ascii_string};
-    return colored_heap.keep(std::move(string_object))->ascii;
+    auto [string_iter, _] = string_atlas.emplace(
+        *strings_token, std::string{std::from_range, ascii_string});
+    return std::get<std::string>(*string_iter);
   }
-  std::unique_ptr string_object{std::make_unique<StringUnicode>(heap_color)};
-  string_object->unicode = std::move(u16_literal);
-  return colored_heap.keep(std::move(string_object))->unicode;
+  auto [u16string_iter, _] =
+      string_atlas.emplace(*strings_token, std::move(u16_literal));
+  return std::get<std::u16string>(*u16string_iter);
 }
 
 Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
@@ -1011,7 +1043,7 @@ Language &Language::operator=(Language &&other) noexcept = default;
 void Language::compile_and_execute() {
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
-  tokenizer.heap_color = colored_heap.create_color();
+  tokenizer.strings_token = string_atlas.create_token();
 
   ModuleDefinition definition{};
   ModuleParser parser{definition, tokenizer};
