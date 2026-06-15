@@ -6,7 +6,6 @@
 #include <generator>
 #include <inplace_vector>
 #include <list>
-#include <map>
 #include <memory>
 #include <memory_resource>
 #include <meta>
@@ -141,114 +140,6 @@ struct Identifier {
   auto operator<=>(const Identifier &) const = default;
 };
 
-template <typename T> class UniqueElementList {
-private:
-  struct Node;
-  mutable std::mutex nodes_mutex;
-  std::list<Node> nodes;
-
-public:
-  class UniqueElement;
-  UniqueElementList() = default;
-
-  UniqueElement push(const T &value) { return emplace(value); }
-  UniqueElement push(T &&value) { return emplace(std::move(value)); }
-
-  template <typename... Args> UniqueElement emplace(Args &&...args);
-
-  bool empty() const;
-  std::size_t size() const;
-};
-
-template <typename T> bool UniqueElementList<T>::empty() const {
-  std::lock_guard<std::mutex> lock(nodes_mutex);
-  return nodes.empty();
-}
-
-template <typename T> std::size_t UniqueElementList<T>::size() const {
-  std::lock_guard<std::mutex> lock(nodes_mutex);
-  return nodes.size();
-}
-
-template <typename T>
-template <typename... Args>
-UniqueElementList<T>::UniqueElement
-UniqueElementList<T>::emplace(Args &&...args) {
-  std::lock_guard<std::mutex> lock{nodes_mutex};
-  auto it = nodes.emplace(nodes.end(), &nodes_mutex, &nodes,
-                          std::forward<Args>(args)...);
-  it->it = it;
-  return UniqueElement{&*it};
-}
-
-template <typename T> struct UniqueElementList<T>::Node {
-  T data;
-  typename std::list<Node>::iterator it;
-  std::mutex *owner_mutex;
-  std::list<Node> *owner_list;
-
-  template <typename... Args>
-  Node(std::mutex *mtx, std::list<Node> *lst, Args &&...args)
-      : data{std::forward<Args>(args)...}, owner_mutex{mtx}, owner_list{lst} {}
-};
-
-template <typename T> class UniqueElementList<T>::UniqueElement {
-public:
-  UniqueElement(const UniqueElement &) = delete;
-  UniqueElement &operator=(const UniqueElement &) = delete;
-
-  UniqueElement(UniqueElement &&other) noexcept;
-  UniqueElement &operator=(UniqueElement &&other) noexcept;
-
-  ~UniqueElement();
-
-  T &operator*() { return node_ptr->data; }
-  T *operator->() { return &node_ptr->data; }
-
-private:
-  friend class UniqueElementList;
-  explicit UniqueElement(Node *node) : node_ptr(node) {}
-  Node *node_ptr = nullptr;
-};
-
-template <typename T>
-UniqueElementList<T>::UniqueElement::UniqueElement(
-    UniqueElement &&other) noexcept
-    : node_ptr{other.node_ptr} {
-  other.node_ptr = nullptr;
-}
-
-template <typename T>
-UniqueElementList<T>::UniqueElement &
-UniqueElementList<T>::UniqueElement::operator=(UniqueElement &&other) noexcept {
-  if (this == &other)
-    return *this;
-  this->~UniqueElement();
-  node_ptr = other.node_ptr;
-  other.node_ptr = nullptr;
-  return *this;
-}
-
-template <typename T> UniqueElementList<T>::UniqueElement::~UniqueElement() {
-  if (!node_ptr)
-    return;
-  if constexpr (std::is_nothrow_move_constructible_v<T>) {
-    std::unique_lock<std::mutex> lock{*node_ptr->owner_mutex};
-    T local_data{std::move(node_ptr->data)};
-    node_ptr->owner_list->erase(node_ptr->it);
-    lock.unlock();
-  } else {
-    std::lock_guard<std::mutex> lock{*node_ptr->owner_mutex};
-    node_ptr->owner_list->erase(node_ptr->it);
-  }
-}
-
-static UniqueElementList<std::set<std::variant<std::string, std::u16string>>>
-    string_atlas_list{};
-
-using VariantString = std::variant<std::string, std::u16string>;
-using StringAtlas = UniqueElementList<std::set<VariantString>>::UniqueElement;
-
 using Token =
     std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
                  Keyword, Identifier, std::string_view, std::u16string_view>;
@@ -256,6 +147,8 @@ using Token =
 inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
+
+using VariantString = std::variant<std::string, std::u16string>;
 
 class Tokenizer {
 public:
@@ -267,7 +160,7 @@ private:
   friend class FunctionParser;
 
   std::flat_map<std::string, Identifier> atom_atlas;
-  std::shared_ptr<StringAtlas> string_atlas;
+  std::set<VariantString> *string_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -361,10 +254,11 @@ public:
 template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
-  std::list<AnyStatement> program;
   std::vector<std::byte> bytecode;
+  std::list<AnyStatement> program;
+  std::list<FunctionDefinition> *function_definition_list;
 
-  std::list<FunctionDefinition> inner_functions;
+  std::vector<FunctionDefinition *> inner_functions;
   FunctionDefinition *find_function(Identifier identifier) override;
 
   std::flat_map<Identifier, VariantType> local_layout;
@@ -426,7 +320,7 @@ protected:
 
 private:
   friend class Language;
-  std::shared_ptr<StringAtlas> string_atlas;
+  std::set<VariantString> *string_atlas;
 };
 
 class FunctionParser final : public Parser<FunctionDefinition> {
@@ -523,7 +417,7 @@ public:
 class LambdaExpression final : public Expression {
 public:
   LambdaExpression() = default;
-  FunctionDefinition definition;
+  FunctionDefinition *definition;
 };
 
 struct AnyExpression {
@@ -697,10 +591,10 @@ Token Tokenizer::tokenize_string_literal(char32_t separator) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
     auto ascii_string = u16_literal | std::views::transform(cast_to_ascii);
     auto [string_iter, _] =
-        (*string_atlas)->emplace(std::string{std::from_range, ascii_string});
+        string_atlas->emplace(std::string{std::from_range, ascii_string});
     return std::get<std::string>(*string_iter);
   }
-  auto [u16string_iter, _] = (*string_atlas)->emplace(std::move(u16_literal));
+  auto [u16string_iter, _] = string_atlas->emplace(std::move(u16_literal));
   return std::get<std::u16string>(*u16string_iter);
 }
 
@@ -841,17 +735,19 @@ template <typename T> void Parser<T>::parse_statement() {
 }
 
 template <typename T> void Parser<T>::parse_function_stmt() {
-  FunctionDefinition definition{};
-  FunctionParser function_parser{definition, tokenizer};
+  FunctionDefinition *definition{
+      &boundary.function_definition_list->emplace_back()};
+  definition->function_definition_list = boundary.function_definition_list;
+  FunctionParser function_parser{*definition, tokenizer};
   function_parser.parse_function_decl();
-  if (not definition.function_name)
+  if (not definition->function_name)
     throw MissingFunctionName{};
   bool duplicate_exists =
-      std::ranges::contains(boundary.inner_functions, definition.function_name,
-                            [](const auto &el) { return el.function_name; });
+      std::ranges::contains(boundary.inner_functions, definition->function_name,
+                            [](const auto &el) { return el->function_name; });
   if (duplicate_exists)
     throw DuplicateDeclaration{};
-  boundary.inner_functions.push_back(std::move(definition));
+  boundary.inner_functions.push_back(definition);
 }
 
 template <typename T> AnyExpression Parser<T>::parse_assign_expression() {
@@ -1006,7 +902,9 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
       switch (keyword) {
       case Keyword::K_FUNCTION: {
         LambdaExpression lambda_expression{};
-        FunctionParser function_parser{lambda_expression.definition,
+        lambda_expression.definition =
+            &parser.boundary.function_definition_list->emplace_back();
+        FunctionParser function_parser{*lambda_expression.definition,
                                        parser.tokenizer};
         function_parser.parse_function_decl();
         return AnyExpression{lambda_expression};
@@ -1049,9 +947,9 @@ AbstractBoundary<T>::find_local(Identifier identifier) const {
 
 template <typename T>
 FunctionDefinition *AbstractBoundary<T>::find_function(Identifier identifier) {
-  auto by_name = [](const auto &def) { return def.function_name; };
+  auto by_name = [](auto definition) { return definition->function_name; };
   auto function_it = std::ranges::find(inner_functions, identifier, by_name);
-  return function_it == inner_functions.end() ? nullptr : &(*function_it);
+  return function_it == inner_functions.end() ? nullptr : *function_it;
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
@@ -1060,16 +958,17 @@ Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
 void Language::compile_and_execute() {
-  std::shared_ptr string_atlas{
-      std::make_shared<StringAtlas>(string_atlas_list.emplace())};
+  std::set<VariantString> string_atlas{};
+  std::list<FunctionDefinition> function_definition_list{};
 
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
-  tokenizer.string_atlas = string_atlas;
+  tokenizer.string_atlas = &string_atlas;
 
   ModuleDefinition definition{};
+  definition.function_definition_list = &function_definition_list;
   ModuleParser parser{definition, tokenizer};
-  parser.string_atlas = string_atlas;
+  parser.string_atlas = &string_atlas;
 
   while (1) {
     tokenizer.tokenize();
