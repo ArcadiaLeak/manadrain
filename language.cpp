@@ -201,8 +201,29 @@ public:
   std::size_t type_size() const override { return sizeof(VariantStringView); }
 };
 
+struct DynamicValue;
+class DynamicType final : public ValueType {
+public:
+  auto operator<=>(const DynamicType &) const = default;
+  std::size_t type_size() const override;
+};
+
 class LambdaType;
-using VariantType = std::variant<NumberType, StringType, const LambdaType *>;
+
+class VariantType {
+public:
+  using Alternative =
+      std::variant<NumberType, StringType, const LambdaType *, DynamicType>;
+  Alternative alt;
+
+  VariantType() = delete;
+  VariantType(Alternative a) : alt{a} {};
+
+  auto operator<=>(const VariantType &) const = default;
+};
+
+struct DynamicValue {};
+std::size_t DynamicType::type_size() const { return sizeof(DynamicValue); }
 
 struct LambdaDescriptor {};
 class LambdaType final : public ValueType {
@@ -215,7 +236,7 @@ public:
 
 class ObjectShape {
 public:
-  std::flat_map<Identifier, VariantType> properties;
+  std::flat_map<Identifier, std::optional<VariantType>> properties;
 };
 
 struct AnyExpression;
@@ -239,7 +260,7 @@ struct Heap {
 template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
-  std::flat_map<Identifier, VariantType> local_layout;
+  std::flat_map<Identifier, std::optional<VariantType>> local_layout;
   std::vector<std::byte> bytecode;
 
   std::list<AnyStatement> *program;
@@ -259,8 +280,9 @@ protected:
 class FunctionDefinition final : public AbstractBoundary<FunctionDefinition> {
 public:
   std::optional<Identifier> function_name;
+
+  std::optional<VariantType> return_type;
   std::vector<Identifier> arguments;
-  VariantType return_type;
 
   enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
   AnalyzerMark analyzer_mark;
@@ -273,11 +295,6 @@ class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
   void analyze();
 };
-
-void ModuleDefinition::analyze() {
-  analyze_statements();
-  analyze_inner_functions();
-}
 
 template <typename T> class Parser {
 public:
@@ -375,7 +392,7 @@ public:
 
 class ScopeAccessor final : public Expression {
 public:
-  ScopeAccessor() = default;
+  ScopeAccessor(VariantType t) : local_type{t} {}
   VariantType local_type;
   std::array<std::size_t, 2> location;
 };
@@ -453,6 +470,12 @@ public:
 
 struct AnyStatement {
   std::variant<InitializeVariable, ReturnStatement, ExpressionStatement> alt;
+};
+
+template <typename T> struct StatementVisitor {
+  void operator()(const InitializeVariable &statement) {}
+  void operator()(const ReturnStatement &statement) {}
+  void operator()(const ExpressionStatement &statement) {}
 };
 
 class Machine {};
@@ -925,8 +948,7 @@ AbstractBoundary<T>::find_local(Identifier identifier) const {
     return std::nullopt;
   std::size_t local_offset =
       std::distance(local_layout.begin(), local_layout.find(identifier));
-  ScopeAccessor accessor{};
-  accessor.local_type = local_layout.values()[local_offset];
+  ScopeAccessor accessor{local_layout.values()[local_offset].value()};
   std::get<1>(accessor.location) = local_offset;
   return accessor;
 }
@@ -938,12 +960,69 @@ FunctionDefinition *AbstractBoundary<T>::find_function(Identifier identifier) {
   return function_it == inner_functions.end() ? nullptr : *function_it;
 }
 
+template <typename T> void AbstractBoundary<T>::analyze_inner_functions() {
+  for (FunctionDefinition *definition : inner_functions) {
+    definition->parent_boundary = this;
+    definition->analyze();
+  }
+}
+
+template <typename T> void AbstractBoundary<T>::analyze_statements() {
+  struct StatementAnalyzer final : StatementVisitor<StatementAnalyzer> {
+    using StatementVisitor<StatementAnalyzer>::operator();
+
+    void operator()(const ExpressionStatement &statement) {}
+
+    std::optional<AnyStatement> result;
+  };
+  for (AnyStatement &any_statement : *program) {
+    StatementAnalyzer visitor{};
+    any_statement.alt.visit(visitor);
+    any_statement = std::move(visitor.result.value());
+  }
+}
+
+void FunctionDefinition::analyze_formal_parameters() {
+  for (Identifier argument : arguments)
+    local_layout.find(argument)->second.emplace(DynamicType{});
+}
+
+void FunctionDefinition::analyze() {
+  switch (analyzer_mark) {
+  case AnalyzerMark::PENDING:
+    analyzer_mark = AnalyzerMark::INITIATED;
+    analyze_formal_parameters();
+    analyze_statements();
+    analyze_inner_functions();
+    analyzer_mark = AnalyzerMark::COMPLETE;
+    break;
+  case AnalyzerMark::INITIATED:
+    throw UnresolvableCircularity{};
+  case AnalyzerMark::COMPLETE:
+    break;
+  }
+}
+
+void ModuleDefinition::analyze() {
+  analyze_statements();
+  analyze_inner_functions();
+}
+
 Language::Language() { machine = std::make_unique<Machine>(); }
 Language::~Language() = default;
 Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
 void Language::compile_and_execute() {
+  auto parse_module = [](Tokenizer &tokenizer, ModuleParser &parser) {
+    repeat:
+      tokenizer.tokenize();
+      if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+        return;
+      parser.parse_statement();
+      goto repeat;
+  };
+
   std::set<LambdaType> lambda_types{};
   std::set<VariantString> string_atlas{};
   Heap heap{};
@@ -959,11 +1038,7 @@ void Language::compile_and_execute() {
   ModuleParser parser{definition, tokenizer};
   parser.string_atlas = &string_atlas;
 
-  while (1) {
-    tokenizer.tokenize();
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
-      break;
-    parser.parse_statement();
-  }
+  parse_module(tokenizer, parser);
+  definition.analyze();
 }
 } // namespace Manadrain
