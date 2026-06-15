@@ -247,6 +247,7 @@ class ScopeAccessor;
 
 class LexicalBoundary {
 public:
+  LexicalBoundary *parent_boundary;
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
   find_local(Identifier identifier) const = 0;
@@ -259,7 +260,6 @@ struct Heap {
 
 template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
-  LexicalBoundary *parent_boundary;
   std::flat_map<Identifier, std::optional<VariantType>> local_layout;
   std::vector<std::byte> bytecode;
 
@@ -388,6 +388,9 @@ class VariableAccessor final : public Expression {
 public:
   VariableAccessor() = default;
   Identifier identifier;
+  std::optional<ScopeAccessor>
+  search_boundary_chain(const LexicalBoundary *boundary,
+                        std::size_t scope_offset = 0) const;
 };
 
 class ScopeAccessor final : public Expression {
@@ -395,6 +398,13 @@ public:
   ScopeAccessor(VariantType t) : local_type{t} {}
   VariantType local_type;
   std::array<std::size_t, 2> location;
+};
+
+enum class IntrinsicObject { O_CONSOLE };
+class IntrinsicAccessor final : public Expression {
+public:
+  IntrinsicAccessor() = default;
+  IntrinsicObject object_type;
 };
 
 class NumericLiteral final : public Expression {
@@ -425,7 +435,8 @@ struct AnyExpression {
   std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
                AliasedFunctionCall, MemberExpression, AssignExpression,
                LogicalExpression, BinaryExpression, ObjectExpression,
-               VariableAccessor, ScopeAccessor, LambdaExpression>
+               VariableAccessor, ScopeAccessor, IntrinsicAccessor,
+               LambdaExpression>
       alt;
 };
 
@@ -443,6 +454,22 @@ LogicalExpression::LogicalExpression(AnyExpression &&l, AnyExpression &&r)
 
 BinaryExpression::BinaryExpression(AnyExpression &&l, AnyExpression &&r)
     : left{std::move(l)}, right{std::move(r)} {};
+
+template <typename T> struct ExpressionVisitor {
+  void operator()(const NumericLiteral &expression) {}
+  void operator()(const AsciiLiteral &expression) {}
+  void operator()(const UnicodeLiteral &expression) {}
+  void operator()(const AliasedFunctionCall &expression) {}
+  void operator()(const MemberExpression &expression) {}
+  void operator()(const AssignExpression &expression) {}
+  void operator()(const LogicalExpression &expression) {}
+  void operator()(const BinaryExpression &expression) {}
+  void operator()(const ObjectExpression &expression) {}
+  void operator()(const VariableAccessor &expression) {}
+  void operator()(const ScopeAccessor &expression) {}
+  void operator()(const IntrinsicAccessor &expression) {}
+  void operator()(const LambdaExpression &expression) {}
+};
 
 class Statement {
 protected:
@@ -825,8 +852,9 @@ seek_postfix:
 
 template <typename T>
 void Parser<T>::parse_function_call(AnyExpression &expression) {
+  AnyExpression callee{std::move(expression)};
   AliasedFunctionCall &function_call{
-      expression.alt.emplace<AliasedFunctionCall>(std::move(expression))};
+      expression.alt.emplace<AliasedFunctionCall>(std::move(callee))};
   while (1) {
     tokenizer.tokenize();
     if (tokenizer.last_token == Token{U')'})
@@ -844,22 +872,24 @@ void Parser<T>::parse_member_expression(AnyExpression &expression) {
   if (not std::holds_alternative<Identifier>(tokenizer.last_token))
     throw MissingPropertyName{};
   Identifier field_name{std::get<Identifier>(tokenizer.last_token)};
+  AnyExpression member_object{std::move(expression)};
   MemberExpression &member_expression{
-      expression.alt.emplace<MemberExpression>(std::move(expression))};
+      expression.alt.emplace<MemberExpression>(std::move(member_object))};
   member_expression.property = field_name;
 }
 
 template <typename T> AnyExpression Parser<T>::parse_additive_expression() {
-  AnyExpression left_expression{parse_postfix_expression()};
+  AnyExpression expression{parse_postfix_expression()};
   if (tokenizer.last_token != Token{U'+'} &&
       tokenizer.last_token != Token{U'-'})
-    return left_expression;
+    return expression;
   char32_t binary_op{std::get<char32_t>(tokenizer.last_token)};
   tokenizer.tokenize();
-  BinaryExpression &expression{left_expression.alt.emplace<BinaryExpression>(
+  AnyExpression left_expression{std::move(expression)};
+  BinaryExpression &binary_expression{expression.alt.emplace<BinaryExpression>(
       std::move(left_expression), parse_postfix_expression())};
-  expression.op = binary_op;
-  return left_expression;
+  binary_expression.op = binary_op;
+  return expression;
 }
 
 template <typename T> AnyExpression Parser<T>::parse_object_literal() {
@@ -967,16 +997,95 @@ template <typename T> void AbstractBoundary<T>::analyze_inner_functions() {
   }
 }
 
+struct RvalueAnalyzer;
+
+struct CalleeAnalyzer final : ExpressionVisitor<CalleeAnalyzer> {
+  using ExpressionVisitor<CalleeAnalyzer>::operator();
+
+  void operator()(const MemberExpression &expression);
+
+  CalleeAnalyzer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+  std::optional<AnyExpression> result;
+};
+
+struct RvalueAnalyzer final : ExpressionVisitor<RvalueAnalyzer> {
+  using ExpressionVisitor<RvalueAnalyzer>::operator();
+
+  void operator()(const AsciiLiteral &ascii_literal) {
+    result.emplace(ascii_literal);
+  }
+
+  void operator()(const AliasedFunctionCall &function_call) {
+    CalleeAnalyzer visitor{boundary};
+    function_call.callee->alt.visit(visitor);
+  }
+
+  void operator()(const VariableAccessor &variable_accessor);
+
+  RvalueAnalyzer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+  std::optional<AnyExpression> result;
+};
+
+void CalleeAnalyzer::operator()(const MemberExpression &expression) {
+  RvalueAnalyzer visitor{boundary};
+  expression.object->alt.visit(visitor);
+}
+
+std::optional<ScopeAccessor>
+VariableAccessor::search_boundary_chain(const LexicalBoundary *boundary,
+                                        std::size_t scope_offset) const {
+  if (not boundary)
+    throw InvalidVariableAccess{};
+  std::optional<ScopeAccessor> scope_accessor{boundary->find_local(identifier)};
+  if (scope_accessor) {
+    std::get<0>(scope_accessor->location) = scope_offset;
+    return scope_accessor;
+  }
+  return search_boundary_chain(boundary->parent_boundary, scope_offset + 1);
+}
+
+void RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
+  std::optional<ScopeAccessor> scope_accessor{
+      variable_accessor.search_boundary_chain(&boundary)};
+  if (scope_accessor) {
+    result.emplace(*scope_accessor);
+    return;
+  }
+  switch (variable_accessor.identifier.offset) {
+  case OFFSET_console: {
+    IntrinsicAccessor intrinsic_accessor{};
+    intrinsic_accessor.object_type = IntrinsicObject::O_CONSOLE;
+    result.emplace(intrinsic_accessor);
+    return;
+  }
+  default:
+    throw InvalidVariableAccess{};
+  }
+}
+
+struct StatementAnalyzer final : StatementVisitor<StatementAnalyzer> {
+  using StatementVisitor<StatementAnalyzer>::operator();
+
+  void operator()(const ExpressionStatement &statement) {
+    RvalueAnalyzer visitor{boundary};
+    statement.argument->alt.visit(visitor);
+  }
+
+  void operator()(const InitializeVariable &statement) {
+    RvalueAnalyzer visitor{boundary};
+    statement.rvalue->alt.visit(visitor);
+  }
+
+  StatementAnalyzer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+  std::optional<AnyStatement> result;
+};
+
 template <typename T> void AbstractBoundary<T>::analyze_statements() {
-  struct StatementAnalyzer final : StatementVisitor<StatementAnalyzer> {
-    using StatementVisitor<StatementAnalyzer>::operator();
-
-    void operator()(const ExpressionStatement &statement) {}
-
-    std::optional<AnyStatement> result;
-  };
   for (AnyStatement &any_statement : *program) {
-    StatementAnalyzer visitor{};
+    StatementAnalyzer visitor{*this};
     any_statement.alt.visit(visitor);
     any_statement = std::move(visitor.result.value());
   }
