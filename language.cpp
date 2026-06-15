@@ -6,6 +6,7 @@
 #include <generator>
 #include <inplace_vector>
 #include <list>
+#include <map>
 #include <memory>
 #include <memory_resource>
 #include <meta>
@@ -93,96 +94,6 @@ public:
   UnresolvableCircularity() : CompilationError{"unresolvable circularity!"} {}
 };
 
-template <typename T> class Pool {
-public:
-  class UniqueToken {
-  public:
-    ~UniqueToken();
-    UniqueToken(const UniqueToken &) = delete;
-    UniqueToken &operator=(const UniqueToken &) = delete;
-    UniqueToken(UniqueToken &&another) noexcept;
-    UniqueToken &operator=(UniqueToken &&another) noexcept;
-
-  private:
-    UniqueToken(Pool *p, std::size_t i) noexcept : owner{p}, token_id{i} {}
-    Pool *owner;
-    std::size_t token_id;
-
-    friend class Pool;
-    std::size_t id() const noexcept { return token_id; }
-  };
-
-  Pool(const Pool &) = delete;
-  Pool &operator=(const Pool &) = delete;
-  Pool() = default;
-
-  UniqueToken create_token();
-
-  void push(const UniqueToken &token, T obj);
-  template <typename... Args>
-  T &emplace(const UniqueToken &token, Args &&...args);
-
-private:
-  void dispose_token(std::size_t color_id);
-
-  std::atomic<std::size_t> next_token_id{0};
-  std::mutex registry_mutex;
-  std::flat_map<std::size_t, std::list<T>> registry;
-};
-
-template <typename T>
-Pool<T>::UniqueToken::UniqueToken(UniqueToken &&another) noexcept
-    : owner{another.owner}, token_id{another.token_id} {
-  another.owner = nullptr;
-}
-
-template <typename T>
-Pool<T>::UniqueToken &
-Pool<T>::UniqueToken::operator=(UniqueToken &&another) noexcept {
-  if (this == &another)
-    return *this;
-  if (owner)
-    owner->dispose_token(token_id);
-  owner = another.owner;
-  token_id = another.token_id;
-  another.owner = nullptr;
-  return *this;
-}
-
-template <typename T> Pool<T>::UniqueToken::~UniqueToken() {
-  if (owner)
-    owner->dispose_token(token_id);
-}
-
-template <typename T> Pool<T>::UniqueToken Pool<T>::create_token() {
-  std::size_t id{next_token_id.fetch_add(1, std::memory_order_relaxed)};
-  return UniqueToken{this, id};
-}
-
-template <typename T> void Pool<T>::push(const UniqueToken &token, T obj) {
-  std::lock_guard lock{registry_mutex};
-  registry[token.id()].push_front(std::move(obj));
-}
-
-template <typename T>
-template <typename... Args>
-T &Pool<T>::emplace(const UniqueToken &token, Args &&...args) {
-  std::lock_guard lock{registry_mutex};
-  return registry[token.id()].emplace_front(std::forward<Args>(args)...);
-}
-
-template <typename T> void Pool<T>::dispose_token(std::size_t token_id) {
-  std::list<T> dispose_target{};
-  {
-    std::lock_guard lock{registry_mutex};
-    auto entry_it = registry.find(token_id);
-    if (entry_it == registry.end())
-      return;
-    entry_it->second.swap(dispose_target);
-    registry.erase(entry_it);
-  }
-}
-
 enum class Keyword {
   MONOSTATE,
   K_CONST,
@@ -230,104 +141,113 @@ struct Identifier {
   auto operator<=>(const Identifier &) const = default;
 };
 
-template <typename T> class Atlas {
-public:
-  class UniqueToken {
-  public:
-    ~UniqueToken();
-    UniqueToken(const UniqueToken &) = delete;
-    UniqueToken &operator=(const UniqueToken &) = delete;
-    UniqueToken(UniqueToken &&another) noexcept;
-    UniqueToken &operator=(UniqueToken &&another) noexcept;
-
-  private:
-    UniqueToken(Atlas *p, std::size_t i) noexcept : owner{p}, token_id{i} {}
-    Atlas *owner;
-    std::size_t token_id;
-
-    friend class Atlas;
-    std::size_t id() const noexcept { return token_id; }
-  };
-
-  Atlas(const Atlas &) = delete;
-  Atlas &operator=(const Atlas &) = delete;
-  Atlas() = default;
-
-  UniqueToken create_token();
-
-  std::pair<typename std::set<T>::iterator, bool>
-  insert(const UniqueToken &token, T obj);
-  template <typename... Args>
-  std::pair<typename std::set<T>::iterator, bool>
-  emplace(const UniqueToken &token, Args &&...args);
-
+template <typename T> class UniqueElementList {
 private:
-  void dispose_token(std::size_t color_id);
+  struct Node;
+  mutable std::mutex nodes_mutex;
+  std::list<Node> nodes;
 
-  std::atomic<std::size_t> next_token_id{0};
-  std::mutex registry_mutex;
-  std::flat_map<std::size_t, std::set<T>> registry;
+public:
+  class UniqueElement;
+  UniqueElementList() = default;
+
+  UniqueElement push(const T &value) { return emplace(value); }
+  UniqueElement push(T &&value) { return emplace(std::move(value)); }
+
+  template <typename... Args> UniqueElement emplace(Args &&...args);
+
+  bool empty() const;
+  std::size_t size() const;
 };
 
-template <typename T>
-Atlas<T>::UniqueToken::UniqueToken(UniqueToken &&another) noexcept
-    : owner{another.owner}, token_id{another.token_id} {
-  another.owner = nullptr;
+template <typename T> bool UniqueElementList<T>::empty() const {
+  std::lock_guard<std::mutex> lock(nodes_mutex);
+  return nodes.empty();
 }
 
-template <typename T>
-Atlas<T>::UniqueToken &
-Atlas<T>::UniqueToken::operator=(UniqueToken &&another) noexcept {
-  if (this == &another)
-    return *this;
-  if (owner)
-    owner->dispose_token(token_id);
-  owner = another.owner;
-  token_id = another.token_id;
-  another.owner = nullptr;
-  return *this;
-}
-
-template <typename T> Atlas<T>::UniqueToken::~UniqueToken() {
-  if (owner)
-    owner->dispose_token(token_id);
-}
-
-template <typename T> Atlas<T>::UniqueToken Atlas<T>::create_token() {
-  std::size_t id{next_token_id.fetch_add(1, std::memory_order_relaxed)};
-  return UniqueToken{this, id};
-}
-
-template <typename T>
-std::pair<typename std::set<T>::iterator, bool>
-Atlas<T>::insert(const UniqueToken &token, T obj) {
-  std::lock_guard lock{registry_mutex};
-  return registry[token.id()].insert(std::move(obj));
+template <typename T> std::size_t UniqueElementList<T>::size() const {
+  std::lock_guard<std::mutex> lock(nodes_mutex);
+  return nodes.size();
 }
 
 template <typename T>
 template <typename... Args>
-std::pair<typename std::set<T>::iterator, bool>
-Atlas<T>::emplace(const UniqueToken &token, Args &&...args) {
-  std::lock_guard lock{registry_mutex};
-  return registry[token.id()].emplace(std::forward<Args>(args)...);
+UniqueElementList<T>::UniqueElement
+UniqueElementList<T>::emplace(Args &&...args) {
+  std::lock_guard<std::mutex> lock{nodes_mutex};
+  auto it = nodes.emplace(nodes.end(), &nodes_mutex, &nodes,
+                          std::forward<Args>(args)...);
+  it->it = it;
+  return UniqueElement{&*it};
 }
 
-template <typename T> void Atlas<T>::dispose_token(std::size_t token_id) {
-  std::set<T> dispose_target{};
-  {
-    std::lock_guard lock{registry_mutex};
-    auto entry_it = registry.find(token_id);
-    if (entry_it == registry.end())
-      return;
-    entry_it->second.swap(dispose_target);
-    registry.erase(entry_it);
+template <typename T> struct UniqueElementList<T>::Node {
+  T data;
+  typename std::list<Node>::iterator it;
+  std::mutex *owner_mutex;
+  std::list<Node> *owner_list;
+
+  template <typename... Args>
+  Node(std::mutex *mtx, std::list<Node> *lst, Args &&...args)
+      : data{std::forward<Args>(args)...}, owner_mutex{mtx}, owner_list{lst} {}
+};
+
+template <typename T> class UniqueElementList<T>::UniqueElement {
+public:
+  UniqueElement(const UniqueElement &) = delete;
+  UniqueElement &operator=(const UniqueElement &) = delete;
+
+  UniqueElement(UniqueElement &&other) noexcept;
+  UniqueElement &operator=(UniqueElement &&other) noexcept;
+
+  ~UniqueElement();
+
+  T &operator*() { return node_ptr->data; }
+  T *operator->() { return &node_ptr->data; }
+
+private:
+  friend class UniqueElementList;
+  explicit UniqueElement(Node *node) : node_ptr(node) {}
+  Node *node_ptr = nullptr;
+};
+
+template <typename T>
+UniqueElementList<T>::UniqueElement::UniqueElement(
+    UniqueElement &&other) noexcept
+    : node_ptr{other.node_ptr} {
+  other.node_ptr = nullptr;
+}
+
+template <typename T>
+UniqueElementList<T>::UniqueElement &
+UniqueElementList<T>::UniqueElement::operator=(UniqueElement &&other) noexcept {
+  if (this == &other)
+    return *this;
+  this->~UniqueElement();
+  node_ptr = other.node_ptr;
+  other.node_ptr = nullptr;
+  return *this;
+}
+
+template <typename T> UniqueElementList<T>::UniqueElement::~UniqueElement() {
+  if (!node_ptr)
+    return;
+  if constexpr (std::is_nothrow_move_constructible_v<T>) {
+    std::unique_lock<std::mutex> lock{*node_ptr->owner_mutex};
+    T local_data{std::move(node_ptr->data)};
+    node_ptr->owner_list->erase(node_ptr->it);
+    lock.unlock();
+  } else {
+    std::lock_guard<std::mutex> lock{*node_ptr->owner_mutex};
+    node_ptr->owner_list->erase(node_ptr->it);
   }
 }
 
+static UniqueElementList<std::set<std::variant<std::string, std::u16string>>>
+    string_atlas_list{};
+
 using VariantString = std::variant<std::string, std::u16string>;
-static Atlas<VariantString> string_atlas{};
-using StringsToken = const Atlas<VariantString>::UniqueToken;
+using StringAtlas = UniqueElementList<std::set<VariantString>>::UniqueElement;
 
 using Token =
     std::variant<std::monostate, char32_t, std::int64_t, double, Operator,
@@ -347,7 +267,7 @@ private:
   friend class FunctionParser;
 
   std::flat_map<std::string, Identifier> atom_atlas;
-  std::shared_ptr<StringsToken> strings_token;
+  std::shared_ptr<StringAtlas> string_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -506,7 +426,7 @@ protected:
 
 private:
   friend class Language;
-  std::shared_ptr<StringsToken> strings_token;
+  std::shared_ptr<StringAtlas> string_atlas;
 };
 
 class FunctionParser final : public Parser<FunctionDefinition> {
@@ -776,12 +696,11 @@ Token Tokenizer::tokenize_string_literal(char32_t separator) {
   if (std::ranges::all_of(u16_literal, [](char16_t ch) { return ch < 128; })) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
     auto ascii_string = u16_literal | std::views::transform(cast_to_ascii);
-    auto [string_iter, _] = string_atlas.emplace(
-        *strings_token, std::string{std::from_range, ascii_string});
+    auto [string_iter, _] =
+        (*string_atlas)->emplace(std::string{std::from_range, ascii_string});
     return std::get<std::string>(*string_iter);
   }
-  auto [u16string_iter, _] =
-      string_atlas.emplace(*strings_token, std::move(u16_literal));
+  auto [u16string_iter, _] = (*string_atlas)->emplace(std::move(u16_literal));
   return std::get<std::u16string>(*u16string_iter);
 }
 
@@ -1141,16 +1060,16 @@ Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
 void Language::compile_and_execute() {
-  std::shared_ptr strings_token{
-      std::make_shared<StringsToken>(string_atlas.create_token())};
+  std::shared_ptr string_atlas{
+      std::make_shared<StringAtlas>(string_atlas_list.emplace())};
 
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
-  tokenizer.strings_token = strings_token;
+  tokenizer.string_atlas = string_atlas;
 
   ModuleDefinition definition{};
   ModuleParser parser{definition, tokenizer};
-  parser.strings_token = strings_token;
+  parser.string_atlas = string_atlas;
 
   while (1) {
     tokenizer.tokenize();
