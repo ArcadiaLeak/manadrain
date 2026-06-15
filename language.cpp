@@ -182,55 +182,35 @@ private:
 class ValueType {
 protected:
   ValueType() = default;
+
+public:
+  auto operator<=>(const ValueType &) const = default;
   virtual std::size_t type_size() const = 0;
 };
-class ObjectShape;
 
 class NumberType final : public ValueType {
+public:
+  auto operator<=>(const NumberType &) const = default;
   std::size_t type_size() const override { return sizeof(double); }
 };
 
-class AbstractStringView {
-public:
-  virtual std::string normalize() const = 0;
-  virtual std::size_t size() const = 0;
-};
-
-class AsciiStringView final : public AbstractStringView {
-public:
-  AsciiStringView(std::string_view sv) : ascii_view{sv} {}
-  std::string normalize() const override { return std::string{ascii_view}; }
-  std::size_t size() const override { return ascii_view.size(); }
-
-private:
-  std::string_view ascii_view;
-};
-
-class UnicodeStringView final : public AbstractStringView {
-public:
-  UnicodeStringView(std::u16string_view sv) : unicode_view{sv} {}
-  std::string normalize() const override;
-  std::size_t size() const override { return unicode_view.size(); }
-
-private:
-  std::u16string_view unicode_view;
-};
-
-struct VariantType;
-
-using VariantStringView = std::variant<AsciiStringView, UnicodeStringView>;
+using VariantStringView = std::variant<std::string_view, std::u16string_view>;
 class StringType final : public ValueType {
+public:
+  auto operator<=>(const StringType &) const = default;
   std::size_t type_size() const override { return sizeof(VariantStringView); }
 };
 
+class LambdaType;
+using VariantType = std::variant<NumberType, StringType, const LambdaType *>;
+
 struct LambdaDescriptor {};
 class LambdaType final : public ValueType {
-  std::span<VariantType> signature;
+public:
+  std::vector<VariantType> parameter_types;
+  VariantType return_type;
+  auto operator<=>(const LambdaType &) const = default;
   std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
-};
-
-struct VariantType {
-  std::variant<NumberType, StringType, LambdaType> alt;
 };
 
 class ObjectShape {
@@ -497,7 +477,7 @@ static const std::flat_map<std::string_view, std::size_t> identifier_atlas{
 static const std::array persistent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::string UnicodeStringView::normalize() const {
+std::string normalize(std::u16string_view unicode_view) {
   auto encode_u16 =
       [](std::uint16_t uchar) -> std::inplace_vector<std::uint8_t, 3> {
     std::array<std::uint8_t, 3> buffer{};
@@ -964,6 +944,7 @@ Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
 void Language::compile_and_execute() {
+  std::set<LambdaType> lambda_types{};
   std::set<VariantString> string_atlas{};
   Heap heap{};
 
