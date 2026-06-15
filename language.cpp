@@ -251,19 +251,23 @@ public:
   find_local(Identifier identifier) const = 0;
 };
 
+struct Heap {
+  std::list<FunctionDefinition> function_definition_list;
+  std::list<std::list<AnyStatement>> program_list;
+};
+
 template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
-  std::vector<std::byte> bytecode;
-  std::list<AnyStatement> program;
-  std::list<FunctionDefinition> *function_definition_list;
-
-  std::vector<FunctionDefinition *> inner_functions;
-  FunctionDefinition *find_function(Identifier identifier) override;
-
   std::flat_map<Identifier, VariantType> local_layout;
-  std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
+  std::vector<std::byte> bytecode;
 
+  std::list<AnyStatement> *program;
+  std::vector<FunctionDefinition *> inner_functions;
+  Heap *heap;
+
+  FunctionDefinition *find_function(Identifier identifier) override;
+  std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
   void serialize();
 
 protected:
@@ -721,13 +725,13 @@ template <typename T> void Parser<T>::parse_statement() {
   case Keyword::K_RETURN: {
     tokenizer.tokenize();
     ReturnStatement statement{parse_expression()};
-    boundary.program.emplace_back(std::move(statement));
+    boundary.program->emplace_back(std::move(statement));
     tokenizer.assert_punct(';');
     return;
   }
   default: {
     ExpressionStatement statement{parse_expression()};
-    boundary.program.emplace_back(std::move(statement));
+    boundary.program->emplace_back(std::move(statement));
     tokenizer.assert_punct(';');
     return;
   }
@@ -736,8 +740,10 @@ template <typename T> void Parser<T>::parse_statement() {
 
 template <typename T> void Parser<T>::parse_function_stmt() {
   FunctionDefinition *definition{
-      &boundary.function_definition_list->emplace_back()};
-  definition->function_definition_list = boundary.function_definition_list;
+      &boundary.heap->function_definition_list.emplace_back()};
+  definition->parent_boundary = &boundary;
+  definition->program = &boundary.heap->program_list.emplace_back();
+  definition->heap = boundary.heap;
   FunctionParser function_parser{*definition, tokenizer};
   function_parser.parse_function_decl();
   if (not definition->function_name)
@@ -770,7 +776,7 @@ template <typename T> void Parser<T>::parse_variable_decl() {
   tokenizer.tokenize();
   InitializeVariable initialize_variable{parse_expression()};
   initialize_variable.variable_name = variable_name;
-  boundary.program.emplace_back(std::move(initialize_variable));
+  boundary.program->emplace_back(std::move(initialize_variable));
   tokenizer.assert_punct(';');
   if (boundary.local_layout.contains(variable_name))
     throw DuplicateDeclaration{};
@@ -903,7 +909,7 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
       case Keyword::K_FUNCTION: {
         LambdaExpression lambda_expression{};
         lambda_expression.definition =
-            &parser.boundary.function_definition_list->emplace_back();
+            &parser.boundary.heap->function_definition_list.emplace_back();
         FunctionParser function_parser{*lambda_expression.definition,
                                        parser.tokenizer};
         function_parser.parse_function_decl();
@@ -959,14 +965,16 @@ Language &Language::operator=(Language &&other) noexcept = default;
 
 void Language::compile_and_execute() {
   std::set<VariantString> string_atlas{};
-  std::list<FunctionDefinition> function_definition_list{};
+  Heap heap{};
 
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
   tokenizer.string_atlas = &string_atlas;
 
   ModuleDefinition definition{};
-  definition.function_definition_list = &function_definition_list;
+  definition.program = &heap.program_list.emplace_back();
+  definition.heap = &heap;
+
   ModuleParser parser{definition, tokenizer};
   parser.string_atlas = &string_atlas;
 
