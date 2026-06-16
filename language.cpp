@@ -2,15 +2,14 @@
 #include <cassert>
 #include <condition_variable>
 #include <cstdint>
+#include <debugging>
 #include <flat_map>
 #include <generator>
 #include <inplace_vector>
 #include <list>
 #include <memory>
 #include <memory_resource>
-#include <meta>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <print>
 #include <ranges>
@@ -25,73 +24,87 @@
 #include "language.hpp"
 
 namespace Manadrain {
-class CompilationError : public std::runtime_error {
+class Error {
 public:
-  CompilationError(const char *msg) : std::runtime_error{msg} {}
-  CompilationError() : std::runtime_error{"compilation error!"} {}
+  Error(const char *m) : message{m} {}
+  Error() : message{"unspecified error!"} {}
+  const char *what() noexcept { return message; }
+
+private:
+  const char *message;
 };
-class UnexpectedStringEnd final : public CompilationError {
+
+class UnexpectedStringEnd final : public Error {
 public:
-  UnexpectedStringEnd() : CompilationError{"unexpected string end!"} {}
+  UnexpectedStringEnd() : Error{"unexpected string end!"} {}
 };
-class UnexpectedToken final : public CompilationError {
+class UnexpectedToken final : public Error {
 public:
-  UnexpectedToken() : CompilationError{"unexpected token!"} {}
+  UnexpectedToken() : Error{"unexpected token!"} {}
 };
-class MissingPunctuation final : public CompilationError {
+class MissingPunctuation final : public Error {
 public:
   MissingPunctuation(char32_t ch)
-      : CompilationError{"missing punctuation!"}, must_be{ch} {}
+      : Error{"missing punctuation!"}, must_be{ch} {}
   char32_t must_be;
 };
-class MissingFormalParameter final : public CompilationError {
+class MissingFormalParameter final : public Error {
 public:
-  MissingFormalParameter() : CompilationError{"missing formal parameter!"} {}
+  MissingFormalParameter() : Error{"missing formal parameter!"} {}
 };
-class MissingFunctionName final : public CompilationError {
+class MissingFunctionName final : public Error {
 public:
-  MissingFunctionName() : CompilationError{"missing function_name!"} {}
+  MissingFunctionName() : Error{"missing function_name!"} {}
 };
-class DuplicateDeclaration final : public CompilationError {
+class DuplicateDeclaration final : public Error {
 public:
-  DuplicateDeclaration() : CompilationError{"duplicate declaration!"} {}
+  DuplicateDeclaration() : Error{"duplicate declaration!"} {}
 };
-class MissingPropertyName final : public CompilationError {
+class MissingPropertyName final : public Error {
 public:
-  MissingPropertyName() : CompilationError{"missing property name!"} {}
+  MissingPropertyName() : Error{"missing property name!"} {}
 };
-class InvalidPropertyName final : public CompilationError {
+class InvalidPropertyName final : public Error {
 public:
-  InvalidPropertyName() : CompilationError{"invalid property name!"} {}
+  InvalidPropertyName() : Error{"invalid property name!"} {}
 };
-class InvalidPropertyAccess final : public CompilationError {
+class InvalidPropertyAccess final : public Error {
 public:
-  InvalidPropertyAccess() : CompilationError{"invalid property access!"} {}
+  InvalidPropertyAccess() : Error{"invalid property access!"} {}
 };
-class MissingVariableName final : public CompilationError {
+class MissingVariableName final : public Error {
 public:
-  MissingVariableName() : CompilationError{"missing variable name!"} {}
+  MissingVariableName() : Error{"missing variable name!"} {}
 };
-class InvalidMethodAccess final : public CompilationError {
+class InvalidMethodAccess final : public Error {
 public:
-  InvalidMethodAccess() : CompilationError{"invalid method access!"} {}
+  InvalidMethodAccess() : Error{"invalid method access!"} {}
 };
-class InvalidVariableAccess final : public CompilationError {
+class InvalidVariableAccess final : public Error {
 public:
-  InvalidVariableAccess() : CompilationError{"invalid variable access!"} {}
+  InvalidVariableAccess() : Error{"invalid variable access!"} {}
 };
-class InvalidReturnStatement final : public CompilationError {
+class InvalidReturnStatement final : public Error {
 public:
-  InvalidReturnStatement() : CompilationError{"invalid return statement!"} {}
+  InvalidReturnStatement() : Error{"invalid return statement!"} {}
 };
-class InvalidAssignment final : public CompilationError {
+class InvalidAssignment final : public Error {
 public:
-  InvalidAssignment() : CompilationError{"invalid assignment!"} {}
+  InvalidAssignment() : Error{"invalid assignment!"} {}
 };
-class UnresolvableCircularity final : public CompilationError {
+class UnresolvableCircularity final : public Error {
 public:
-  UnresolvableCircularity() : CompilationError{"unresolvable circularity!"} {}
+  UnresolvableCircularity() : Error{"unresolvable circularity!"} {}
 };
+
+using VariantError = std::variant<
+    Error, UnexpectedStringEnd, UnexpectedToken, MissingPunctuation,
+    MissingFormalParameter, MissingFunctionName, DuplicateDeclaration,
+    MissingPropertyName, InvalidPropertyName, InvalidPropertyAccess,
+    MissingVariableName, InvalidMethodAccess, InvalidVariableAccess,
+    InvalidReturnStatement, InvalidAssignment, UnresolvableCircularity>;
+
+static thread_local VariantError error_descriptor{};
 
 enum class Keyword {
   MONOSTATE,
@@ -170,13 +183,13 @@ private:
   void backward();
   void backward(std::size_t N);
 
-  Token tokenize_identifier(char32_t leading);
-  Token tokenize_string_literal(char32_t separator);
-  Token tokenize_numeric_literal(char32_t leading);
+  std::optional<Token> tokenize_identifier(char32_t leading);
+  std::optional<Token> tokenize_string_literal(char32_t separator);
+  std::optional<Token> tokenize_numeric_literal(char32_t leading);
 
   Token last_token;
-  void assert_punct(char32_t must_be);
-  void tokenize();
+  bool assert_punct(char32_t must_be);
+  bool tokenize();
 };
 
 class ValueType {
@@ -328,7 +341,7 @@ private:
 class FunctionParser final : public Parser<FunctionDefinition> {
 public:
   FunctionParser(FunctionDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  void parse_function_decl();
+  bool parse_function_decl();
 };
 class ModuleParser final : public Parser<ModuleDefinition> {
 public:
@@ -614,7 +627,7 @@ void Tokenizer::backward(std::size_t N) {
     backward();
 }
 
-Token Tokenizer::tokenize_identifier(char32_t leading) {
+std::optional<Token> Tokenizer::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -635,7 +648,7 @@ Token Tokenizer::tokenize_identifier(char32_t leading) {
   return emplace_ret.first->second;
 }
 
-Token Tokenizer::tokenize_string_literal(char32_t separator) {
+std::optional<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
   std::u16string u16_literal{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
@@ -645,8 +658,11 @@ Token Tokenizer::tokenize_string_literal(char32_t separator) {
   for (std::optional<char32_t> leading : literal_view) {
     if (leading == '\r' && forward() != '\n')
       backward();
-    if (not leading || leading == '\r' || leading == '\n')
-      throw UnexpectedStringEnd{};
+    if (not leading || leading == '\r' || leading == '\n') {
+      std::breakpoint();
+      error_descriptor.emplace<UnexpectedStringEnd>();
+      return std::nullopt;
+    }
     u16_literal.append_range(traverse_u16(*leading));
   }
   if (std::ranges::all_of(u16_literal, [](char16_t ch) { return ch < 128; })) {
@@ -660,7 +676,7 @@ Token Tokenizer::tokenize_string_literal(char32_t separator) {
   return std::get<std::u16string>(*u16string_iter);
 }
 
-Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
+std::optional<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -677,7 +693,7 @@ Token Tokenizer::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-void Tokenizer::tokenize() {
+bool Tokenizer::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -702,96 +718,126 @@ void Tokenizer::tokenize() {
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
       last_token = Operator::LOGICAL_DISJUNCT;
-      return;
+      return 1;
     } else
       backward();
     if (std::ranges::binary_search(std::to_array({'"', '\'', '`'}), leading)) {
-      last_token = tokenize_string_literal(leading);
-      return;
+      std::optional token_opt{tokenize_string_literal(leading)};
+      if (token_opt)
+        last_token = *token_opt;
+      return token_opt.has_value();
     }
     if (uc_is_property_xid_start(leading) || leading == '_') {
-      last_token = tokenize_identifier(leading);
-      return;
+      std::optional token_opt{tokenize_identifier(leading)};
+      if (token_opt)
+        last_token = *token_opt;
+      return token_opt.has_value();
     }
     static const std::array legal_punct{std::to_array<char32_t>(
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
       last_token = leading;
-      return;
+      return 1;
     }
     if (std::isdigit(leading)) {
-      last_token = tokenize_numeric_literal(leading);
-      return;
+      std::optional token_opt{tokenize_numeric_literal(leading)};
+      if (token_opt)
+        last_token = *token_opt;
+      return token_opt.has_value();
     }
     throw UnexpectedToken{};
   }
-  last_token = std::monostate{};
+  last_token.emplace<std::monostate>();
+  return 1;
 }
 
-void Tokenizer::assert_punct(char32_t must_be) {
+bool Tokenizer::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
-    return;
-  throw MissingPunctuation{must_be};
+    return 1;
+  else {
+    std::breakpoint();
+    error_descriptor.emplace<MissingPunctuation>(must_be);
+    return 0;
+  }
 }
 
-void FunctionParser::parse_function_decl() {
-  tokenizer.tokenize();
+bool FunctionParser::parse_function_decl() {
+  if (not tokenizer.tokenize())
+    return 0;
   if (std::holds_alternative<Identifier>(tokenizer.last_token)) {
     boundary.function_name = std::get<Identifier>(tokenizer.last_token);
-    tokenizer.tokenize();
+    if (not tokenizer.tokenize())
+      return 0;
   }
-  tokenizer.assert_punct('(');
+  if (not tokenizer.assert_punct('('))
+    return 0;
   while (1) {
-    tokenizer.tokenize();
+    if (not tokenizer.tokenize())
+      return 0;
     if (tokenizer.last_token == Token{U')'})
       break;
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
-      throw MissingFormalParameter{};
+    if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
+      std::breakpoint();
+      error_descriptor.emplace<MissingFormalParameter>();
+      return 0;
+    }
     Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
     boundary.local_layout.try_emplace(parameter);
     boundary.arguments.push_back(parameter);
-    tokenizer.tokenize();
+    if (not tokenizer.tokenize())
+      return 0;
     if (tokenizer.last_token == Token{U')'})
       break;
-    tokenizer.assert_punct(',');
+    if (not tokenizer.assert_punct(','))
+      return 0;
   }
-  tokenizer.tokenize();
-  tokenizer.assert_punct('{');
+  if (not tokenizer.tokenize())
+    return 0;
+  if (not tokenizer.assert_punct('{'))
+    return 0;
   while (1) {
-    tokenizer.tokenize();
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
-      throw MissingPunctuation{'}'};
+    if (not tokenizer.tokenize())
+      return 0;
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token)) {
+      std::breakpoint();
+      error_descriptor.emplace<MissingPunctuation>('}');
+      return 0;
+    }
     char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
     if (alter_ptr && *alter_ptr == '}')
       break;
     parse_statement();
   }
+  return 1;
 }
 
-template <typename T> void Parser<T>::parse_statement() {
+template <typename T> bool Parser<T>::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(tokenizer.last_token))
     keyword = std::get<Keyword>(tokenizer.last_token);
   switch (keyword) {
   case Keyword::K_FUNCTION:
     parse_function_stmt();
-    return;
+    return 1;
   case Keyword::K_LET:
     parse_variable_decl();
-    return;
+    return 1;
   case Keyword::K_RETURN: {
-    tokenizer.tokenize();
+    if (not tokenizer.tokenize())
+      return 0;
     ReturnStatement statement{parse_expression()};
     boundary.program->emplace_back(std::move(statement));
-    tokenizer.assert_punct(';');
-    return;
+    if (not tokenizer.assert_punct(';'))
+      return 0;
+    return 1;
   }
   default: {
     ExpressionStatement statement{parse_expression()};
     boundary.program->emplace_back(std::move(statement));
-    tokenizer.assert_punct(';');
-    return;
+    if (not tokenizer.assert_punct(';'))
+      return 0;
+    return 1;
   }
   }
 }
