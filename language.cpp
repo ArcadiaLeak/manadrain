@@ -24,86 +24,6 @@
 #include "language.hpp"
 
 namespace Manadrain {
-class Error {
-public:
-  Error(const char *m) : message{m} {}
-  Error() : message{"unspecified error!"} {}
-  const char *what() noexcept { return message; }
-
-private:
-  const char *message;
-};
-
-class UnexpectedStringEnd final : public Error {
-public:
-  UnexpectedStringEnd() : Error{"unexpected string end!"} {}
-};
-class UnexpectedToken final : public Error {
-public:
-  UnexpectedToken() : Error{"unexpected token!"} {}
-};
-class MissingPunctuation final : public Error {
-public:
-  MissingPunctuation(char32_t ch)
-      : Error{"missing punctuation!"}, must_be{ch} {}
-  char32_t must_be;
-};
-class MissingFormalParameter final : public Error {
-public:
-  MissingFormalParameter() : Error{"missing formal parameter!"} {}
-};
-class MissingFunctionName final : public Error {
-public:
-  MissingFunctionName() : Error{"missing function_name!"} {}
-};
-class DuplicateDeclaration final : public Error {
-public:
-  DuplicateDeclaration() : Error{"duplicate declaration!"} {}
-};
-class MissingPropertyName final : public Error {
-public:
-  MissingPropertyName() : Error{"missing property name!"} {}
-};
-class InvalidPropertyName final : public Error {
-public:
-  InvalidPropertyName() : Error{"invalid property name!"} {}
-};
-class InvalidPropertyAccess final : public Error {
-public:
-  InvalidPropertyAccess() : Error{"invalid property access!"} {}
-};
-class MissingVariableName final : public Error {
-public:
-  MissingVariableName() : Error{"missing variable name!"} {}
-};
-class InvalidMethodAccess final : public Error {
-public:
-  InvalidMethodAccess() : Error{"invalid method access!"} {}
-};
-class InvalidVariableAccess final : public Error {
-public:
-  InvalidVariableAccess() : Error{"invalid variable access!"} {}
-};
-class InvalidReturnStatement final : public Error {
-public:
-  InvalidReturnStatement() : Error{"invalid return statement!"} {}
-};
-class InvalidAssignment final : public Error {
-public:
-  InvalidAssignment() : Error{"invalid assignment!"} {}
-};
-class UnresolvableCircularity final : public Error {
-public:
-  UnresolvableCircularity() : Error{"unresolvable circularity!"} {}
-};
-
-using VariantError = std::variant<
-    Error, UnexpectedStringEnd, UnexpectedToken, MissingPunctuation,
-    MissingFormalParameter, MissingFunctionName, DuplicateDeclaration,
-    MissingPropertyName, InvalidPropertyName, InvalidPropertyAccess,
-    MissingVariableName, InvalidMethodAccess, InvalidVariableAccess,
-    InvalidReturnStatement, InvalidAssignment, UnresolvableCircularity>;
-
 static thread_local VariantError error_descriptor{};
 
 enum class Keyword {
@@ -171,6 +91,7 @@ private:
   friend class Language;
   template <typename T> friend class Parser;
   friend class FunctionParser;
+  friend class ModuleParser;
 
   std::flat_map<std::string, Identifier> atom_atlas;
   std::set<VariantString> *string_atlas;
@@ -347,6 +268,7 @@ public:
 class ModuleParser final : public Parser<ModuleDefinition> {
 public:
   ModuleParser(ModuleDefinition &b, Tokenizer &t) : Parser{b, t} {}
+  std::optional<std::monostate> parse_module();
 };
 
 class Expression {
@@ -823,6 +745,17 @@ body_statement: {
     return std::nullopt;
   goto body_statement;
 }
+}
+
+std::optional<std::monostate> ModuleParser::parse_module() {
+repeat:
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+    return std::monostate{};
+  if (not parse_statement())
+    return std::nullopt;
+  goto repeat;
 }
 
 template <typename T>
@@ -1396,16 +1329,7 @@ Language::~Language() = default;
 Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
-void Language::compile_and_execute() {
-  auto parse_module = [](Tokenizer &tokenizer, ModuleParser &parser) {
-    repeat:
-      tokenizer.tokenize();
-      if (std::holds_alternative<std::monostate>(tokenizer.last_token))
-        return;
-      parser.parse_statement();
-      goto repeat;
-  };
-
+bool Language::compile_and_execute() {
   std::set<LambdaType> lambda_types{};
   std::set<VariantString> string_atlas{};
   Heap heap{};
@@ -1421,7 +1345,12 @@ void Language::compile_and_execute() {
   ModuleParser parser{definition, tokenizer};
   parser.string_atlas = &string_atlas;
 
-  parse_module(tokenizer, parser);
-  definition.analyze();
+  if (not parser.parse_module()) {
+    variant_error = error_descriptor;
+    return 0;
+  } else {
+    definition.analyze();
+    return 1;
+  }
 }
 } // namespace Manadrain
