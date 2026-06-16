@@ -188,8 +188,8 @@ private:
   std::optional<Token> tokenize_numeric_literal(char32_t leading);
 
   Token last_token;
-  bool assert_punct(char32_t must_be);
-  bool tokenize();
+  std::optional<std::monostate> assert_punct(char32_t must_be);
+  std::optional<std::monostate> tokenize();
 };
 
 class ValueType {
@@ -312,21 +312,22 @@ public:
 
 template <typename T> class Parser {
 public:
-  void parse_function_stmt();
-  void parse_variable_decl();
-  void parse_statement();
+  std::optional<std::monostate> parse_function_stmt();
+  std::optional<std::monostate> parse_variable_decl();
+  std::optional<std::monostate> parse_statement();
 
-  AnyExpression parse_expression();
-  AnyExpression parse_primary_expression();
+  std::optional<AnyExpression> parse_expression();
+  std::optional<AnyExpression> parse_primary_expression();
 
-  AnyExpression parse_assign_expression();
-  AnyExpression parse_logical_disjunct();
-  AnyExpression parse_additive_expression();
-  AnyExpression parse_object_literal();
+  std::optional<AnyExpression> parse_assign_expression();
+  std::optional<AnyExpression> parse_logical_disjunct();
+  std::optional<AnyExpression> parse_additive_expression();
+  std::optional<AnyExpression> parse_object_literal();
 
-  void parse_member_expression(AnyExpression &expression);
-  void parse_function_call(AnyExpression &expression);
-  AnyExpression parse_postfix_expression();
+  std::optional<std::monostate>
+  parse_member_expression(AnyExpression &expression);
+  std::optional<std::monostate> parse_function_call(AnyExpression &expression);
+  std::optional<AnyExpression> parse_postfix_expression();
 
 protected:
   Parser(T &b, Tokenizer &t) : boundary{b}, tokenizer{t} {}
@@ -341,7 +342,7 @@ private:
 class FunctionParser final : public Parser<FunctionDefinition> {
 public:
   FunctionParser(FunctionDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  bool parse_function_decl();
+  std::optional<std::monostate> parse_function_decl();
 };
 class ModuleParser final : public Parser<ModuleDefinition> {
 public:
@@ -693,7 +694,7 @@ std::optional<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-bool Tokenizer::tokenize() {
+std::optional<std::monostate> Tokenizer::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -718,300 +719,412 @@ bool Tokenizer::tokenize() {
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
       last_token = Operator::LOGICAL_DISJUNCT;
-      return 1;
+      return std::monostate{};
     } else
       backward();
     if (std::ranges::binary_search(std::to_array({'"', '\'', '`'}), leading)) {
       std::optional token_opt{tokenize_string_literal(leading)};
-      if (token_opt)
+      if (token_opt) {
         last_token = *token_opt;
-      return token_opt.has_value();
+        return std::monostate{};
+      } else
+        return std::nullopt;
     }
     if (uc_is_property_xid_start(leading) || leading == '_') {
       std::optional token_opt{tokenize_identifier(leading)};
-      if (token_opt)
+      if (token_opt) {
         last_token = *token_opt;
-      return token_opt.has_value();
+        return std::monostate{};
+      } else
+        return std::nullopt;
     }
     static const std::array legal_punct{std::to_array<char32_t>(
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
-      last_token = leading;
-      return 1;
+      last_token.emplace<char32_t>(leading);
+      return std::monostate{};
     }
     if (std::isdigit(leading)) {
       std::optional token_opt{tokenize_numeric_literal(leading)};
-      if (token_opt)
+      if (token_opt) {
         last_token = *token_opt;
-      return token_opt.has_value();
+        return std::monostate{};
+      } else
+        return std::nullopt;
     }
-    throw UnexpectedToken{};
+    std::breakpoint();
+    error_descriptor.emplace<UnexpectedToken>();
+    return std::nullopt;
   }
   last_token.emplace<std::monostate>();
-  return 1;
+  return std::monostate{};
 }
 
-bool Tokenizer::assert_punct(char32_t must_be) {
+std::optional<std::monostate> Tokenizer::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
-    return 1;
+    return std::monostate{};
   else {
     std::breakpoint();
     error_descriptor.emplace<MissingPunctuation>(must_be);
-    return 0;
+    return std::nullopt;
   }
 }
 
-bool FunctionParser::parse_function_decl() {
+std::optional<std::monostate> FunctionParser::parse_function_decl() {
   if (not tokenizer.tokenize())
-    return 0;
-  if (std::holds_alternative<Identifier>(tokenizer.last_token)) {
-    boundary.function_name = std::get<Identifier>(tokenizer.last_token);
-    if (not tokenizer.tokenize())
-      return 0;
-  }
+    return std::nullopt;
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
+    goto after_name;
+  boundary.function_name = std::get<Identifier>(tokenizer.last_token);
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+after_name:
   if (not tokenizer.assert_punct('('))
-    return 0;
-  while (1) {
-    if (not tokenizer.tokenize())
-      return 0;
-    if (tokenizer.last_token == Token{U')'})
-      break;
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
-      std::breakpoint();
-      error_descriptor.emplace<MissingFormalParameter>();
-      return 0;
-    }
-    Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
-    boundary.local_layout.try_emplace(parameter);
-    boundary.arguments.push_back(parameter);
-    if (not tokenizer.tokenize())
-      return 0;
-    if (tokenizer.last_token == Token{U')'})
-      break;
-    if (not tokenizer.assert_punct(','))
-      return 0;
-  }
+    return std::nullopt;
+formal_parameter: {
   if (not tokenizer.tokenize())
-    return 0;
-  if (not tokenizer.assert_punct('{'))
-    return 0;
-  while (1) {
-    if (not tokenizer.tokenize())
-      return 0;
-    if (std::holds_alternative<std::monostate>(tokenizer.last_token)) {
-      std::breakpoint();
-      error_descriptor.emplace<MissingPunctuation>('}');
-      return 0;
-    }
-    char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
-    if (alter_ptr && *alter_ptr == '}')
-      break;
-    parse_statement();
+    return std::nullopt;
+  if (tokenizer.last_token == Token{U')'})
+    goto after_parameters;
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
+    std::breakpoint();
+    error_descriptor.emplace<MissingFormalParameter>();
+    return std::nullopt;
   }
-  return 1;
+  Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
+  boundary.local_layout.try_emplace(parameter);
+  boundary.arguments.push_back(parameter);
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (tokenizer.last_token == Token{U')'})
+    goto after_parameters;
+  if (not tokenizer.assert_punct(','))
+    return std::nullopt;
+  goto formal_parameter;
+}
+after_parameters:
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (not tokenizer.assert_punct('{'))
+    return std::nullopt;
+body_statement: {
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (std::holds_alternative<std::monostate>(tokenizer.last_token)) {
+    std::breakpoint();
+    error_descriptor.emplace<MissingPunctuation>('}');
+    return std::nullopt;
+  }
+  char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
+  if (alter_ptr && *alter_ptr == '}')
+    return std::monostate{};
+  if (not parse_statement())
+    return std::nullopt;
+  goto body_statement;
+}
 }
 
-template <typename T> bool Parser<T>::parse_statement() {
+template <typename T>
+std::optional<std::monostate> Parser<T>::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(tokenizer.last_token))
     keyword = std::get<Keyword>(tokenizer.last_token);
   switch (keyword) {
   case Keyword::K_FUNCTION:
-    parse_function_stmt();
-    return 1;
+    return parse_function_stmt();
   case Keyword::K_LET:
-    parse_variable_decl();
-    return 1;
-  case Keyword::K_RETURN: {
+    return parse_variable_decl();
+  case Keyword::K_RETURN:
     if (not tokenizer.tokenize())
-      return 0;
-    ReturnStatement statement{parse_expression()};
-    boundary.program->emplace_back(std::move(statement));
-    if (not tokenizer.assert_punct(';'))
-      return 0;
-    return 1;
-  }
-  default: {
-    ExpressionStatement statement{parse_expression()};
-    boundary.program->emplace_back(std::move(statement));
-    if (not tokenizer.assert_punct(';'))
-      return 0;
-    return 1;
-  }
+      return std::nullopt;
+    if (auto stmt_opt = parse_expression(); not stmt_opt)
+      return std::nullopt;
+    else {
+      ReturnStatement statement{*stmt_opt};
+      boundary.program->emplace_back(std::move(statement));
+      return tokenizer.assert_punct(';');
+    }
+  default:
+    if (auto stmt_opt = parse_expression(); not stmt_opt)
+      return std::nullopt;
+    else {
+      ExpressionStatement statement{*stmt_opt};
+      boundary.program->emplace_back(std::move(statement));
+      return tokenizer.assert_punct(';');
+    }
   }
 }
 
-template <typename T> void Parser<T>::parse_function_stmt() {
+template <typename T>
+std::optional<std::monostate> Parser<T>::parse_function_stmt() {
   FunctionDefinition *definition{
       &boundary.heap->function_definition_list.emplace_back()};
   definition->parent_boundary = &boundary;
   definition->program = &boundary.heap->program_list.emplace_back();
   definition->heap = boundary.heap;
   FunctionParser function_parser{*definition, tokenizer};
-  function_parser.parse_function_decl();
-  if (not definition->function_name)
-    throw MissingFunctionName{};
+  if (not function_parser.parse_function_decl())
+    return std::nullopt;
+  if (not definition->function_name) {
+    std::breakpoint();
+    error_descriptor.emplace<MissingFunctionName>();
+    return std::nullopt;
+  }
   bool duplicate_exists =
       std::ranges::contains(boundary.inner_functions, definition->function_name,
                             [](const auto &el) { return el->function_name; });
-  if (duplicate_exists)
-    throw DuplicateDeclaration{};
-  boundary.inner_functions.push_back(definition);
+  if (duplicate_exists) {
+    std::breakpoint();
+    error_descriptor.emplace<DuplicateDeclaration>();
+    return std::nullopt;
+  } else {
+    boundary.inner_functions.push_back(definition);
+    return std::monostate{};
+  }
 }
 
-template <typename T> AnyExpression Parser<T>::parse_assign_expression() {
-  AnyExpression left_expression{parse_logical_disjunct()};
+template <typename T>
+std::optional<AnyExpression> Parser<T>::parse_assign_expression() {
+  std::optional left_expression{parse_logical_disjunct()};
+  if (not left_expression)
+    return std::nullopt;
   if (tokenizer.last_token != Token{U'='})
     return left_expression;
-  tokenizer.tokenize();
-  AssignExpression expression{std::move(left_expression),
-                              parse_assign_expression()};
-  return AnyExpression{expression};
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (auto expr_opt = parse_assign_expression(); not expr_opt)
+    return std::nullopt;
+  else {
+    AssignExpression expression{std::move(*left_expression),
+                                std::move(*expr_opt)};
+    return AnyExpression{std::move(expression)};
+  }
 }
 
-template <typename T> void Parser<T>::parse_variable_decl() {
-  tokenizer.tokenize();
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
-    throw MissingVariableName{};
+template <typename T>
+std::optional<std::monostate> Parser<T>::parse_variable_decl() {
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
+    std::breakpoint();
+    error_descriptor.emplace<MissingVariableName>();
+    return std::nullopt;
+  }
   Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
-  tokenizer.tokenize();
-  tokenizer.assert_punct('=');
-  tokenizer.tokenize();
-  InitializeVariable initialize_variable{parse_expression()};
-  initialize_variable.variable_name = variable_name;
-  boundary.program->emplace_back(std::move(initialize_variable));
-  tokenizer.assert_punct(';');
-  if (boundary.local_layout.contains(variable_name))
-    throw DuplicateDeclaration{};
-  boundary.local_layout.try_emplace(variable_name);
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (not tokenizer.assert_punct('='))
+    return std::nullopt;
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (auto expr_opt = parse_expression(); not expr_opt)
+    return std::nullopt;
+  else {
+    InitializeVariable initialize_variable{*expr_opt};
+    initialize_variable.variable_name = variable_name;
+    boundary.program->emplace_back(std::move(initialize_variable));
+  }
+  if (not tokenizer.assert_punct(';'))
+    return std::nullopt;
+  if (boundary.local_layout.contains(variable_name)) {
+    std::breakpoint();
+    error_descriptor.emplace<DuplicateDeclaration>();
+    return std::nullopt;
+  } else {
+    boundary.local_layout.try_emplace(variable_name);
+    return std::monostate{};
+  }
 }
 
-template <typename T> AnyExpression Parser<T>::parse_expression() {
+template <typename T>
+std::optional<AnyExpression> Parser<T>::parse_expression() {
   return parse_assign_expression();
 }
 
-template <typename T> AnyExpression Parser<T>::parse_logical_disjunct() {
-  AnyExpression left_expression{parse_additive_expression()};
+template <typename T>
+std::optional<AnyExpression> Parser<T>::parse_logical_disjunct() {
+  std::optional left_expression{parse_additive_expression()};
+  if (not left_expression)
+    return std::nullopt;
 right_expression: {
   if (tokenizer.last_token != Token{Operator::LOGICAL_DISJUNCT})
     return left_expression;
   Operator logical_op{std::get<Operator>(tokenizer.last_token)};
-  tokenizer.tokenize();
-  LogicalExpression expression{std::move(left_expression),
-                               parse_additive_expression()};
-  expression.op = logical_op;
-  left_expression.alt.emplace<LogicalExpression>(std::move(expression));
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (auto expr_opt = parse_additive_expression(); not expr_opt)
+    return std::nullopt;
+  else {
+    LogicalExpression expression{std::move(*left_expression),
+                                 std::move(*expr_opt)};
+    expression.op = logical_op;
+    left_expression->alt.template emplace<LogicalExpression>(
+        std::move(expression));
+  }
   goto right_expression;
 }
 }
 
-template <typename T> AnyExpression Parser<T>::parse_postfix_expression() {
-  AnyExpression postfix_expression{parse_primary_expression()};
-seek_postfix:
-  tokenizer.tokenize();
+template <typename T>
+std::optional<AnyExpression> Parser<T>::parse_postfix_expression() {
+  std::optional postfix_expression{parse_primary_expression()};
+postfix_iteration:
+  if (not tokenizer.tokenize())
+    return std::nullopt;
   if (not std::holds_alternative<char32_t>(tokenizer.last_token))
     return postfix_expression;
   switch (std::get<char32_t>(tokenizer.last_token)) {
   case '.':
-    parse_member_expression(postfix_expression);
-    goto seek_postfix;
+    if (not parse_member_expression(*postfix_expression))
+      return std::nullopt;
+    else
+      goto postfix_iteration;
   case '(':
-    parse_function_call(postfix_expression);
-    goto seek_postfix;
+    if (not parse_function_call(*postfix_expression))
+      return std::nullopt;
+    else
+      goto postfix_iteration;
   default:
     return postfix_expression;
   }
 }
 
 template <typename T>
-void Parser<T>::parse_function_call(AnyExpression &expression) {
+std::optional<std::monostate>
+Parser<T>::parse_function_call(AnyExpression &expression) {
   AnyExpression callee{std::move(expression)};
   AliasedFunctionCall &function_call{
       expression.alt.emplace<AliasedFunctionCall>(std::move(callee))};
   while (1) {
-    tokenizer.tokenize();
+    if (not tokenizer.tokenize())
+      return std::nullopt;
     if (tokenizer.last_token == Token{U')'})
-      return;
-    function_call.arguments.push_back(parse_expression());
+      return std::monostate{};
+    if (auto expr_opt = parse_expression(); not expr_opt)
+      return std::nullopt;
+    else
+      function_call.arguments.push_back(*expr_opt);
     if (tokenizer.last_token == Token{U')'})
-      return;
-    tokenizer.assert_punct(',');
+      return std::monostate{};
+    if (not tokenizer.assert_punct(','))
+      return std::nullopt;
   }
 }
 
 template <typename T>
-void Parser<T>::parse_member_expression(AnyExpression &expression) {
-  tokenizer.tokenize();
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token))
-    throw MissingPropertyName{};
-  Identifier field_name{std::get<Identifier>(tokenizer.last_token)};
-  AnyExpression member_object{std::move(expression)};
-  MemberExpression &member_expression{
-      expression.alt.emplace<MemberExpression>(std::move(member_object))};
-  member_expression.property = field_name;
+std::optional<std::monostate>
+Parser<T>::parse_member_expression(AnyExpression &expression) {
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
+    std::breakpoint();
+    error_descriptor.emplace<MissingPropertyName>();
+    return std::nullopt;
+  } else {
+    Identifier field_name{std::get<Identifier>(tokenizer.last_token)};
+    AnyExpression member_object{std::move(expression)};
+    MemberExpression &member_expression{
+        expression.alt.emplace<MemberExpression>(std::move(member_object))};
+    member_expression.property = field_name;
+    return std::monostate{};
+  }
 }
 
-template <typename T> AnyExpression Parser<T>::parse_additive_expression() {
-  AnyExpression expression{parse_postfix_expression()};
+template <typename T>
+std::optional<AnyExpression> Parser<T>::parse_additive_expression() {
+  std::optional expression{parse_postfix_expression()};
+  if (not expression)
+    return std::nullopt;
   if (tokenizer.last_token != Token{U'+'} &&
       tokenizer.last_token != Token{U'-'})
     return expression;
   char32_t binary_op{std::get<char32_t>(tokenizer.last_token)};
-  tokenizer.tokenize();
-  AnyExpression left_expression{std::move(expression)};
-  BinaryExpression &binary_expression{expression.alt.emplace<BinaryExpression>(
-      std::move(left_expression), parse_postfix_expression())};
-  binary_expression.op = binary_op;
-  return expression;
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (auto expr_opt = parse_postfix_expression(); not expr_opt)
+    return std::nullopt;
+  else {
+    BinaryExpression binary_expression{std::move(*expression),
+                                       std::move(*expr_opt)};
+    binary_expression.op = binary_op;
+    return AnyExpression{std::move(binary_expression)};
+  }
 }
 
-template <typename T> AnyExpression Parser<T>::parse_object_literal() {
+template <typename T>
+std::optional<AnyExpression> Parser<T>::parse_object_literal() {
   ObjectExpression object_expression{};
-  tokenizer.tokenize();
-  while (tokenizer.last_token != Token{U'}'}) {
-    if (not std::holds_alternative<Identifier>(tokenizer.last_token))
-      throw InvalidPropertyName{};
-    Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
-    object_expression.object_shape.properties.try_emplace(property_name);
-    tokenizer.tokenize();
-    object_expression.keys.push_back(property_name);
-    std::optional<AnyExpression> initializer{};
-    if (tokenizer.last_token == Token{U':'}) {
-      tokenizer.tokenize();
-      initializer = parse_expression();
-    }
-    object_expression.values.push_back(std::move(initializer));
-    if (tokenizer.last_token != Token{U','})
-      break;
-    tokenizer.tokenize();
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+object_property: {
+  if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
+    std::breakpoint();
+    error_descriptor.emplace<InvalidPropertyName>();
+    return std::nullopt;
   }
+  Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
+  object_expression.object_shape.properties.try_emplace(property_name);
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  object_expression.keys.push_back(property_name);
+  std::optional<AnyExpression> initializer{};
+  if (tokenizer.last_token != Token{U':'})
+    goto after_initializer;
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (auto expr_opt = parse_expression(); not expr_opt)
+    return std::nullopt;
+  else
+    initializer.emplace(*expr_opt);
+after_initializer:
+  object_expression.values.push_back(std::move(initializer));
+  if (tokenizer.last_token != Token{U','})
+    goto after_properties;
+  if (not tokenizer.tokenize())
+    return std::nullopt;
+  if (tokenizer.last_token != Token{U'}'})
+    goto object_property;
+}
+after_properties:
   tokenizer.assert_punct('}');
   return AnyExpression{std::move(object_expression)};
 }
 
-template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
+template <typename T>
+std::optional<AnyExpression> Parser<T>::parse_primary_expression() {
   struct TokenVisitor {
     Parser<T> &parser;
-    AnyExpression operator()(std::monostate) { throw UnexpectedToken{}; }
-    AnyExpression operator()(char32_t punct) {
+    std::optional<AnyExpression> operator()(std::monostate) {
+      std::breakpoint();
+      error_descriptor.emplace<UnexpectedToken>();
+      return std::nullopt;
+    }
+    std::optional<AnyExpression> operator()(char32_t punct) {
       if (punct == '{')
         return parser.parse_object_literal();
-      else
-        throw UnexpectedToken{};
+      else {
+        std::breakpoint();
+        error_descriptor.emplace<UnexpectedToken>();
+        return std::nullopt;
+      }
     }
-    AnyExpression operator()(std::int64_t number) {
+    std::optional<AnyExpression> operator()(std::int64_t number) {
       NumericLiteral num_literal{};
       num_literal.val = static_cast<double>(number);
       return AnyExpression{num_literal};
     }
-    AnyExpression operator()(double number) {
+    std::optional<AnyExpression> operator()(double number) {
       NumericLiteral numeric_literal{};
       numeric_literal.val = number;
       return AnyExpression{numeric_literal};
     }
-    AnyExpression operator()(Operator op) { throw UnexpectedToken{}; }
-    AnyExpression operator()(Keyword keyword) {
+    std::optional<AnyExpression> operator()(Operator op) {
+      std::breakpoint();
+      error_descriptor.emplace<UnexpectedToken>();
+      return std::nullopt;
+    }
+    std::optional<AnyExpression> operator()(Keyword keyword) {
       switch (keyword) {
       case Keyword::K_FUNCTION: {
         LambdaExpression lambda_expression{};
@@ -1023,20 +1136,22 @@ template <typename T> AnyExpression Parser<T>::parse_primary_expression() {
         return AnyExpression{lambda_expression};
       }
       default:
-        throw UnexpectedToken{};
+        std::breakpoint();
+        error_descriptor.emplace<UnexpectedToken>();
+        return std::nullopt;
       }
     }
-    AnyExpression operator()(Identifier identifier) {
+    std::optional<AnyExpression> operator()(Identifier identifier) {
       VariableAccessor variable_accessor{};
       variable_accessor.identifier = identifier;
       return AnyExpression{variable_accessor};
     }
-    AnyExpression operator()(std::string_view ascii_view) {
+    std::optional<AnyExpression> operator()(std::string_view ascii_view) {
       AsciiLiteral ascii_literal{};
       ascii_literal.val_view = ascii_view;
       return AnyExpression{ascii_literal};
     }
-    AnyExpression operator()(std::u16string_view unicode_view) {
+    std::optional<AnyExpression> operator()(std::u16string_view unicode_view) {
       UnicodeLiteral unicode_literal{};
       unicode_literal.val_view = unicode_view;
       return AnyExpression{unicode_literal};
