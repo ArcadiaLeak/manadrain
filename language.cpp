@@ -248,6 +248,8 @@ class ScopeAccessor;
 class LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
+  std::flat_map<Identifier, std::optional<VariantType>> local_layout;
+
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
   find_local(Identifier identifier) const = 0;
@@ -260,7 +262,6 @@ struct Heap {
 
 template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
-  std::flat_map<Identifier, std::optional<VariantType>> local_layout;
   std::vector<std::byte> bytecode;
 
   std::list<AnyStatement> *program;
@@ -346,6 +347,14 @@ public:
   std::vector<AnyExpression> arguments;
 };
 
+class DirectFunctionCall final : public Expression {
+public:
+  DirectFunctionCall() = default;
+  const FunctionDefinition *callee;
+  std::vector<Identifier> passed_identifiers;
+  std::vector<AnyExpression> passed_values;
+};
+
 class MemberExpression final : public Expression {
 public:
   MemberExpression(AnyExpression &&obj);
@@ -389,8 +398,9 @@ public:
   VariableAccessor() = default;
   Identifier identifier;
   std::optional<ScopeAccessor>
-  search_boundary_chain(const LexicalBoundary *boundary,
-                        std::size_t scope_offset = 0) const;
+  find_local_linkedly(const LexicalBoundary *boundary,
+                      std::size_t scope_offset = 0) const;
+  FunctionDefinition *find_function_linkedly(LexicalBoundary *boundary) const;
 };
 
 class ScopeAccessor final : public Expression {
@@ -439,10 +449,10 @@ public:
 
 struct AnyExpression {
   std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
-               AliasedFunctionCall, MemberExpression, AssignExpression,
-               LogicalExpression, BinaryExpression, ObjectExpression,
-               VariableAccessor, ScopeAccessor, IntrinsicAccessor,
-               LambdaExpression, ConsoleCall>
+               AliasedFunctionCall, DirectFunctionCall, MemberExpression,
+               AssignExpression, LogicalExpression, BinaryExpression,
+               ObjectExpression, VariableAccessor, ScopeAccessor,
+               IntrinsicAccessor, LambdaExpression, ConsoleCall>
       alt;
 };
 
@@ -466,6 +476,7 @@ template <typename T> struct ExpressionVisitor {
   void operator()(const AsciiLiteral &expression) {}
   void operator()(const UnicodeLiteral &expression) {}
   void operator()(const AliasedFunctionCall &expression) {}
+  void operator()(const DirectFunctionCall &expression) {}
   void operator()(const MemberExpression &expression) {}
   void operator()(const AssignExpression &expression) {}
   void operator()(const LogicalExpression &expression) {}
@@ -485,8 +496,15 @@ protected:
 
 class InitializeVariable final : public Statement {
 public:
-  InitializeVariable(AnyExpression v) : rvalue{v} {};
+  InitializeVariable(AnyExpression v) : rvalue{std::move(v)} {};
   Identifier variable_name;
+  std::indirect<AnyExpression> rvalue;
+};
+
+class InitializeScope final : public Statement {
+public:
+  InitializeScope(AnyExpression v) : rvalue{std::move(v)} {};
+  std::size_t local_offset;
   std::indirect<AnyExpression> rvalue;
 };
 
@@ -503,11 +521,14 @@ public:
 };
 
 struct AnyStatement {
-  std::variant<InitializeVariable, ReturnStatement, ExpressionStatement> alt;
+  std::variant<InitializeVariable, InitializeScope, ReturnStatement,
+               ExpressionStatement>
+      alt;
 };
 
 template <typename T> struct StatementVisitor {
   void operator()(const InitializeVariable &statement) {}
+  void operator()(const InitializeScope &statement) {}
   void operator()(const ReturnStatement &statement) {}
   void operator()(const ExpressionStatement &statement) {}
 };
@@ -1010,7 +1031,7 @@ struct CalleeAnalyzer final : ExpressionVisitor<CalleeAnalyzer> {
   using ExpressionVisitor<CalleeAnalyzer>::operator();
 
   void operator()(const MemberExpression &expression);
-  void operator()(const MemberExpression &expression);
+  void operator()(const VariableAccessor &expression);
 
   CalleeAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1024,8 +1045,9 @@ struct RvalueAnalyzer final : ExpressionVisitor<RvalueAnalyzer> {
   void operator()(const AsciiLiteral &ascii_literal) {
     result.emplace(ascii_literal);
   }
-  void operator()(const AliasedFunctionCall &function_call);
-  void operator()(const VariableAccessor &variable_accessor);
+  void operator()(const AliasedFunctionCall &expression);
+  void operator()(const VariableAccessor &expression);
+  void operator()(const BinaryExpression &expression);
 
   RvalueAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1044,19 +1066,17 @@ struct MethodAnalyzer final : ExpressionVisitor<MethodAnalyzer> {
   std::span<const AnyExpression> arguments;
 };
 
-void MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
-  if (intrinsic_accessor.object_type != IntrinsicObject::O_CONSOLE)
-    return;
-  if (identifier.offset != OFFSET_log)
-    return;
-  ConsoleCall console_call{};
-  for (const AnyExpression &argument : arguments) {
-    RvalueAnalyzer visitor{boundary};
-    argument.alt.visit(visitor);
-    console_call.arguments.push_back(std::move(visitor.result.value()));
+struct DatatypeAnalyzer final : ExpressionVisitor<DatatypeAnalyzer> {
+  using ExpressionVisitor<DatatypeAnalyzer>::operator();
+
+  void operator()(const AsciiLiteral &ascii_literal) {
+    result.emplace(StringType{});
   }
-  result.emplace(std::move(console_call));
-}
+
+  DatatypeAnalyzer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+  std::optional<VariantType> result;
+};
 
 void RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   CalleeAnalyzer visitor{boundary};
@@ -1064,34 +1084,9 @@ void RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   function_call.callee->alt.visit(visitor);
 }
 
-void CalleeAnalyzer::operator()(const MemberExpression &expression) {
-  RvalueAnalyzer object_visitor{boundary};
-  expression.object->alt.visit(object_visitor);
-  MethodAnalyzer method_visitor{boundary};
-  method_visitor.identifier = expression.property;
-  method_visitor.arguments = arguments;
-  object_visitor.result.value().alt.visit(method_visitor);
-  if (not method_visitor.result)
-    throw InvalidMethodAccess{};
-  result.emplace(*method_visitor.result);
-}
-
-std::optional<ScopeAccessor>
-VariableAccessor::search_boundary_chain(const LexicalBoundary *boundary,
-                                        std::size_t scope_offset) const {
-  if (not boundary)
-    return std::nullopt;
-  std::optional<ScopeAccessor> scope_accessor{boundary->find_local(identifier)};
-  if (scope_accessor) {
-    std::get<0>(scope_accessor->location) = scope_offset;
-    return scope_accessor;
-  }
-  return search_boundary_chain(boundary->parent_boundary, scope_offset + 1);
-}
-
 void RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   std::optional<ScopeAccessor> scope_accessor{
-      variable_accessor.search_boundary_chain(&boundary)};
+      variable_accessor.find_local_linkedly(&boundary)};
   if (scope_accessor) {
     result.emplace(*scope_accessor);
     return;
@@ -1108,23 +1103,98 @@ void RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   }
 }
 
+void RvalueAnalyzer::operator()(const BinaryExpression &expression) {
+  assert(0);
+}
+
+void MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
+  if (intrinsic_accessor.object_type != IntrinsicObject::O_CONSOLE)
+    return;
+  if (identifier.offset != OFFSET_log)
+    return;
+  ConsoleCall console_call{};
+  for (const AnyExpression &argument : arguments) {
+    RvalueAnalyzer visitor{boundary};
+    argument.alt.visit(visitor);
+    console_call.arguments.push_back(std::move(visitor.result.value()));
+  }
+  result.emplace(std::move(console_call));
+}
+
+void CalleeAnalyzer::operator()(const MemberExpression &expression) {
+  RvalueAnalyzer object_visitor{boundary};
+  expression.object->alt.visit(object_visitor);
+  MethodAnalyzer method_visitor{boundary};
+  method_visitor.identifier = expression.property;
+  method_visitor.arguments = arguments;
+  object_visitor.result.value().alt.visit(method_visitor);
+  if (not method_visitor.result)
+    throw InvalidMethodAccess{};
+  result.emplace(*method_visitor.result);
+}
+
+void CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
+  FunctionDefinition *definition{
+      variable_accessor.find_function_linkedly(&boundary)};
+  if (not definition)
+    throw InvalidVariableAccess{};
+  definition->analyze();
+  DirectFunctionCall direct_call{};
+  direct_call.callee = definition;
+  result.emplace(std::move(direct_call));
+}
+
+FunctionDefinition *
+VariableAccessor::find_function_linkedly(LexicalBoundary *boundary) const {
+  if (not boundary)
+    return nullptr;
+  FunctionDefinition *definition{boundary->find_function(identifier)};
+  return definition ? definition
+                    : find_function_linkedly(boundary->parent_boundary);
+}
+
+std::optional<ScopeAccessor>
+VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
+                                      std::size_t scope_offset) const {
+  if (not boundary)
+    return std::nullopt;
+  std::optional<ScopeAccessor> scope_accessor{boundary->find_local(identifier)};
+  if (scope_accessor) {
+    std::get<0>(scope_accessor->location) = scope_offset;
+    return scope_accessor;
+  }
+  return find_local_linkedly(boundary->parent_boundary, scope_offset + 1);
+}
+
 struct StatementAnalyzer final : StatementVisitor<StatementAnalyzer> {
   using StatementVisitor<StatementAnalyzer>::operator();
 
-  void operator()(const ExpressionStatement &statement) {
-    RvalueAnalyzer visitor{boundary};
-    statement.argument->alt.visit(visitor);
-  }
-
-  void operator()(const InitializeVariable &statement) {
-    RvalueAnalyzer visitor{boundary};
-    statement.rvalue->alt.visit(visitor);
-  }
+  void operator()(const ExpressionStatement &statement);
+  void operator()(const InitializeVariable &statement);
 
   StatementAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
   std::optional<AnyStatement> result;
 };
+
+void StatementAnalyzer::operator()(const ExpressionStatement &statement) {
+  RvalueAnalyzer visitor{boundary};
+  statement.argument->alt.visit(visitor);
+}
+
+void StatementAnalyzer::operator()(const InitializeVariable &statement) {
+  RvalueAnalyzer rvalue_visitor{boundary};
+  statement.rvalue->alt.visit(rvalue_visitor);
+  DatatypeAnalyzer datatype_visitor{boundary};
+  InitializeScope initialize_scope{std::move(rvalue_visitor.result.value())};
+  initialize_scope.rvalue->alt.visit(datatype_visitor);
+  boundary.local_layout[statement.variable_name].emplace(
+      datatype_visitor.result.value());
+  auto variable_it = boundary.local_layout.find(statement.variable_name);
+  initialize_scope.local_offset =
+      std::distance(boundary.local_layout.begin(), variable_it);
+  result.emplace(std::move(initialize_scope));
+}
 
 template <typename T> void AbstractBoundary<T>::analyze_statements() {
   for (AnyStatement &any_statement : *program) {
