@@ -179,10 +179,15 @@ struct AnyStatement;
 class FunctionDefinition;
 class ScopeAccessor;
 
+struct LayoutEntry {
+  std::optional<VariantType> variant_type;
+  std::size_t offset;
+};
+
 class LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
-  std::flat_map<Identifier, std::optional<VariantType>> local_layout;
+  std::flat_map<Identifier, LayoutEntry> local_layout;
 
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
@@ -1157,8 +1162,8 @@ AbstractBoundary<T>::find_local(Identifier identifier) const {
     return std::nullopt;
   std::size_t local_offset =
       std::distance(local_layout.begin(), local_layout.find(identifier));
-  assert(local_layout.values()[local_offset].has_value());
-  ScopeAccessor accessor{*local_layout.values()[local_offset]};
+  assert(local_layout.values()[local_offset].variant_type.has_value());
+  ScopeAccessor accessor{*local_layout.values()[local_offset].variant_type};
   std::get<1>(accessor.location) = local_offset;
   return accessor;
 }
@@ -1359,7 +1364,8 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
       initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
   if (not datatype_analyzed)
     return std::nullopt;
-  boundary.local_layout[statement.variable_name].emplace(*datatype_analyzed);
+  boundary.local_layout[statement.variable_name].variant_type.emplace(
+      *datatype_analyzed);
   auto variable_it = boundary.local_layout.find(statement.variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
@@ -1380,7 +1386,7 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_statements() {
 
 std::optional<std::monostate> FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
-    local_layout.find(argument)->second.emplace(DynamicType{});
+    local_layout.find(argument)->second.variant_type.emplace(DynamicType{});
   return std::monostate{};
 }
 
