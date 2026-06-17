@@ -409,52 +409,67 @@ BinaryExpression::BinaryExpression(AnyExpression &&l, AnyExpression &&r)
 
 template <typename T> struct ExpressionVisitor {
   std::optional<std::monostate> operator()(const NumericLiteral &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const AsciiLiteral &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const UnicodeLiteral &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate>
   operator()(const AliasedFunctionCall &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate>
   operator()(const DirectFunctionCall &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const MemberExpression &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const AssignExpression &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate>
   operator()(const LogicalExpression &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const BinaryExpression &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const ObjectExpression &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const VariableAccessor &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const ScopeAccessor &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate>
   operator()(const IntrinsicAccessor &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const LambdaExpression &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const ConsoleCall &expression) {
+    std::breakpoint();
     return std::nullopt;
   }
 };
@@ -499,16 +514,20 @@ struct AnyStatement {
 template <typename T> struct StatementVisitor {
   std::optional<std::monostate>
   operator()(const InitializeVariable &statement) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const InitializeScope &statement) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate> operator()(const ReturnStatement &statement) {
+    std::breakpoint();
     return std::nullopt;
   }
   std::optional<std::monostate>
   operator()(const ExpressionStatement &statement) {
+    std::breakpoint();
     return std::nullopt;
   }
 };
@@ -1191,7 +1210,6 @@ struct RvalueAnalyzer final : ExpressionVisitor<RvalueAnalyzer> {
   std::optional<std::monostate>
   operator()(const AliasedFunctionCall &expression);
   std::optional<std::monostate> operator()(const VariableAccessor &expression);
-  std::optional<std::monostate> operator()(const BinaryExpression &expression);
 
   RvalueAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1255,11 +1273,6 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
 }
 
 std::optional<std::monostate>
-RvalueAnalyzer::operator()(const BinaryExpression &expression) {
-  assert(0);
-}
-
-std::optional<std::monostate>
 MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   if (intrinsic_accessor.object_type != IntrinsicObject::O_CONSOLE)
     return std::nullopt;
@@ -1268,8 +1281,8 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   ConsoleCall console_call{};
   for (const AnyExpression &argument : arguments) {
     RvalueAnalyzer visitor{boundary};
-    argument.alt.visit(visitor);
-    assert(visitor.result.has_value());
+    if (not argument.alt.visit(visitor))
+      return std::nullopt;
     console_call.arguments.push_back(std::move(*visitor.result));
   }
   result.emplace(std::move(console_call));
@@ -1279,11 +1292,11 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
 std::optional<std::monostate>
 CalleeAnalyzer::operator()(const MemberExpression &expression) {
   RvalueAnalyzer object_visitor{boundary};
-  expression.object->alt.visit(object_visitor);
+  if (not expression.object->alt.visit(object_visitor))
+    return std::nullopt;
   MethodAnalyzer method_visitor{boundary};
   method_visitor.identifier = expression.property;
   method_visitor.arguments = arguments;
-  assert(object_visitor.result.has_value());
   object_visitor.result->alt.visit(method_visitor);
   if (not method_visitor.result) {
     std::breakpoint();
@@ -1356,12 +1369,12 @@ StatementAnalyzer::operator()(const ExpressionStatement &statement) {
 std::optional<std::monostate>
 StatementAnalyzer::operator()(const InitializeVariable &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
-  statement.rvalue->alt.visit(rvalue_visitor);
-  assert(rvalue_visitor.result.has_value());
+  if (not statement.rvalue->alt.visit(rvalue_visitor))
+    return std::nullopt;
   DatatypeAnalyzer datatype_visitor{boundary};
   InitializeScope initialize_scope{std::move(*rvalue_visitor.result)};
-  initialize_scope.rvalue->alt.visit(datatype_visitor);
-  assert(datatype_visitor.result.has_value());
+  if (not initialize_scope.rvalue->alt.visit(datatype_visitor))
+    return std::nullopt;
   boundary.local_layout[statement.variable_name].emplace(
       *datatype_visitor.result);
   auto variable_it = boundary.local_layout.find(statement.variable_name);
@@ -1375,8 +1388,8 @@ template <typename T>
 std::optional<std::monostate> AbstractBoundary<T>::analyze_statements() {
   for (AnyStatement &any_statement : *program) {
     StatementAnalyzer visitor{*this};
-    any_statement.alt.visit(visitor);
-    assert(visitor.result.has_value());
+    if (not any_statement.alt.visit(visitor))
+      return std::nullopt;
     any_statement = std::move(*visitor.result);
   }
   return std::monostate{};
@@ -1394,8 +1407,10 @@ std::optional<std::monostate> FunctionDefinition::analyze() {
     analyzer_mark = AnalyzerMark::INITIATED;
     if (not analyze_formal_parameters())
       return std::nullopt;
-    analyze_statements();
-    analyze_inner_functions();
+    else if (not analyze_statements())
+      return std::nullopt;
+    else if (not analyze_inner_functions())
+      return std::nullopt;
     analyzer_mark = AnalyzerMark::COMPLETE;
     return std::monostate{};
   case AnalyzerMark::INITIATED:
@@ -1409,8 +1424,10 @@ std::optional<std::monostate> FunctionDefinition::analyze() {
 }
 
 std::optional<std::monostate> ModuleDefinition::analyze() {
-  analyze_statements();
-  analyze_inner_functions();
+  if (not analyze_statements())
+    return std::nullopt;
+  else if (not analyze_inner_functions())
+    return std::nullopt;
   return std::monostate{};
 }
 
