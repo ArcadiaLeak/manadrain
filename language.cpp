@@ -231,6 +231,8 @@ public:
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
   find_local(Identifier identifier) const = 0;
+  virtual std::optional<std::monostate>
+  put_return_type(VariantType variant_type) = 0;
 };
 
 struct Heap {
@@ -267,12 +269,25 @@ public:
   AnalyzerMark analyzer_mark;
   std::optional<std::monostate> analyze();
 
+  std::optional<std::monostate>
+  put_return_type(VariantType variant_type) override {
+    return_type.emplace(variant_type);
+    return std::monostate{};
+  }
+
 private:
   std::optional<std::monostate> analyze_formal_parameters();
 };
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
   std::optional<std::monostate> analyze();
+
+  std::optional<std::monostate>
+  put_return_type(VariantType variant_type) override {
+    std::breakpoint();
+    error_descriptor.emplace<InvalidReturnStatement>();
+    return std::nullopt;
+  }
 };
 
 template <typename T> class Parser {
@@ -1299,11 +1314,19 @@ struct MethodAnalyzer final : ExpressionVisitor<AnyExpression> {
 struct DatatypeAnalyzer final : ExpressionVisitor<VariantType> {
   using ExpressionVisitor<VariantType>::operator();
 
-  std::optional<VariantType> operator()(const AsciiLiteral &ascii_literal) {
+  std::optional<VariantType> operator()(const AsciiLiteral &) {
     return VariantType{StringType{}};
   }
   std::optional<VariantType> operator()(const ScopeAccessor &accessor) {
     return accessor.local_type;
+  }
+  std::optional<VariantType> operator()(const BinaryExpression &) {
+    return VariantType{NumberType{}};
+  }
+  std::optional<VariantType> operator()(const DirectFunctionCall &direct_call) {
+    assert(direct_call.callee != nullptr);
+    assert(direct_call.callee->return_type.has_value());
+    return direct_call.callee->return_type;
   }
 
   DatatypeAnalyzer(LexicalBoundary &b) : boundary{b} {}
@@ -1312,10 +1335,9 @@ struct DatatypeAnalyzer final : ExpressionVisitor<VariantType> {
 
 std::optional<AnyExpression>
 RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
-  CalleeAnalyzer visitor{boundary};
-  visitor.arguments = function_call.arguments;
-  function_call.callee->alt.visit(visitor);
-  return std::nullopt;
+  CalleeAnalyzer callee_visitor{boundary};
+  callee_visitor.arguments = function_call.arguments;
+  return function_call.callee->alt.visit(callee_visitor);
 }
 
 std::optional<AnyExpression>
@@ -1339,22 +1361,26 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
 
 std::optional<AnyExpression>
 RvalueAnalyzer::operator()(const BinaryExpression &expression) {
-  RvalueAnalyzer rvalue_visitor{boundary};
-  std::optional left_analyzed{expression.left->alt.visit(rvalue_visitor)};
-  std::optional right_analyzed{expression.right->alt.visit(rvalue_visitor)};
-  return std::nullopt;
+  std::optional left_analyzed{expression.left->alt.visit(*this)};
+  if (not left_analyzed)
+    return std::nullopt;
+  std::optional right_analyzed{expression.right->alt.visit(*this)};
+  if (not right_analyzed)
+    return std::nullopt;
+  BinaryExpression output_expression{std::move(*left_analyzed),
+                                     std::move(*right_analyzed)};
+  output_expression.op = expression.op;
+  return AnyExpression{std::move(output_expression)};
 }
 
 std::optional<AnyExpression>
 RvalueAnalyzer::operator()(const MemberExpression &expression) {
-  RvalueAnalyzer rvalue_visitor{boundary};
-  std::optional object_analyzed{expression.object->alt.visit(rvalue_visitor)};
+  std::optional object_analyzed{expression.object->alt.visit(*this)};
   if (not object_analyzed)
     return std::nullopt;
   DatatypeAnalyzer datatype_visitor{boundary};
   std::optional datatype_analyzed{object_analyzed->alt.visit(datatype_visitor)};
-  if (not datatype_analyzed)
-    return std::nullopt;
+  assert(datatype_analyzed.has_value());
   std::optional property_ok{datatype_analyzed->value_type().find_property(
       *object_analyzed, expression.property)};
   if (not property_ok) {
@@ -1409,7 +1435,7 @@ CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
     error_descriptor.emplace<InvalidVariableAccess>();
     return std::nullopt;
   }
-  if (definition->analyze())
+  if (not definition->analyze())
     return std::nullopt;
   DirectFunctionCall direct_call{};
   direct_call.callee = definition;
@@ -1438,26 +1464,27 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
   return find_local_linkedly(boundary->parent_boundary, scope_offset + 1);
 }
 
-struct StatementAnalyzer final : StatementVisitor<std::monostate> {
-  using StatementVisitor<std::monostate>::operator();
+struct StatementAnalyzer final : StatementVisitor<AnyStatement> {
+  using StatementVisitor<AnyStatement>::operator();
 
-  std::optional<std::monostate>
-  operator()(const ExpressionStatement &statement);
-  std::optional<std::monostate> operator()(const InitializeVariable &statement);
+  std::optional<AnyStatement> operator()(const ExpressionStatement &statement);
+  std::optional<AnyStatement> operator()(const InitializeVariable &statement);
+  std::optional<AnyStatement> operator()(const ReturnStatement &statement);
 
   StatementAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
-  std::optional<AnyStatement> result;
 };
 
-std::optional<std::monostate>
+std::optional<AnyStatement>
 StatementAnalyzer::operator()(const ExpressionStatement &statement) {
-  RvalueAnalyzer visitor{boundary};
-  statement.argument->alt.visit(visitor);
-  return std::monostate{};
+  std::optional argument_analyzed{
+      statement.argument->alt.visit(RvalueAnalyzer{boundary})};
+  if (not argument_analyzed)
+    return std::nullopt;
+  return AnyStatement{ExpressionStatement{std::move(*argument_analyzed)}};
 }
 
-std::optional<std::monostate>
+std::optional<AnyStatement>
 StatementAnalyzer::operator()(const InitializeVariable &statement) {
   std::optional<AnyExpression> rvalue_analyzed{
       statement.rvalue->alt.visit(RvalueAnalyzer{boundary})};
@@ -1466,24 +1493,38 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
   InitializeScope initialize_scope{std::move(*rvalue_analyzed)};
   std::optional<VariantType> datatype_analyzed{
       initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
-  if (not datatype_analyzed)
-    return std::nullopt;
+  assert(datatype_analyzed.has_value());
   boundary.local_layout[statement.variable_name].variant_type.emplace(
       *datatype_analyzed);
   auto variable_it = boundary.local_layout.find(statement.variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
-  result.emplace(std::move(initialize_scope));
-  return std::monostate{};
+  return AnyStatement{std::move(initialize_scope)};
+}
+
+std::optional<AnyStatement>
+StatementAnalyzer::operator()(const ReturnStatement &statement) {
+  RvalueAnalyzer rvalue_visitor{boundary};
+  std::optional argument_analyzed{
+      statement.argument->alt.visit(rvalue_visitor)};
+  if (not argument_analyzed)
+    return std::nullopt;
+  DatatypeAnalyzer datatype_visitor{boundary};
+  std::optional argument_type{argument_analyzed->alt.visit(datatype_visitor)};
+  assert(argument_type.has_value());
+  if (not boundary.put_return_type(*argument_type))
+    return std::nullopt;
+  return AnyStatement{ReturnStatement{std::move(*argument_analyzed)}};
 }
 
 template <typename T>
 std::optional<std::monostate> AbstractBoundary<T>::analyze_statements() {
   for (AnyStatement &any_statement : *program) {
     StatementAnalyzer visitor{*this};
-    if (not any_statement.alt.visit(visitor))
+    std::optional output_statement{any_statement.alt.visit(visitor)};
+    if (not output_statement)
       return std::nullopt;
-    any_statement = std::move(*visitor.result);
+    any_statement = std::move(*output_statement);
   }
   return std::monostate{};
 }
