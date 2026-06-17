@@ -113,6 +113,8 @@ private:
   std::optional<std::monostate> tokenize();
 };
 
+struct AnyExpression;
+
 class ValueType {
 protected:
   ValueType() = default;
@@ -120,12 +122,20 @@ protected:
 public:
   auto operator<=>(const ValueType &) const = default;
   virtual std::size_t type_size() const = 0;
+  virtual std::optional<std::monostate>
+  find_property(AnyExpression &inout_expression,
+                Identifier identifier) const = 0;
 };
 
 class NumberType final : public ValueType {
 public:
   auto operator<=>(const NumberType &) const = default;
   std::size_t type_size() const override { return sizeof(double); }
+  std::optional<std::monostate>
+  find_property(AnyExpression &inout_expression,
+                Identifier identifier) const override {
+    return std::nullopt;
+  }
 };
 
 using VariantStringView = std::variant<std::string_view, std::u16string_view>;
@@ -133,6 +143,9 @@ class StringType final : public ValueType {
 public:
   auto operator<=>(const StringType &) const = default;
   std::size_t type_size() const override { return sizeof(VariantStringView); }
+  std::optional<std::monostate>
+  find_property(AnyExpression &inout_expression,
+                Identifier identifier) const override;
 };
 
 struct DynamicValue;
@@ -140,6 +153,11 @@ class DynamicType final : public ValueType {
 public:
   auto operator<=>(const DynamicType &) const = default;
   std::size_t type_size() const override;
+  std::optional<std::monostate>
+  find_property(AnyExpression &inout_expression,
+                Identifier identifier) const override {
+    return std::nullopt;
+  }
 };
 
 class LambdaType;
@@ -154,6 +172,7 @@ public:
   VariantType(Alternative a) : alt{a} {};
 
   auto operator<=>(const VariantType &) const = default;
+  const ValueType &value_type() const;
 };
 
 struct DynamicValue {};
@@ -166,14 +185,36 @@ public:
   VariantType return_type;
   auto operator<=>(const LambdaType &) const = default;
   std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
+  std::optional<std::monostate>
+  find_property(AnyExpression &inout_expression,
+                Identifier identifier) const override {
+    return std::nullopt;
+  }
 };
+
+const ValueType &VariantType::value_type() const {
+  struct TypeVisitor {
+    const ValueType &operator()(const NumberType &inline_type) {
+      return inline_type;
+    }
+    const ValueType &operator()(const StringType &inline_type) {
+      return inline_type;
+    }
+    const ValueType &operator()(const DynamicType &inline_type) {
+      return inline_type;
+    }
+    const ValueType &operator()(const LambdaType *heap_type) {
+      return *heap_type;
+    }
+  };
+  return alt.visit(TypeVisitor{});
+}
 
 class ObjectShape {
 public:
   std::flat_map<Identifier, std::optional<VariantType>> properties;
 };
 
-struct AnyExpression;
 struct AnyStatement;
 
 class FunctionDefinition;
@@ -1185,6 +1226,12 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_inner_functions() {
   return std::monostate{};
 }
 
+std::optional<std::monostate>
+StringType::find_property(AnyExpression &inout_expression,
+                          Identifier identifier) const {
+  return std::nullopt;
+}
+
 struct RvalueAnalyzer;
 
 struct CalleeAnalyzer final : ExpressionVisitor<AnyExpression> {
@@ -1205,8 +1252,14 @@ struct RvalueAnalyzer final : ExpressionVisitor<AnyExpression> {
     return AnyExpression{ascii_literal};
   }
   std::optional<AnyExpression>
+  operator()(const NumericLiteral &numeric_literal) {
+    return AnyExpression{numeric_literal};
+  }
+  std::optional<AnyExpression>
   operator()(const AliasedFunctionCall &expression);
   std::optional<AnyExpression> operator()(const VariableAccessor &expression);
+  std::optional<AnyExpression> operator()(const BinaryExpression &expression);
+  std::optional<AnyExpression> operator()(const MemberExpression &expression);
 
   RvalueAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1229,6 +1282,9 @@ struct DatatypeAnalyzer final : ExpressionVisitor<VariantType> {
 
   std::optional<VariantType> operator()(const AsciiLiteral &ascii_literal) {
     return VariantType{StringType{}};
+  }
+  std::optional<VariantType> operator()(const ScopeAccessor &accessor) {
+    return accessor.local_type;
   }
 
   DatatypeAnalyzer(LexicalBoundary &b) : boundary{b} {}
@@ -1260,6 +1316,29 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
     error_descriptor.emplace<InvalidVariableAccess>();
     return std::nullopt;
   }
+}
+
+std::optional<AnyExpression>
+RvalueAnalyzer::operator()(const BinaryExpression &expression) {
+  RvalueAnalyzer rvalue_visitor{boundary};
+  std::optional left_analyzed{expression.left->alt.visit(rvalue_visitor)};
+  std::optional right_analyzed{expression.right->alt.visit(rvalue_visitor)};
+  return std::nullopt;
+}
+
+std::optional<AnyExpression>
+RvalueAnalyzer::operator()(const MemberExpression &expression) {
+  RvalueAnalyzer rvalue_visitor{boundary};
+  std::optional object_analyzed{expression.object->alt.visit(rvalue_visitor)};
+  if (not object_analyzed)
+    return std::nullopt;
+  DatatypeAnalyzer datatype_visitor{boundary};
+  std::optional datatype_analyzed{object_analyzed->alt.visit(datatype_visitor)};
+  if (not datatype_analyzed)
+    return std::nullopt;
+  std::optional property_ok{datatype_analyzed->value_type().find_property(
+      *object_analyzed, expression.property)};
+  return std::nullopt;
 }
 
 std::optional<AnyExpression>
