@@ -208,8 +208,8 @@ public:
 
 protected:
   AbstractBoundary() = default;
-  void analyze_statements();
-  void analyze_inner_functions();
+  std::optional<std::monostate> analyze_statements();
+  std::optional<std::monostate> analyze_inner_functions();
 };
 
 class FunctionDefinition final : public AbstractBoundary<FunctionDefinition> {
@@ -221,14 +221,14 @@ public:
 
   enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
   AnalyzerMark analyzer_mark;
-  void analyze();
+  std::optional<std::monostate> analyze();
 
 private:
-  void analyze_formal_parameters();
+  std::optional<std::monostate> analyze_formal_parameters();
 };
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
-  void analyze();
+  std::optional<std::monostate> analyze();
 };
 
 template <typename T> class Parser {
@@ -408,21 +408,55 @@ BinaryExpression::BinaryExpression(AnyExpression &&l, AnyExpression &&r)
     : left{std::move(l)}, right{std::move(r)} {};
 
 template <typename T> struct ExpressionVisitor {
-  void operator()(const NumericLiteral &expression) {}
-  void operator()(const AsciiLiteral &expression) {}
-  void operator()(const UnicodeLiteral &expression) {}
-  void operator()(const AliasedFunctionCall &expression) {}
-  void operator()(const DirectFunctionCall &expression) {}
-  void operator()(const MemberExpression &expression) {}
-  void operator()(const AssignExpression &expression) {}
-  void operator()(const LogicalExpression &expression) {}
-  void operator()(const BinaryExpression &expression) {}
-  void operator()(const ObjectExpression &expression) {}
-  void operator()(const VariableAccessor &expression) {}
-  void operator()(const ScopeAccessor &expression) {}
-  void operator()(const IntrinsicAccessor &expression) {}
-  void operator()(const LambdaExpression &expression) {}
-  void operator()(const ConsoleCall &expression) {}
+  std::optional<std::monostate> operator()(const NumericLiteral &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const AsciiLiteral &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const UnicodeLiteral &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate>
+  operator()(const AliasedFunctionCall &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate>
+  operator()(const DirectFunctionCall &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const MemberExpression &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const AssignExpression &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate>
+  operator()(const LogicalExpression &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const BinaryExpression &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const ObjectExpression &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const VariableAccessor &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const ScopeAccessor &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate>
+  operator()(const IntrinsicAccessor &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const LambdaExpression &expression) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const ConsoleCall &expression) {
+    return std::nullopt;
+  }
 };
 
 class Statement {
@@ -463,10 +497,20 @@ struct AnyStatement {
 };
 
 template <typename T> struct StatementVisitor {
-  void operator()(const InitializeVariable &statement) {}
-  void operator()(const InitializeScope &statement) {}
-  void operator()(const ReturnStatement &statement) {}
-  void operator()(const ExpressionStatement &statement) {}
+  std::optional<std::monostate>
+  operator()(const InitializeVariable &statement) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const InitializeScope &statement) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate> operator()(const ReturnStatement &statement) {
+    return std::nullopt;
+  }
+  std::optional<std::monostate>
+  operator()(const ExpressionStatement &statement) {
+    return std::nullopt;
+  }
 };
 
 class Machine {};
@@ -1100,7 +1144,8 @@ AbstractBoundary<T>::find_local(Identifier identifier) const {
     return std::nullopt;
   std::size_t local_offset =
       std::distance(local_layout.begin(), local_layout.find(identifier));
-  ScopeAccessor accessor{local_layout.values()[local_offset].value()};
+  assert(local_layout.values()[local_offset].has_value());
+  ScopeAccessor accessor{*local_layout.values()[local_offset]};
   std::get<1>(accessor.location) = local_offset;
   return accessor;
 }
@@ -1112,11 +1157,14 @@ FunctionDefinition *AbstractBoundary<T>::find_function(Identifier identifier) {
   return function_it == inner_functions.end() ? nullptr : *function_it;
 }
 
-template <typename T> void AbstractBoundary<T>::analyze_inner_functions() {
+template <typename T>
+std::optional<std::monostate> AbstractBoundary<T>::analyze_inner_functions() {
   for (FunctionDefinition *definition : inner_functions) {
     definition->parent_boundary = this;
-    definition->analyze();
+    if (not definition->analyze())
+      return std::nullopt;
   }
+  return std::monostate{};
 }
 
 struct RvalueAnalyzer;
@@ -1124,8 +1172,8 @@ struct RvalueAnalyzer;
 struct CalleeAnalyzer final : ExpressionVisitor<CalleeAnalyzer> {
   using ExpressionVisitor<CalleeAnalyzer>::operator();
 
-  void operator()(const MemberExpression &expression);
-  void operator()(const VariableAccessor &expression);
+  std::optional<std::monostate> operator()(const MemberExpression &expression);
+  std::optional<std::monostate> operator()(const VariableAccessor &expression);
 
   CalleeAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1136,12 +1184,14 @@ struct CalleeAnalyzer final : ExpressionVisitor<CalleeAnalyzer> {
 struct RvalueAnalyzer final : ExpressionVisitor<RvalueAnalyzer> {
   using ExpressionVisitor<RvalueAnalyzer>::operator();
 
-  void operator()(const AsciiLiteral &ascii_literal) {
+  std::optional<std::monostate> operator()(const AsciiLiteral &ascii_literal) {
     result.emplace(ascii_literal);
+    return std::monostate{};
   }
-  void operator()(const AliasedFunctionCall &expression);
-  void operator()(const VariableAccessor &expression);
-  void operator()(const BinaryExpression &expression);
+  std::optional<std::monostate>
+  operator()(const AliasedFunctionCall &expression);
+  std::optional<std::monostate> operator()(const VariableAccessor &expression);
+  std::optional<std::monostate> operator()(const BinaryExpression &expression);
 
   RvalueAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1151,7 +1201,8 @@ struct RvalueAnalyzer final : ExpressionVisitor<RvalueAnalyzer> {
 struct MethodAnalyzer final : ExpressionVisitor<MethodAnalyzer> {
   using ExpressionVisitor<MethodAnalyzer>::operator();
 
-  void operator()(const IntrinsicAccessor &intrinsic_accessor);
+  std::optional<std::monostate>
+  operator()(const IntrinsicAccessor &intrinsic_accessor);
 
   MethodAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1163,8 +1214,9 @@ struct MethodAnalyzer final : ExpressionVisitor<MethodAnalyzer> {
 struct DatatypeAnalyzer final : ExpressionVisitor<DatatypeAnalyzer> {
   using ExpressionVisitor<DatatypeAnalyzer>::operator();
 
-  void operator()(const AsciiLiteral &ascii_literal) {
+  std::optional<std::monostate> operator()(const AsciiLiteral &ascii_literal) {
     result.emplace(StringType{});
+    return std::monostate{};
   }
 
   DatatypeAnalyzer(LexicalBoundary &b) : boundary{b} {}
@@ -1172,70 +1224,92 @@ struct DatatypeAnalyzer final : ExpressionVisitor<DatatypeAnalyzer> {
   std::optional<VariantType> result;
 };
 
-void RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
+std::optional<std::monostate>
+RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   CalleeAnalyzer visitor{boundary};
   visitor.arguments = function_call.arguments;
   function_call.callee->alt.visit(visitor);
+  return std::monostate{};
 }
 
-void RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
+std::optional<std::monostate>
+RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   std::optional<ScopeAccessor> scope_accessor{
       variable_accessor.find_local_linkedly(&boundary)};
   if (scope_accessor) {
     result.emplace(*scope_accessor);
-    return;
+    return std::monostate{};
   }
   switch (variable_accessor.identifier.offset) {
   case OFFSET_console: {
     IntrinsicAccessor intrinsic_accessor{};
     intrinsic_accessor.object_type = IntrinsicObject::O_CONSOLE;
     result.emplace(intrinsic_accessor);
-    return;
+    return std::monostate{};
   }
   default:
-    throw InvalidVariableAccess{};
+    std::breakpoint();
+    error_descriptor.emplace<InvalidVariableAccess>();
+    return std::nullopt;
   }
 }
 
-void RvalueAnalyzer::operator()(const BinaryExpression &expression) {
+std::optional<std::monostate>
+RvalueAnalyzer::operator()(const BinaryExpression &expression) {
   assert(0);
 }
 
-void MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
+std::optional<std::monostate>
+MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   if (intrinsic_accessor.object_type != IntrinsicObject::O_CONSOLE)
-    return;
+    return std::nullopt;
   if (identifier.offset != OFFSET_log)
-    return;
+    return std::nullopt;
   ConsoleCall console_call{};
   for (const AnyExpression &argument : arguments) {
     RvalueAnalyzer visitor{boundary};
     argument.alt.visit(visitor);
-    console_call.arguments.push_back(std::move(visitor.result.value()));
+    assert(visitor.result.has_value());
+    console_call.arguments.push_back(std::move(*visitor.result));
   }
   result.emplace(std::move(console_call));
+  return std::monostate{};
 }
 
-void CalleeAnalyzer::operator()(const MemberExpression &expression) {
+std::optional<std::monostate>
+CalleeAnalyzer::operator()(const MemberExpression &expression) {
   RvalueAnalyzer object_visitor{boundary};
   expression.object->alt.visit(object_visitor);
   MethodAnalyzer method_visitor{boundary};
   method_visitor.identifier = expression.property;
   method_visitor.arguments = arguments;
-  object_visitor.result.value().alt.visit(method_visitor);
-  if (not method_visitor.result)
-    throw InvalidMethodAccess{};
-  result.emplace(*method_visitor.result);
+  assert(object_visitor.result.has_value());
+  object_visitor.result->alt.visit(method_visitor);
+  if (not method_visitor.result) {
+    std::breakpoint();
+    error_descriptor.emplace<InvalidMethodAccess>();
+    return std::nullopt;
+  } else {
+    result.emplace(*method_visitor.result);
+    return std::monostate{};
+  }
 }
 
-void CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
+std::optional<std::monostate>
+CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   FunctionDefinition *definition{
       variable_accessor.find_function_linkedly(&boundary)};
-  if (not definition)
-    throw InvalidVariableAccess{};
-  definition->analyze();
+  if (not definition) {
+    std::breakpoint();
+    error_descriptor.emplace<InvalidVariableAccess>();
+    return std::nullopt;
+  }
+  if (definition->analyze())
+    return std::nullopt;
   DirectFunctionCall direct_call{};
   direct_call.callee = definition;
   result.emplace(std::move(direct_call));
+  return std::monostate{};
 }
 
 FunctionDefinition *
@@ -1263,65 +1337,81 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
 struct StatementAnalyzer final : StatementVisitor<StatementAnalyzer> {
   using StatementVisitor<StatementAnalyzer>::operator();
 
-  void operator()(const ExpressionStatement &statement);
-  void operator()(const InitializeVariable &statement);
+  std::optional<std::monostate>
+  operator()(const ExpressionStatement &statement);
+  std::optional<std::monostate> operator()(const InitializeVariable &statement);
 
   StatementAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
   std::optional<AnyStatement> result;
 };
 
-void StatementAnalyzer::operator()(const ExpressionStatement &statement) {
+std::optional<std::monostate>
+StatementAnalyzer::operator()(const ExpressionStatement &statement) {
   RvalueAnalyzer visitor{boundary};
   statement.argument->alt.visit(visitor);
+  return std::monostate{};
 }
 
-void StatementAnalyzer::operator()(const InitializeVariable &statement) {
+std::optional<std::monostate>
+StatementAnalyzer::operator()(const InitializeVariable &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
   statement.rvalue->alt.visit(rvalue_visitor);
+  assert(rvalue_visitor.result.has_value());
   DatatypeAnalyzer datatype_visitor{boundary};
-  InitializeScope initialize_scope{std::move(rvalue_visitor.result.value())};
+  InitializeScope initialize_scope{std::move(*rvalue_visitor.result)};
   initialize_scope.rvalue->alt.visit(datatype_visitor);
+  assert(datatype_visitor.result.has_value());
   boundary.local_layout[statement.variable_name].emplace(
-      datatype_visitor.result.value());
+      *datatype_visitor.result);
   auto variable_it = boundary.local_layout.find(statement.variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
   result.emplace(std::move(initialize_scope));
+  return std::monostate{};
 }
 
-template <typename T> void AbstractBoundary<T>::analyze_statements() {
+template <typename T>
+std::optional<std::monostate> AbstractBoundary<T>::analyze_statements() {
   for (AnyStatement &any_statement : *program) {
     StatementAnalyzer visitor{*this};
     any_statement.alt.visit(visitor);
-    any_statement = std::move(visitor.result.value());
+    assert(visitor.result.has_value());
+    any_statement = std::move(*visitor.result);
   }
+  return std::monostate{};
 }
 
-void FunctionDefinition::analyze_formal_parameters() {
+std::optional<std::monostate> FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
     local_layout.find(argument)->second.emplace(DynamicType{});
+  return std::monostate{};
 }
 
-void FunctionDefinition::analyze() {
+std::optional<std::monostate> FunctionDefinition::analyze() {
   switch (analyzer_mark) {
   case AnalyzerMark::PENDING:
     analyzer_mark = AnalyzerMark::INITIATED;
-    analyze_formal_parameters();
+    if (not analyze_formal_parameters())
+      return std::nullopt;
     analyze_statements();
     analyze_inner_functions();
     analyzer_mark = AnalyzerMark::COMPLETE;
-    break;
+    return std::monostate{};
   case AnalyzerMark::INITIATED:
-    throw UnresolvableCircularity{};
+    std::breakpoint();
+    error_descriptor.emplace<UnresolvableCircularity>();
+    return std::nullopt;
   case AnalyzerMark::COMPLETE:
-    break;
+    return std::monostate{};
   }
+  std::unreachable();
 }
 
-void ModuleDefinition::analyze() {
+std::optional<std::monostate> ModuleDefinition::analyze() {
   analyze_statements();
   analyze_inner_functions();
+  return std::monostate{};
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
@@ -1348,9 +1438,10 @@ bool Language::compile_and_execute() {
   if (not parser.parse_module()) {
     variant_error = error_descriptor;
     return 0;
-  } else {
-    definition.analyze();
+  } else if (not definition.analyze()) {
+    variant_error = error_descriptor;
+    return 0;
+  } else
     return 1;
-  }
 }
 } // namespace Manadrain
