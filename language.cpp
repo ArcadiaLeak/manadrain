@@ -122,20 +122,12 @@ protected:
 public:
   auto operator<=>(const ValueType &) const = default;
   virtual std::size_t type_size() const = 0;
-  virtual std::optional<std::monostate>
-  find_property(AnyExpression &inout_expression,
-                Identifier identifier) const = 0;
 };
 
 class NumberType final : public ValueType {
 public:
   auto operator<=>(const NumberType &) const = default;
   std::size_t type_size() const override { return sizeof(double); }
-  std::optional<std::monostate>
-  find_property(AnyExpression &inout_expression,
-                Identifier identifier) const override {
-    return std::nullopt;
-  }
 };
 
 using VariantStringView = std::variant<std::string_view, std::u16string_view>;
@@ -143,9 +135,6 @@ class StringType final : public ValueType {
 public:
   auto operator<=>(const StringType &) const = default;
   std::size_t type_size() const override { return sizeof(VariantStringView); }
-  std::optional<std::monostate>
-  find_property(AnyExpression &inout_expression,
-                Identifier identifier) const override;
 };
 
 struct DynamicValue;
@@ -153,11 +142,6 @@ class DynamicType final : public ValueType {
 public:
   auto operator<=>(const DynamicType &) const = default;
   std::size_t type_size() const override;
-  std::optional<std::monostate>
-  find_property(AnyExpression &inout_expression,
-                Identifier identifier) const override {
-    return std::nullopt;
-  }
 };
 
 class LambdaType;
@@ -172,10 +156,6 @@ public:
   VariantType(Alternative a) : alt{a} {};
 
   auto operator<=>(const VariantType &) const = default;
-  const ValueType &value_type() const;
-
-private:
-  struct TypeVisitor;
 };
 
 struct DynamicValue {};
@@ -188,25 +168,26 @@ public:
   VariantType return_type;
   auto operator<=>(const LambdaType &) const = default;
   std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
-  std::optional<std::monostate>
-  find_property(AnyExpression &inout_expression,
-                Identifier identifier) const override {
+};
+
+template <typename T> struct TypeVisitor {
+  std::optional<T> operator()(NumberType type_alt) {
+    std::breakpoint();
+    return std::nullopt;
+  }
+  std::optional<T> operator()(StringType type_alt) {
+    std::breakpoint();
+    return std::nullopt;
+  }
+  std::optional<T> operator()(const LambdaType *type_alt) {
+    std::breakpoint();
+    return std::nullopt;
+  }
+  std::optional<T> operator()(DynamicType type_alt) {
+    std::breakpoint();
     return std::nullopt;
   }
 };
-
-struct VariantType::TypeVisitor {
-  template <typename T> const ValueType &operator()(const T &inline_type) {
-    return inline_type;
-  }
-  const ValueType &operator()(const LambdaType *heap_type) {
-    return *heap_type;
-  }
-};
-
-const ValueType &VariantType::value_type() const {
-  return alt.visit(TypeVisitor{});
-}
 
 class ObjectShape {
 public:
@@ -448,12 +429,19 @@ public:
   std::indirect<AnyExpression> argument;
 };
 
+class StringifyIntrinsic final : public Expression {
+public:
+  StringifyIntrinsic(AnyExpression &&arg);
+  std::indirect<AnyExpression> argument;
+};
+
 struct AnyExpression {
-  std::variant<
-      NumericLiteral, AsciiLiteral, UnicodeLiteral, AliasedFunctionCall,
-      DirectFunctionCall, MemberExpression, AssignExpression, LogicalExpression,
-      BinaryExpression, ObjectExpression, VariableAccessor, ScopeAccessor,
-      IntrinsicAccessor, LambdaExpression, ConsoleCall, LengthIntrinsic>
+  std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
+               AliasedFunctionCall, DirectFunctionCall, MemberExpression,
+               AssignExpression, LogicalExpression, BinaryExpression,
+               ObjectExpression, VariableAccessor, ScopeAccessor,
+               IntrinsicAccessor, LambdaExpression, ConsoleCall,
+               LengthIntrinsic, StringifyIntrinsic>
       alt;
 };
 
@@ -473,6 +461,9 @@ BinaryExpression::BinaryExpression(AnyExpression &&l, AnyExpression &&r)
     : left{std::move(l)}, right{std::move(r)} {};
 
 LengthIntrinsic::LengthIntrinsic(AnyExpression &&arg)
+    : argument{std::move(arg)} {};
+
+StringifyIntrinsic::StringifyIntrinsic(AnyExpression &&arg)
     : argument{std::move(arg)} {};
 
 template <typename T> struct ExpressionVisitor {
@@ -537,6 +528,10 @@ template <typename T> struct ExpressionVisitor {
     return std::nullopt;
   }
   std::optional<T> operator()(const LengthIntrinsic &expression) {
+    std::breakpoint();
+    return std::nullopt;
+  }
+  std::optional<T> operator()(const StringifyIntrinsic &expression) {
     std::breakpoint();
     return std::nullopt;
   }
@@ -1252,19 +1247,13 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_inner_functions() {
   return std::monostate{};
 }
 
-std::optional<std::monostate>
-StringType::find_property(AnyExpression &inout_expression,
-                          Identifier identifier) const {
-  switch (identifier.offset) {
-  case OFFSET_length: {
-    AnyExpression temporary{std::move(inout_expression)};
-    inout_expression.alt.emplace<LengthIntrinsic>(std::move(temporary));
-    return std::monostate{};
-  }
-  default:
-    return std::nullopt;
-  }
-}
+struct PropertyFinder final : TypeVisitor<AnyExpression> {
+  using TypeVisitor<AnyExpression>::operator();
+  std::optional<AnyExpression> operator()(StringType);
+  AnyExpression source_expression;
+  Identifier identifier;
+  PropertyFinder(AnyExpression e) : source_expression{std::move(e)} {}
+};
 
 struct RvalueAnalyzer;
 
@@ -1333,6 +1322,26 @@ struct DatatypeAnalyzer final : ExpressionVisitor<VariantType> {
   LexicalBoundary &boundary;
 };
 
+struct ExpressionStringifier final : TypeVisitor<AnyExpression> {
+  using TypeVisitor<AnyExpression>::operator();
+  std::optional<AnyExpression> operator()(NumberType);
+  AnyExpression source_expression;
+  ExpressionStringifier(AnyExpression e) : source_expression{std::move(e)} {}
+};
+
+std::optional<AnyExpression> PropertyFinder::operator()(StringType) {
+  switch (identifier.offset) {
+  case OFFSET_length:
+    return AnyExpression{LengthIntrinsic{std::move(source_expression)}};
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<AnyExpression> ExpressionStringifier::operator()(NumberType) {
+  return AnyExpression{StringifyIntrinsic{std::move(source_expression)}};
+}
+
 std::optional<AnyExpression>
 RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   CalleeAnalyzer callee_visitor{boundary};
@@ -1381,14 +1390,16 @@ RvalueAnalyzer::operator()(const MemberExpression &expression) {
   DatatypeAnalyzer datatype_visitor{boundary};
   std::optional datatype_analyzed{object_analyzed->alt.visit(datatype_visitor)};
   assert(datatype_analyzed.has_value());
-  std::optional property_ok{datatype_analyzed->value_type().find_property(
-      *object_analyzed, expression.property)};
-  if (not property_ok) {
+  PropertyFinder property_visitor{std::move(*object_analyzed)};
+  property_visitor.identifier = expression.property;
+  std::optional property_expression{
+      datatype_analyzed->alt.visit(property_visitor)};
+  if (not property_expression) {
     std::breakpoint();
     error_descriptor.emplace<InvalidPropertyAccess>();
     return std::nullopt;
   }
-  return std::move(*object_analyzed);
+  return property_expression;
 }
 
 std::optional<AnyExpression>
@@ -1403,7 +1414,15 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
     std::optional argument_analyzed{argument.alt.visit(rvalue_visitor)};
     if (not argument_analyzed)
       return std::nullopt;
-    console_call.arguments.push_back(std::move(*argument_analyzed));
+    DatatypeAnalyzer datatype_visitor{boundary};
+    std::optional argument_type{argument_analyzed->alt.visit(datatype_visitor)};
+    if (not argument_type)
+      return std::nullopt;
+    ExpressionStringifier stringifier{std::move(*argument_analyzed)};
+    std::optional stringified_argument{argument_type->alt.visit(stringifier)};
+    if (not stringified_argument)
+      return std::nullopt;
+    console_call.arguments.push_back(std::move(*stringified_argument));
   }
   return AnyExpression{std::move(console_call)};
 }
