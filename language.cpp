@@ -173,6 +173,9 @@ public:
 
   auto operator<=>(const VariantType &) const = default;
   const ValueType &value_type() const;
+
+private:
+  struct TypeVisitor;
 };
 
 struct DynamicValue {};
@@ -192,21 +195,16 @@ public:
   }
 };
 
+struct VariantType::TypeVisitor {
+  template <typename T> const ValueType &operator()(const T &inline_type) {
+    return inline_type;
+  }
+  const ValueType &operator()(const LambdaType *heap_type) {
+    return *heap_type;
+  }
+};
+
 const ValueType &VariantType::value_type() const {
-  struct TypeVisitor {
-    const ValueType &operator()(const NumberType &inline_type) {
-      return inline_type;
-    }
-    const ValueType &operator()(const StringType &inline_type) {
-      return inline_type;
-    }
-    const ValueType &operator()(const DynamicType &inline_type) {
-      return inline_type;
-    }
-    const ValueType &operator()(const LambdaType *heap_type) {
-      return *heap_type;
-    }
-  };
   return alt.visit(TypeVisitor{});
 }
 
@@ -429,12 +427,18 @@ public:
   std::vector<AnyExpression> arguments;
 };
 
+class LengthIntrinsic final : public Expression {
+public:
+  LengthIntrinsic(AnyExpression &&arg);
+  std::indirect<AnyExpression> argument;
+};
+
 struct AnyExpression {
-  std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
-               AliasedFunctionCall, DirectFunctionCall, MemberExpression,
-               AssignExpression, LogicalExpression, BinaryExpression,
-               ObjectExpression, VariableAccessor, ScopeAccessor,
-               IntrinsicAccessor, LambdaExpression, ConsoleCall>
+  std::variant<
+      NumericLiteral, AsciiLiteral, UnicodeLiteral, AliasedFunctionCall,
+      DirectFunctionCall, MemberExpression, AssignExpression, LogicalExpression,
+      BinaryExpression, ObjectExpression, VariableAccessor, ScopeAccessor,
+      IntrinsicAccessor, LambdaExpression, ConsoleCall, LengthIntrinsic>
       alt;
 };
 
@@ -452,6 +456,9 @@ LogicalExpression::LogicalExpression(AnyExpression &&l, AnyExpression &&r)
 
 BinaryExpression::BinaryExpression(AnyExpression &&l, AnyExpression &&r)
     : left{std::move(l)}, right{std::move(r)} {};
+
+LengthIntrinsic::LengthIntrinsic(AnyExpression &&arg)
+    : argument{std::move(arg)} {};
 
 template <typename T> struct ExpressionVisitor {
   std::optional<T> operator()(const NumericLiteral &expression) {
@@ -511,6 +518,10 @@ template <typename T> struct ExpressionVisitor {
     return std::nullopt;
   }
   std::optional<T> operator()(const ConsoleCall &expression) {
+    std::breakpoint();
+    return std::nullopt;
+  }
+  std::optional<T> operator()(const LengthIntrinsic &expression) {
     std::breakpoint();
     return std::nullopt;
   }
@@ -1229,7 +1240,15 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_inner_functions() {
 std::optional<std::monostate>
 StringType::find_property(AnyExpression &inout_expression,
                           Identifier identifier) const {
-  return std::nullopt;
+  switch (identifier.offset) {
+  case OFFSET_length: {
+    AnyExpression temporary{std::move(inout_expression)};
+    inout_expression.alt.emplace<LengthIntrinsic>(std::move(temporary));
+    return std::monostate{};
+  }
+  default:
+    return std::nullopt;
+  }
 }
 
 struct RvalueAnalyzer;
@@ -1338,7 +1357,12 @@ RvalueAnalyzer::operator()(const MemberExpression &expression) {
     return std::nullopt;
   std::optional property_ok{datatype_analyzed->value_type().find_property(
       *object_analyzed, expression.property)};
-  return std::nullopt;
+  if (not property_ok) {
+    std::breakpoint();
+    error_descriptor.emplace<InvalidPropertyAccess>();
+    return std::nullopt;
+  }
+  return std::move(*object_analyzed);
 }
 
 std::optional<AnyExpression>
@@ -1349,10 +1373,11 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
     return std::nullopt;
   ConsoleCall console_call{};
   for (const AnyExpression &argument : arguments) {
-    RvalueAnalyzer visitor{boundary};
-    if (auto expr_opt = argument.alt.visit(visitor); expr_opt)
-      console_call.arguments.push_back(std::move(*expr_opt));
-    return std::nullopt;
+    RvalueAnalyzer rvalue_visitor{boundary};
+    std::optional argument_analyzed{argument.alt.visit(rvalue_visitor)};
+    if (not argument_analyzed)
+      return std::nullopt;
+    console_call.arguments.push_back(std::move(*argument_analyzed));
   }
   return AnyExpression{std::move(console_call)};
 }
