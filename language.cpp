@@ -155,7 +155,7 @@ public:
   Alternative alt;
 
   VariantType() = delete;
-  VariantType(Alternative a) : alt{a} {};
+  VariantType(Alternative a) : alt{std::move(a)} {};
 
   auto operator<=>(const VariantType &) const = default;
   std::size_t type_size() const;
@@ -170,25 +170,6 @@ public:
   std::vector<VariantType> parameter_types;
   VariantType return_type;
   auto operator<=>(const LambdaType &) const = default;
-};
-
-template <typename T> struct TypeVisitor {
-  Fallible<T> operator()(NumberType type_alt) {
-    std::breakpoint();
-    return Throw<Error>(std::in_place);
-  }
-  Fallible<T> operator()(StringType type_alt) {
-    std::breakpoint();
-    return Throw<Error>(std::in_place);
-  }
-  Fallible<T> operator()(const LambdaType *type_alt) {
-    std::breakpoint();
-    return Throw<Error>(std::in_place);
-  }
-  Fallible<T> operator()(DynamicType type_alt) {
-    std::breakpoint();
-    return Throw<Error>(std::in_place);
-  }
 };
 
 std::size_t VariantType::type_size() const {
@@ -244,7 +225,7 @@ public:
 
   FunctionDefinition *find_function(Identifier identifier) override;
   std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
-  std::optional<std::monostate> serialize();
+  Fallible<void> serialize();
 
 protected:
   AbstractBoundary() = default;
@@ -448,13 +429,15 @@ public:
 };
 
 struct AnyExpression {
-  std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
-               AliasedFunctionCall, DirectFunctionCall, MemberExpression,
-               AssignExpression, LogicalExpression, BinaryExpression,
-               ObjectExpression, VariableAccessor, ScopeAccessor,
-               IntrinsicAccessor, LambdaExpression, ConsoleCall,
-               LengthIntrinsic, StringifyIntrinsic>
-      alt;
+  using Alternative =
+      std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
+                   AliasedFunctionCall, DirectFunctionCall, MemberExpression,
+                   AssignExpression, LogicalExpression, BinaryExpression,
+                   ObjectExpression, VariableAccessor, ScopeAccessor,
+                   IntrinsicAccessor, LambdaExpression, ConsoleCall,
+                   LengthIntrinsic, StringifyIntrinsic>;
+  Alternative alt;
+  AnyExpression(Alternative a) : alt{std::move(a)} {};
 };
 
 AliasedFunctionCall::AliasedFunctionCall(AnyExpression &&c)
@@ -477,77 +460,6 @@ LengthIntrinsic::LengthIntrinsic(AnyExpression &&arg)
 
 StringifyIntrinsic::StringifyIntrinsic(AnyExpression &&arg)
     : argument{std::move(arg)} {};
-
-template <typename T> struct ExpressionVisitor {
-  std::optional<T> operator()(const NumericLiteral &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const AsciiLiteral &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const UnicodeLiteral &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const AliasedFunctionCall &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const DirectFunctionCall &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const MemberExpression &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const AssignExpression &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const LogicalExpression &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const BinaryExpression &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const ObjectExpression &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const VariableAccessor &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const ScopeAccessor &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const IntrinsicAccessor &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const LambdaExpression &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const ConsoleCall &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const LengthIntrinsic &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const StringifyIntrinsic &expression) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-};
 
 class Statement {
 protected:
@@ -581,28 +493,10 @@ public:
 };
 
 struct AnyStatement {
-  std::variant<InitializeVariable, InitializeScope, ReturnStatement,
-               ExpressionStatement>
-      alt;
-};
-
-template <typename T> struct StatementVisitor {
-  std::optional<T> operator()(const InitializeVariable &statement) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const InitializeScope &statement) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const ReturnStatement &statement) {
-    std::breakpoint();
-    return std::nullopt;
-  }
-  std::optional<T> operator()(const ExpressionStatement &statement) {
-    std::breakpoint();
-    return std::nullopt;
-  }
+  using Alternative = std::variant<InitializeVariable, InitializeScope,
+                                   ReturnStatement, ExpressionStatement>;
+  Alternative alt;
+  AnyStatement(Alternative a) : alt{std::move(a)} {};
 };
 
 struct ConsoleMessage {
@@ -817,7 +711,7 @@ Fallible<void> Tokenizer::tokenize() {
         last_token = *token_opt;
         return Fallible<void>();
       } else
-        return Throw<VariantError>(std::in_place, token_opt.error());
+        return Throw(token_opt.error());
     }
     if (uc_is_property_xid_start(leading) || leading == '_') {
       std::expected token_opt{tokenize_identifier(leading)};
@@ -825,7 +719,7 @@ Fallible<void> Tokenizer::tokenize() {
         last_token = *token_opt;
         return Fallible<void>();
       } else
-        return Throw<VariantError>(std::in_place, token_opt.error());
+        return Throw(token_opt.error());
     }
     static const std::array legal_punct{std::to_array<char32_t>(
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
@@ -839,7 +733,7 @@ Fallible<void> Tokenizer::tokenize() {
         last_token = *token_opt;
         return Fallible<void>();
       } else
-        return Throw<VariantError>(std::in_place, token_opt.error());
+        return Throw(token_opt.error());
     }
     std::breakpoint();
     return Throw<UnexpectedToken>(std::in_place);
@@ -944,8 +838,8 @@ std::optional<std::monostate> Parser<T>::parse_statement() {
 }
 
 template <typename T> Fallible<void> Parser<T>::parse_return_stmt() {
-  if (not tokenizer.tokenize())
-    return Throw<Error>(std::in_place);
+  if (auto token_opt = tokenizer.tokenize(); not token_opt)
+    return Throw(token_opt.error());
   if (auto stmt_opt = parse_expression(); not stmt_opt)
     return Throw<Error>(std::in_place);
   else {
@@ -1300,9 +1194,14 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_inner_functions() {
   return std::monostate{};
 }
 
-struct PropertyFinder final : TypeVisitor<AnyExpression> {
-  using TypeVisitor<AnyExpression>::operator();
-  std::expected<AnyExpression, VariantError> operator()(StringType);
+struct PropertyFinder {
+  Fallible<AnyExpression> operator()(StringType);
+  template <std::derived_from<ValueType> T>
+  Fallible<AnyExpression> operator()(T) {
+    std::unreachable();
+  }
+  Fallible<AnyExpression> operator()(const LambdaType *) { std::unreachable(); }
+
   AnyExpression source_expression;
   Identifier identifier;
   PropertyFinder(AnyExpression e) : source_expression{std::move(e)} {}
@@ -1310,42 +1209,46 @@ struct PropertyFinder final : TypeVisitor<AnyExpression> {
 
 struct RvalueAnalyzer;
 
-struct CalleeAnalyzer final : ExpressionVisitor<AnyExpression> {
-  using ExpressionVisitor<AnyExpression>::operator();
-
-  std::optional<AnyExpression> operator()(const MemberExpression &expression);
-  std::optional<AnyExpression> operator()(const VariableAccessor &expression);
+struct CalleeAnalyzer {
+  Fallible<AnyExpression> operator()(const MemberExpression &expression);
+  Fallible<AnyExpression> operator()(const VariableAccessor &expression);
+  template <std::derived_from<Expression> T>
+  Fallible<AnyExpression> operator()(const T &expression) {
+    std::unreachable();
+  }
 
   CalleeAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
   std::span<const AnyExpression> arguments;
 };
 
-struct RvalueAnalyzer final : ExpressionVisitor<AnyExpression> {
-  using ExpressionVisitor<AnyExpression>::operator();
-
-  std::optional<AnyExpression> operator()(const AsciiLiteral &ascii_literal) {
+struct RvalueAnalyzer {
+  Fallible<AnyExpression> operator()(const AsciiLiteral &ascii_literal) {
     return AnyExpression{ascii_literal};
   }
-  std::optional<AnyExpression>
-  operator()(const NumericLiteral &numeric_literal) {
+  Fallible<AnyExpression> operator()(const NumericLiteral &numeric_literal) {
     return AnyExpression{numeric_literal};
   }
-  std::optional<AnyExpression>
-  operator()(const AliasedFunctionCall &expression);
-  std::optional<AnyExpression> operator()(const VariableAccessor &expression);
-  std::optional<AnyExpression> operator()(const BinaryExpression &expression);
-  std::optional<AnyExpression> operator()(const MemberExpression &expression);
+  Fallible<AnyExpression> operator()(const AliasedFunctionCall &expression);
+  Fallible<AnyExpression> operator()(const VariableAccessor &expression);
+  Fallible<AnyExpression> operator()(const BinaryExpression &expression);
+  Fallible<AnyExpression> operator()(const MemberExpression &expression);
+  template <std::derived_from<Expression> T>
+  Fallible<AnyExpression> operator()(const T &expression) {
+    std::unreachable();
+  }
 
   RvalueAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
 };
 
-struct MethodAnalyzer final : ExpressionVisitor<AnyExpression> {
-  using ExpressionVisitor<AnyExpression>::operator();
-
-  std::optional<AnyExpression>
+struct MethodAnalyzer {
+  Fallible<AnyExpression>
   operator()(const IntrinsicAccessor &intrinsic_accessor);
+  template <std::derived_from<Expression> T>
+  Fallible<AnyExpression> operator()(const T &expression) {
+    std::unreachable();
+  }
 
   MethodAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1353,31 +1256,36 @@ struct MethodAnalyzer final : ExpressionVisitor<AnyExpression> {
   std::span<const AnyExpression> arguments;
 };
 
-struct DatatypeAnalyzer final : ExpressionVisitor<VariantType> {
-  using ExpressionVisitor<VariantType>::operator();
-
-  std::optional<VariantType> operator()(const AsciiLiteral &) {
+struct DatatypeAnalyzer {
+  VariantType operator()(const AsciiLiteral &) {
     return VariantType{StringType{}};
   }
-  std::optional<VariantType> operator()(const ScopeAccessor &accessor) {
+  VariantType operator()(const ScopeAccessor &accessor) {
     return accessor.local_type;
   }
-  std::optional<VariantType> operator()(const BinaryExpression &) {
+  VariantType operator()(const BinaryExpression &) {
     return VariantType{NumberType{}};
   }
-  std::optional<VariantType> operator()(const DirectFunctionCall &direct_call) {
+  VariantType operator()(const DirectFunctionCall &direct_call) {
     assert(direct_call.callee != nullptr);
     assert(direct_call.callee->return_type.has_value());
-    return direct_call.callee->return_type;
+    return *direct_call.callee->return_type;
+  }
+  template <std::derived_from<Expression> T> VariantType operator()(const T &) {
+    std::unreachable();
   }
 
   DatatypeAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
 };
 
-struct ExpressionStringifier final : TypeVisitor<AnyExpression> {
-  using TypeVisitor<AnyExpression>::operator();
-  std::expected<AnyExpression, VariantError> operator()(NumberType);
+struct ExpressionStringifier {
+  AnyExpression operator()(NumberType);
+  template <std::derived_from<ValueType> T> AnyExpression operator()(T) {
+    std::unreachable();
+  }
+  AnyExpression operator()(const LambdaType *) { std::unreachable(); }
+
   AnyExpression source_expression;
   ExpressionStringifier(AnyExpression e) : source_expression{std::move(e)} {}
 };
@@ -1388,23 +1296,24 @@ Fallible<AnyExpression> PropertyFinder::operator()(StringType) {
     return Fallible<AnyExpression>(
         std::in_place, LengthIntrinsic{std::move(source_expression)});
   default:
-    return Throw<Error>(std::in_place);
+    std::breakpoint();
+    return Throw<InvalidPropertyAccess>(std::in_place);
   }
 }
 
-Fallible<AnyExpression> ExpressionStringifier::operator()(NumberType) {
-  return Fallible<AnyExpression>(
-      std::in_place, StringifyIntrinsic{std::move(source_expression)});
+AnyExpression ExpressionStringifier::operator()(NumberType) {
+  return AnyExpression::Alternative(std::in_place_type<StringifyIntrinsic>,
+                                    std::move(source_expression));
 }
 
-std::optional<AnyExpression>
+Fallible<AnyExpression>
 RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   CalleeAnalyzer callee_visitor{boundary};
   callee_visitor.arguments = function_call.arguments;
   return function_call.callee->alt.visit(callee_visitor);
 }
 
-std::optional<AnyExpression>
+Fallible<AnyExpression>
 RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   std::optional<ScopeAccessor> scope_accessor{
       variable_accessor.find_local_linkedly(&boundary)};
@@ -1418,99 +1327,79 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   }
   default:
     std::breakpoint();
-    error_descriptor.emplace<InvalidVariableAccess>();
-    return std::nullopt;
+    return Throw<InvalidVariableAccess>(std::in_place);
   }
 }
 
-std::optional<AnyExpression>
+Fallible<AnyExpression>
 RvalueAnalyzer::operator()(const BinaryExpression &expression) {
-  std::optional left_analyzed{expression.left->alt.visit(*this)};
-  if (not left_analyzed)
-    return std::nullopt;
-  std::optional right_analyzed{expression.right->alt.visit(*this)};
-  if (not right_analyzed)
-    return std::nullopt;
-  BinaryExpression output_expression{std::move(*left_analyzed),
-                                     std::move(*right_analyzed)};
-  output_expression.op = expression.op;
-  return AnyExpression{std::move(output_expression)};
+  if (auto left_analyzed = expression.left->alt.visit(*this); not left_analyzed)
+    return left_analyzed;
+  else if (auto right_analyzed = expression.right->alt.visit(*this);
+           not right_analyzed)
+    return right_analyzed;
+  else {
+    BinaryExpression output_expression{std::move(*left_analyzed),
+                                       std::move(*right_analyzed)};
+    output_expression.op = expression.op;
+    return AnyExpression{std::move(output_expression)};
+  }
 }
 
-std::optional<AnyExpression>
+Fallible<AnyExpression>
 RvalueAnalyzer::operator()(const MemberExpression &expression) {
-  std::optional object_analyzed{expression.object->alt.visit(*this)};
+  auto object_analyzed = expression.object->alt.visit(*this);
   if (not object_analyzed)
-    return std::nullopt;
+    return Throw(object_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
-  std::optional datatype_analyzed{object_analyzed->alt.visit(datatype_visitor)};
-  assert(datatype_analyzed.has_value());
+  auto datatype_analyzed = object_analyzed->alt.visit(datatype_visitor);
   PropertyFinder property_visitor{std::move(*object_analyzed)};
   property_visitor.identifier = expression.property;
-  std::expected property_expression{
-      datatype_analyzed->alt.visit(property_visitor)};
-  if (not property_expression) {
-    std::breakpoint();
-    error_descriptor.emplace<InvalidPropertyAccess>();
-    return std::nullopt;
-  }
-  return *property_expression;
+  return datatype_analyzed.alt.visit(property_visitor);
 }
 
-std::optional<AnyExpression>
+Fallible<AnyExpression>
 MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   if (intrinsic_accessor.object_type != IntrinsicObject::O_CONSOLE)
-    return std::nullopt;
+    return Throw<InvalidMethodAccess>(std::in_place);
   if (identifier.offset != OFFSET_log)
-    return std::nullopt;
+    return Throw<InvalidMethodAccess>(std::in_place);
   ConsoleCall console_call{};
   for (const AnyExpression &argument : arguments) {
     RvalueAnalyzer rvalue_visitor{boundary};
-    std::optional argument_analyzed{argument.alt.visit(rvalue_visitor)};
+    std::expected argument_analyzed{argument.alt.visit(rvalue_visitor)};
     if (not argument_analyzed)
-      return std::nullopt;
+      return Throw(argument_analyzed.error());
     DatatypeAnalyzer datatype_visitor{boundary};
-    std::optional argument_type{argument_analyzed->alt.visit(datatype_visitor)};
-    if (not argument_type)
-      return std::nullopt;
+    auto argument_type = argument_analyzed->alt.visit(datatype_visitor);
     ExpressionStringifier stringifier{std::move(*argument_analyzed)};
-    std::expected stringified_argument{argument_type->alt.visit(stringifier)};
-    if (not stringified_argument)
-      return std::nullopt;
-    console_call.arguments.push_back(std::move(*stringified_argument));
+    AnyExpression stringified_argument{argument_type.alt.visit(stringifier)};
+    console_call.arguments.push_back(std::move(stringified_argument));
   }
   return AnyExpression{std::move(console_call)};
 }
 
-std::optional<AnyExpression>
+Fallible<AnyExpression>
 CalleeAnalyzer::operator()(const MemberExpression &expression) {
-  std::optional<AnyExpression> member_object{
-      expression.object->alt.visit(RvalueAnalyzer{boundary})};
+  auto member_object = expression.object->alt.visit(RvalueAnalyzer{boundary});
   if (not member_object)
-    return std::nullopt;
+    return Throw(member_object.error());
   MethodAnalyzer method_visitor{boundary};
   method_visitor.identifier = expression.property;
   method_visitor.arguments = arguments;
-  if (auto method_opt = member_object->alt.visit(method_visitor);
-      not method_opt) {
-    std::breakpoint();
-    error_descriptor.emplace<InvalidMethodAccess>();
-    return std::nullopt;
-  } else
-    return *method_opt;
+  return member_object->alt.visit(method_visitor);
 }
 
-std::optional<AnyExpression>
+Fallible<AnyExpression>
 CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   FunctionDefinition *definition{
       variable_accessor.find_function_linkedly(&boundary)};
   if (not definition) {
     std::breakpoint();
-    error_descriptor.emplace<InvalidVariableAccess>();
-    return std::nullopt;
+    return Throw<InvalidVariableAccess>(std::in_place);
   }
   if (not definition->analyze())
-    return std::nullopt;
+    return Throw<Error>(std::in_place);
   DirectFunctionCall direct_call{};
   direct_call.callee = definition;
   return AnyExpression{std::move(direct_call)};
@@ -1538,9 +1427,7 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
   return find_local_linkedly(boundary->parent_boundary, scope_offset + 1);
 }
 
-struct StatementAnalyzer final : StatementVisitor<AnyStatement> {
-  using StatementVisitor<AnyStatement>::operator();
-
+struct StatementAnalyzer {
   std::optional<AnyStatement> operator()(const ExpressionStatement &statement);
   std::optional<AnyStatement> operator()(const InitializeVariable &statement);
   std::optional<AnyStatement> operator()(const ReturnStatement &statement);
@@ -1554,25 +1441,24 @@ struct StatementAnalyzer final : StatementVisitor<AnyStatement> {
 
 std::optional<AnyStatement>
 StatementAnalyzer::operator()(const ExpressionStatement &statement) {
-  std::optional argument_analyzed{
+  std::expected argument_analyzed{
       statement.argument->alt.visit(RvalueAnalyzer{boundary})};
   if (not argument_analyzed)
     return std::nullopt;
-  return AnyStatement{ExpressionStatement{std::move(*argument_analyzed)}};
+  return AnyStatement::Alternative(std::in_place_type<ExpressionStatement>,
+                                   std::move(*argument_analyzed));
 }
 
 std::optional<AnyStatement>
 StatementAnalyzer::operator()(const InitializeVariable &statement) {
-  std::optional<AnyExpression> rvalue_analyzed{
-      statement.rvalue->alt.visit(RvalueAnalyzer{boundary})};
+  auto rvalue_analyzed = statement.rvalue->alt.visit(RvalueAnalyzer{boundary});
   if (not rvalue_analyzed)
     return std::nullopt;
   InitializeScope initialize_scope{std::move(*rvalue_analyzed)};
-  std::optional<VariantType> datatype_analyzed{
+  VariantType datatype_analyzed{
       initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
-  assert(datatype_analyzed.has_value());
   boundary.local_layout[statement.variable_name].variant_type.emplace(
-      *datatype_analyzed);
+      datatype_analyzed);
   auto variable_it = boundary.local_layout.find(statement.variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
@@ -1582,14 +1468,12 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
 std::optional<AnyStatement>
 StatementAnalyzer::operator()(const ReturnStatement &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
-  std::optional argument_analyzed{
-      statement.argument->alt.visit(rvalue_visitor)};
+  auto argument_analyzed = statement.argument->alt.visit(rvalue_visitor);
   if (not argument_analyzed)
     return std::nullopt;
   DatatypeAnalyzer datatype_visitor{boundary};
-  std::optional argument_type{argument_analyzed->alt.visit(datatype_visitor)};
-  assert(argument_type.has_value());
-  if (not boundary.put_return_type(*argument_type))
+  VariantType argument_type{argument_analyzed->alt.visit(datatype_visitor)};
+  if (not boundary.put_return_type(argument_type))
     return std::nullopt;
   return AnyStatement{ReturnStatement{std::move(*argument_analyzed)}};
 }
@@ -1660,12 +1544,10 @@ enum class SerialStatement : std::uint8_t {
   RETURN_STMT
 };
 
-struct StatementSerializer final : StatementVisitor<std::monostate> {
-  using StatementVisitor<std::monostate>::operator();
-
-  std::optional<std::monostate> operator()(const InitializeScope &statement);
-  std::optional<std::monostate>
-  operator()(const InitializeVariable &statement) {
+struct StatementSerializer {
+  Fallible<void> operator()(const InitializeScope &statement);
+  template <std::derived_from<Statement> T>
+  Fallible<void> operator()(const T &statement) {
     std::unreachable();
   }
 
@@ -1674,27 +1556,30 @@ struct StatementSerializer final : StatementVisitor<std::monostate> {
   std::vector<std::byte> bytecode;
 };
 
-struct ExpressionSerializer final : ExpressionVisitor<std::monostate> {
-  using ExpressionVisitor<std::monostate>::operator();
+struct ExpressionSerializer {
+  template <std::derived_from<Expression> T>
+  Fallible<void> operator()(const T &expression) {
+    std::unreachable();
+  }
 
   ExpressionSerializer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
   std::vector<std::byte> bytecode;
 };
 
-template <typename T>
-std::optional<std::monostate> AbstractBoundary<T>::serialize() {
+template <typename T> Fallible<void> AbstractBoundary<T>::serialize() {
   for (FunctionDefinition *definition : inner_functions)
-    if (not definition->serialize())
-      return std::nullopt;
+    if (auto void_opt = definition->serialize(); not void_opt)
+      return Throw(void_opt.error());
   for (const AnyStatement &statement : *program) {
     StatementSerializer stmt_visitor{*this};
-    statement.alt.visit(stmt_visitor);
+    if (auto void_opt = statement.alt.visit(stmt_visitor); not void_opt)
+      return Throw(void_opt.error());
   }
-  return std::monostate{};
+  return Fallible<void>();
 }
 
-std::optional<std::monostate>
+Fallible<void>
 StatementSerializer::operator()(const InitializeScope &initialize_scope) {
   std::size_t byte_offset{};
   for (std::size_t i = 0; i < initialize_scope.local_offset; ++i) {
@@ -1707,9 +1592,11 @@ StatementSerializer::operator()(const InitializeScope &initialize_scope) {
   using serial_offset_t = std::array<std::byte, sizeof(std::size_t)>;
   bytecode.append_range(std::bit_cast<serial_offset_t>(byte_offset));
   ExpressionSerializer expression_serializer{boundary};
-  initialize_scope.rvalue->alt.visit(expression_serializer);
+  if (auto void_opt = initialize_scope.rvalue->alt.visit(expression_serializer);
+      not void_opt)
+    return Throw(void_opt.error());
   bytecode.append_range(std::move(expression_serializer.bytecode));
-  return std::monostate{};
+  return Fallible<void>();
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
