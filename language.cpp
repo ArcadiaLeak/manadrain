@@ -121,27 +121,26 @@ protected:
 
 public:
   auto operator<=>(const ValueType &) const = default;
-  virtual std::size_t type_size() const = 0;
 };
 
 class NumberType final : public ValueType {
 public:
+  NumberType() = default;
   auto operator<=>(const NumberType &) const = default;
-  std::size_t type_size() const override { return sizeof(double); }
 };
 
 using VariantStringView = std::variant<std::string_view, std::u16string_view>;
 class StringType final : public ValueType {
 public:
+  StringType() = default;
   auto operator<=>(const StringType &) const = default;
-  std::size_t type_size() const override { return sizeof(VariantStringView); }
 };
 
 struct DynamicValue;
 class DynamicType final : public ValueType {
 public:
+  DynamicType() = default;
   auto operator<=>(const DynamicType &) const = default;
-  std::size_t type_size() const override;
 };
 
 class LambdaType;
@@ -159,15 +158,14 @@ public:
 };
 
 struct DynamicValue {};
-std::size_t DynamicType::type_size() const { return sizeof(DynamicValue); }
-
 struct LambdaDescriptor {};
+
 class LambdaType final : public ValueType {
 public:
+  LambdaType() = default;
   std::vector<VariantType> parameter_types;
   VariantType return_type;
   auto operator<=>(const LambdaType &) const = default;
-  std::size_t type_size() const override { return sizeof(LambdaDescriptor); }
 };
 
 template <typename T> struct TypeVisitor {
@@ -231,7 +229,7 @@ public:
 
   FunctionDefinition *find_function(Identifier identifier) override;
   std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
-  void serialize();
+  std::optional<std::monostate> serialize();
 
 protected:
   AbstractBoundary() = default;
@@ -593,7 +591,39 @@ template <typename T> struct StatementVisitor {
   }
 };
 
-class Machine {};
+struct ConsoleMessage {
+  std::vector<VariantString> parts;
+  std::string encode_for_print() const;
+};
+
+struct RuntimeFrame {
+  const LexicalBoundary *boundary;
+  std::vector<std::byte>::const_iterator bytecode_it;
+  std::span<std::byte> local_memory;
+  std::span<RuntimeFrame *> closure;
+  std::span<std::byte> return_val;
+};
+
+struct RuntimeMemory {
+  std::pmr::monotonic_buffer_resource resource{65536};
+  std::pmr::list<RuntimeFrame> runtime_frames{&resource};
+  std::pmr::list<std::pmr::vector<RuntimeFrame *>> scope_traces{&resource};
+  std::pmr::list<std::pmr::vector<std::byte>> structures{&resource};
+  std::pmr::list<VariantString> strings{&resource};
+};
+
+class Machine {
+public:
+  Machine() : runtime_memory{std::make_unique<RuntimeMemory>()} {}
+  std::list<ConsoleMessage> collect_console_messages(std::stop_token stopper);
+
+private:
+  RuntimeFrame *top_frame;
+  std::unique_ptr<RuntimeMemory> runtime_memory;
+  std::mutex console_mutex;
+  std::condition_variable_any console_condition;
+  std::list<ConsoleMessage> console_messages;
+};
 
 static const std::flat_map<std::string_view, Keyword> keyword_atlas{
     {"const", Keyword::K_CONST},       {"let", Keyword::K_LET},
@@ -1489,6 +1519,9 @@ struct StatementAnalyzer final : StatementVisitor<AnyStatement> {
   std::optional<AnyStatement> operator()(const ExpressionStatement &statement);
   std::optional<AnyStatement> operator()(const InitializeVariable &statement);
   std::optional<AnyStatement> operator()(const ReturnStatement &statement);
+  std::optional<AnyStatement> operator()(const InitializeScope &statement) {
+    std::unreachable();
+  }
 
   StatementAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1584,6 +1617,96 @@ std::optional<std::monostate> ModuleDefinition::analyze() {
   return std::monostate{};
 }
 
+enum class SerialExpression : std::uint8_t {
+  MONOSTATE,
+  LITERAL,
+  SCOPE_ACCESSOR,
+  ADDITION,
+  SUBTRACTION,
+  FUNCTION_CALL,
+  CONSOLE_CALL,
+  LENGTH_INTRINSIC,
+  STRINGIFY_INTRINSIC
+};
+enum class SerialStatement : std::uint8_t {
+  MONOSTATE,
+  INITIALIZE_SCOPE,
+  EXPRESSION,
+  RETURN_STMT
+};
+
+struct StatementSerializer final : StatementVisitor<std::monostate> {
+  using StatementVisitor<std::monostate>::operator();
+
+  std::optional<std::monostate> operator()(const InitializeScope &statement);
+  std::optional<std::monostate>
+  operator()(const InitializeVariable &statement) {
+    std::unreachable();
+  }
+
+  StatementSerializer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+  std::vector<std::byte> bytecode;
+};
+
+struct ExpressionSerializer final : ExpressionVisitor<std::monostate> {
+  using ExpressionVisitor<std::monostate>::operator();
+
+  ExpressionSerializer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+  std::vector<std::byte> bytecode;
+};
+
+template <typename T>
+std::optional<std::monostate> AbstractBoundary<T>::serialize() {
+  for (FunctionDefinition *definition : inner_functions)
+    if (not definition->serialize())
+      return std::nullopt;
+  for (const AnyStatement &statement : *program) {
+    StatementSerializer stmt_visitor{*this};
+    statement.alt.visit(stmt_visitor);
+  }
+  return std::monostate{};
+}
+
+struct TypeSize : TypeVisitor<std::size_t> {
+  using TypeVisitor<std::size_t>::operator();
+
+  std::optional<std::size_t> operator()(NumberType) { return sizeof(double); }
+  std::optional<std::size_t> operator()(StringType) {
+    return sizeof(VariantStringView);
+  }
+  std::optional<std::size_t> operator()(DynamicType) {
+    return sizeof(DynamicValue);
+  }
+  std::optional<std::size_t> operator()(LambdaType) {
+    return sizeof(LambdaDescriptor);
+  }
+};
+
+std::optional<std::monostate>
+StatementSerializer::operator()(const InitializeScope &initialize_scope) {
+  std::size_t byte_offset{};
+  for (std::size_t i = 0; i < initialize_scope.local_offset; ++i) {
+    std::optional variant_type{boundary.local_layout.values()[i].variant_type};
+    if (not variant_type)
+      return std::nullopt;
+    TypeSize size_visitor{};
+    std::optional type_size{variant_type->alt.visit(size_visitor)};
+    if (not type_size)
+      return std::nullopt;
+    byte_offset += *type_size;
+  }
+  bytecode.push_back(
+      std::byte{std::to_underlying(SerialStatement::INITIALIZE_SCOPE)});
+  using serial_offset_t = std::array<std::byte, sizeof(std::size_t)>;
+  bytecode.append_range(std::bit_cast<serial_offset_t>(byte_offset));
+  ExpressionSerializer expression_serializer{boundary};
+  initialize_scope.rvalue->alt.visit(expression_serializer);
+  bytecode.append_range(std::move(expression_serializer.bytecode));
+  return std::monostate{};
+}
+
 Language::Language() { machine = std::make_unique<Machine>(); }
 Language::~Language() = default;
 Language::Language(Language &&other) noexcept = default;
@@ -1609,6 +1732,9 @@ bool Language::compile_and_execute() {
     variant_error = error_descriptor;
     return 0;
   } else if (not definition.analyze()) {
+    variant_error = error_descriptor;
+    return 0;
+  } else if (not definition.serialize()) {
     variant_error = error_descriptor;
     return 0;
   } else
