@@ -82,6 +82,8 @@ inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
+template <typename T> using Fallible = std::expected<T, VariantError>;
+template <typename T> using Throw = std::unexpected<T>;
 using VariantString = std::variant<std::string, std::u16string>;
 
 class Tokenizer {
@@ -105,13 +107,13 @@ private:
   void backward();
   void backward(std::size_t N);
 
-  std::optional<Token> tokenize_identifier(char32_t leading);
-  std::optional<Token> tokenize_string_literal(char32_t separator);
-  std::optional<Token> tokenize_numeric_literal(char32_t leading);
+  Fallible<Token> tokenize_identifier(char32_t leading);
+  Fallible<Token> tokenize_string_literal(char32_t separator);
+  Fallible<Token> tokenize_numeric_literal(char32_t leading);
 
   Token last_token;
-  std::optional<std::monostate> assert_punct(char32_t must_be);
-  std::optional<std::monostate> tokenize();
+  Fallible<void> assert_punct(char32_t must_be);
+  Fallible<void> tokenize();
 };
 
 struct AnyExpression;
@@ -170,9 +172,6 @@ public:
   auto operator<=>(const LambdaType &) const = default;
 };
 
-template <typename T> using Fallible = std::expected<T, VariantError>;
-template <typename T> using Throw = std::unexpected<T>;
-
 template <typename T> struct TypeVisitor {
   Fallible<T> operator()(NumberType type_alt) {
     std::breakpoint();
@@ -227,8 +226,7 @@ public:
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
   find_local(Identifier identifier) const = 0;
-  virtual std::expected<void, VariantError>
-  put_return_type(VariantType variant_type) = 0;
+  virtual Fallible<void> put_return_type(VariantType variant_type) = 0;
 };
 
 struct Heap {
@@ -265,21 +263,19 @@ public:
   AnalyzerMark analyzer_mark;
   std::optional<std::monostate> analyze();
 
-  std::expected<void, VariantError>
-  put_return_type(VariantType variant_type) override {
+  Fallible<void> put_return_type(VariantType variant_type) override {
     return_type.emplace(variant_type);
-    return {};
+    return Fallible<void>();
   }
 
 private:
-  std::expected<void, VariantError> analyze_formal_parameters();
+  Fallible<void> analyze_formal_parameters();
 };
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
   std::optional<std::monostate> analyze();
 
-  std::expected<void, VariantError>
-  put_return_type(VariantType variant_type) override {
+  Fallible<void> put_return_type(VariantType variant_type) override {
     std::breakpoint();
     return Throw<InvalidReturnStatement>(std::in_place);
   }
@@ -288,6 +284,8 @@ public:
 template <typename T> class Parser {
 public:
   std::optional<std::monostate> parse_function_stmt();
+  Fallible<void> parse_return_stmt();
+  Fallible<void> parse_expression_stmt();
   std::optional<std::monostate> parse_variable_decl();
   std::optional<std::monostate> parse_statement();
 
@@ -720,7 +718,7 @@ void Tokenizer::backward(std::size_t N) {
     backward();
 }
 
-std::optional<Token> Tokenizer::tokenize_identifier(char32_t leading) {
+Fallible<Token> Tokenizer::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -741,7 +739,7 @@ std::optional<Token> Tokenizer::tokenize_identifier(char32_t leading) {
   return emplace_ret.first->second;
 }
 
-std::optional<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
+Fallible<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
   std::u16string u16_literal{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
@@ -753,8 +751,7 @@ std::optional<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
       backward();
     if (not leading || leading == '\r' || leading == '\n') {
       std::breakpoint();
-      error_descriptor.emplace<UnexpectedStringEnd>();
-      return std::nullopt;
+      return Throw<UnexpectedStringEnd>(std::in_place);
     }
     u16_literal.append_range(traverse_u16(*leading));
   }
@@ -769,7 +766,7 @@ std::optional<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
   return std::get<std::u16string>(*u16string_iter);
 }
 
-std::optional<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
+Fallible<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -786,7 +783,7 @@ std::optional<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-std::optional<std::monostate> Tokenizer::tokenize() {
+Fallible<void> Tokenizer::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -811,55 +808,53 @@ std::optional<std::monostate> Tokenizer::tokenize() {
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
       last_token = Operator::LOGICAL_DISJUNCT;
-      return std::monostate{};
+      return Fallible<void>();
     } else
       backward();
     if (std::ranges::binary_search(std::to_array({'"', '\'', '`'}), leading)) {
-      std::optional token_opt{tokenize_string_literal(leading)};
+      std::expected token_opt{tokenize_string_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return std::monostate{};
+        return Fallible<void>();
       } else
-        return std::nullopt;
+        return Throw<VariantError>(std::in_place, token_opt.error());
     }
     if (uc_is_property_xid_start(leading) || leading == '_') {
-      std::optional token_opt{tokenize_identifier(leading)};
+      std::expected token_opt{tokenize_identifier(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return std::monostate{};
+        return Fallible<void>();
       } else
-        return std::nullopt;
+        return Throw<VariantError>(std::in_place, token_opt.error());
     }
     static const std::array legal_punct{std::to_array<char32_t>(
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
       last_token.emplace<char32_t>(leading);
-      return std::monostate{};
+      return Fallible<void>();
     }
     if (std::isdigit(leading)) {
-      std::optional token_opt{tokenize_numeric_literal(leading)};
+      std::expected token_opt{tokenize_numeric_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return std::monostate{};
+        return Fallible<void>();
       } else
-        return std::nullopt;
+        return Throw<VariantError>(std::in_place, token_opt.error());
     }
     std::breakpoint();
-    error_descriptor.emplace<UnexpectedToken>();
-    return std::nullopt;
+    return Throw<UnexpectedToken>(std::in_place);
   }
   last_token.emplace<std::monostate>();
-  return std::monostate{};
+  return Fallible<void>();
 }
 
-std::optional<std::monostate> Tokenizer::assert_punct(char32_t must_be) {
+Fallible<void> Tokenizer::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
-    return std::monostate{};
+    return Fallible<void>();
   else {
     std::breakpoint();
-    error_descriptor.emplace<MissingPunctuation>(must_be);
-    return std::nullopt;
+    return Throw<MissingPunctuation>(std::in_place, must_be);
   }
 }
 
@@ -939,23 +934,34 @@ std::optional<std::monostate> Parser<T>::parse_statement() {
   case Keyword::K_LET:
     return parse_variable_decl();
   case Keyword::K_RETURN:
-    if (not tokenizer.tokenize())
-      return std::nullopt;
-    if (auto stmt_opt = parse_expression(); not stmt_opt)
-      return std::nullopt;
-    else {
-      ReturnStatement statement{*stmt_opt};
-      boundary.program->emplace_back(std::move(statement));
-      return tokenizer.assert_punct(';');
-    }
+    return parse_return_stmt() ? std::optional<std::monostate>(std::in_place)
+                               : std::nullopt;
   default:
-    if (auto stmt_opt = parse_expression(); not stmt_opt)
-      return std::nullopt;
-    else {
-      ExpressionStatement statement{*stmt_opt};
-      boundary.program->emplace_back(std::move(statement));
-      return tokenizer.assert_punct(';');
-    }
+    return parse_expression_stmt()
+               ? std::optional<std::monostate>(std::in_place)
+               : std::nullopt;
+  }
+}
+
+template <typename T> Fallible<void> Parser<T>::parse_return_stmt() {
+  if (not tokenizer.tokenize())
+    return Throw<Error>(std::in_place);
+  if (auto stmt_opt = parse_expression(); not stmt_opt)
+    return Throw<Error>(std::in_place);
+  else {
+    ReturnStatement statement{*stmt_opt};
+    boundary.program->emplace_back(std::move(statement));
+    return tokenizer.assert_punct(';');
+  }
+}
+
+template <typename T> Fallible<void> Parser<T>::parse_expression_stmt() {
+  if (auto stmt_opt = parse_expression(); not stmt_opt)
+    return Throw<Error>(std::in_place);
+  else {
+    ExpressionStatement statement{*stmt_opt};
+    boundary.program->emplace_back(std::move(statement));
+    return tokenizer.assert_punct(';');
   }
 }
 
@@ -1190,7 +1196,8 @@ after_initializer:
     goto object_property;
 }
 after_properties:
-  tokenizer.assert_punct('}');
+  if (not tokenizer.assert_punct('}'))
+    return std::nullopt;
   return AnyExpression{std::move(object_expression)};
 }
 
@@ -1599,11 +1606,10 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_statements() {
   return std::monostate{};
 }
 
-std::expected<void, VariantError>
-FunctionDefinition::analyze_formal_parameters() {
+Fallible<void> FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
     local_layout.find(argument)->second.variant_type.emplace(DynamicType{});
-  return {};
+  return Fallible<void>();
 }
 
 std::optional<std::monostate> FunctionDefinition::analyze() {
