@@ -3,6 +3,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <debugging>
+#include <expected>
 #include <flat_map>
 #include <generator>
 #include <inplace_vector>
@@ -155,6 +156,7 @@ public:
   VariantType(Alternative a) : alt{a} {};
 
   auto operator<=>(const VariantType &) const = default;
+  std::size_t type_size() const;
 };
 
 struct DynamicValue {};
@@ -168,24 +170,39 @@ public:
   auto operator<=>(const LambdaType &) const = default;
 };
 
+template <typename T> using Fallible = std::expected<T, VariantError>;
+template <typename T> using Throw = std::unexpected<T>;
+
 template <typename T> struct TypeVisitor {
-  std::optional<T> operator()(NumberType type_alt) {
+  Fallible<T> operator()(NumberType type_alt) {
     std::breakpoint();
-    return std::nullopt;
+    return Throw<Error>(std::in_place);
   }
-  std::optional<T> operator()(StringType type_alt) {
+  Fallible<T> operator()(StringType type_alt) {
     std::breakpoint();
-    return std::nullopt;
+    return Throw<Error>(std::in_place);
   }
-  std::optional<T> operator()(const LambdaType *type_alt) {
+  Fallible<T> operator()(const LambdaType *type_alt) {
     std::breakpoint();
-    return std::nullopt;
+    return Throw<Error>(std::in_place);
   }
-  std::optional<T> operator()(DynamicType type_alt) {
+  Fallible<T> operator()(DynamicType type_alt) {
     std::breakpoint();
-    return std::nullopt;
+    return Throw<Error>(std::in_place);
   }
 };
+
+std::size_t VariantType::type_size() const {
+  struct SizeVisitor {
+    std::size_t operator()(NumberType) { return sizeof(double); }
+    std::size_t operator()(StringType) { return sizeof(VariantStringView); }
+    std::size_t operator()(DynamicType) { return sizeof(DynamicValue); }
+    std::size_t operator()(const LambdaType *) {
+      return sizeof(LambdaDescriptor);
+    }
+  };
+  return alt.visit(SizeVisitor{});
+}
 
 class ObjectShape {
 public:
@@ -199,7 +216,7 @@ class ScopeAccessor;
 
 struct LayoutEntry {
   std::optional<VariantType> variant_type;
-  std::size_t offset;
+  std::optional<std::size_t> offset;
 };
 
 class LexicalBoundary {
@@ -210,7 +227,7 @@ public:
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
   find_local(Identifier identifier) const = 0;
-  virtual std::optional<std::monostate>
+  virtual std::expected<void, VariantError>
   put_return_type(VariantType variant_type) = 0;
 };
 
@@ -248,24 +265,23 @@ public:
   AnalyzerMark analyzer_mark;
   std::optional<std::monostate> analyze();
 
-  std::optional<std::monostate>
+  std::expected<void, VariantError>
   put_return_type(VariantType variant_type) override {
     return_type.emplace(variant_type);
-    return std::monostate{};
+    return {};
   }
 
 private:
-  std::optional<std::monostate> analyze_formal_parameters();
+  std::expected<void, VariantError> analyze_formal_parameters();
 };
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
   std::optional<std::monostate> analyze();
 
-  std::optional<std::monostate>
+  std::expected<void, VariantError>
   put_return_type(VariantType variant_type) override {
     std::breakpoint();
-    error_descriptor.emplace<InvalidReturnStatement>();
-    return std::nullopt;
+    return Throw<InvalidReturnStatement>(std::in_place);
   }
 };
 
@@ -1279,7 +1295,7 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_inner_functions() {
 
 struct PropertyFinder final : TypeVisitor<AnyExpression> {
   using TypeVisitor<AnyExpression>::operator();
-  std::optional<AnyExpression> operator()(StringType);
+  std::expected<AnyExpression, VariantError> operator()(StringType);
   AnyExpression source_expression;
   Identifier identifier;
   PropertyFinder(AnyExpression e) : source_expression{std::move(e)} {}
@@ -1354,22 +1370,24 @@ struct DatatypeAnalyzer final : ExpressionVisitor<VariantType> {
 
 struct ExpressionStringifier final : TypeVisitor<AnyExpression> {
   using TypeVisitor<AnyExpression>::operator();
-  std::optional<AnyExpression> operator()(NumberType);
+  std::expected<AnyExpression, VariantError> operator()(NumberType);
   AnyExpression source_expression;
   ExpressionStringifier(AnyExpression e) : source_expression{std::move(e)} {}
 };
 
-std::optional<AnyExpression> PropertyFinder::operator()(StringType) {
+Fallible<AnyExpression> PropertyFinder::operator()(StringType) {
   switch (identifier.offset) {
   case OFFSET_length:
-    return AnyExpression{LengthIntrinsic{std::move(source_expression)}};
+    return Fallible<AnyExpression>(
+        std::in_place, LengthIntrinsic{std::move(source_expression)});
   default:
-    return std::nullopt;
+    return Throw<Error>(std::in_place);
   }
 }
 
-std::optional<AnyExpression> ExpressionStringifier::operator()(NumberType) {
-  return AnyExpression{StringifyIntrinsic{std::move(source_expression)}};
+Fallible<AnyExpression> ExpressionStringifier::operator()(NumberType) {
+  return Fallible<AnyExpression>(
+      std::in_place, StringifyIntrinsic{std::move(source_expression)});
 }
 
 std::optional<AnyExpression>
@@ -1422,14 +1440,14 @@ RvalueAnalyzer::operator()(const MemberExpression &expression) {
   assert(datatype_analyzed.has_value());
   PropertyFinder property_visitor{std::move(*object_analyzed)};
   property_visitor.identifier = expression.property;
-  std::optional property_expression{
+  std::expected property_expression{
       datatype_analyzed->alt.visit(property_visitor)};
   if (not property_expression) {
     std::breakpoint();
     error_descriptor.emplace<InvalidPropertyAccess>();
     return std::nullopt;
   }
-  return property_expression;
+  return *property_expression;
 }
 
 std::optional<AnyExpression>
@@ -1449,7 +1467,7 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
     if (not argument_type)
       return std::nullopt;
     ExpressionStringifier stringifier{std::move(*argument_analyzed)};
-    std::optional stringified_argument{argument_type->alt.visit(stringifier)};
+    std::expected stringified_argument{argument_type->alt.visit(stringifier)};
     if (not stringified_argument)
       return std::nullopt;
     console_call.arguments.push_back(std::move(*stringified_argument));
@@ -1581,17 +1599,18 @@ std::optional<std::monostate> AbstractBoundary<T>::analyze_statements() {
   return std::monostate{};
 }
 
-std::optional<std::monostate> FunctionDefinition::analyze_formal_parameters() {
+std::expected<void, VariantError>
+FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
     local_layout.find(argument)->second.variant_type.emplace(DynamicType{});
-  return std::monostate{};
+  return {};
 }
 
 std::optional<std::monostate> FunctionDefinition::analyze() {
   switch (analyzer_mark) {
   case AnalyzerMark::PENDING:
     analyzer_mark = AnalyzerMark::INITIATED;
-    if (not analyze_formal_parameters())
+    if (auto void_opt = analyze_formal_parameters(); not void_opt)
       return std::nullopt;
     else if (not analyze_statements())
       return std::nullopt;
@@ -1669,33 +1688,13 @@ std::optional<std::monostate> AbstractBoundary<T>::serialize() {
   return std::monostate{};
 }
 
-struct TypeSize : TypeVisitor<std::size_t> {
-  using TypeVisitor<std::size_t>::operator();
-
-  std::optional<std::size_t> operator()(NumberType) { return sizeof(double); }
-  std::optional<std::size_t> operator()(StringType) {
-    return sizeof(VariantStringView);
-  }
-  std::optional<std::size_t> operator()(DynamicType) {
-    return sizeof(DynamicValue);
-  }
-  std::optional<std::size_t> operator()(LambdaType) {
-    return sizeof(LambdaDescriptor);
-  }
-};
-
 std::optional<std::monostate>
 StatementSerializer::operator()(const InitializeScope &initialize_scope) {
   std::size_t byte_offset{};
   for (std::size_t i = 0; i < initialize_scope.local_offset; ++i) {
     std::optional variant_type{boundary.local_layout.values()[i].variant_type};
-    if (not variant_type)
-      return std::nullopt;
-    TypeSize size_visitor{};
-    std::optional type_size{variant_type->alt.visit(size_visitor)};
-    if (not type_size)
-      return std::nullopt;
-    byte_offset += *type_size;
+    assert(variant_type.has_value());
+    byte_offset += variant_type->type_size();
   }
   bytecode.push_back(
       std::byte{std::to_underlying(SerialStatement::INITIALIZE_SCOPE)});
