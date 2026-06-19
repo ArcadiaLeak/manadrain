@@ -270,12 +270,11 @@ public:
   Fallible<void> parse_variable_decl();
   Fallible<void> parse_statement();
 
-  std::optional<AnyExpression> parse_expression();
-
-  std::optional<AnyExpression> parse_assign_expression();
-  std::optional<AnyExpression> parse_logical_disjunct();
-  std::optional<AnyExpression> parse_additive_expression();
-  std::optional<AnyExpression> parse_object_literal();
+  Fallible<AnyExpression> parse_expression();
+  Fallible<AnyExpression> parse_assign_expression();
+  Fallible<AnyExpression> parse_logical_disjunct();
+  Fallible<AnyExpression> parse_additive_expression();
+  Fallible<AnyExpression> parse_object_literal();
 
 protected:
   Parser(T &b, Tokenizer &t) : boundary{b}, tokenizer{t} {}
@@ -884,21 +883,20 @@ template <typename T> Fallible<void> Parser<T>::parse_function_stmt() {
 }
 
 template <typename T>
-std::optional<AnyExpression> Parser<T>::parse_assign_expression() {
-  std::optional left_expression{parse_logical_disjunct()};
+Fallible<AnyExpression> Parser<T>::parse_assign_expression() {
+  auto left_expression = parse_logical_disjunct();
   if (not left_expression)
-    return std::nullopt;
+    return Throw(left_expression.error());
   if (tokenizer.last_token != Token{U'='})
     return left_expression;
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (auto expr_opt = parse_assign_expression(); not expr_opt)
-    return std::nullopt;
-  else {
-    AssignExpression expression{std::move(*left_expression),
-                                std::move(*expr_opt)};
-    return AnyExpression{std::move(expression)};
-  }
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  auto expression_result = parse_assign_expression();
+  if (not expression_result)
+    return Throw(expression_result.error());
+  return AnyExpression::Alternative(std::in_place_type<AssignExpression>,
+                                    std::move(*left_expression),
+                                    std::move(*expression_result));
 }
 
 template <typename T> Fallible<void> Parser<T>::parse_variable_decl() {
@@ -933,27 +931,27 @@ template <typename T> Fallible<void> Parser<T>::parse_variable_decl() {
   }
 }
 
-template <typename T>
-std::optional<AnyExpression> Parser<T>::parse_expression() {
+template <typename T> Fallible<AnyExpression> Parser<T>::parse_expression() {
   return parse_assign_expression();
 }
 
 template <typename T>
-std::optional<AnyExpression> Parser<T>::parse_logical_disjunct() {
-  std::optional left_expression{parse_additive_expression()};
+Fallible<AnyExpression> Parser<T>::parse_logical_disjunct() {
+  auto left_expression = parse_additive_expression();
   if (not left_expression)
-    return std::nullopt;
+    return Throw(left_expression.error());
 right_expression: {
   if (tokenizer.last_token != Token{Operator::LOGICAL_DISJUNCT})
     return left_expression;
   Operator logical_op{std::get<Operator>(tokenizer.last_token)};
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (auto expr_opt = parse_additive_expression(); not expr_opt)
-    return std::nullopt;
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  if (auto expression_result = parse_additive_expression();
+      not expression_result)
+    return Throw(expression_result.error());
   else {
     LogicalExpression expression{std::move(*left_expression),
-                                 std::move(*expr_opt)};
+                                 std::move(*expression_result)};
     expression.op = logical_op;
     left_expression->alt.template emplace<LogicalExpression>(
         std::move(expression));
@@ -986,17 +984,19 @@ Fallible<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
     if (auto token_result = parser.tokenizer.tokenize(); not token_result)
       return Throw(token_result.error());
     if (parser.tokenizer.last_token == Token{U')'})
-      return AnyExpression{std::move(function_call)};
+      break;
     auto argument_expression = parser.parse_expression();
     if (not argument_expression)
       return Throw(argument_expression.error());
     function_call.arguments.push_back(std::move(*argument_expression));
     if (parser.tokenizer.last_token == Token{U')'})
-      return AnyExpression{std::move(function_call)};
+      break;
     if (auto assert_result = parser.tokenizer.assert_punct(',');
         not assert_result)
       return Throw(assert_result.error());
   }
+  return Fallible<AnyExpression>(std::in_place, std::move(function_call))
+      .and_then(*this);
 }
 
 template <typename T>
@@ -1012,74 +1012,76 @@ Parser<T>::PostfixExpressionSaga::parse_member_expression(
   } else {
     MemberExpression member_expression(std::move(expression));
     member_expression.property = *field_name;
-    return AnyExpression{std::move(member_expression)};
+    return Fallible<AnyExpression>(std::in_place, std::move(member_expression))
+        .and_then(*this);
   }
 }
 
 template <typename T>
 Fallible<AnyExpression> Parser<T>::parse_postfix_expression() {
-  return parse_primary_expression().and_then(PostfixExpressionSaga{*this});
+  return parse_primary_expression().and_then(PostfixExpressionSaga(*this));
 }
 
 template <typename T>
-std::optional<AnyExpression> Parser<T>::parse_additive_expression() {
-  auto expression = parse_postfix_expression();
-  if (not expression)
-    return std::nullopt;
-  if (std::holds_alternative<char32_t>(tokenizer.last_token) &&
-      std::ranges::contains(std::to_array<char32_t>({'+', '-'}),
-                            std::get<char32_t>(tokenizer.last_token)))
-    return std::move(*expression);
-  char32_t binary_op{std::get<char32_t>(tokenizer.last_token)};
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (auto expr_opt = parse_postfix_expression(); not expr_opt)
-    return std::nullopt;
+Fallible<AnyExpression> Parser<T>::parse_additive_expression() {
+  auto left_expression = parse_postfix_expression();
+  if (not left_expression)
+    return Throw(left_expression.error());
+  auto *operator_ahead = std::get_if<char32_t>(&tokenizer.last_token);
+  static const std::array additive_punct = std::to_array<char32_t>({'+', '-'});
+  bool should_proceed =
+      operator_ahead && std::ranges::contains(additive_punct, *operator_ahead);
+  if (not should_proceed)
+    return std::move(*left_expression);
+  char32_t binary_op{*operator_ahead};
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  if (auto right_expression = parse_postfix_expression(); not right_expression)
+    return Throw(right_expression.error());
   else {
-    BinaryExpression binary_expression{std::move(*expression),
-                                       std::move(*expr_opt)};
+    BinaryExpression binary_expression{std::move(*left_expression),
+                                       std::move(*right_expression)};
     binary_expression.op = binary_op;
     return AnyExpression{std::move(binary_expression)};
   }
 }
 
 template <typename T>
-std::optional<AnyExpression> Parser<T>::parse_object_literal() {
+Fallible<AnyExpression> Parser<T>::parse_object_literal() {
   ObjectExpression object_expression{};
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
 object_property: {
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    error_descriptor.emplace<InvalidPropertyName>();
-    return std::nullopt;
+    return Throw<InvalidPropertyName>(std::in_place);
   }
   Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
   object_expression.object_shape.properties.try_emplace(property_name);
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
   object_expression.keys.push_back(property_name);
   std::optional<AnyExpression> initializer{};
   if (tokenizer.last_token != Token{U':'})
     goto after_initializer;
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (auto expr_opt = parse_expression(); not expr_opt)
-    return std::nullopt;
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  if (auto expression_result = parse_expression(); not expression_result)
+    return Throw(expression_result.error());
   else
-    initializer.emplace(std::move(*expr_opt));
+    initializer.emplace(std::move(*expression_result));
 after_initializer:
   object_expression.values.push_back(std::move(initializer));
   if (tokenizer.last_token != Token{U','})
     goto after_properties;
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
   if (tokenizer.last_token != Token{U'}'})
     goto object_property;
 }
 after_properties:
-  if (not tokenizer.assert_punct('}'))
-    return std::nullopt;
+  if (auto assert_result = tokenizer.assert_punct('}'); not assert_result)
+    return Throw(assert_result.error());
   return AnyExpression{std::move(object_expression)};
 }
 
