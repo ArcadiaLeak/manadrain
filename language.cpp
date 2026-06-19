@@ -271,17 +271,11 @@ public:
   Fallible<void> parse_statement();
 
   std::optional<AnyExpression> parse_expression();
-  std::optional<AnyExpression> parse_primary_expression();
 
   std::optional<AnyExpression> parse_assign_expression();
   std::optional<AnyExpression> parse_logical_disjunct();
   std::optional<AnyExpression> parse_additive_expression();
   std::optional<AnyExpression> parse_object_literal();
-
-  std::optional<std::monostate>
-  parse_member_expression(AnyExpression &expression);
-  std::optional<std::monostate> parse_function_call(AnyExpression &expression);
-  std::optional<AnyExpression> parse_postfix_expression();
 
 protected:
   Parser(T &b, Tokenizer &t) : boundary{b}, tokenizer{t} {}
@@ -289,6 +283,17 @@ protected:
   Tokenizer &tokenizer;
 
 private:
+  struct PostfixExpressionSaga {
+    Fallible<AnyExpression> parse_member_expression(AnyExpression expression);
+    Fallible<AnyExpression> parse_function_call(AnyExpression expression);
+    Fallible<AnyExpression> operator()(AnyExpression expression);
+    Parser &parser;
+  };
+  Fallible<AnyExpression> parse_postfix_expression();
+
+  struct PrimaryExpressionSaga;
+  Fallible<AnyExpression> parse_primary_expression();
+
   friend class Language;
   std::set<VariantString> *string_atlas;
 };
@@ -958,78 +963,73 @@ right_expression: {
 }
 
 template <typename T>
-std::optional<AnyExpression> Parser<T>::parse_postfix_expression() {
-  std::optional postfix_expression{parse_primary_expression()};
-postfix_iteration:
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (not std::holds_alternative<char32_t>(tokenizer.last_token))
-    return postfix_expression;
-  switch (std::get<char32_t>(tokenizer.last_token)) {
-  case '.':
-    if (not parse_member_expression(*postfix_expression))
-      return std::nullopt;
-    else
-      goto postfix_iteration;
-  case '(':
-    if (not parse_function_call(*postfix_expression))
-      return std::nullopt;
-    else
-      goto postfix_iteration;
-  default:
-    return postfix_expression;
-  }
+Fallible<AnyExpression>
+Parser<T>::PostfixExpressionSaga::operator()(AnyExpression expression) {
+  if (auto token_result = parser.tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  if (auto *punctuation = std::get_if<char32_t>(&parser.tokenizer.last_token);
+      not punctuation)
+    return expression;
+  else if (*punctuation == '.')
+    return parse_member_expression(std::move(expression));
+  else if (*punctuation == '(')
+    return parse_function_call(std::move(expression));
+  else
+    return expression;
 }
 
 template <typename T>
-std::optional<std::monostate>
-Parser<T>::parse_function_call(AnyExpression &expression) {
-  AnyExpression callee{std::move(expression)};
-  AliasedFunctionCall &function_call{
-      expression.alt.emplace<AliasedFunctionCall>(std::move(callee))};
+Fallible<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
+    AnyExpression expression) {
+  AliasedFunctionCall function_call(std::move(expression));
   while (1) {
-    if (not tokenizer.tokenize())
-      return std::nullopt;
-    if (tokenizer.last_token == Token{U')'})
-      return std::monostate{};
-    if (auto expr_opt = parse_expression(); not expr_opt)
-      return std::nullopt;
-    else
-      function_call.arguments.push_back(std::move(*expr_opt));
-    if (tokenizer.last_token == Token{U')'})
-      return std::monostate{};
-    if (not tokenizer.assert_punct(','))
-      return std::nullopt;
+    if (auto token_result = parser.tokenizer.tokenize(); not token_result)
+      return Throw(token_result.error());
+    if (parser.tokenizer.last_token == Token{U')'})
+      return AnyExpression{std::move(function_call)};
+    auto argument_expression = parser.parse_expression();
+    if (not argument_expression)
+      return Throw(argument_expression.error());
+    function_call.arguments.push_back(std::move(*argument_expression));
+    if (parser.tokenizer.last_token == Token{U')'})
+      return AnyExpression{std::move(function_call)};
+    if (auto assert_result = parser.tokenizer.assert_punct(',');
+        not assert_result)
+      return Throw(assert_result.error());
   }
 }
 
 template <typename T>
-std::optional<std::monostate>
-Parser<T>::parse_member_expression(AnyExpression &expression) {
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
+Fallible<AnyExpression>
+Parser<T>::PostfixExpressionSaga::parse_member_expression(
+    AnyExpression expression) {
+  if (auto token_result = parser.tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  if (auto *field_name = std::get_if<Identifier>(&parser.tokenizer.last_token);
+      not field_name) {
     std::breakpoint();
-    error_descriptor.emplace<MissingPropertyName>();
-    return std::nullopt;
+    return Throw<MissingPropertyName>(std::in_place);
   } else {
-    Identifier field_name{std::get<Identifier>(tokenizer.last_token)};
-    AnyExpression member_object{std::move(expression)};
-    MemberExpression &member_expression{
-        expression.alt.emplace<MemberExpression>(std::move(member_object))};
-    member_expression.property = field_name;
-    return std::monostate{};
+    MemberExpression member_expression(std::move(expression));
+    member_expression.property = *field_name;
+    return AnyExpression{std::move(member_expression)};
   }
+}
+
+template <typename T>
+Fallible<AnyExpression> Parser<T>::parse_postfix_expression() {
+  return parse_primary_expression().and_then(PostfixExpressionSaga{*this});
 }
 
 template <typename T>
 std::optional<AnyExpression> Parser<T>::parse_additive_expression() {
-  std::optional expression{parse_postfix_expression()};
+  auto expression = parse_postfix_expression();
   if (not expression)
     return std::nullopt;
-  if (tokenizer.last_token != Token{U'+'} &&
-      tokenizer.last_token != Token{U'-'})
-    return expression;
+  if (std::holds_alternative<char32_t>(tokenizer.last_token) &&
+      std::ranges::contains(std::to_array<char32_t>({'+', '-'}),
+                            std::get<char32_t>(tokenizer.last_token)))
+    return std::move(*expression);
   char32_t binary_op{std::get<char32_t>(tokenizer.last_token)};
   if (not tokenizer.tokenize())
     return std::nullopt;
@@ -1083,74 +1083,88 @@ after_properties:
   return AnyExpression{std::move(object_expression)};
 }
 
+template <typename T> class Parser<T>::PrimaryExpressionSaga {
+private:
+  Parser &parser;
+
+public:
+  PrimaryExpressionSaga(Parser &p) : parser{p} {}
+
+  Fallible<AnyExpression> operator()(char32_t punct);
+  Fallible<AnyExpression> operator()(Keyword keyword);
+
+  Fallible<AnyExpression> operator()(std::monostate) {
+    std::breakpoint();
+    return Throw<UnexpectedToken>(std::in_place);
+  }
+
+  Fallible<AnyExpression> operator()(std::int64_t number) {
+    NumericLiteral num_literal{};
+    num_literal.val = static_cast<double>(number);
+    return AnyExpression{num_literal};
+  }
+
+  Fallible<AnyExpression> operator()(double number) {
+    NumericLiteral numeric_literal{};
+    numeric_literal.val = number;
+    return AnyExpression{numeric_literal};
+  }
+
+  Fallible<AnyExpression> operator()(Operator op) {
+    std::breakpoint();
+    return Throw<UnexpectedToken>(std::in_place);
+  }
+
+  Fallible<AnyExpression> operator()(Identifier identifier) {
+    VariableAccessor variable_accessor{};
+    variable_accessor.identifier = identifier;
+    return AnyExpression{variable_accessor};
+  }
+
+  Fallible<AnyExpression> operator()(std::string_view ascii_view) {
+    AsciiLiteral ascii_literal{};
+    ascii_literal.val_view = ascii_view;
+    return AnyExpression{ascii_literal};
+  }
+
+  Fallible<AnyExpression> operator()(std::u16string_view unicode_view) {
+    UnicodeLiteral unicode_literal{};
+    unicode_literal.val_view = unicode_view;
+    return AnyExpression{unicode_literal};
+  }
+};
+
 template <typename T>
-std::optional<AnyExpression> Parser<T>::parse_primary_expression() {
-  struct TokenVisitor {
-    Parser<T> &parser;
-    std::optional<AnyExpression> operator()(std::monostate) {
-      std::breakpoint();
-      error_descriptor.emplace<UnexpectedToken>();
-      return std::nullopt;
-    }
-    std::optional<AnyExpression> operator()(char32_t punct) {
-      if (punct == '{')
-        return parser.parse_object_literal();
-      else {
-        std::breakpoint();
-        error_descriptor.emplace<UnexpectedToken>();
-        return std::nullopt;
-      }
-    }
-    std::optional<AnyExpression> operator()(std::int64_t number) {
-      NumericLiteral num_literal{};
-      num_literal.val = static_cast<double>(number);
-      return AnyExpression{num_literal};
-    }
-    std::optional<AnyExpression> operator()(double number) {
-      NumericLiteral numeric_literal{};
-      numeric_literal.val = number;
-      return AnyExpression{numeric_literal};
-    }
-    std::optional<AnyExpression> operator()(Operator op) {
-      std::breakpoint();
-      error_descriptor.emplace<UnexpectedToken>();
-      return std::nullopt;
-    }
-    std::optional<AnyExpression> operator()(Keyword keyword) {
-      switch (keyword) {
-      case Keyword::K_FUNCTION: {
-        LambdaExpression lambda_expression{};
-        lambda_expression.definition =
-            &parser.boundary.heap->function_definition_list.emplace_back();
-        FunctionParser function_parser{*lambda_expression.definition,
-                                       parser.tokenizer};
-        if (not function_parser.parse_function_decl())
-          return std::nullopt;
-        return AnyExpression{lambda_expression};
-      }
-      default:
-        std::breakpoint();
-        error_descriptor.emplace<UnexpectedToken>();
-        return std::nullopt;
-      }
-    }
-    std::optional<AnyExpression> operator()(Identifier identifier) {
-      VariableAccessor variable_accessor{};
-      variable_accessor.identifier = identifier;
-      return AnyExpression{variable_accessor};
-    }
-    std::optional<AnyExpression> operator()(std::string_view ascii_view) {
-      AsciiLiteral ascii_literal{};
-      ascii_literal.val_view = ascii_view;
-      return AnyExpression{ascii_literal};
-    }
-    std::optional<AnyExpression> operator()(std::u16string_view unicode_view) {
-      UnicodeLiteral unicode_literal{};
-      unicode_literal.val_view = unicode_view;
-      return AnyExpression{unicode_literal};
-    }
-  };
-  return tokenizer.last_token.visit(TokenVisitor{*this});
+Fallible<AnyExpression>
+Parser<T>::PrimaryExpressionSaga::operator()(char32_t punct) {
+  if (punct == '{')
+    return parser.parse_object_literal();
+  else {
+    std::breakpoint();
+    return Throw<UnexpectedToken>(std::in_place);
+  }
+}
+
+template <typename T>
+Fallible<AnyExpression>
+Parser<T>::PrimaryExpressionSaga::operator()(Keyword keyword) {
+  if (keyword != Keyword::K_FUNCTION) {
+    std::breakpoint();
+    return Throw<UnexpectedToken>(std::in_place);
+  }
+  LambdaExpression lambda_expression{};
+  lambda_expression.definition =
+      &parser.boundary.heap->function_definition_list.emplace_back();
+  FunctionParser function_parser{*lambda_expression.definition,
+                                 parser.tokenizer};
+  if (auto void_opt = function_parser.parse_function_decl(); not void_opt)
+    return Throw(void_opt.error());
+  return AnyExpression{lambda_expression};
+}
+
+template <typename T>
+Fallible<AnyExpression> Parser<T>::parse_primary_expression() {
+  return tokenizer.last_token.visit(PrimaryExpressionSaga(*this));
 }
 
 template <typename T>
