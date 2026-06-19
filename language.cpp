@@ -229,8 +229,8 @@ public:
 
 protected:
   AbstractBoundary() = default;
-  std::optional<std::monostate> analyze_statements();
-  std::optional<std::monostate> analyze_inner_functions();
+  Fallible<void> analyze_statements();
+  Fallible<void> analyze_inner_functions();
 };
 
 class FunctionDefinition final : public AbstractBoundary<FunctionDefinition> {
@@ -242,11 +242,11 @@ public:
 
   enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
   AnalyzerMark analyzer_mark;
-  std::optional<std::monostate> analyze();
+  Fallible<void> analyze();
 
   Fallible<void> put_return_type(VariantType variant_type) override {
     return_type.emplace(variant_type);
-    return Fallible<void>();
+    return Fallible<void>{};
   }
 
 private:
@@ -254,7 +254,7 @@ private:
 };
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
-  std::optional<std::monostate> analyze();
+  Fallible<void> analyze();
 
   Fallible<void> put_return_type(VariantType variant_type) override {
     std::breakpoint();
@@ -702,14 +702,14 @@ Fallible<void> Tokenizer::tokenize() {
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
       last_token = Operator::LOGICAL_DISJUNCT;
-      return Fallible<void>();
+      return Fallible<void>{};
     } else
       backward();
     if (std::ranges::binary_search(std::to_array({'"', '\'', '`'}), leading)) {
       std::expected token_opt{tokenize_string_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Fallible<void>();
+        return Fallible<void>{};
       } else
         return Throw(token_opt.error());
     }
@@ -717,7 +717,7 @@ Fallible<void> Tokenizer::tokenize() {
       std::expected token_opt{tokenize_identifier(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Fallible<void>();
+        return Fallible<void>{};
       } else
         return Throw(token_opt.error());
     }
@@ -725,13 +725,13 @@ Fallible<void> Tokenizer::tokenize() {
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
       last_token.emplace<char32_t>(leading);
-      return Fallible<void>();
+      return Fallible<void>{};
     }
     if (std::isdigit(leading)) {
       std::expected token_opt{tokenize_numeric_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Fallible<void>();
+        return Fallible<void>{};
       } else
         return Throw(token_opt.error());
     }
@@ -739,13 +739,13 @@ Fallible<void> Tokenizer::tokenize() {
     return Throw<UnexpectedToken>(std::in_place);
   }
   last_token.emplace<std::monostate>();
-  return Fallible<void>();
+  return Fallible<void>{};
 }
 
 Fallible<void> Tokenizer::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
-    return Fallible<void>();
+    return Fallible<void>{};
   else {
     std::breakpoint();
     return Throw<MissingPunctuation>(std::in_place, must_be);
@@ -1185,13 +1185,13 @@ FunctionDefinition *AbstractBoundary<T>::find_function(Identifier identifier) {
 }
 
 template <typename T>
-std::optional<std::monostate> AbstractBoundary<T>::analyze_inner_functions() {
+Fallible<void> AbstractBoundary<T>::analyze_inner_functions() {
   for (FunctionDefinition *definition : inner_functions) {
     definition->parent_boundary = this;
-    if (not definition->analyze())
-      return std::nullopt;
+    if (auto void_opt = definition->analyze(); not void_opt)
+      return Throw(void_opt.error());
   }
-  return std::monostate{};
+  return Fallible<void>{};
 }
 
 struct PropertyFinder {
@@ -1428,10 +1428,10 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
 }
 
 struct StatementAnalyzer {
-  std::optional<AnyStatement> operator()(const ExpressionStatement &statement);
-  std::optional<AnyStatement> operator()(const InitializeVariable &statement);
-  std::optional<AnyStatement> operator()(const ReturnStatement &statement);
-  std::optional<AnyStatement> operator()(const InitializeScope &statement) {
+  Fallible<AnyStatement> operator()(const ExpressionStatement &statement);
+  Fallible<AnyStatement> operator()(const InitializeVariable &statement);
+  Fallible<AnyStatement> operator()(const ReturnStatement &statement);
+  Fallible<AnyStatement> operator()(const InitializeScope &statement) {
     std::unreachable();
   }
 
@@ -1439,21 +1439,21 @@ struct StatementAnalyzer {
   LexicalBoundary &boundary;
 };
 
-std::optional<AnyStatement>
+Fallible<AnyStatement>
 StatementAnalyzer::operator()(const ExpressionStatement &statement) {
   std::expected argument_analyzed{
       statement.argument->alt.visit(RvalueAnalyzer{boundary})};
   if (not argument_analyzed)
-    return std::nullopt;
+    return Throw(argument_analyzed.error());
   return AnyStatement::Alternative(std::in_place_type<ExpressionStatement>,
                                    std::move(*argument_analyzed));
 }
 
-std::optional<AnyStatement>
+Fallible<AnyStatement>
 StatementAnalyzer::operator()(const InitializeVariable &statement) {
   auto rvalue_analyzed = statement.rvalue->alt.visit(RvalueAnalyzer{boundary});
   if (not rvalue_analyzed)
-    return std::nullopt;
+    return Throw(rvalue_analyzed.error());
   InitializeScope initialize_scope{std::move(*rvalue_analyzed)};
   VariantType datatype_analyzed{
       initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
@@ -1465,65 +1465,64 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
   return AnyStatement{std::move(initialize_scope)};
 }
 
-std::optional<AnyStatement>
+Fallible<AnyStatement>
 StatementAnalyzer::operator()(const ReturnStatement &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
   auto argument_analyzed = statement.argument->alt.visit(rvalue_visitor);
   if (not argument_analyzed)
-    return std::nullopt;
+    return Throw(argument_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
   VariantType argument_type{argument_analyzed->alt.visit(datatype_visitor)};
-  if (not boundary.put_return_type(argument_type))
-    return std::nullopt;
-  return AnyStatement{ReturnStatement{std::move(*argument_analyzed)}};
+  if (auto void_opt = boundary.put_return_type(argument_type); not void_opt)
+    return Throw(void_opt.error());
+  return AnyStatement::Alternative(std::in_place_type<ReturnStatement>,
+                                   std::move(*argument_analyzed));
 }
 
-template <typename T>
-std::optional<std::monostate> AbstractBoundary<T>::analyze_statements() {
+template <typename T> Fallible<void> AbstractBoundary<T>::analyze_statements() {
   for (AnyStatement &any_statement : *program) {
     StatementAnalyzer visitor{*this};
-    std::optional output_statement{any_statement.alt.visit(visitor)};
+    auto output_statement = any_statement.alt.visit(visitor);
     if (not output_statement)
-      return std::nullopt;
-    any_statement = std::move(*output_statement);
+      return Throw(output_statement.error());
+    std::swap(any_statement, *output_statement);
   }
-  return std::monostate{};
+  return Fallible<void>{};
 }
 
 Fallible<void> FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
     local_layout.find(argument)->second.variant_type.emplace(DynamicType{});
-  return Fallible<void>();
+  return Fallible<void>{};
 }
 
-std::optional<std::monostate> FunctionDefinition::analyze() {
+Fallible<void> FunctionDefinition::analyze() {
   switch (analyzer_mark) {
   case AnalyzerMark::PENDING:
     analyzer_mark = AnalyzerMark::INITIATED;
     if (auto void_opt = analyze_formal_parameters(); not void_opt)
-      return std::nullopt;
-    else if (not analyze_statements())
-      return std::nullopt;
-    else if (not analyze_inner_functions())
-      return std::nullopt;
+      return Throw(void_opt.error());
+    if (auto void_opt = analyze_statements(); not void_opt)
+      return Throw(void_opt.error());
+    if (auto void_opt = analyze_inner_functions(); not void_opt)
+      return Throw(void_opt.error());
     analyzer_mark = AnalyzerMark::COMPLETE;
-    return std::monostate{};
+    return Fallible<void>{};
   case AnalyzerMark::INITIATED:
     std::breakpoint();
-    error_descriptor.emplace<UnresolvableCircularity>();
-    return std::nullopt;
+    return Throw<UnresolvableCircularity>(std::in_place);
   case AnalyzerMark::COMPLETE:
-    return std::monostate{};
+    return Fallible<void>{};
   }
   std::unreachable();
 }
 
-std::optional<std::monostate> ModuleDefinition::analyze() {
-  if (not analyze_statements())
-    return std::nullopt;
-  else if (not analyze_inner_functions())
-    return std::nullopt;
-  return std::monostate{};
+Fallible<void> ModuleDefinition::analyze() {
+  if (auto void_opt = analyze_statements(); not void_opt)
+    return Throw(void_opt.error());
+  if (auto void_opt = analyze_inner_functions(); not void_opt)
+    return Throw(void_opt.error());
+  return Fallible<void>{};
 }
 
 enum class SerialExpression : std::uint8_t {
@@ -1576,7 +1575,7 @@ template <typename T> Fallible<void> AbstractBoundary<T>::serialize() {
     if (auto void_opt = statement.alt.visit(stmt_visitor); not void_opt)
       return Throw(void_opt.error());
   }
-  return Fallible<void>();
+  return Fallible<void>{};
 }
 
 Fallible<void>
@@ -1596,7 +1595,7 @@ StatementSerializer::operator()(const InitializeScope &initialize_scope) {
       not void_opt)
     return Throw(void_opt.error());
   bytecode.append_range(std::move(expression_serializer.bytecode));
-  return Fallible<void>();
+  return Fallible<void>{};
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
@@ -1623,13 +1622,16 @@ bool Language::compile_and_execute() {
   if (not parser.parse_module()) {
     variant_error = error_descriptor;
     return 0;
-  } else if (not definition.analyze()) {
-    variant_error = error_descriptor;
+  }
+  if (auto void_opt = definition.analyze(); not void_opt) {
+    variant_error = void_opt.error();
     return 0;
-  } else if (not definition.serialize()) {
-    variant_error = error_descriptor;
+  }
+  if (auto void_opt = definition.serialize(); not void_opt) {
+    variant_error = void_opt.error();
     return 0;
-  } else
-    return 1;
+  }
+
+  return 1;
 }
 } // namespace Manadrain
