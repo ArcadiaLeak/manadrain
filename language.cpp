@@ -1565,40 +1565,58 @@ struct ExpressionSerializer {
   Fallible<void> operator()(const T &expression) {
     std::unreachable();
   }
+  Fallible<void> operator()(const AsciiLiteral &expression);
 
   ExpressionSerializer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
   std::vector<std::byte> bytecode;
 };
 
+Fallible<void>
+ExpressionSerializer::operator()(const AsciiLiteral &expression) {
+  using serial_string_view_t = std::array<std::byte, sizeof(VariantStringView)>;
+  bytecode.append_range(std::bit_cast<serial_string_view_t>(
+      VariantStringView{expression.val_view}));
+  return Fallible<void>{};
+}
+
 template <typename T> Fallible<void> AbstractBoundary<T>::serialize() {
   for (FunctionDefinition *definition : inner_functions)
-    if (auto void_opt = definition->serialize(); not void_opt)
-      return Throw(void_opt.error());
+    if (auto definition_result = definition->serialize(); not definition_result)
+      return Throw(definition_result.error());
   for (const AnyStatement &statement : *program) {
-    StatementSerializer stmt_visitor{*this};
-    if (auto void_opt = statement.alt.visit(stmt_visitor); not void_opt)
-      return Throw(void_opt.error());
+    StatementSerializer statement_visitor{*this};
+    auto statement_result = statement.alt.visit(statement_visitor);
+    if (not statement_result)
+      return Throw(statement_result.error());
   }
   return Fallible<void>{};
 }
 
 Fallible<void>
 StatementSerializer::operator()(const InitializeScope &initialize_scope) {
+  bytecode.push_back(
+      std::byte{std::to_underlying(SerialStatement::INITIALIZE_SCOPE)});
   std::size_t byte_offset{};
   for (std::size_t i = 0; i < initialize_scope.local_offset; ++i) {
     std::optional variant_type{boundary.local_layout.values()[i].variant_type};
     assert(variant_type.has_value());
     byte_offset += variant_type->type_size();
   }
-  bytecode.push_back(
-      std::byte{std::to_underlying(SerialStatement::INITIALIZE_SCOPE)});
-  using serial_offset_t = std::array<std::byte, sizeof(std::size_t)>;
-  bytecode.append_range(std::bit_cast<serial_offset_t>(byte_offset));
+  Identifier entry_key{
+      boundary.local_layout.keys()[initialize_scope.local_offset]};
+  LayoutEntry &entry_value{boundary.local_layout[entry_key]};
+  entry_value.offset = byte_offset;
+  assert(entry_value.variant_type.has_value());
+  using serial_size_t = std::array<std::byte, sizeof(std::size_t)>;
+  bytecode.append_range(std::bit_cast<serial_size_t>(byte_offset));
+  bytecode.append_range(
+      std::bit_cast<serial_size_t>(entry_value.variant_type->type_size()));
   ExpressionSerializer expression_serializer{boundary};
-  if (auto void_opt = initialize_scope.rvalue->alt.visit(expression_serializer);
-      not void_opt)
-    return Throw(void_opt.error());
+  auto serialize_result =
+      initialize_scope.rvalue->alt.visit(expression_serializer);
+  if (not serialize_result)
+    return Throw(serialize_result.error());
   bytecode.append_range(std::move(expression_serializer.bytecode));
   return Fallible<void>{};
 }
