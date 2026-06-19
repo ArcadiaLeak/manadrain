@@ -264,11 +264,11 @@ public:
 
 template <typename T> class Parser {
 public:
-  std::optional<std::monostate> parse_function_stmt();
+  Fallible<void> parse_function_stmt();
   Fallible<void> parse_return_stmt();
   Fallible<void> parse_expression_stmt();
-  std::optional<std::monostate> parse_variable_decl();
-  std::optional<std::monostate> parse_statement();
+  Fallible<void> parse_variable_decl();
+  Fallible<void> parse_statement();
 
   std::optional<AnyExpression> parse_expression();
   std::optional<AnyExpression> parse_primary_expression();
@@ -296,7 +296,7 @@ private:
 class FunctionParser final : public Parser<FunctionDefinition> {
 public:
   FunctionParser(FunctionDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  std::optional<std::monostate> parse_function_decl();
+  Fallible<void> parse_function_decl();
 };
 class ModuleParser final : public Parser<ModuleDefinition> {
 public:
@@ -752,56 +752,54 @@ Fallible<void> Tokenizer::assert_punct(char32_t must_be) {
   }
 }
 
-std::optional<std::monostate> FunctionParser::parse_function_decl() {
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+Fallible<void> FunctionParser::parse_function_decl() {
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
   if (not std::holds_alternative<Identifier>(tokenizer.last_token))
     goto after_name;
   boundary.function_name = std::get<Identifier>(tokenizer.last_token);
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
 after_name:
-  if (not tokenizer.assert_punct('('))
-    return std::nullopt;
+  if (auto void_opt = tokenizer.assert_punct('('); not void_opt)
+    return Throw(void_opt.error());
 formal_parameter: {
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
   if (tokenizer.last_token == Token{U')'})
     goto after_parameters;
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    error_descriptor.emplace<MissingFormalParameter>();
-    return std::nullopt;
+    return Throw<MissingFormalParameter>(std::in_place);
   }
   Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
   boundary.local_layout.try_emplace(parameter);
   boundary.arguments.push_back(parameter);
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
   if (tokenizer.last_token == Token{U')'})
     goto after_parameters;
-  if (not tokenizer.assert_punct(','))
-    return std::nullopt;
+  if (auto void_opt = tokenizer.assert_punct(','); not void_opt)
+    return Throw(void_opt.error());
   goto formal_parameter;
 }
 after_parameters:
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (not tokenizer.assert_punct('{'))
-    return std::nullopt;
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
+  if (auto void_opt = tokenizer.assert_punct('{'); not void_opt)
+    return Throw(void_opt.error());
 body_statement: {
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
   if (std::holds_alternative<std::monostate>(tokenizer.last_token)) {
     std::breakpoint();
-    error_descriptor.emplace<MissingPunctuation>('}');
-    return std::nullopt;
+    return Throw<MissingPunctuation>(std::in_place, '}');
   }
   char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
   if (alter_ptr && *alter_ptr == '}')
-    return std::monostate{};
-  if (not parse_statement())
-    return std::nullopt;
+    return Fallible<void>{};
+  if (auto void_opt = parse_statement(); not void_opt)
+    return Throw(void_opt.error());
   goto body_statement;
 }
 }
@@ -817,8 +815,7 @@ repeat:
   goto repeat;
 }
 
-template <typename T>
-std::optional<std::monostate> Parser<T>::parse_statement() {
+template <typename T> Fallible<void> Parser<T>::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(tokenizer.last_token))
     keyword = std::get<Keyword>(tokenizer.last_token);
@@ -828,12 +825,9 @@ std::optional<std::monostate> Parser<T>::parse_statement() {
   case Keyword::K_LET:
     return parse_variable_decl();
   case Keyword::K_RETURN:
-    return parse_return_stmt() ? std::optional<std::monostate>(std::in_place)
-                               : std::nullopt;
+    return parse_return_stmt();
   default:
-    return parse_expression_stmt()
-               ? std::optional<std::monostate>(std::in_place)
-               : std::nullopt;
+    return parse_expression_stmt();
   }
 }
 
@@ -859,31 +853,28 @@ template <typename T> Fallible<void> Parser<T>::parse_expression_stmt() {
   }
 }
 
-template <typename T>
-std::optional<std::monostate> Parser<T>::parse_function_stmt() {
+template <typename T> Fallible<void> Parser<T>::parse_function_stmt() {
   FunctionDefinition *definition{
       &boundary.heap->function_definition_list.emplace_back()};
   definition->parent_boundary = &boundary;
   definition->program = &boundary.heap->program_list.emplace_back();
   definition->heap = boundary.heap;
   FunctionParser function_parser{*definition, tokenizer};
-  if (not function_parser.parse_function_decl())
-    return std::nullopt;
+  if (auto void_opt = function_parser.parse_function_decl(); not void_opt)
+    return Throw(void_opt.error());
   if (not definition->function_name) {
     std::breakpoint();
-    error_descriptor.emplace<MissingFunctionName>();
-    return std::nullopt;
+    return Throw<MissingFunctionName>(std::in_place);
   }
   bool duplicate_exists =
       std::ranges::contains(boundary.inner_functions, definition->function_name,
                             [](const auto &el) { return el->function_name; });
   if (duplicate_exists) {
     std::breakpoint();
-    error_descriptor.emplace<DuplicateDeclaration>();
-    return std::nullopt;
+    return Throw<DuplicateDeclaration>(std::in_place);
   } else {
     boundary.inner_functions.push_back(definition);
-    return std::monostate{};
+    return Fallible<void>{};
   }
 }
 
@@ -905,38 +896,35 @@ std::optional<AnyExpression> Parser<T>::parse_assign_expression() {
   }
 }
 
-template <typename T>
-std::optional<std::monostate> Parser<T>::parse_variable_decl() {
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+template <typename T> Fallible<void> Parser<T>::parse_variable_decl() {
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    error_descriptor.emplace<MissingVariableName>();
-    return std::nullopt;
+    return Throw<MissingVariableName>(std::in_place);
   }
   Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (not tokenizer.assert_punct('='))
-    return std::nullopt;
-  if (not tokenizer.tokenize())
-    return std::nullopt;
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
+  if (auto void_opt = tokenizer.assert_punct('='); not void_opt)
+    return Throw(void_opt.error());
+  if (auto void_opt = tokenizer.tokenize(); not void_opt)
+    return Throw(void_opt.error());
   if (auto expr_opt = parse_expression(); not expr_opt)
-    return std::nullopt;
+    return Throw<Error>(std::in_place);
   else {
     InitializeVariable initialize_variable{std::move(*expr_opt)};
     initialize_variable.variable_name = variable_name;
     boundary.program->emplace_back(std::move(initialize_variable));
   }
-  if (not tokenizer.assert_punct(';'))
-    return std::nullopt;
+  if (auto void_opt = tokenizer.assert_punct(';'); not void_opt)
+    return Throw(void_opt.error());
   if (boundary.local_layout.contains(variable_name)) {
     std::breakpoint();
-    error_descriptor.emplace<DuplicateDeclaration>();
-    return std::nullopt;
+    return Throw<DuplicateDeclaration>(std::in_place);
   } else {
     boundary.local_layout.try_emplace(variable_name);
-    return std::monostate{};
+    return Fallible<void>{};
   }
 }
 
@@ -1136,7 +1124,8 @@ std::optional<AnyExpression> Parser<T>::parse_primary_expression() {
             &parser.boundary.heap->function_definition_list.emplace_back();
         FunctionParser function_parser{*lambda_expression.definition,
                                        parser.tokenizer};
-        function_parser.parse_function_decl();
+        if (not function_parser.parse_function_decl())
+          return std::nullopt;
         return AnyExpression{lambda_expression};
       }
       default:
