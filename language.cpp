@@ -839,7 +839,7 @@ template <typename T> Fallible<void> Parser<T>::parse_return_stmt() {
   if (auto token_opt = tokenizer.tokenize(); not token_opt)
     return Throw(token_opt.error());
   if (auto stmt_opt = parse_expression(); not stmt_opt)
-    return Throw<Error>(std::in_place);
+    return Throw(stmt_opt.error());
   else {
     ReturnStatement statement{*stmt_opt};
     boundary.program->emplace_back(std::move(statement));
@@ -849,7 +849,7 @@ template <typename T> Fallible<void> Parser<T>::parse_return_stmt() {
 
 template <typename T> Fallible<void> Parser<T>::parse_expression_stmt() {
   if (auto stmt_opt = parse_expression(); not stmt_opt)
-    return Throw<Error>(std::in_place);
+    return Throw(stmt_opt.error());
   else {
     ExpressionStatement statement{*stmt_opt};
     boundary.program->emplace_back(std::move(statement));
@@ -907,21 +907,21 @@ template <typename T> Fallible<void> Parser<T>::parse_variable_decl() {
     return Throw<MissingVariableName>(std::in_place);
   }
   Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
-  if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
-  if (auto void_opt = tokenizer.assert_punct('='); not void_opt)
-    return Throw(void_opt.error());
-  if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
-  if (auto expr_opt = parse_expression(); not expr_opt)
-    return Throw<Error>(std::in_place);
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  if (auto assert_result = tokenizer.assert_punct('='); not assert_result)
+    return Throw(assert_result.error());
+  if (auto token_result = tokenizer.tokenize(); not token_result)
+    return Throw(token_result.error());
+  if (auto expression_result = parse_expression(); not expression_result)
+    return Throw(expression_result.error());
   else {
-    InitializeVariable initialize_variable{std::move(*expr_opt)};
+    InitializeVariable initialize_variable{std::move(*expression_result)};
     initialize_variable.variable_name = variable_name;
     boundary.program->emplace_back(std::move(initialize_variable));
   }
-  if (auto void_opt = tokenizer.assert_punct(';'); not void_opt)
-    return Throw(void_opt.error());
+  if (auto assert_result = tokenizer.assert_punct(';'); not assert_result)
+    return Throw(assert_result.error());
   if (boundary.local_layout.contains(variable_name)) {
     std::breakpoint();
     return Throw<DuplicateDeclaration>(std::in_place);
@@ -1403,8 +1403,8 @@ CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
     std::breakpoint();
     return Throw<InvalidVariableAccess>(std::in_place);
   }
-  if (not definition->analyze())
-    return Throw<Error>(std::in_place);
+  if (auto analyze_result = definition->analyze(); not analyze_result)
+    return Throw(analyze_result.error());
   DirectFunctionCall direct_call{};
   direct_call.callee = definition;
   return AnyExpression{std::move(direct_call)};
