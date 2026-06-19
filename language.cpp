@@ -25,8 +25,6 @@
 #include "language.hpp"
 
 namespace Manadrain {
-static thread_local VariantError error_descriptor{};
-
 enum class Keyword {
   MONOSTATE,
   K_CONST,
@@ -225,7 +223,7 @@ public:
 
   FunctionDefinition *find_function(Identifier identifier) override;
   std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
-  Fallible<void> serialize();
+  void serialize();
 
 protected:
   AbstractBoundary() = default;
@@ -305,7 +303,7 @@ public:
 class ModuleParser final : public Parser<ModuleDefinition> {
 public:
   ModuleParser(ModuleDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  std::optional<std::monostate> parse_module();
+  Fallible<void> parse_module();
 };
 
 class Expression {
@@ -808,15 +806,15 @@ body_statement: {
 }
 }
 
-std::optional<std::monostate> ModuleParser::parse_module() {
-repeat:
-  if (not tokenizer.tokenize())
-    return std::nullopt;
-  if (std::holds_alternative<std::monostate>(tokenizer.last_token))
-    return std::monostate{};
-  if (not parse_statement())
-    return std::nullopt;
-  goto repeat;
+Fallible<void> ModuleParser::parse_module() {
+  while (1) {
+    if (auto token_result = tokenizer.tokenize(); not token_result)
+      return Throw(token_result.error());
+    if (std::holds_alternative<std::monostate>(tokenizer.last_token))
+      return Fallible<void>{};
+    if (auto statement_result = parse_statement(); not statement_result)
+      return Throw(statement_result.error());
+  }
 }
 
 template <typename T> Fallible<void> Parser<T>::parse_statement() {
@@ -1549,9 +1547,9 @@ enum class SerialStatement : std::uint8_t {
 };
 
 struct StatementSerializer {
-  Fallible<void> operator()(const InitializeScope &statement);
+  void operator()(const InitializeScope &statement);
   template <std::derived_from<Statement> T>
-  Fallible<void> operator()(const T &statement) {
+  void operator()(const T &statement) {
     std::unreachable();
   }
 
@@ -1562,39 +1560,33 @@ struct StatementSerializer {
 
 struct ExpressionSerializer {
   template <std::derived_from<Expression> T>
-  Fallible<void> operator()(const T &expression) {
+  void operator()(const T &expression) {
     std::unreachable();
   }
-  Fallible<void> operator()(const AsciiLiteral &expression);
+  void operator()(const AsciiLiteral &expression);
 
   ExpressionSerializer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
   std::vector<std::byte> bytecode;
 };
 
-Fallible<void>
-ExpressionSerializer::operator()(const AsciiLiteral &expression) {
+void ExpressionSerializer::operator()(const AsciiLiteral &expression) {
   using serial_string_view_t = std::array<std::byte, sizeof(VariantStringView)>;
   bytecode.append_range(std::bit_cast<serial_string_view_t>(
       VariantStringView{expression.val_view}));
-  return Fallible<void>{};
 }
 
-template <typename T> Fallible<void> AbstractBoundary<T>::serialize() {
+template <typename T> void AbstractBoundary<T>::serialize() {
   for (FunctionDefinition *definition : inner_functions)
-    if (auto definition_result = definition->serialize(); not definition_result)
-      return Throw(definition_result.error());
+    definition->serialize();
   for (const AnyStatement &statement : *program) {
-    StatementSerializer statement_visitor{*this};
-    auto statement_result = statement.alt.visit(statement_visitor);
-    if (not statement_result)
-      return Throw(statement_result.error());
+    StatementSerializer statement_serializer{*this};
+    statement.alt.visit(statement_serializer);
+    bytecode.append_range(std::move(statement_serializer.bytecode));
   }
-  return Fallible<void>{};
 }
 
-Fallible<void>
-StatementSerializer::operator()(const InitializeScope &initialize_scope) {
+void StatementSerializer::operator()(const InitializeScope &initialize_scope) {
   bytecode.push_back(
       std::byte{std::to_underlying(SerialStatement::INITIALIZE_SCOPE)});
   std::size_t byte_offset{};
@@ -1613,12 +1605,8 @@ StatementSerializer::operator()(const InitializeScope &initialize_scope) {
   bytecode.append_range(
       std::bit_cast<serial_size_t>(entry_value.variant_type->type_size()));
   ExpressionSerializer expression_serializer{boundary};
-  auto serialize_result =
-      initialize_scope.rvalue->alt.visit(expression_serializer);
-  if (not serialize_result)
-    return Throw(serialize_result.error());
+  initialize_scope.rvalue->alt.visit(expression_serializer);
   bytecode.append_range(std::move(expression_serializer.bytecode));
-  return Fallible<void>{};
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
@@ -1642,18 +1630,15 @@ bool Language::compile_and_execute() {
   ModuleParser parser{definition, tokenizer};
   parser.string_atlas = &string_atlas;
 
-  if (not parser.parse_module()) {
-    variant_error = error_descriptor;
+  if (auto parse_result = parser.parse_module(); not parse_result) {
+    variant_error = parse_result.error();
     return 0;
   }
-  if (auto void_opt = definition.analyze(); not void_opt) {
-    variant_error = void_opt.error();
+  if (auto analyze_result = definition.analyze(); not analyze_result) {
+    variant_error = analyze_result.error();
     return 0;
   }
-  if (auto void_opt = definition.serialize(); not void_opt) {
-    variant_error = void_opt.error();
-    return 0;
-  }
+  definition.serialize();
 
   return 1;
 }
