@@ -198,30 +198,31 @@ struct LayoutEntry {
   std::optional<std::size_t> offset;
 };
 
+struct ProgramTape {
+  std::pmr::monotonic_buffer_resource resource;
+  std::list<FunctionDefinition> function_definition_list;
+  std::list<std::list<AnyStatement>> program_list;
+};
+
 class LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
+
+  std::list<AnyStatement> *program;
+  std::vector<FunctionDefinition *> inner_functions;
+  ProgramTape *tape;
+
   std::flat_map<Identifier, LayoutEntry> local_layout;
 
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
   find_local(Identifier identifier) const = 0;
-  virtual Fallible<void> put_return_type(VariantType variant_type) = 0;
-};
 
-struct Heap {
-  std::list<FunctionDefinition> function_definition_list;
-  std::list<std::list<AnyStatement>> program_list;
+  virtual Fallible<void> put_return_type(VariantType variant_type) = 0;
 };
 
 template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
-  std::vector<std::byte> bytecode;
-
-  std::list<AnyStatement> *program;
-  std::vector<FunctionDefinition *> inner_functions;
-  Heap *heap;
-
   FunctionDefinition *find_function(Identifier identifier) override;
   std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
   void serialize();
@@ -508,7 +509,6 @@ struct ConsoleMessage {
 
 struct RuntimeFrame {
   const LexicalBoundary *boundary;
-  std::vector<std::byte>::const_iterator bytecode_it;
   std::span<std::byte> local_memory;
   std::span<RuntimeFrame *> closure;
   std::span<std::byte> return_val;
@@ -857,10 +857,10 @@ template <typename T> Fallible<void> Parser<T>::parse_expression_stmt() {
 
 template <typename T> Fallible<void> Parser<T>::parse_function_stmt() {
   FunctionDefinition *definition{
-      &boundary.heap->function_definition_list.emplace_back()};
+      &boundary.tape->function_definition_list.emplace_back()};
   definition->parent_boundary = &boundary;
-  definition->program = &boundary.heap->program_list.emplace_back();
-  definition->heap = boundary.heap;
+  definition->program = &boundary.tape->program_list.emplace_back();
+  definition->tape = boundary.tape;
   FunctionParser function_parser{*definition, tokenizer};
   if (auto void_opt = function_parser.parse_function_decl(); not void_opt)
     return Throw(void_opt.error());
@@ -1154,7 +1154,7 @@ Parser<T>::PrimaryExpressionSaga::operator()(Keyword keyword) {
   }
   LambdaExpression lambda_expression{};
   lambda_expression.definition =
-      &parser.boundary.heap->function_definition_list.emplace_back();
+      &parser.boundary.tape->function_definition_list.emplace_back();
   FunctionParser function_parser{*lambda_expression.definition,
                                  parser.tokenizer};
   if (auto void_opt = function_parser.parse_function_decl(); not void_opt)
@@ -1547,7 +1547,6 @@ enum class SerialStatement : std::uint8_t {
 };
 
 struct StatementSerializer {
-  void operator()(const InitializeScope &statement);
   template <std::derived_from<Statement> T>
   void operator()(const T &statement) {
     std::unreachable();
@@ -1555,7 +1554,6 @@ struct StatementSerializer {
 
   StatementSerializer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
-  std::vector<std::byte> bytecode;
 };
 
 struct ExpressionSerializer {
@@ -1563,18 +1561,10 @@ struct ExpressionSerializer {
   void operator()(const T &expression) {
     std::unreachable();
   }
-  void operator()(const AsciiLiteral &expression);
 
   ExpressionSerializer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
-  std::vector<std::byte> bytecode;
 };
-
-void ExpressionSerializer::operator()(const AsciiLiteral &expression) {
-  using serial_string_view_t = std::array<std::byte, sizeof(VariantStringView)>;
-  bytecode.append_range(std::bit_cast<serial_string_view_t>(
-      VariantStringView{expression.val_view}));
-}
 
 template <typename T> void AbstractBoundary<T>::serialize() {
   for (FunctionDefinition *definition : inner_functions)
@@ -1582,31 +1572,7 @@ template <typename T> void AbstractBoundary<T>::serialize() {
   for (const AnyStatement &statement : *program) {
     StatementSerializer statement_serializer{*this};
     statement.alt.visit(statement_serializer);
-    bytecode.append_range(std::move(statement_serializer.bytecode));
   }
-}
-
-void StatementSerializer::operator()(const InitializeScope &initialize_scope) {
-  bytecode.push_back(
-      std::byte{std::to_underlying(SerialStatement::INITIALIZE_SCOPE)});
-  std::size_t byte_offset{};
-  for (std::size_t i = 0; i < initialize_scope.local_offset; ++i) {
-    std::optional variant_type{boundary.local_layout.values()[i].variant_type};
-    assert(variant_type.has_value());
-    byte_offset += variant_type->type_size();
-  }
-  Identifier entry_key{
-      boundary.local_layout.keys()[initialize_scope.local_offset]};
-  LayoutEntry &entry_value{boundary.local_layout[entry_key]};
-  entry_value.offset = byte_offset;
-  assert(entry_value.variant_type.has_value());
-  using serial_size_t = std::array<std::byte, sizeof(std::size_t)>;
-  bytecode.append_range(std::bit_cast<serial_size_t>(byte_offset));
-  bytecode.append_range(
-      std::bit_cast<serial_size_t>(entry_value.variant_type->type_size()));
-  ExpressionSerializer expression_serializer{boundary};
-  initialize_scope.rvalue->alt.visit(expression_serializer);
-  bytecode.append_range(std::move(expression_serializer.bytecode));
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
@@ -1618,7 +1584,7 @@ bool Language::compile_and_execute() {
   std::set<LambdaType> lambda_types{};
   std::set<std::string> string_atlas{};
   std::set<std::u16string> u16string_atlas{};
-  Heap heap{};
+  ProgramTape tape{};
 
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
@@ -1626,8 +1592,8 @@ bool Language::compile_and_execute() {
   tokenizer.u16string_atlas = &u16string_atlas;
 
   ModuleDefinition definition{};
-  definition.program = &heap.program_list.emplace_back();
-  definition.heap = &heap;
+  definition.program = &tape.program_list.emplace_back();
+  definition.tape = &tape;
 
   ModuleParser parser{definition, tokenizer};
 
