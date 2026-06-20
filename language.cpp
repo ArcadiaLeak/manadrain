@@ -95,7 +95,8 @@ private:
   friend class ModuleParser;
 
   std::flat_map<std::string, Identifier> atom_atlas;
-  std::set<VariantString> *string_atlas;
+  std::set<std::string> *string_atlas;
+  std::set<std::u16string> *u16string_atlas;
 
   std::size_t position;
   std::vector<std::optional<char32_t>> backtrace;
@@ -292,7 +293,6 @@ private:
   Fallible<AnyExpression> parse_primary_expression();
 
   friend class Language;
-  std::set<VariantString> *string_atlas;
 };
 
 class FunctionParser final : public Parser<FunctionDefinition> {
@@ -655,11 +655,11 @@ Fallible<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
     auto cast_to_ascii = [](char16_t ch) { return static_cast<char>(ch); };
     auto ascii_string = u16_literal | std::views::transform(cast_to_ascii);
     auto [string_iter, _] =
-        string_atlas->emplace(std::string{std::from_range, ascii_string});
-    return std::get<std::string>(*string_iter);
+        string_atlas->emplace(std::from_range, ascii_string);
+    return *string_iter;
   }
-  auto [u16string_iter, _] = string_atlas->emplace(std::move(u16_literal));
-  return std::get<std::u16string>(*u16string_iter);
+  auto [u16string_iter, _] = u16string_atlas->insert(std::move(u16_literal));
+  return *u16string_iter;
 }
 
 Fallible<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
@@ -1616,19 +1616,20 @@ Language &Language::operator=(Language &&other) noexcept = default;
 
 bool Language::compile_and_execute() {
   std::set<LambdaType> lambda_types{};
-  std::set<VariantString> string_atlas{};
+  std::set<std::string> string_atlas{};
+  std::set<std::u16string> u16string_atlas{};
   Heap heap{};
 
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
   tokenizer.string_atlas = &string_atlas;
+  tokenizer.u16string_atlas = &u16string_atlas;
 
   ModuleDefinition definition{};
   definition.program = &heap.program_list.emplace_back();
   definition.heap = &heap;
 
   ModuleParser parser{definition, tokenizer};
-  parser.string_atlas = &string_atlas;
 
   if (auto parse_result = parser.parse_module(); not parse_result) {
     variant_error = parse_result.error();
