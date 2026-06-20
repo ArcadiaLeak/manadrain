@@ -495,9 +495,27 @@ public:
   std::indirect<AnyExpression> argument;
 };
 
+template <typename T> class ResourceDeleter {
+private:
+  std::pmr::memory_resource *resource;
+
+public:
+  ResourceDeleter(std::pmr::memory_resource *r) : resource{r} {}
+  void operator()(T *pointer);
+};
+
+template <typename T> void ResourceDeleter<T>::operator()(T *pointer) {
+  std::pmr::polymorphic_allocator<> allocator(resource);
+  allocator.delete_object<T>(pointer);
+}
+
+template <typename T>
+using ResourcePointer = std::unique_ptr<T, ResourceDeleter<T>>;
+
 struct AnyStatement {
-  using Alternative = std::variant<InitializeVariable, InitializeScope,
-                                   ReturnStatement, ExpressionStatement>;
+  using Alternative = std::variant<
+      ResourcePointer<InitializeVariable>, ResourcePointer<InitializeScope>,
+      ResourcePointer<ReturnStatement>, ResourcePointer<ExpressionStatement>>;
   Alternative alt;
   AnyStatement(Alternative a) : alt{std::move(a)} {};
 };
@@ -836,21 +854,27 @@ template <typename T> Fallible<void> Parser<T>::parse_statement() {
 template <typename T> Fallible<void> Parser<T>::parse_return_stmt() {
   if (auto token_opt = tokenizer.tokenize(); not token_opt)
     return Throw(token_opt.error());
-  if (auto stmt_opt = parse_expression(); not stmt_opt)
-    return Throw(stmt_opt.error());
+  if (auto expression_result = parse_expression(); not expression_result)
+    return Throw(expression_result.error());
   else {
-    ReturnStatement statement{*stmt_opt};
-    boundary.program->emplace_back(std::move(statement));
+    std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    auto statement_pointer =
+        allocator.new_object<ReturnStatement>(std::move(*expression_result));
+    boundary.program->emplace_back(ResourcePointer<ReturnStatement>(
+        statement_pointer, allocator.resource()));
     return tokenizer.assert_punct(';');
   }
 }
 
 template <typename T> Fallible<void> Parser<T>::parse_expression_stmt() {
-  if (auto stmt_opt = parse_expression(); not stmt_opt)
-    return Throw(stmt_opt.error());
+  if (auto expression_result = parse_expression(); not expression_result)
+    return Throw(expression_result.error());
   else {
-    ExpressionStatement statement{*stmt_opt};
-    boundary.program->emplace_back(std::move(statement));
+    std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    auto statement_pointer = allocator.new_object<ExpressionStatement>(
+        std::move(*expression_result));
+    boundary.program->emplace_back(ResourcePointer<ExpressionStatement>(
+        statement_pointer, allocator.resource()));
     return tokenizer.assert_punct(';');
   }
 }
@@ -914,9 +938,12 @@ template <typename T> Fallible<void> Parser<T>::parse_variable_decl() {
   if (auto expression_result = parse_expression(); not expression_result)
     return Throw(expression_result.error());
   else {
-    InitializeVariable initialize_variable{std::move(*expression_result)};
-    initialize_variable.variable_name = variable_name;
-    boundary.program->emplace_back(std::move(initialize_variable));
+    std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    auto statement_pointer =
+        allocator.new_object<InitializeVariable>(std::move(*expression_result));
+    statement_pointer->variable_name = variable_name;
+    boundary.program->emplace_back(ResourcePointer<InitializeVariable>(
+        statement_pointer, allocator.resource()));
   }
   if (auto assert_result = tokenizer.assert_punct(';'); not assert_result)
     return Throw(assert_result.error());
@@ -1431,10 +1458,14 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
 }
 
 struct StatementAnalyzer {
-  Fallible<AnyStatement> operator()(const ExpressionStatement &statement);
-  Fallible<AnyStatement> operator()(const InitializeVariable &statement);
-  Fallible<AnyStatement> operator()(const ReturnStatement &statement);
-  Fallible<AnyStatement> operator()(const InitializeScope &statement) {
+  Fallible<AnyStatement>
+  operator()(ResourcePointer<ExpressionStatement> &statement);
+  Fallible<AnyStatement>
+  operator()(ResourcePointer<InitializeVariable> &statement);
+  Fallible<AnyStatement>
+  operator()(ResourcePointer<ReturnStatement> &statement);
+  Fallible<AnyStatement>
+  operator()(ResourcePointer<InitializeScope> &statement) {
     std::unreachable();
   }
 
@@ -1443,43 +1474,53 @@ struct StatementAnalyzer {
 };
 
 Fallible<AnyStatement>
-StatementAnalyzer::operator()(const ExpressionStatement &statement) {
+StatementAnalyzer::operator()(ResourcePointer<ExpressionStatement> &statement) {
   std::expected argument_analyzed{
-      statement.argument->alt.visit(RvalueAnalyzer{boundary})};
+      statement->argument->alt.visit(RvalueAnalyzer{boundary})};
   if (not argument_analyzed)
     return Throw(argument_analyzed.error());
-  return AnyStatement::Alternative(std::in_place_type<ExpressionStatement>,
-                                   std::move(*argument_analyzed));
+  std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+  auto statement_pointer =
+      allocator.new_object<ExpressionStatement>(std::move(*argument_analyzed));
+  return AnyStatement::Alternative(std::in_place_index<3>, statement_pointer,
+                                   allocator.resource());
 }
 
 Fallible<AnyStatement>
-StatementAnalyzer::operator()(const InitializeVariable &statement) {
-  auto rvalue_analyzed = statement.rvalue->alt.visit(RvalueAnalyzer{boundary});
+StatementAnalyzer::operator()(ResourcePointer<InitializeVariable> &statement) {
+  auto rvalue_analyzed = statement->rvalue->alt.visit(RvalueAnalyzer{boundary});
   if (not rvalue_analyzed)
     return Throw(rvalue_analyzed.error());
   InitializeScope initialize_scope{std::move(*rvalue_analyzed)};
   VariantType datatype_analyzed{
       initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
-  boundary.local_layout[statement.variable_name].variant_type.emplace(
+  boundary.local_layout[statement->variable_name].variant_type.emplace(
       datatype_analyzed);
-  auto variable_it = boundary.local_layout.find(statement.variable_name);
+  auto variable_it = boundary.local_layout.find(statement->variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
-  return AnyStatement{std::move(initialize_scope)};
+  std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+  auto statement_pointer =
+      allocator.new_object<InitializeScope>(std::move(initialize_scope));
+  return AnyStatement::Alternative(std::in_place_index<1>, statement_pointer,
+                                   allocator.resource());
 }
 
 Fallible<AnyStatement>
-StatementAnalyzer::operator()(const ReturnStatement &statement) {
+StatementAnalyzer::operator()(ResourcePointer<ReturnStatement> &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
-  auto argument_analyzed = statement.argument->alt.visit(rvalue_visitor);
+  auto argument_analyzed = statement->argument->alt.visit(rvalue_visitor);
   if (not argument_analyzed)
     return Throw(argument_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
   VariantType argument_type{argument_analyzed->alt.visit(datatype_visitor)};
   if (auto void_opt = boundary.put_return_type(argument_type); not void_opt)
     return Throw(void_opt.error());
-  return AnyStatement::Alternative(std::in_place_type<ReturnStatement>,
-                                   std::move(*argument_analyzed));
+  std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+  auto statement_pointer =
+      allocator.new_object<ReturnStatement>(std::move(*argument_analyzed));
+  return AnyStatement::Alternative(std::in_place_index<2>, statement_pointer,
+                                   allocator.resource());
 }
 
 template <typename T> Fallible<void> AbstractBoundary<T>::analyze_statements() {
@@ -1548,13 +1589,29 @@ enum class SerialStatement : std::uint8_t {
 
 struct StatementSerializer {
   template <std::derived_from<Statement> T>
-  void operator()(const T &statement) {
+  void operator()(const ResourcePointer<T> &statement) {
     std::unreachable();
   }
+  void operator()(const ResourcePointer<InitializeScope> &statement);
 
   StatementSerializer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
 };
+
+void StatementSerializer::operator()(
+    const ResourcePointer<InitializeScope> &initialize_scope) {
+  std::size_t byte_offset{};
+  for (std::size_t i = 0; i < initialize_scope->local_offset; ++i) {
+    std::optional variant_type{boundary.local_layout.values()[i].variant_type};
+    assert(variant_type.has_value());
+    byte_offset += variant_type->type_size();
+  }
+  Identifier entry_key{
+      boundary.local_layout.keys()[initialize_scope->local_offset]};
+  LayoutEntry &entry_value{boundary.local_layout[entry_key]};
+  entry_value.offset = byte_offset;
+  assert(entry_value.variant_type.has_value());
+}
 
 struct ExpressionSerializer {
   template <std::derived_from<Expression> T>
