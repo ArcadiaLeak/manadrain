@@ -80,8 +80,7 @@ inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
-template <typename T> using Fallible = std::expected<T, VariantError>;
-template <typename T> using Throw = std::unexpected<T>;
+template <typename T> using Expected = std::expected<T, VariantError>;
 using VariantString = std::variant<std::string, std::u16string>;
 
 class Tokenizer {
@@ -106,13 +105,13 @@ private:
   void backward();
   void backward(std::size_t N);
 
-  Fallible<Token> tokenize_identifier(char32_t leading);
-  Fallible<Token> tokenize_string_literal(char32_t separator);
-  Fallible<Token> tokenize_numeric_literal(char32_t leading);
+  Expected<Token> tokenize_identifier(char32_t leading);
+  Expected<Token> tokenize_string_literal(char32_t separator);
+  Expected<Token> tokenize_numeric_literal(char32_t leading);
 
   Token last_token;
-  Fallible<void> assert_punct(char32_t must_be);
-  Fallible<void> tokenize();
+  Expected<void> assert_punct(char32_t must_be);
+  Expected<void> tokenize();
 };
 
 struct AnyExpression;
@@ -198,19 +197,23 @@ struct LayoutEntry {
   std::optional<std::size_t> offset;
 };
 
-struct ProgramTape {
+struct Program {
   std::pmr::monotonic_buffer_resource resource;
+  std::vector<AnyStatement> statements;
+};
+
+struct FunctionTape {
   std::list<FunctionDefinition> function_definition_list;
-  std::list<std::list<AnyStatement>> program_list;
+  std::vector<std::unique_ptr<Program>> all_programs;
 };
 
 class LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
 
-  std::list<AnyStatement> *program;
+  std::size_t program_idx;
   std::vector<FunctionDefinition *> inner_functions;
-  ProgramTape *tape;
+  FunctionTape *tape;
 
   std::flat_map<Identifier, LayoutEntry> local_layout;
 
@@ -218,7 +221,7 @@ public:
   virtual std::optional<ScopeAccessor>
   find_local(Identifier identifier) const = 0;
 
-  virtual Fallible<void> put_return_type(VariantType variant_type) = 0;
+  virtual Expected<void> put_return_type(VariantType variant_type) = 0;
 };
 
 template <typename T> class AbstractBoundary : public LexicalBoundary {
@@ -229,8 +232,8 @@ public:
 
 protected:
   AbstractBoundary() = default;
-  Fallible<void> analyze_statements();
-  Fallible<void> analyze_inner_functions();
+  Expected<void> analyze_statements();
+  Expected<void> analyze_inner_functions();
 };
 
 class FunctionDefinition final : public AbstractBoundary<FunctionDefinition> {
@@ -242,39 +245,39 @@ public:
 
   enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
   AnalyzerMark analyzer_mark;
-  Fallible<void> analyze();
+  Expected<void> analyze();
 
-  Fallible<void> put_return_type(VariantType variant_type) override {
+  Expected<void> put_return_type(VariantType variant_type) override {
     return_type.emplace(variant_type);
-    return Fallible<void>{};
+    return Expected<void>{};
   }
 
 private:
-  Fallible<void> analyze_formal_parameters();
+  Expected<void> analyze_formal_parameters();
 };
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
-  Fallible<void> analyze();
+  Expected<void> analyze();
 
-  Fallible<void> put_return_type(VariantType variant_type) override {
+  Expected<void> put_return_type(VariantType variant_type) override {
     std::breakpoint();
-    return Throw<InvalidReturnStatement>(std::in_place);
+    return std::unexpected<InvalidReturnStatement>(std::in_place);
   }
 };
 
 template <typename T> class Parser {
 public:
-  Fallible<void> parse_function_stmt();
-  Fallible<void> parse_return_stmt();
-  Fallible<void> parse_expression_stmt();
-  Fallible<void> parse_variable_decl();
-  Fallible<void> parse_statement();
+  Expected<void> parse_function_stmt();
+  Expected<void> parse_return_stmt();
+  Expected<void> parse_expression_stmt();
+  Expected<void> parse_variable_decl();
+  Expected<void> parse_statement();
 
-  Fallible<AnyExpression> parse_expression();
-  Fallible<AnyExpression> parse_assign_expression();
-  Fallible<AnyExpression> parse_logical_disjunct();
-  Fallible<AnyExpression> parse_additive_expression();
-  Fallible<AnyExpression> parse_object_literal();
+  Expected<AnyExpression> parse_expression();
+  Expected<AnyExpression> parse_assign_expression();
+  Expected<AnyExpression> parse_logical_disjunct();
+  Expected<AnyExpression> parse_additive_expression();
+  Expected<AnyExpression> parse_object_literal();
 
 protected:
   Parser(T &b, Tokenizer &t) : boundary{b}, tokenizer{t} {}
@@ -283,15 +286,15 @@ protected:
 
 private:
   struct PostfixExpressionSaga {
-    Fallible<AnyExpression> parse_member_expression(AnyExpression expression);
-    Fallible<AnyExpression> parse_function_call(AnyExpression expression);
-    Fallible<AnyExpression> operator()(AnyExpression expression);
+    Expected<AnyExpression> parse_member_expression(AnyExpression expression);
+    Expected<AnyExpression> parse_function_call(AnyExpression expression);
+    Expected<AnyExpression> operator()(AnyExpression expression);
     Parser &parser;
   };
-  Fallible<AnyExpression> parse_postfix_expression();
+  Expected<AnyExpression> parse_postfix_expression();
 
   struct PrimaryExpressionSaga;
-  Fallible<AnyExpression> parse_primary_expression();
+  Expected<AnyExpression> parse_primary_expression();
 
   friend class Language;
 };
@@ -299,12 +302,12 @@ private:
 class FunctionParser final : public Parser<FunctionDefinition> {
 public:
   FunctionParser(FunctionDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  Fallible<void> parse_function_decl();
+  Expected<void> parse_function_decl();
 };
 class ModuleParser final : public Parser<ModuleDefinition> {
 public:
   ModuleParser(ModuleDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  Fallible<void> parse_module();
+  Expected<void> parse_module();
 };
 
 class Expression {
@@ -503,12 +506,10 @@ public:
   ResourceDeleter(std::pmr::memory_resource *r) : resource{r} {}
   void operator()(T *pointer);
 };
-
 template <typename T> void ResourceDeleter<T>::operator()(T *pointer) {
   std::pmr::polymorphic_allocator<> allocator(resource);
   allocator.delete_object<T>(pointer);
 }
-
 template <typename T>
 using ResourcePointer = std::unique_ptr<T, ResourceDeleter<T>>;
 
@@ -632,7 +633,7 @@ void Tokenizer::backward(std::size_t N) {
     backward();
 }
 
-Fallible<Token> Tokenizer::tokenize_identifier(char32_t leading) {
+Expected<Token> Tokenizer::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -653,7 +654,7 @@ Fallible<Token> Tokenizer::tokenize_identifier(char32_t leading) {
   return emplace_ret.first->second;
 }
 
-Fallible<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
+Expected<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
   std::u16string u16_literal{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
@@ -665,7 +666,7 @@ Fallible<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
       backward();
     if (not leading || leading == '\r' || leading == '\n') {
       std::breakpoint();
-      return Throw<UnexpectedStringEnd>(std::in_place);
+      return std::unexpected<UnexpectedStringEnd>(std::in_place);
     }
     u16_literal.append_range(traverse_u16(*leading));
   }
@@ -680,7 +681,7 @@ Fallible<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
   return *u16string_iter;
 }
 
-Fallible<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
+Expected<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -697,7 +698,7 @@ Fallible<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-Fallible<void> Tokenizer::tokenize() {
+Expected<void> Tokenizer::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -722,120 +723,120 @@ Fallible<void> Tokenizer::tokenize() {
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
       last_token = Operator::LOGICAL_DISJUNCT;
-      return Fallible<void>{};
+      return Expected<void>{};
     } else
       backward();
     if (std::ranges::binary_search(std::to_array({'"', '\'', '`'}), leading)) {
       std::expected token_opt{tokenize_string_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Fallible<void>{};
+        return Expected<void>{};
       } else
-        return Throw(token_opt.error());
+        return std::unexpected(token_opt.error());
     }
     if (uc_is_property_xid_start(leading) || leading == '_') {
       std::expected token_opt{tokenize_identifier(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Fallible<void>{};
+        return Expected<void>{};
       } else
-        return Throw(token_opt.error());
+        return std::unexpected(token_opt.error());
     }
     static const std::array legal_punct{std::to_array<char32_t>(
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
       last_token.emplace<char32_t>(leading);
-      return Fallible<void>{};
+      return Expected<void>{};
     }
     if (std::isdigit(leading)) {
       std::expected token_opt{tokenize_numeric_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Fallible<void>{};
+        return Expected<void>{};
       } else
-        return Throw(token_opt.error());
+        return std::unexpected(token_opt.error());
     }
     std::breakpoint();
-    return Throw<UnexpectedToken>(std::in_place);
+    return std::unexpected<UnexpectedToken>(std::in_place);
   }
   last_token.emplace<std::monostate>();
-  return Fallible<void>{};
+  return Expected<void>{};
 }
 
-Fallible<void> Tokenizer::assert_punct(char32_t must_be) {
+Expected<void> Tokenizer::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
-    return Fallible<void>{};
+    return Expected<void>{};
   else {
     std::breakpoint();
-    return Throw<MissingPunctuation>(std::in_place, must_be);
+    return std::unexpected<MissingPunctuation>(std::in_place, must_be);
   }
 }
 
-Fallible<void> FunctionParser::parse_function_decl() {
+Expected<void> FunctionParser::parse_function_decl() {
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (not std::holds_alternative<Identifier>(tokenizer.last_token))
     goto after_name;
   boundary.function_name = std::get<Identifier>(tokenizer.last_token);
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
 after_name:
   if (auto void_opt = tokenizer.assert_punct('('); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
 formal_parameter: {
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (tokenizer.last_token == Token{U')'})
     goto after_parameters;
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    return Throw<MissingFormalParameter>(std::in_place);
+    return std::unexpected<MissingFormalParameter>(std::in_place);
   }
   Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
   boundary.local_layout.try_emplace(parameter);
   boundary.arguments.push_back(parameter);
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (tokenizer.last_token == Token{U')'})
     goto after_parameters;
   if (auto void_opt = tokenizer.assert_punct(','); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   goto formal_parameter;
 }
 after_parameters:
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (auto void_opt = tokenizer.assert_punct('{'); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
 body_statement: {
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (std::holds_alternative<std::monostate>(tokenizer.last_token)) {
     std::breakpoint();
-    return Throw<MissingPunctuation>(std::in_place, '}');
+    return std::unexpected<MissingPunctuation>(std::in_place, '}');
   }
   char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
   if (alter_ptr && *alter_ptr == '}')
-    return Fallible<void>{};
+    return Expected<void>{};
   if (auto void_opt = parse_statement(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   goto body_statement;
 }
 }
 
-Fallible<void> ModuleParser::parse_module() {
+Expected<void> ModuleParser::parse_module() {
   while (1) {
     if (auto token_result = tokenizer.tokenize(); not token_result)
-      return Throw(token_result.error());
+      return std::unexpected(token_result.error());
     if (std::holds_alternative<std::monostate>(tokenizer.last_token))
-      return Fallible<void>{};
+      return Expected<void>{};
     if (auto statement_result = parse_statement(); not statement_result)
-      return Throw(statement_result.error());
+      return std::unexpected(statement_result.error());
   }
 }
 
-template <typename T> Fallible<void> Parser<T>::parse_statement() {
+template <typename T> Expected<void> Parser<T>::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(tokenizer.last_token))
     keyword = std::get<Keyword>(tokenizer.last_token);
@@ -851,129 +852,133 @@ template <typename T> Fallible<void> Parser<T>::parse_statement() {
   }
 }
 
-template <typename T> Fallible<void> Parser<T>::parse_return_stmt() {
+template <typename T> Expected<void> Parser<T>::parse_return_stmt() {
   if (auto token_opt = tokenizer.tokenize(); not token_opt)
-    return Throw(token_opt.error());
+    return std::unexpected(token_opt.error());
   if (auto expression_result = parse_expression(); not expression_result)
-    return Throw(expression_result.error());
+    return std::unexpected(expression_result.error());
   else {
-    std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    Program &program{*boundary.tape->all_programs[boundary.program_idx]};
+    std::pmr::polymorphic_allocator<> allocator(&program.resource);
     auto statement_pointer =
         allocator.new_object<ReturnStatement>(std::move(*expression_result));
-    boundary.program->emplace_back(ResourcePointer<ReturnStatement>(
+    program.statements.emplace_back(ResourcePointer<ReturnStatement>(
         statement_pointer, allocator.resource()));
     return tokenizer.assert_punct(';');
   }
 }
 
-template <typename T> Fallible<void> Parser<T>::parse_expression_stmt() {
+template <typename T> Expected<void> Parser<T>::parse_expression_stmt() {
   if (auto expression_result = parse_expression(); not expression_result)
-    return Throw(expression_result.error());
+    return std::unexpected(expression_result.error());
   else {
-    std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    Program &program{*boundary.tape->all_programs[boundary.program_idx]};
+    std::pmr::polymorphic_allocator<> allocator(&program.resource);
     auto statement_pointer = allocator.new_object<ExpressionStatement>(
         std::move(*expression_result));
-    boundary.program->emplace_back(ResourcePointer<ExpressionStatement>(
+    program.statements.emplace_back(ResourcePointer<ExpressionStatement>(
         statement_pointer, allocator.resource()));
     return tokenizer.assert_punct(';');
   }
 }
 
-template <typename T> Fallible<void> Parser<T>::parse_function_stmt() {
+template <typename T> Expected<void> Parser<T>::parse_function_stmt() {
   FunctionDefinition *definition{
       &boundary.tape->function_definition_list.emplace_back()};
   definition->parent_boundary = &boundary;
-  definition->program = &boundary.tape->program_list.emplace_back();
+  definition->program_idx = boundary.tape->all_programs.size();
+  boundary.tape->all_programs.push_back(std::make_unique<Program>());
   definition->tape = boundary.tape;
   FunctionParser function_parser{*definition, tokenizer};
   if (auto void_opt = function_parser.parse_function_decl(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (not definition->function_name) {
     std::breakpoint();
-    return Throw<MissingFunctionName>(std::in_place);
+    return std::unexpected<MissingFunctionName>(std::in_place);
   }
   bool duplicate_exists =
       std::ranges::contains(boundary.inner_functions, definition->function_name,
                             [](const auto &el) { return el->function_name; });
   if (duplicate_exists) {
     std::breakpoint();
-    return Throw<DuplicateDeclaration>(std::in_place);
+    return std::unexpected<DuplicateDeclaration>(std::in_place);
   } else {
     boundary.inner_functions.push_back(definition);
-    return Fallible<void>{};
+    return Expected<void>{};
   }
 }
 
 template <typename T>
-Fallible<AnyExpression> Parser<T>::parse_assign_expression() {
+Expected<AnyExpression> Parser<T>::parse_assign_expression() {
   auto left_expression = parse_logical_disjunct();
   if (not left_expression)
-    return Throw(left_expression.error());
+    return std::unexpected(left_expression.error());
   if (tokenizer.last_token != Token{U'='})
     return left_expression;
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   auto expression_result = parse_assign_expression();
   if (not expression_result)
-    return Throw(expression_result.error());
+    return std::unexpected(expression_result.error());
   return AnyExpression::Alternative(std::in_place_type<AssignExpression>,
                                     std::move(*left_expression),
                                     std::move(*expression_result));
 }
 
-template <typename T> Fallible<void> Parser<T>::parse_variable_decl() {
+template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    return Throw<MissingVariableName>(std::in_place);
+    return std::unexpected<MissingVariableName>(std::in_place);
   }
   Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (auto assert_result = tokenizer.assert_punct('='); not assert_result)
-    return Throw(assert_result.error());
+    return std::unexpected(assert_result.error());
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (auto expression_result = parse_expression(); not expression_result)
-    return Throw(expression_result.error());
+    return std::unexpected(expression_result.error());
   else {
-    std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    Program &program{*boundary.tape->all_programs[boundary.program_idx]};
+    std::pmr::polymorphic_allocator<> allocator(&program.resource);
     auto statement_pointer =
         allocator.new_object<InitializeVariable>(std::move(*expression_result));
     statement_pointer->variable_name = variable_name;
-    boundary.program->emplace_back(ResourcePointer<InitializeVariable>(
+    program.statements.emplace_back(ResourcePointer<InitializeVariable>(
         statement_pointer, allocator.resource()));
   }
   if (auto assert_result = tokenizer.assert_punct(';'); not assert_result)
-    return Throw(assert_result.error());
+    return std::unexpected(assert_result.error());
   if (boundary.local_layout.contains(variable_name)) {
     std::breakpoint();
-    return Throw<DuplicateDeclaration>(std::in_place);
+    return std::unexpected<DuplicateDeclaration>(std::in_place);
   } else {
     boundary.local_layout.try_emplace(variable_name);
-    return Fallible<void>{};
+    return Expected<void>{};
   }
 }
 
-template <typename T> Fallible<AnyExpression> Parser<T>::parse_expression() {
+template <typename T> Expected<AnyExpression> Parser<T>::parse_expression() {
   return parse_assign_expression();
 }
 
 template <typename T>
-Fallible<AnyExpression> Parser<T>::parse_logical_disjunct() {
+Expected<AnyExpression> Parser<T>::parse_logical_disjunct() {
   auto left_expression = parse_additive_expression();
   if (not left_expression)
-    return Throw(left_expression.error());
+    return std::unexpected(left_expression.error());
 right_expression: {
   if (tokenizer.last_token != Token{Operator::LOGICAL_DISJUNCT})
     return left_expression;
   Operator logical_op{std::get<Operator>(tokenizer.last_token)};
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (auto expression_result = parse_additive_expression();
       not expression_result)
-    return Throw(expression_result.error());
+    return std::unexpected(expression_result.error());
   else {
     LogicalExpression expression{std::move(*left_expression),
                                  std::move(*expression_result)};
@@ -986,10 +991,10 @@ right_expression: {
 }
 
 template <typename T>
-Fallible<AnyExpression>
+Expected<AnyExpression>
 Parser<T>::PostfixExpressionSaga::operator()(AnyExpression expression) {
   if (auto token_result = parser.tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (auto *punctuation = std::get_if<char32_t>(&parser.tokenizer.last_token);
       not punctuation)
     return expression;
@@ -1002,56 +1007,56 @@ Parser<T>::PostfixExpressionSaga::operator()(AnyExpression expression) {
 }
 
 template <typename T>
-Fallible<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
+Expected<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
     AnyExpression expression) {
   AliasedFunctionCall function_call(std::move(expression));
   while (1) {
     if (auto token_result = parser.tokenizer.tokenize(); not token_result)
-      return Throw(token_result.error());
+      return std::unexpected(token_result.error());
     if (parser.tokenizer.last_token == Token{U')'})
       break;
     auto argument_expression = parser.parse_expression();
     if (not argument_expression)
-      return Throw(argument_expression.error());
+      return std::unexpected(argument_expression.error());
     function_call.arguments.push_back(std::move(*argument_expression));
     if (parser.tokenizer.last_token == Token{U')'})
       break;
     if (auto assert_result = parser.tokenizer.assert_punct(',');
         not assert_result)
-      return Throw(assert_result.error());
+      return std::unexpected(assert_result.error());
   }
-  return Fallible<AnyExpression>(std::in_place, std::move(function_call))
+  return Expected<AnyExpression>(std::in_place, std::move(function_call))
       .and_then(*this);
 }
 
 template <typename T>
-Fallible<AnyExpression>
+Expected<AnyExpression>
 Parser<T>::PostfixExpressionSaga::parse_member_expression(
     AnyExpression expression) {
   if (auto token_result = parser.tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (auto *field_name = std::get_if<Identifier>(&parser.tokenizer.last_token);
       not field_name) {
     std::breakpoint();
-    return Throw<MissingPropertyName>(std::in_place);
+    return std::unexpected<MissingPropertyName>(std::in_place);
   } else {
     MemberExpression member_expression(std::move(expression));
     member_expression.property = *field_name;
-    return Fallible<AnyExpression>(std::in_place, std::move(member_expression))
+    return Expected<AnyExpression>(std::in_place, std::move(member_expression))
         .and_then(*this);
   }
 }
 
 template <typename T>
-Fallible<AnyExpression> Parser<T>::parse_postfix_expression() {
+Expected<AnyExpression> Parser<T>::parse_postfix_expression() {
   return parse_primary_expression().and_then(PostfixExpressionSaga(*this));
 }
 
 template <typename T>
-Fallible<AnyExpression> Parser<T>::parse_additive_expression() {
+Expected<AnyExpression> Parser<T>::parse_additive_expression() {
   auto left_expression = parse_postfix_expression();
   if (not left_expression)
-    return Throw(left_expression.error());
+    return std::unexpected(left_expression.error());
   auto *operator_ahead = std::get_if<char32_t>(&tokenizer.last_token);
   static const std::array additive_punct = std::to_array<char32_t>({'+', '-'});
   bool should_proceed =
@@ -1060,9 +1065,9 @@ Fallible<AnyExpression> Parser<T>::parse_additive_expression() {
     return std::move(*left_expression);
   char32_t binary_op{*operator_ahead};
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (auto right_expression = parse_postfix_expression(); not right_expression)
-    return Throw(right_expression.error());
+    return std::unexpected(right_expression.error());
   else {
     BinaryExpression binary_expression{std::move(*left_expression),
                                        std::move(*right_expression)};
@@ -1072,27 +1077,27 @@ Fallible<AnyExpression> Parser<T>::parse_additive_expression() {
 }
 
 template <typename T>
-Fallible<AnyExpression> Parser<T>::parse_object_literal() {
+Expected<AnyExpression> Parser<T>::parse_object_literal() {
   ObjectExpression object_expression{};
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
 object_property: {
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    return Throw<InvalidPropertyName>(std::in_place);
+    return std::unexpected<InvalidPropertyName>(std::in_place);
   }
   Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
   object_expression.object_shape.properties.try_emplace(property_name);
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   object_expression.keys.push_back(property_name);
   std::optional<AnyExpression> initializer{};
   if (tokenizer.last_token != Token{U':'})
     goto after_initializer;
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (auto expression_result = parse_expression(); not expression_result)
-    return Throw(expression_result.error());
+    return std::unexpected(expression_result.error());
   else
     initializer.emplace(std::move(*expression_result));
 after_initializer:
@@ -1100,13 +1105,13 @@ after_initializer:
   if (tokenizer.last_token != Token{U','})
     goto after_properties;
   if (auto token_result = tokenizer.tokenize(); not token_result)
-    return Throw(token_result.error());
+    return std::unexpected(token_result.error());
   if (tokenizer.last_token != Token{U'}'})
     goto object_property;
 }
 after_properties:
   if (auto assert_result = tokenizer.assert_punct('}'); not assert_result)
-    return Throw(assert_result.error());
+    return std::unexpected(assert_result.error());
   return AnyExpression{std::move(object_expression)};
 }
 
@@ -1117,44 +1122,44 @@ private:
 public:
   PrimaryExpressionSaga(Parser &p) : parser{p} {}
 
-  Fallible<AnyExpression> operator()(char32_t punct);
-  Fallible<AnyExpression> operator()(Keyword keyword);
+  Expected<AnyExpression> operator()(char32_t punct);
+  Expected<AnyExpression> operator()(Keyword keyword);
 
-  Fallible<AnyExpression> operator()(std::monostate) {
+  Expected<AnyExpression> operator()(std::monostate) {
     std::breakpoint();
-    return Throw<UnexpectedToken>(std::in_place);
+    return std::unexpected<UnexpectedToken>(std::in_place);
   }
 
-  Fallible<AnyExpression> operator()(std::int64_t number) {
+  Expected<AnyExpression> operator()(std::int64_t number) {
     NumericLiteral num_literal{};
     num_literal.val = static_cast<double>(number);
     return AnyExpression{num_literal};
   }
 
-  Fallible<AnyExpression> operator()(double number) {
+  Expected<AnyExpression> operator()(double number) {
     NumericLiteral numeric_literal{};
     numeric_literal.val = number;
     return AnyExpression{numeric_literal};
   }
 
-  Fallible<AnyExpression> operator()(Operator op) {
+  Expected<AnyExpression> operator()(Operator op) {
     std::breakpoint();
-    return Throw<UnexpectedToken>(std::in_place);
+    return std::unexpected<UnexpectedToken>(std::in_place);
   }
 
-  Fallible<AnyExpression> operator()(Identifier identifier) {
+  Expected<AnyExpression> operator()(Identifier identifier) {
     VariableAccessor variable_accessor{};
     variable_accessor.identifier = identifier;
     return AnyExpression{variable_accessor};
   }
 
-  Fallible<AnyExpression> operator()(std::string_view ascii_view) {
+  Expected<AnyExpression> operator()(std::string_view ascii_view) {
     AsciiLiteral ascii_literal{};
     ascii_literal.val_view = ascii_view;
     return AnyExpression{ascii_literal};
   }
 
-  Fallible<AnyExpression> operator()(std::u16string_view unicode_view) {
+  Expected<AnyExpression> operator()(std::u16string_view unicode_view) {
     UnicodeLiteral unicode_literal{};
     unicode_literal.val_view = unicode_view;
     return AnyExpression{unicode_literal};
@@ -1162,22 +1167,22 @@ public:
 };
 
 template <typename T>
-Fallible<AnyExpression>
+Expected<AnyExpression>
 Parser<T>::PrimaryExpressionSaga::operator()(char32_t punct) {
   if (punct == '{')
     return parser.parse_object_literal();
   else {
     std::breakpoint();
-    return Throw<UnexpectedToken>(std::in_place);
+    return std::unexpected<UnexpectedToken>(std::in_place);
   }
 }
 
 template <typename T>
-Fallible<AnyExpression>
+Expected<AnyExpression>
 Parser<T>::PrimaryExpressionSaga::operator()(Keyword keyword) {
   if (keyword != Keyword::K_FUNCTION) {
     std::breakpoint();
-    return Throw<UnexpectedToken>(std::in_place);
+    return std::unexpected<UnexpectedToken>(std::in_place);
   }
   LambdaExpression lambda_expression{};
   lambda_expression.definition =
@@ -1185,12 +1190,12 @@ Parser<T>::PrimaryExpressionSaga::operator()(Keyword keyword) {
   FunctionParser function_parser{*lambda_expression.definition,
                                  parser.tokenizer};
   if (auto void_opt = function_parser.parse_function_decl(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   return AnyExpression{lambda_expression};
 }
 
 template <typename T>
-Fallible<AnyExpression> Parser<T>::parse_primary_expression() {
+Expected<AnyExpression> Parser<T>::parse_primary_expression() {
   return tokenizer.last_token.visit(PrimaryExpressionSaga(*this));
 }
 
@@ -1215,22 +1220,22 @@ FunctionDefinition *AbstractBoundary<T>::find_function(Identifier identifier) {
 }
 
 template <typename T>
-Fallible<void> AbstractBoundary<T>::analyze_inner_functions() {
+Expected<void> AbstractBoundary<T>::analyze_inner_functions() {
   for (FunctionDefinition *definition : inner_functions) {
     definition->parent_boundary = this;
     if (auto void_opt = definition->analyze(); not void_opt)
-      return Throw(void_opt.error());
+      return std::unexpected(void_opt.error());
   }
-  return Fallible<void>{};
+  return Expected<void>{};
 }
 
 struct PropertyFinder {
-  Fallible<AnyExpression> operator()(StringType);
+  Expected<AnyExpression> operator()(StringType);
   template <std::derived_from<ValueType> T>
-  Fallible<AnyExpression> operator()(T) {
+  Expected<AnyExpression> operator()(T) {
     std::unreachable();
   }
-  Fallible<AnyExpression> operator()(const LambdaType *) { std::unreachable(); }
+  Expected<AnyExpression> operator()(const LambdaType *) { std::unreachable(); }
 
   AnyExpression source_expression;
   Identifier identifier;
@@ -1240,10 +1245,10 @@ struct PropertyFinder {
 struct RvalueAnalyzer;
 
 struct CalleeAnalyzer {
-  Fallible<AnyExpression> operator()(const MemberExpression &expression);
-  Fallible<AnyExpression> operator()(const VariableAccessor &expression);
+  Expected<AnyExpression> operator()(const MemberExpression &expression);
+  Expected<AnyExpression> operator()(const VariableAccessor &expression);
   template <std::derived_from<Expression> T>
-  Fallible<AnyExpression> operator()(const T &expression) {
+  Expected<AnyExpression> operator()(const T &expression) {
     std::unreachable();
   }
 
@@ -1253,18 +1258,18 @@ struct CalleeAnalyzer {
 };
 
 struct RvalueAnalyzer {
-  Fallible<AnyExpression> operator()(const AsciiLiteral &ascii_literal) {
+  Expected<AnyExpression> operator()(const AsciiLiteral &ascii_literal) {
     return AnyExpression{ascii_literal};
   }
-  Fallible<AnyExpression> operator()(const NumericLiteral &numeric_literal) {
+  Expected<AnyExpression> operator()(const NumericLiteral &numeric_literal) {
     return AnyExpression{numeric_literal};
   }
-  Fallible<AnyExpression> operator()(const AliasedFunctionCall &expression);
-  Fallible<AnyExpression> operator()(const VariableAccessor &expression);
-  Fallible<AnyExpression> operator()(const BinaryExpression &expression);
-  Fallible<AnyExpression> operator()(const MemberExpression &expression);
+  Expected<AnyExpression> operator()(const AliasedFunctionCall &expression);
+  Expected<AnyExpression> operator()(const VariableAccessor &expression);
+  Expected<AnyExpression> operator()(const BinaryExpression &expression);
+  Expected<AnyExpression> operator()(const MemberExpression &expression);
   template <std::derived_from<Expression> T>
-  Fallible<AnyExpression> operator()(const T &expression) {
+  Expected<AnyExpression> operator()(const T &expression) {
     std::unreachable();
   }
 
@@ -1273,10 +1278,10 @@ struct RvalueAnalyzer {
 };
 
 struct MethodAnalyzer {
-  Fallible<AnyExpression>
+  Expected<AnyExpression>
   operator()(const IntrinsicAccessor &intrinsic_accessor);
   template <std::derived_from<Expression> T>
-  Fallible<AnyExpression> operator()(const T &expression) {
+  Expected<AnyExpression> operator()(const T &expression) {
     std::unreachable();
   }
 
@@ -1320,14 +1325,14 @@ struct ExpressionStringifier {
   ExpressionStringifier(AnyExpression e) : source_expression{std::move(e)} {}
 };
 
-Fallible<AnyExpression> PropertyFinder::operator()(StringType) {
+Expected<AnyExpression> PropertyFinder::operator()(StringType) {
   switch (identifier.offset) {
   case OFFSET_length:
-    return Fallible<AnyExpression>(
+    return Expected<AnyExpression>(
         std::in_place, LengthIntrinsic{std::move(source_expression)});
   default:
     std::breakpoint();
-    return Throw<InvalidPropertyAccess>(std::in_place);
+    return std::unexpected<InvalidPropertyAccess>(std::in_place);
   }
 }
 
@@ -1336,14 +1341,14 @@ AnyExpression ExpressionStringifier::operator()(NumberType) {
                                     std::move(source_expression));
 }
 
-Fallible<AnyExpression>
+Expected<AnyExpression>
 RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   CalleeAnalyzer callee_visitor{boundary};
   callee_visitor.arguments = function_call.arguments;
   return function_call.callee->alt.visit(callee_visitor);
 }
 
-Fallible<AnyExpression>
+Expected<AnyExpression>
 RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   std::optional<ScopeAccessor> scope_accessor{
       variable_accessor.find_local_linkedly(&boundary)};
@@ -1357,11 +1362,11 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   }
   default:
     std::breakpoint();
-    return Throw<InvalidVariableAccess>(std::in_place);
+    return std::unexpected<InvalidVariableAccess>(std::in_place);
   }
 }
 
-Fallible<AnyExpression>
+Expected<AnyExpression>
 RvalueAnalyzer::operator()(const BinaryExpression &expression) {
   if (auto left_analyzed = expression.left->alt.visit(*this); not left_analyzed)
     return left_analyzed;
@@ -1376,11 +1381,11 @@ RvalueAnalyzer::operator()(const BinaryExpression &expression) {
   }
 }
 
-Fallible<AnyExpression>
+Expected<AnyExpression>
 RvalueAnalyzer::operator()(const MemberExpression &expression) {
   auto object_analyzed = expression.object->alt.visit(*this);
   if (not object_analyzed)
-    return Throw(object_analyzed.error());
+    return std::unexpected(object_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
   auto datatype_analyzed = object_analyzed->alt.visit(datatype_visitor);
   PropertyFinder property_visitor{std::move(*object_analyzed)};
@@ -1388,18 +1393,18 @@ RvalueAnalyzer::operator()(const MemberExpression &expression) {
   return datatype_analyzed.alt.visit(property_visitor);
 }
 
-Fallible<AnyExpression>
+Expected<AnyExpression>
 MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   if (intrinsic_accessor.object_type != IntrinsicObject::O_CONSOLE)
-    return Throw<InvalidMethodAccess>(std::in_place);
+    return std::unexpected<InvalidMethodAccess>(std::in_place);
   if (identifier.offset != OFFSET_log)
-    return Throw<InvalidMethodAccess>(std::in_place);
+    return std::unexpected<InvalidMethodAccess>(std::in_place);
   ConsoleCall console_call{};
   for (const AnyExpression &argument : arguments) {
     RvalueAnalyzer rvalue_visitor{boundary};
     std::expected argument_analyzed{argument.alt.visit(rvalue_visitor)};
     if (not argument_analyzed)
-      return Throw(argument_analyzed.error());
+      return std::unexpected(argument_analyzed.error());
     DatatypeAnalyzer datatype_visitor{boundary};
     auto argument_type = argument_analyzed->alt.visit(datatype_visitor);
     ExpressionStringifier stringifier{std::move(*argument_analyzed)};
@@ -1409,27 +1414,27 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   return AnyExpression{std::move(console_call)};
 }
 
-Fallible<AnyExpression>
+Expected<AnyExpression>
 CalleeAnalyzer::operator()(const MemberExpression &expression) {
   auto member_object = expression.object->alt.visit(RvalueAnalyzer{boundary});
   if (not member_object)
-    return Throw(member_object.error());
+    return std::unexpected(member_object.error());
   MethodAnalyzer method_visitor{boundary};
   method_visitor.identifier = expression.property;
   method_visitor.arguments = arguments;
   return member_object->alt.visit(method_visitor);
 }
 
-Fallible<AnyExpression>
+Expected<AnyExpression>
 CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   FunctionDefinition *definition{
       variable_accessor.find_function_linkedly(&boundary)};
   if (not definition) {
     std::breakpoint();
-    return Throw<InvalidVariableAccess>(std::in_place);
+    return std::unexpected<InvalidVariableAccess>(std::in_place);
   }
   if (auto analyze_result = definition->analyze(); not analyze_result)
-    return Throw(analyze_result.error());
+    return std::unexpected(analyze_result.error());
   DirectFunctionCall direct_call{};
   direct_call.callee = definition;
   return AnyExpression{std::move(direct_call)};
@@ -1458,14 +1463,14 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
 }
 
 struct StatementAnalyzer {
-  Fallible<AnyStatement>
-  operator()(ResourcePointer<ExpressionStatement> &statement);
-  Fallible<AnyStatement>
-  operator()(ResourcePointer<InitializeVariable> &statement);
-  Fallible<AnyStatement>
-  operator()(ResourcePointer<ReturnStatement> &statement);
-  Fallible<AnyStatement>
-  operator()(ResourcePointer<InitializeScope> &statement) {
+  Expected<AnyStatement>
+  operator()(const ResourcePointer<ExpressionStatement> &statement);
+  Expected<AnyStatement>
+  operator()(const ResourcePointer<InitializeVariable> &statement);
+  Expected<AnyStatement>
+  operator()(const ResourcePointer<ReturnStatement> &statement);
+  Expected<AnyStatement>
+  operator()(const ResourcePointer<InitializeScope> &statement) {
     std::unreachable();
   }
 
@@ -1473,24 +1478,25 @@ struct StatementAnalyzer {
   LexicalBoundary &boundary;
 };
 
-Fallible<AnyStatement>
-StatementAnalyzer::operator()(ResourcePointer<ExpressionStatement> &statement) {
+Expected<AnyStatement> StatementAnalyzer::operator()(
+    const ResourcePointer<ExpressionStatement> &statement) {
   std::expected argument_analyzed{
       statement->argument->alt.visit(RvalueAnalyzer{boundary})};
   if (not argument_analyzed)
-    return Throw(argument_analyzed.error());
-  std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    return std::unexpected(argument_analyzed.error());
+  std::pmr::polymorphic_allocator<> allocator(
+      &boundary.tape->all_programs[boundary.program_idx]->resource);
   auto statement_pointer =
       allocator.new_object<ExpressionStatement>(std::move(*argument_analyzed));
   return AnyStatement::Alternative(std::in_place_index<3>, statement_pointer,
                                    allocator.resource());
 }
 
-Fallible<AnyStatement>
-StatementAnalyzer::operator()(ResourcePointer<InitializeVariable> &statement) {
+Expected<AnyStatement> StatementAnalyzer::operator()(
+    const ResourcePointer<InitializeVariable> &statement) {
   auto rvalue_analyzed = statement->rvalue->alt.visit(RvalueAnalyzer{boundary});
   if (not rvalue_analyzed)
-    return Throw(rvalue_analyzed.error());
+    return std::unexpected(rvalue_analyzed.error());
   InitializeScope initialize_scope{std::move(*rvalue_analyzed)};
   VariantType datatype_analyzed{
       initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
@@ -1499,74 +1505,82 @@ StatementAnalyzer::operator()(ResourcePointer<InitializeVariable> &statement) {
   auto variable_it = boundary.local_layout.find(statement->variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
-  std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+  std::pmr::polymorphic_allocator<> allocator(
+      &boundary.tape->all_programs[boundary.program_idx]->resource);
   auto statement_pointer =
       allocator.new_object<InitializeScope>(std::move(initialize_scope));
   return AnyStatement::Alternative(std::in_place_index<1>, statement_pointer,
                                    allocator.resource());
 }
 
-Fallible<AnyStatement>
-StatementAnalyzer::operator()(ResourcePointer<ReturnStatement> &statement) {
+Expected<AnyStatement> StatementAnalyzer::operator()(
+    const ResourcePointer<ReturnStatement> &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
   auto argument_analyzed = statement->argument->alt.visit(rvalue_visitor);
   if (not argument_analyzed)
-    return Throw(argument_analyzed.error());
+    return std::unexpected(argument_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
   VariantType argument_type{argument_analyzed->alt.visit(datatype_visitor)};
   if (auto void_opt = boundary.put_return_type(argument_type); not void_opt)
-    return Throw(void_opt.error());
-  std::pmr::polymorphic_allocator<> allocator(&boundary.tape->resource);
+    return std::unexpected(void_opt.error());
+  std::pmr::polymorphic_allocator<> allocator(
+      &boundary.tape->all_programs[boundary.program_idx]->resource);
   auto statement_pointer =
       allocator.new_object<ReturnStatement>(std::move(*argument_analyzed));
   return AnyStatement::Alternative(std::in_place_index<2>, statement_pointer,
                                    allocator.resource());
 }
 
-template <typename T> Fallible<void> AbstractBoundary<T>::analyze_statements() {
-  for (AnyStatement &any_statement : *program) {
-    StatementAnalyzer visitor{*this};
-    auto output_statement = any_statement.alt.visit(visitor);
-    if (not output_statement)
-      return Throw(output_statement.error());
-    std::swap(any_statement, *output_statement);
+template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
+  std::unique_ptr<Program> input_program{std::make_unique<Program>()};
+  std::swap(tape->all_programs[program_idx], input_program);
+  Expected<void> program_result{};
+  for (const AnyStatement &any_statement : input_program->statements) {
+    auto output_stmt = any_statement.alt.visit(StatementAnalyzer{*this});
+    if (not output_stmt) {
+      program_result = std::unexpected{output_stmt.error()};
+      break;
+    } else {
+      auto &program = *tape->all_programs[program_idx];
+      program.statements.push_back(std::move(*output_stmt));
+    }
   }
-  return Fallible<void>{};
+  return program_result;
 }
 
-Fallible<void> FunctionDefinition::analyze_formal_parameters() {
+Expected<void> FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
     local_layout.find(argument)->second.variant_type.emplace(DynamicType{});
-  return Fallible<void>{};
+  return Expected<void>{};
 }
 
-Fallible<void> FunctionDefinition::analyze() {
+Expected<void> FunctionDefinition::analyze() {
   switch (analyzer_mark) {
   case AnalyzerMark::PENDING:
     analyzer_mark = AnalyzerMark::INITIATED;
     if (auto void_opt = analyze_formal_parameters(); not void_opt)
-      return Throw(void_opt.error());
+      return std::unexpected(void_opt.error());
     if (auto void_opt = analyze_statements(); not void_opt)
-      return Throw(void_opt.error());
+      return std::unexpected(void_opt.error());
     if (auto void_opt = analyze_inner_functions(); not void_opt)
-      return Throw(void_opt.error());
+      return std::unexpected(void_opt.error());
     analyzer_mark = AnalyzerMark::COMPLETE;
-    return Fallible<void>{};
+    return Expected<void>{};
   case AnalyzerMark::INITIATED:
     std::breakpoint();
-    return Throw<UnresolvableCircularity>(std::in_place);
+    return std::unexpected<UnresolvableCircularity>(std::in_place);
   case AnalyzerMark::COMPLETE:
-    return Fallible<void>{};
+    return Expected<void>{};
   }
   std::unreachable();
 }
 
-Fallible<void> ModuleDefinition::analyze() {
+Expected<void> ModuleDefinition::analyze() {
   if (auto void_opt = analyze_statements(); not void_opt)
-    return Throw(void_opt.error());
+    return std::unexpected(void_opt.error());
   if (auto void_opt = analyze_inner_functions(); not void_opt)
-    return Throw(void_opt.error());
-  return Fallible<void>{};
+    return std::unexpected(void_opt.error());
+  return Expected<void>{};
 }
 
 enum class SerialExpression : std::uint8_t {
@@ -1626,7 +1640,8 @@ struct ExpressionSerializer {
 template <typename T> void AbstractBoundary<T>::serialize() {
   for (FunctionDefinition *definition : inner_functions)
     definition->serialize();
-  for (const AnyStatement &statement : *program) {
+  auto &program = *tape->all_programs[program_idx];
+  for (const AnyStatement &statement : program.statements) {
     StatementSerializer statement_serializer{*this};
     statement.alt.visit(statement_serializer);
   }
@@ -1641,7 +1656,7 @@ bool Language::compile_and_execute() {
   std::set<LambdaType> lambda_types{};
   std::set<std::string> string_atlas{};
   std::set<std::u16string> u16string_atlas{};
-  ProgramTape tape{};
+  FunctionTape tape{};
 
   Tokenizer tokenizer{};
   tokenizer.text_buffer = std::move(text_buffer);
@@ -1649,7 +1664,8 @@ bool Language::compile_and_execute() {
   tokenizer.u16string_atlas = &u16string_atlas;
 
   ModuleDefinition definition{};
-  definition.program = &tape.program_list.emplace_back();
+  definition.program_idx = tape.all_programs.size();
+  tape.all_programs.push_back(std::make_unique<Program>());
   definition.tape = &tape;
 
   ModuleParser parser{definition, tokenizer};
