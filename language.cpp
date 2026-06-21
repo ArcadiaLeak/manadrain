@@ -81,7 +81,6 @@ inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
 template <typename T> using Expected = std::expected<T, VariantError>;
-using VariantString = std::variant<std::string, std::u16string>;
 
 class Tokenizer {
 public:
@@ -199,7 +198,7 @@ struct LayoutEntry {
 
 struct Program {
   std::pmr::monotonic_buffer_resource resource;
-  std::vector<AnyStatement> statements;
+  std::pmr::list<AnyStatement> statements{&resource};
 };
 
 struct FunctionTape {
@@ -498,31 +497,15 @@ public:
   std::indirect<AnyExpression> argument;
 };
 
-template <typename T> class ResourceDeleter {
-private:
-  std::pmr::memory_resource *resource;
-
-public:
-  ResourceDeleter(std::pmr::memory_resource *r) : resource{r} {}
-  void operator()(T *pointer);
-};
-template <typename T> void ResourceDeleter<T>::operator()(T *pointer) {
-  std::pmr::polymorphic_allocator<> allocator(resource);
-  allocator.delete_object<T>(pointer);
-}
-template <typename T>
-using ResourcePointer = std::unique_ptr<T, ResourceDeleter<T>>;
-
 struct AnyStatement {
-  using Alternative = std::variant<
-      ResourcePointer<InitializeVariable>, ResourcePointer<InitializeScope>,
-      ResourcePointer<ReturnStatement>, ResourcePointer<ExpressionStatement>>;
+  using Alternative = std::variant<InitializeVariable, InitializeScope,
+                                   ReturnStatement, ExpressionStatement>;
   Alternative alt;
   AnyStatement(Alternative a) : alt{std::move(a)} {};
 };
 
 struct ConsoleMessage {
-  std::vector<VariantString> parts;
+  std::vector<VariantStringView> parts;
   std::string encode_for_print() const;
 };
 
@@ -538,7 +521,6 @@ struct RuntimeMemory {
   std::pmr::list<RuntimeFrame> runtime_frames{&resource};
   std::pmr::list<std::pmr::vector<RuntimeFrame *>> scope_traces{&resource};
   std::pmr::list<std::pmr::vector<std::byte>> structures{&resource};
-  std::pmr::list<VariantString> strings{&resource};
 };
 
 class Machine {
@@ -858,12 +840,9 @@ template <typename T> Expected<void> Parser<T>::parse_return_stmt() {
   if (auto expression_result = parse_expression(); not expression_result)
     return std::unexpected(expression_result.error());
   else {
-    Program &program{*boundary.tape->all_programs[boundary.program_idx]};
-    std::pmr::polymorphic_allocator<> allocator(&program.resource);
-    auto statement_pointer =
-        allocator.new_object<ReturnStatement>(std::move(*expression_result));
-    program.statements.emplace_back(ResourcePointer<ReturnStatement>(
-        statement_pointer, allocator.resource()));
+    ReturnStatement return_statement{std::move(*expression_result)};
+    boundary.tape->all_programs[boundary.program_idx]->statements.emplace_back(
+        std::move(return_statement));
     return tokenizer.assert_punct(';');
   }
 }
@@ -872,12 +851,9 @@ template <typename T> Expected<void> Parser<T>::parse_expression_stmt() {
   if (auto expression_result = parse_expression(); not expression_result)
     return std::unexpected(expression_result.error());
   else {
-    Program &program{*boundary.tape->all_programs[boundary.program_idx]};
-    std::pmr::polymorphic_allocator<> allocator(&program.resource);
-    auto statement_pointer = allocator.new_object<ExpressionStatement>(
-        std::move(*expression_result));
-    program.statements.emplace_back(ResourcePointer<ExpressionStatement>(
-        statement_pointer, allocator.resource()));
+    ExpressionStatement expression_statement{std::move(*expression_result)};
+    boundary.tape->all_programs[boundary.program_idx]->statements.emplace_back(
+        std::move(expression_statement));
     return tokenizer.assert_punct(';');
   }
 }
@@ -942,13 +918,10 @@ template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
   if (auto expression_result = parse_expression(); not expression_result)
     return std::unexpected(expression_result.error());
   else {
-    Program &program{*boundary.tape->all_programs[boundary.program_idx]};
-    std::pmr::polymorphic_allocator<> allocator(&program.resource);
-    auto statement_pointer =
-        allocator.new_object<InitializeVariable>(std::move(*expression_result));
-    statement_pointer->variable_name = variable_name;
-    program.statements.emplace_back(ResourcePointer<InitializeVariable>(
-        statement_pointer, allocator.resource()));
+    InitializeVariable initialize_variable{std::move(*expression_result)};
+    initialize_variable.variable_name = variable_name;
+    boundary.tape->all_programs[boundary.program_idx]->statements.emplace_back(
+        std::move(initialize_variable));
   }
   if (auto assert_result = tokenizer.assert_punct(';'); not assert_result)
     return std::unexpected(assert_result.error());
@@ -1463,14 +1436,10 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
 }
 
 struct StatementAnalyzer {
-  Expected<AnyStatement>
-  operator()(const ResourcePointer<ExpressionStatement> &statement);
-  Expected<AnyStatement>
-  operator()(const ResourcePointer<InitializeVariable> &statement);
-  Expected<AnyStatement>
-  operator()(const ResourcePointer<ReturnStatement> &statement);
-  Expected<AnyStatement>
-  operator()(const ResourcePointer<InitializeScope> &statement) {
+  Expected<AnyStatement> operator()(const ExpressionStatement &statement);
+  Expected<AnyStatement> operator()(const InitializeVariable &statement);
+  Expected<AnyStatement> operator()(const ReturnStatement &statement);
+  Expected<AnyStatement> operator()(const InitializeScope &statement) {
     std::unreachable();
   }
 
@@ -1478,57 +1447,45 @@ struct StatementAnalyzer {
   LexicalBoundary &boundary;
 };
 
-Expected<AnyStatement> StatementAnalyzer::operator()(
-    const ResourcePointer<ExpressionStatement> &statement) {
+Expected<AnyStatement>
+StatementAnalyzer::operator()(const ExpressionStatement &statement) {
   std::expected argument_analyzed{
-      statement->argument->alt.visit(RvalueAnalyzer{boundary})};
+      statement.argument->alt.visit(RvalueAnalyzer{boundary})};
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
-  std::pmr::polymorphic_allocator<> allocator(
-      &boundary.tape->all_programs[boundary.program_idx]->resource);
-  auto statement_pointer =
-      allocator.new_object<ExpressionStatement>(std::move(*argument_analyzed));
-  return AnyStatement::Alternative(std::in_place_index<3>, statement_pointer,
-                                   allocator.resource());
+  return AnyStatement::Alternative(std::in_place_type<ExpressionStatement>,
+                                   std::move(*argument_analyzed));
 }
 
-Expected<AnyStatement> StatementAnalyzer::operator()(
-    const ResourcePointer<InitializeVariable> &statement) {
-  auto rvalue_analyzed = statement->rvalue->alt.visit(RvalueAnalyzer{boundary});
+Expected<AnyStatement>
+StatementAnalyzer::operator()(const InitializeVariable &statement) {
+  auto rvalue_analyzed = statement.rvalue->alt.visit(RvalueAnalyzer{boundary});
   if (not rvalue_analyzed)
     return std::unexpected(rvalue_analyzed.error());
   InitializeScope initialize_scope{std::move(*rvalue_analyzed)};
   VariantType datatype_analyzed{
       initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
-  boundary.local_layout[statement->variable_name].variant_type.emplace(
+  boundary.local_layout[statement.variable_name].variant_type.emplace(
       datatype_analyzed);
-  auto variable_it = boundary.local_layout.find(statement->variable_name);
+  auto variable_it = boundary.local_layout.find(statement.variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
-  std::pmr::polymorphic_allocator<> allocator(
-      &boundary.tape->all_programs[boundary.program_idx]->resource);
-  auto statement_pointer =
-      allocator.new_object<InitializeScope>(std::move(initialize_scope));
-  return AnyStatement::Alternative(std::in_place_index<1>, statement_pointer,
-                                   allocator.resource());
+  return AnyStatement::Alternative(std::in_place_type<InitializeScope>,
+                                   std::move(initialize_scope));
 }
 
-Expected<AnyStatement> StatementAnalyzer::operator()(
-    const ResourcePointer<ReturnStatement> &statement) {
+Expected<AnyStatement>
+StatementAnalyzer::operator()(const ReturnStatement &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
-  auto argument_analyzed = statement->argument->alt.visit(rvalue_visitor);
+  auto argument_analyzed = statement.argument->alt.visit(rvalue_visitor);
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
   VariantType argument_type{argument_analyzed->alt.visit(datatype_visitor)};
-  if (auto void_opt = boundary.put_return_type(argument_type); not void_opt)
-    return std::unexpected(void_opt.error());
-  std::pmr::polymorphic_allocator<> allocator(
-      &boundary.tape->all_programs[boundary.program_idx]->resource);
-  auto statement_pointer =
-      allocator.new_object<ReturnStatement>(std::move(*argument_analyzed));
-  return AnyStatement::Alternative(std::in_place_index<2>, statement_pointer,
-                                   allocator.resource());
+  if (auto put_result = boundary.put_return_type(argument_type); not put_result)
+    return std::unexpected(put_result.error());
+  return AnyStatement::Alternative(std::in_place_type<ReturnStatement>,
+                                   std::move(*argument_analyzed));
 }
 
 template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
@@ -1603,25 +1560,24 @@ enum class SerialStatement : std::uint8_t {
 
 struct StatementSerializer {
   template <std::derived_from<Statement> T>
-  void operator()(const ResourcePointer<T> &statement) {
+  void operator()(const T &statement) {
     std::unreachable();
   }
-  void operator()(const ResourcePointer<InitializeScope> &statement);
+  void operator()(const InitializeScope &statement);
 
   StatementSerializer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
 };
 
-void StatementSerializer::operator()(
-    const ResourcePointer<InitializeScope> &initialize_scope) {
+void StatementSerializer::operator()(const InitializeScope &initialize_scope) {
   std::size_t byte_offset{};
-  for (std::size_t i = 0; i < initialize_scope->local_offset; ++i) {
+  for (std::size_t i = 0; i < initialize_scope.local_offset; ++i) {
     std::optional variant_type{boundary.local_layout.values()[i].variant_type};
     assert(variant_type.has_value());
     byte_offset += variant_type->type_size();
   }
   Identifier entry_key{
-      boundary.local_layout.keys()[initialize_scope->local_offset]};
+      boundary.local_layout.keys()[initialize_scope.local_offset]};
   LayoutEntry &entry_value{boundary.local_layout[entry_key]};
   entry_value.offset = byte_offset;
   assert(entry_value.variant_type.has_value());
