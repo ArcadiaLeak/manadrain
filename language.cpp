@@ -316,9 +316,10 @@ protected:
 
 class AliasedFunctionCall final : public Expression {
 public:
-  AliasedFunctionCall(AnyExpression &&c);
-  std::indirect<AnyExpression> callee;
-  std::vector<AnyExpression> arguments;
+  AliasedFunctionCall(std::pmr::memory_resource *resource_ptr)
+      : callee{std::allocator_arg, resource_ptr}, arguments{resource_ptr} {};
+  std::pmr::indirect<AnyExpression> callee;
+  std::pmr::vector<AnyExpression> arguments;
 };
 
 class DirectFunctionCall final : public Expression {
@@ -452,9 +453,6 @@ struct AnyExpression {
   AnyExpression &operator=(const AnyExpression &other) = delete;
 };
 
-AliasedFunctionCall::AliasedFunctionCall(AnyExpression &&c)
-    : callee{std::move(c)} {};
-
 MemberExpression::MemberExpression(AnyExpression &&obj)
     : object{std::move(obj)} {};
 
@@ -496,14 +494,16 @@ public:
 
 class ReturnStatement final : public Statement {
 public:
-  ReturnStatement(AnyExpression e) : argument{std::move(e)} {};
-  std::indirect<AnyExpression> argument;
+  ReturnStatement(std::pmr::memory_resource *resource_ptr)
+      : argument{std::allocator_arg, resource_ptr} {};
+  std::pmr::indirect<AnyExpression> argument;
 };
 
 class ExpressionStatement final : public Statement {
 public:
-  ExpressionStatement(AnyExpression e) : argument{std::move(e)} {};
-  std::indirect<AnyExpression> argument;
+  ExpressionStatement(std::pmr::memory_resource *resource_ptr)
+      : argument{std::allocator_arg, resource_ptr} {};
+  std::pmr::indirect<AnyExpression> argument;
 };
 
 struct AnyStatement {
@@ -856,9 +856,12 @@ template <typename T> Expected<void> Parser<T>::parse_return_stmt() {
   if (auto expression_result = parse_expression(); not expression_result)
     return std::unexpected(expression_result.error());
   else {
-    ReturnStatement return_statement{std::move(*expression_result)};
-    boundary.tape->all_programs[boundary.program_idx]->statements.emplace_back(
-        std::move(return_statement));
+    auto &program = *boundary.tape->all_programs[boundary.program_idx];
+    auto &any_statement = program.statements.emplace_back();
+    any_statement.alt.emplace(std::in_place_type<ReturnStatement>,
+                              &program.resource);
+    auto &return_statement = std::get<ReturnStatement>(*any_statement.alt);
+    return_statement.argument = std::move(*expression_result);
     return tokenizer.assert_punct(';');
   }
 }
@@ -867,9 +870,13 @@ template <typename T> Expected<void> Parser<T>::parse_expression_stmt() {
   if (auto expression_result = parse_expression(); not expression_result)
     return std::unexpected(expression_result.error());
   else {
-    ExpressionStatement expression_statement{std::move(*expression_result)};
-    boundary.tape->all_programs[boundary.program_idx]->statements.emplace_back(
-        std::move(expression_statement));
+    auto &program = *boundary.tape->all_programs[boundary.program_idx];
+    auto &any_statement = program.statements.emplace_back();
+    any_statement.alt.emplace(std::in_place_type<ExpressionStatement>,
+                              &program.resource);
+    auto &expression_statement =
+        std::get<ExpressionStatement>(*any_statement.alt);
+    expression_statement.argument = std::move(*expression_result);
     return tokenizer.assert_punct(';');
   }
 }
@@ -1002,7 +1009,7 @@ Parser<T>::PostfixExpressionSaga::operator()(AnyExpression expression) {
 template <typename T>
 Expected<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
     AnyExpression expression) {
-  AliasedFunctionCall function_call(std::move(expression));
+  std::vector<AnyExpression> arguments{};
   while (1) {
     if (auto token_result = parser.tokenizer.tokenize(); not token_result)
       return std::unexpected(token_result.error());
@@ -1011,13 +1018,22 @@ Expected<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
     auto argument_expression = parser.parse_expression();
     if (not argument_expression)
       return std::unexpected(argument_expression.error());
-    function_call.arguments.push_back(std::move(*argument_expression));
+    arguments.push_back(std::move(*argument_expression));
     if (parser.tokenizer.last_token == Token{U')'})
       break;
-    if (auto assert_result = parser.tokenizer.assert_punct(',');
-        not assert_result)
+    auto assert_result = parser.tokenizer.assert_punct(',');
+    if (not assert_result)
       return std::unexpected(assert_result.error());
   }
+  auto &program =
+      *parser.boundary.tape->all_programs[parser.boundary.program_idx];
+  AliasedFunctionCall function_call{&program.resource};
+  function_call.arguments.resize(arguments.size());
+  std::ranges::zip_view argument_tuples{function_call.arguments, arguments};
+  for (std::tuple<AnyExpression &, AnyExpression &> argument_tuple :
+       argument_tuples)
+    std::swap(std::get<0>(argument_tuple), std::get<1>(argument_tuple));
+  function_call.callee = std::move(expression);
   return Expected<AnyExpression>(std::in_place, std::move(function_call))
       .and_then(*this);
 }
@@ -1474,8 +1490,10 @@ StatementAnalyzer::operator()(const ExpressionStatement &statement) {
       statement.argument->alt->visit(RvalueAnalyzer{boundary})};
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
-  return AnyStatement::Alternative(std::in_place_type<ExpressionStatement>,
-                                   std::move(*argument_analyzed));
+  ExpressionStatement expression_statement{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  expression_statement.argument = std::move(*argument_analyzed);
+  return AnyStatement::Alternative(std::move(expression_statement));
 }
 
 Expected<AnyStatement>
@@ -1493,22 +1511,23 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
   auto variable_it = boundary.local_layout.find(statement.variable_name);
   initialize_scope.local_offset =
       std::distance(boundary.local_layout.begin(), variable_it);
-  return AnyStatement::Alternative(std::in_place_type<InitializeScope>,
-                                   std::move(initialize_scope));
+  return AnyStatement::Alternative(std::move(initialize_scope));
 }
 
 Expected<AnyStatement>
 StatementAnalyzer::operator()(const ReturnStatement &statement) {
-  RvalueAnalyzer rvalue_visitor{boundary};
-  auto argument_analyzed = statement.argument->alt->visit(rvalue_visitor);
+  auto argument_analyzed =
+      statement.argument->alt->visit(RvalueAnalyzer{boundary});
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
-  DatatypeAnalyzer datatype_visitor{boundary};
-  VariantType argument_type{argument_analyzed->alt->visit(datatype_visitor)};
+  ReturnStatement return_statement{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  return_statement.argument = std::move(*argument_analyzed);
+  VariantType argument_type{
+      argument_analyzed->alt->visit(DatatypeAnalyzer{boundary})};
   if (auto put_result = boundary.put_return_type(argument_type); not put_result)
     return std::unexpected(put_result.error());
-  return AnyStatement::Alternative(std::in_place_type<ReturnStatement>,
-                                   std::move(*argument_analyzed));
+  return AnyStatement::Alternative(std::move(return_statement));
 }
 
 template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
