@@ -441,8 +441,15 @@ struct AnyExpression {
                    ObjectExpression, VariableAccessor, ScopeAccessor,
                    IntrinsicAccessor, LambdaExpression, ConsoleCall,
                    LengthIntrinsic, StringifyIntrinsic>;
-  Alternative alt;
+  std::optional<Alternative> alt;
+  AnyExpression() = default;
   AnyExpression(Alternative a) : alt{std::move(a)} {};
+
+  AnyExpression(AnyExpression &&other) noexcept = default;
+  AnyExpression &operator=(AnyExpression &&other) noexcept = default;
+
+  AnyExpression(const AnyExpression &other) = delete;
+  AnyExpression &operator=(const AnyExpression &other) = delete;
 };
 
 AliasedFunctionCall::AliasedFunctionCall(AnyExpression &&c)
@@ -473,16 +480,18 @@ protected:
 
 class InitializeVariable final : public Statement {
 public:
-  InitializeVariable(AnyExpression v) : rvalue{std::move(v)} {};
+  InitializeVariable(std::pmr::memory_resource *resource_ptr)
+      : rvalue{std::allocator_arg, resource_ptr} {};
   Identifier variable_name;
-  std::indirect<AnyExpression> rvalue;
+  std::pmr::indirect<AnyExpression> rvalue;
 };
 
 class InitializeScope final : public Statement {
 public:
-  InitializeScope(AnyExpression v) : rvalue{std::move(v)} {};
+  InitializeScope(std::pmr::memory_resource *resource_ptr)
+      : rvalue{std::allocator_arg, resource_ptr} {};
   std::size_t local_offset;
-  std::indirect<AnyExpression> rvalue;
+  std::pmr::indirect<AnyExpression> rvalue;
 };
 
 class ReturnStatement final : public Statement {
@@ -500,8 +509,15 @@ public:
 struct AnyStatement {
   using Alternative = std::variant<InitializeVariable, InitializeScope,
                                    ReturnStatement, ExpressionStatement>;
-  Alternative alt;
+  std::optional<Alternative> alt;
+  AnyStatement() = default;
   AnyStatement(Alternative a) : alt{std::move(a)} {};
+
+  AnyStatement(AnyStatement &&other) noexcept = default;
+  AnyStatement &operator=(AnyStatement &&other) noexcept = default;
+
+  AnyStatement(const AnyStatement &other) = delete;
+  AnyStatement &operator=(const AnyStatement &other) = delete;
 };
 
 struct ConsoleMessage {
@@ -918,10 +934,14 @@ template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
   if (auto expression_result = parse_expression(); not expression_result)
     return std::unexpected(expression_result.error());
   else {
-    InitializeVariable initialize_variable{std::move(*expression_result)};
+    auto &program = *boundary.tape->all_programs[boundary.program_idx];
+    auto &any_statement = program.statements.emplace_back();
+    any_statement.alt.emplace(std::in_place_type<InitializeVariable>,
+                              &program.resource);
+    auto &initialize_variable =
+        std::get<InitializeVariable>(*any_statement.alt);
     initialize_variable.variable_name = variable_name;
-    boundary.tape->all_programs[boundary.program_idx]->statements.emplace_back(
-        std::move(initialize_variable));
+    initialize_variable.rvalue = std::move(*expression_result);
   }
   if (auto assert_result = tokenizer.assert_punct(';'); not assert_result)
     return std::unexpected(assert_result.error());
@@ -1318,7 +1338,7 @@ Expected<AnyExpression>
 RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   CalleeAnalyzer callee_visitor{boundary};
   callee_visitor.arguments = function_call.arguments;
-  return function_call.callee->alt.visit(callee_visitor);
+  return function_call.callee->alt->visit(callee_visitor);
 }
 
 Expected<AnyExpression>
@@ -1341,9 +1361,10 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
 
 Expected<AnyExpression>
 RvalueAnalyzer::operator()(const BinaryExpression &expression) {
-  if (auto left_analyzed = expression.left->alt.visit(*this); not left_analyzed)
+  if (auto left_analyzed = expression.left->alt->visit(*this);
+      not left_analyzed)
     return left_analyzed;
-  else if (auto right_analyzed = expression.right->alt.visit(*this);
+  else if (auto right_analyzed = expression.right->alt->visit(*this);
            not right_analyzed)
     return right_analyzed;
   else {
@@ -1356,11 +1377,11 @@ RvalueAnalyzer::operator()(const BinaryExpression &expression) {
 
 Expected<AnyExpression>
 RvalueAnalyzer::operator()(const MemberExpression &expression) {
-  auto object_analyzed = expression.object->alt.visit(*this);
+  auto object_analyzed = expression.object->alt->visit(*this);
   if (not object_analyzed)
     return std::unexpected(object_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
-  auto datatype_analyzed = object_analyzed->alt.visit(datatype_visitor);
+  auto datatype_analyzed = object_analyzed->alt->visit(datatype_visitor);
   PropertyFinder property_visitor{std::move(*object_analyzed)};
   property_visitor.identifier = expression.property;
   return datatype_analyzed.alt.visit(property_visitor);
@@ -1375,11 +1396,11 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   ConsoleCall console_call{};
   for (const AnyExpression &argument : arguments) {
     RvalueAnalyzer rvalue_visitor{boundary};
-    std::expected argument_analyzed{argument.alt.visit(rvalue_visitor)};
+    std::expected argument_analyzed{argument.alt->visit(rvalue_visitor)};
     if (not argument_analyzed)
       return std::unexpected(argument_analyzed.error());
     DatatypeAnalyzer datatype_visitor{boundary};
-    auto argument_type = argument_analyzed->alt.visit(datatype_visitor);
+    auto argument_type = argument_analyzed->alt->visit(datatype_visitor);
     ExpressionStringifier stringifier{std::move(*argument_analyzed)};
     AnyExpression stringified_argument{argument_type.alt.visit(stringifier)};
     console_call.arguments.push_back(std::move(stringified_argument));
@@ -1389,13 +1410,13 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
 
 Expected<AnyExpression>
 CalleeAnalyzer::operator()(const MemberExpression &expression) {
-  auto member_object = expression.object->alt.visit(RvalueAnalyzer{boundary});
+  auto member_object = expression.object->alt->visit(RvalueAnalyzer{boundary});
   if (not member_object)
     return std::unexpected(member_object.error());
   MethodAnalyzer method_visitor{boundary};
   method_visitor.identifier = expression.property;
   method_visitor.arguments = arguments;
-  return member_object->alt.visit(method_visitor);
+  return member_object->alt->visit(method_visitor);
 }
 
 Expected<AnyExpression>
@@ -1450,7 +1471,7 @@ struct StatementAnalyzer {
 Expected<AnyStatement>
 StatementAnalyzer::operator()(const ExpressionStatement &statement) {
   std::expected argument_analyzed{
-      statement.argument->alt.visit(RvalueAnalyzer{boundary})};
+      statement.argument->alt->visit(RvalueAnalyzer{boundary})};
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
   return AnyStatement::Alternative(std::in_place_type<ExpressionStatement>,
@@ -1459,12 +1480,14 @@ StatementAnalyzer::operator()(const ExpressionStatement &statement) {
 
 Expected<AnyStatement>
 StatementAnalyzer::operator()(const InitializeVariable &statement) {
-  auto rvalue_analyzed = statement.rvalue->alt.visit(RvalueAnalyzer{boundary});
+  auto rvalue_analyzed = statement.rvalue->alt->visit(RvalueAnalyzer{boundary});
   if (not rvalue_analyzed)
     return std::unexpected(rvalue_analyzed.error());
-  InitializeScope initialize_scope{std::move(*rvalue_analyzed)};
+  InitializeScope initialize_scope{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  initialize_scope.rvalue = std::move(*rvalue_analyzed);
   VariantType datatype_analyzed{
-      initialize_scope.rvalue->alt.visit(DatatypeAnalyzer{boundary})};
+      initialize_scope.rvalue->alt->visit(DatatypeAnalyzer{boundary})};
   boundary.local_layout[statement.variable_name].variant_type.emplace(
       datatype_analyzed);
   auto variable_it = boundary.local_layout.find(statement.variable_name);
@@ -1477,11 +1500,11 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
 Expected<AnyStatement>
 StatementAnalyzer::operator()(const ReturnStatement &statement) {
   RvalueAnalyzer rvalue_visitor{boundary};
-  auto argument_analyzed = statement.argument->alt.visit(rvalue_visitor);
+  auto argument_analyzed = statement.argument->alt->visit(rvalue_visitor);
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
-  VariantType argument_type{argument_analyzed->alt.visit(datatype_visitor)};
+  VariantType argument_type{argument_analyzed->alt->visit(datatype_visitor)};
   if (auto put_result = boundary.put_return_type(argument_type); not put_result)
     return std::unexpected(put_result.error());
   return AnyStatement::Alternative(std::in_place_type<ReturnStatement>,
@@ -1493,7 +1516,7 @@ template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
   std::swap(tape->all_programs[program_idx], input_program);
   Expected<void> program_result{};
   for (const AnyStatement &any_statement : input_program->statements) {
-    auto output_stmt = any_statement.alt.visit(StatementAnalyzer{*this});
+    auto output_stmt = any_statement.alt->visit(StatementAnalyzer{*this});
     if (not output_stmt) {
       program_result = std::unexpected{output_stmt.error()};
       break;
@@ -1599,7 +1622,7 @@ template <typename T> void AbstractBoundary<T>::serialize() {
   auto &program = *tape->all_programs[program_idx];
   for (const AnyStatement &statement : program.statements) {
     StatementSerializer statement_serializer{*this};
-    statement.alt.visit(statement_serializer);
+    statement.alt->visit(statement_serializer);
   }
 }
 
