@@ -149,9 +149,9 @@ class VariantType {
 public:
   using Alternative =
       std::variant<NumberType, StringType, const LambdaType *, DynamicType>;
-  Alternative alt;
+  std::optional<Alternative> alt;
 
-  VariantType() = delete;
+  VariantType() = default;
   VariantType(Alternative a) : alt{std::move(a)} {};
 
   auto operator<=>(const VariantType &) const = default;
@@ -178,12 +178,12 @@ std::size_t VariantType::type_size() const {
       return sizeof(LambdaDescriptor);
     }
   };
-  return alt.visit(SizeVisitor{});
+  return alt->visit(SizeVisitor{});
 }
 
 class ObjectShape {
 public:
-  std::flat_map<Identifier, std::optional<VariantType>> properties;
+  std::flat_map<Identifier, VariantType> properties;
 };
 
 struct AnyStatement;
@@ -192,8 +192,9 @@ class FunctionDefinition;
 class ScopeAccessor;
 
 struct LayoutEntry {
-  std::optional<VariantType> variant_type;
-  std::optional<std::size_t> offset;
+  Identifier identifier;
+  VariantType variant_type;
+  std::size_t offset;
 };
 
 struct Program {
@@ -214,7 +215,7 @@ public:
   std::vector<FunctionDefinition *> inner_functions;
   FunctionTape *tape;
 
-  std::flat_map<Identifier, LayoutEntry> local_layout;
+  std::vector<LayoutEntry> local_layout;
 
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
@@ -227,7 +228,6 @@ template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
   FunctionDefinition *find_function(Identifier identifier) override;
   std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
-  void serialize();
 
 protected:
   AbstractBoundary() = default;
@@ -239,7 +239,7 @@ class FunctionDefinition final : public AbstractBoundary<FunctionDefinition> {
 public:
   std::optional<Identifier> function_name;
 
-  std::optional<VariantType> return_type;
+  VariantType return_type;
   std::vector<Identifier> arguments;
 
   enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
@@ -247,7 +247,7 @@ public:
   Expected<void> analyze();
 
   Expected<void> put_return_type(VariantType variant_type) override {
-    return_type.emplace(variant_type);
+    return_type = variant_type;
     return Expected<void>{};
   }
 
@@ -630,7 +630,7 @@ Expected<Token> Tokenizer::tokenize_identifier(char32_t leading) {
   auto iter_persistent = identifier_atlas.find(identifier_str);
   if (iter_persistent != identifier_atlas.end())
     return Identifier{iter_persistent->second};
-  Identifier identifier{persistent_identifiers.size() + atom_atlas.size() - 1};
+  Identifier identifier{persistent_identifiers.size() + atom_atlas.size()};
   auto emplace_ret =
       atom_atlas.try_emplace(std::move(identifier_str), identifier);
   return emplace_ret.first->second;
@@ -776,7 +776,8 @@ formal_parameter: {
     return std::unexpected<MissingFormalParameter>(std::in_place);
   }
   Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
-  boundary.local_layout.try_emplace(parameter);
+  auto &layout_entry = boundary.local_layout.emplace_back();
+  layout_entry.identifier = parameter;
   boundary.arguments.push_back(parameter);
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
     return std::unexpected(void_opt.error());
@@ -938,11 +939,13 @@ template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
   }
   if (auto assert_result = tokenizer.assert_punct(';'); not assert_result)
     return std::unexpected(assert_result.error());
-  if (boundary.local_layout.contains(variable_name)) {
+  if (std::ranges::contains(boundary.local_layout, variable_name,
+                            &LayoutEntry::identifier)) {
     std::breakpoint();
     return std::unexpected<DuplicateDeclaration>(std::in_place);
   } else {
-    boundary.local_layout.try_emplace(variable_name);
+    auto &layout_entry = boundary.local_layout.emplace_back();
+    layout_entry.identifier = variable_name;
     return Expected<void>{};
   }
 }
@@ -1161,13 +1164,16 @@ Expected<AnyExpression> Parser<T>::parse_primary_expression() {
 template <typename T>
 std::optional<ScopeAccessor>
 AbstractBoundary<T>::find_local(Identifier identifier) const {
-  if (not local_layout.contains(identifier))
+  auto has_type = [](const auto &layout_entry) {
+    return layout_entry.variant_type.alt.has_value();
+  };
+  auto eligible_entries = local_layout | std::views::take_while(has_type);
+  auto layout_entry_it =
+      std::ranges::find(eligible_entries, identifier, &LayoutEntry::identifier);
+  if (layout_entry_it == eligible_entries.end())
     return std::nullopt;
-  std::size_t local_offset =
-      std::distance(local_layout.begin(), local_layout.find(identifier));
-  assert(local_layout.values()[local_offset].variant_type.has_value());
-  ScopeAccessor accessor{*local_layout.values()[local_offset].variant_type};
-  std::get<1>(accessor.location) = local_offset;
+  ScopeAccessor accessor{layout_entry_it->variant_type};
+  std::get<1>(accessor.location) = layout_entry_it->offset;
   return accessor;
 }
 
@@ -1264,8 +1270,8 @@ struct DatatypeAnalyzer {
   }
   VariantType operator()(const DirectFunctionCall &direct_call) {
     assert(direct_call.callee != nullptr);
-    assert(direct_call.callee->return_type.has_value());
-    return *direct_call.callee->return_type;
+    assert(direct_call.callee->return_type.alt.has_value());
+    return direct_call.callee->return_type;
   }
   template <std::derived_from<Expression> T> VariantType operator()(const T &) {
     std::unreachable();
@@ -1361,7 +1367,7 @@ RvalueAnalyzer::operator()(const MemberExpression &expression) {
   auto datatype_analyzed = object_analyzed->alt->visit(datatype_visitor);
   PropertyFinder property_visitor{boundary, std::move(*object_analyzed)};
   property_visitor.identifier = expression.property;
-  return datatype_analyzed.alt.visit(property_visitor);
+  return datatype_analyzed.alt->visit(property_visitor);
 }
 
 Expected<AnyExpression>
@@ -1384,7 +1390,7 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
     DatatypeAnalyzer datatype_visitor{boundary};
     auto argument_type = argument_analyzed->alt->visit(datatype_visitor);
     ExpressionStringifier stringifier{boundary, std::move(*argument_analyzed)};
-    AnyExpression stringified_argument{argument_type.alt.visit(stringifier)};
+    AnyExpression stringified_argument{argument_type.alt->visit(stringifier)};
     std::get<0>(argument_tuple) = std::move(stringified_argument);
   }
   return AnyExpression{std::move(console_call)};
@@ -1473,12 +1479,19 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
   initialize_scope.rvalue = std::move(*rvalue_analyzed);
   VariantType datatype_analyzed{
       initialize_scope.rvalue->alt->visit(DatatypeAnalyzer{boundary})};
-  boundary.local_layout[statement.variable_name].variant_type.emplace(
-      datatype_analyzed);
-  auto variable_it = boundary.local_layout.find(statement.variable_name);
-  initialize_scope.local_offset =
-      std::distance(boundary.local_layout.begin(), variable_it);
-  return AnyStatement::Alternative(std::move(initialize_scope));
+  std::size_t byte_offset{};
+  for (auto &layout_entry : boundary.local_layout) {
+    if (layout_entry.identifier == statement.variable_name) {
+      layout_entry.variant_type = datatype_analyzed;
+      layout_entry.offset = byte_offset;
+      break;
+    } else {
+      assert(layout_entry.variant_type.alt.has_value());
+      byte_offset += layout_entry.variant_type.type_size();
+    }
+  }
+  initialize_scope.local_offset = byte_offset;
+  return AnyStatement{std::move(initialize_scope)};
 }
 
 Expected<AnyStatement>
@@ -1511,12 +1524,14 @@ template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
       program.statements.push_back(std::move(*output_stmt));
     }
   }
+  std::ranges::sort(local_layout, {}, &LayoutEntry::identifier);
   return program_result;
 }
 
 Expected<void> FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments)
-    local_layout.find(argument)->second.variant_type.emplace(DynamicType{});
+    std::ranges::find(local_layout, argument, &LayoutEntry::identifier)
+        ->variant_type.alt.emplace(std::in_place_type<DynamicType>);
   return Expected<void>{};
 }
 
@@ -1549,69 +1564,6 @@ Expected<void> ModuleDefinition::analyze() {
   return Expected<void>{};
 }
 
-enum class SerialExpression : std::uint8_t {
-  MONOSTATE,
-  LITERAL,
-  SCOPE_ACCESSOR,
-  ADDITION,
-  SUBTRACTION,
-  FUNCTION_CALL,
-  CONSOLE_CALL,
-  LENGTH_INTRINSIC,
-  STRINGIFY_INTRINSIC
-};
-enum class SerialStatement : std::uint8_t {
-  MONOSTATE,
-  INITIALIZE_SCOPE,
-  EXPRESSION,
-  RETURN_STMT
-};
-
-struct StatementSerializer {
-  template <std::derived_from<Statement> T>
-  void operator()(const T &statement) {
-    std::unreachable();
-  }
-  void operator()(const InitializeScope &statement);
-
-  StatementSerializer(LexicalBoundary &b) : boundary{b} {}
-  LexicalBoundary &boundary;
-};
-
-void StatementSerializer::operator()(const InitializeScope &initialize_scope) {
-  std::size_t byte_offset{};
-  for (std::size_t i = 0; i < initialize_scope.local_offset; ++i) {
-    std::optional variant_type{boundary.local_layout.values()[i].variant_type};
-    assert(variant_type.has_value());
-    byte_offset += variant_type->type_size();
-  }
-  Identifier entry_key{
-      boundary.local_layout.keys()[initialize_scope.local_offset]};
-  LayoutEntry &entry_value{boundary.local_layout[entry_key]};
-  entry_value.offset = byte_offset;
-  assert(entry_value.variant_type.has_value());
-}
-
-struct ExpressionSerializer {
-  template <std::derived_from<Expression> T>
-  void operator()(const T &expression) {
-    std::unreachable();
-  }
-
-  ExpressionSerializer(LexicalBoundary &b) : boundary{b} {}
-  LexicalBoundary &boundary;
-};
-
-template <typename T> void AbstractBoundary<T>::serialize() {
-  for (FunctionDefinition *definition : inner_functions)
-    definition->serialize();
-  auto &program = *tape->all_programs[program_idx];
-  for (const AnyStatement &statement : program.statements) {
-    StatementSerializer statement_serializer{*this};
-    statement.alt->visit(statement_serializer);
-  }
-}
-
 Language::Language() { machine = std::make_unique<Machine>(); }
 Language::~Language() = default;
 Language::Language(Language &&other) noexcept = default;
@@ -1635,16 +1587,10 @@ bool Language::compile_and_execute() {
 
   ModuleParser parser{definition, tokenizer};
 
-  if (auto parse_result = parser.parse_module(); not parse_result) {
-    variant_error = parse_result.error();
-    return 0;
-  }
-  if (auto analyze_result = definition.analyze(); not analyze_result) {
-    variant_error = analyze_result.error();
-    return 0;
-  }
-  definition.serialize();
-
-  return 1;
+  if (auto parse_result = parser.parse_module(); not parse_result)
+    variant_error.emplace(parse_result.error());
+  else if (auto analyze_result = definition.analyze(); not analyze_result)
+    variant_error.emplace(analyze_result.error());
+  return not variant_error.has_value();
 }
 } // namespace Manadrain

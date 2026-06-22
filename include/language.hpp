@@ -98,7 +98,7 @@ public:
   ~Language();
 
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
-  VariantError variant_error;
+  std::optional<VariantError> variant_error;
 
   bool compile_and_execute();
 
