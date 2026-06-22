@@ -276,7 +276,6 @@ public:
   Expected<AnyExpression> parse_assign_expression();
   Expected<AnyExpression> parse_logical_disjunct();
   Expected<AnyExpression> parse_additive_expression();
-  Expected<AnyExpression> parse_object_literal();
 
 protected:
   Parser(T &b, Tokenizer &t) : boundary{b}, tokenizer{t} {}
@@ -324,48 +323,50 @@ public:
 
 class DirectFunctionCall final : public Expression {
 public:
-  DirectFunctionCall() = default;
+  DirectFunctionCall(std::pmr::memory_resource *resource_ptr)
+      : passed_identifiers{resource_ptr}, passed_values{resource_ptr} {}
+
   const FunctionDefinition *callee;
-  std::vector<Identifier> passed_identifiers;
-  std::vector<AnyExpression> passed_values;
+
+  std::pmr::vector<Identifier> passed_identifiers;
+  std::pmr::vector<AnyExpression> passed_values;
 };
 
 class MemberExpression final : public Expression {
 public:
-  MemberExpression(AnyExpression &&obj);
-  std::indirect<AnyExpression> object;
+  MemberExpression(std::pmr::memory_resource *resource_ptr)
+      : object{std::allocator_arg, resource_ptr} {}
+  std::pmr::indirect<AnyExpression> object;
   Identifier property;
 };
 
 class AssignExpression final : public Expression {
 public:
-  AssignExpression(AnyExpression &&l, AnyExpression &&r);
-  std::indirect<AnyExpression> left;
-  std::indirect<AnyExpression> right;
+  AssignExpression(std::pmr::memory_resource *resource_ptr)
+      : left{std::allocator_arg, resource_ptr},
+        right{std::allocator_arg, resource_ptr} {}
+  std::pmr::indirect<AnyExpression> left;
+  std::pmr::indirect<AnyExpression> right;
 };
 
 class LogicalExpression final : public Expression {
 public:
-  LogicalExpression(AnyExpression &&l, AnyExpression &&r);
-  std::indirect<AnyExpression> left;
-  std::indirect<AnyExpression> right;
+  LogicalExpression(std::pmr::memory_resource *resource_ptr)
+      : left{std::allocator_arg, resource_ptr},
+        right{std::allocator_arg, resource_ptr} {}
+  std::pmr::indirect<AnyExpression> left;
+  std::pmr::indirect<AnyExpression> right;
   Operator op;
 };
 
 class BinaryExpression final : public Expression {
 public:
-  BinaryExpression(AnyExpression &&l, AnyExpression &&r);
-  std::indirect<AnyExpression> left;
-  std::indirect<AnyExpression> right;
+  BinaryExpression(std::pmr::memory_resource *resource_ptr)
+      : left{std::allocator_arg, resource_ptr},
+        right{std::allocator_arg, resource_ptr} {}
+  std::pmr::indirect<AnyExpression> left;
+  std::pmr::indirect<AnyExpression> right;
   char32_t op;
-};
-
-class ObjectExpression final : public Expression {
-public:
-  ObjectExpression() = default;
-  ObjectShape object_shape;
-  std::vector<Identifier> keys;
-  std::vector<std::optional<AnyExpression>> values;
 };
 
 class VariableAccessor final : public Expression {
@@ -418,30 +419,31 @@ public:
 
 class ConsoleCall final : public Expression {
 public:
-  ConsoleCall() = default;
-  std::vector<AnyExpression> arguments;
+  ConsoleCall(std::pmr::memory_resource *resource_ptr)
+      : arguments{resource_ptr} {}
+  std::pmr::vector<AnyExpression> arguments;
 };
 
 class LengthIntrinsic final : public Expression {
 public:
-  LengthIntrinsic(AnyExpression &&arg);
-  std::indirect<AnyExpression> argument;
+  LengthIntrinsic(std::pmr::memory_resource *resource_ptr)
+      : argument{std::allocator_arg, resource_ptr} {}
+  std::pmr::indirect<AnyExpression> argument;
 };
 
 class StringifyIntrinsic final : public Expression {
 public:
-  StringifyIntrinsic(AnyExpression &&arg);
-  std::indirect<AnyExpression> argument;
+  StringifyIntrinsic(std::pmr::memory_resource *resource_ptr)
+      : argument{std::allocator_arg, resource_ptr} {}
+  std::pmr::indirect<AnyExpression> argument;
 };
 
 struct AnyExpression {
-  using Alternative =
-      std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
-                   AliasedFunctionCall, DirectFunctionCall, MemberExpression,
-                   AssignExpression, LogicalExpression, BinaryExpression,
-                   ObjectExpression, VariableAccessor, ScopeAccessor,
-                   IntrinsicAccessor, LambdaExpression, ConsoleCall,
-                   LengthIntrinsic, StringifyIntrinsic>;
+  using Alternative = std::variant<
+      NumericLiteral, AsciiLiteral, UnicodeLiteral, AliasedFunctionCall,
+      DirectFunctionCall, MemberExpression, AssignExpression, LogicalExpression,
+      BinaryExpression, VariableAccessor, ScopeAccessor, IntrinsicAccessor,
+      LambdaExpression, ConsoleCall, LengthIntrinsic, StringifyIntrinsic>;
   std::optional<Alternative> alt;
   AnyExpression() = default;
   AnyExpression(Alternative a) : alt{std::move(a)} {};
@@ -452,24 +454,6 @@ struct AnyExpression {
   AnyExpression(const AnyExpression &other) = delete;
   AnyExpression &operator=(const AnyExpression &other) = delete;
 };
-
-MemberExpression::MemberExpression(AnyExpression &&obj)
-    : object{std::move(obj)} {};
-
-AssignExpression::AssignExpression(AnyExpression &&l, AnyExpression &&r)
-    : left{std::move(l)}, right{std::move(r)} {};
-
-LogicalExpression::LogicalExpression(AnyExpression &&l, AnyExpression &&r)
-    : left{std::move(l)}, right{std::move(r)} {};
-
-BinaryExpression::BinaryExpression(AnyExpression &&l, AnyExpression &&r)
-    : left{std::move(l)}, right{std::move(r)} {};
-
-LengthIntrinsic::LengthIntrinsic(AnyExpression &&arg)
-    : argument{std::move(arg)} {};
-
-StringifyIntrinsic::StringifyIntrinsic(AnyExpression &&arg)
-    : argument{std::move(arg)} {};
 
 class Statement {
 protected:
@@ -919,9 +903,11 @@ Expected<AnyExpression> Parser<T>::parse_assign_expression() {
   auto expression_result = parse_assign_expression();
   if (not expression_result)
     return std::unexpected(expression_result.error());
-  return AnyExpression::Alternative(std::in_place_type<AssignExpression>,
-                                    std::move(*left_expression),
-                                    std::move(*expression_result));
+  AssignExpression assign_expression{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  assign_expression.left = std::move(*left_expression);
+  assign_expression.right = std::move(*expression_result);
+  return AnyExpression{std::move(assign_expression)};
 }
 
 template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
@@ -980,8 +966,10 @@ right_expression: {
       not expression_result)
     return std::unexpected(expression_result.error());
   else {
-    LogicalExpression expression{std::move(*left_expression),
-                                 std::move(*expression_result)};
+    LogicalExpression expression{
+        &boundary.tape->all_programs[boundary.program_idx]->resource};
+    expression.left = std::move(*left_expression);
+    expression.right = std::move(*expression_result);
     expression.op = logical_op;
     left_expression->alt.template emplace<LogicalExpression>(
         std::move(expression));
@@ -1049,8 +1037,11 @@ Parser<T>::PostfixExpressionSaga::parse_member_expression(
     std::breakpoint();
     return std::unexpected<MissingPropertyName>(std::in_place);
   } else {
-    MemberExpression member_expression(std::move(expression));
+    auto &program =
+        *parser.boundary.tape->all_programs[parser.boundary.program_idx];
+    MemberExpression member_expression(&program.resource);
     member_expression.property = *field_name;
+    member_expression.object = std::move(expression);
     return Expected<AnyExpression>(std::in_place, std::move(member_expression))
         .and_then(*this);
   }
@@ -1078,50 +1069,13 @@ Expected<AnyExpression> Parser<T>::parse_additive_expression() {
   if (auto right_expression = parse_postfix_expression(); not right_expression)
     return std::unexpected(right_expression.error());
   else {
-    BinaryExpression binary_expression{std::move(*left_expression),
-                                       std::move(*right_expression)};
+    auto &program = *boundary.tape->all_programs[boundary.program_idx];
+    BinaryExpression binary_expression(&program.resource);
+    binary_expression.left = std::move(*left_expression);
+    binary_expression.right = std::move(*right_expression);
     binary_expression.op = binary_op;
     return AnyExpression{std::move(binary_expression)};
   }
-}
-
-template <typename T>
-Expected<AnyExpression> Parser<T>::parse_object_literal() {
-  ObjectExpression object_expression{};
-  if (auto token_result = tokenizer.tokenize(); not token_result)
-    return std::unexpected(token_result.error());
-object_property: {
-  if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
-    std::breakpoint();
-    return std::unexpected<InvalidPropertyName>(std::in_place);
-  }
-  Identifier property_name{std::get<Identifier>(tokenizer.last_token)};
-  object_expression.object_shape.properties.try_emplace(property_name);
-  if (auto token_result = tokenizer.tokenize(); not token_result)
-    return std::unexpected(token_result.error());
-  object_expression.keys.push_back(property_name);
-  std::optional<AnyExpression> initializer{};
-  if (tokenizer.last_token != Token{U':'})
-    goto after_initializer;
-  if (auto token_result = tokenizer.tokenize(); not token_result)
-    return std::unexpected(token_result.error());
-  if (auto expression_result = parse_expression(); not expression_result)
-    return std::unexpected(expression_result.error());
-  else
-    initializer.emplace(std::move(*expression_result));
-after_initializer:
-  object_expression.values.push_back(std::move(initializer));
-  if (tokenizer.last_token != Token{U','})
-    goto after_properties;
-  if (auto token_result = tokenizer.tokenize(); not token_result)
-    return std::unexpected(token_result.error());
-  if (tokenizer.last_token != Token{U'}'})
-    goto object_property;
-}
-after_properties:
-  if (auto assert_result = tokenizer.assert_punct('}'); not assert_result)
-    return std::unexpected(assert_result.error());
-  return AnyExpression{std::move(object_expression)};
 }
 
 template <typename T> class Parser<T>::PrimaryExpressionSaga {
@@ -1178,12 +1132,8 @@ public:
 template <typename T>
 Expected<AnyExpression>
 Parser<T>::PrimaryExpressionSaga::operator()(char32_t punct) {
-  if (punct == '{')
-    return parser.parse_object_literal();
-  else {
-    std::breakpoint();
-    return std::unexpected<UnexpectedToken>(std::in_place);
-  }
+  std::breakpoint();
+  return std::unexpected<UnexpectedToken>(std::in_place);
 }
 
 template <typename T>
@@ -1246,9 +1196,11 @@ struct PropertyFinder {
   }
   Expected<AnyExpression> operator()(const LambdaType *) { std::unreachable(); }
 
+  LexicalBoundary &boundary;
   AnyExpression source_expression;
   Identifier identifier;
-  PropertyFinder(AnyExpression e) : source_expression{std::move(e)} {}
+  PropertyFinder(LexicalBoundary &b, AnyExpression e)
+      : boundary{b}, source_expression{std::move(e)} {}
 };
 
 struct RvalueAnalyzer;
@@ -1330,15 +1282,20 @@ struct ExpressionStringifier {
   }
   AnyExpression operator()(const LambdaType *) { std::unreachable(); }
 
+  LexicalBoundary &boundary;
   AnyExpression source_expression;
-  ExpressionStringifier(AnyExpression e) : source_expression{std::move(e)} {}
+  ExpressionStringifier(LexicalBoundary &b, AnyExpression e)
+      : boundary{b}, source_expression{std::move(e)} {}
 };
 
 Expected<AnyExpression> PropertyFinder::operator()(StringType) {
   switch (identifier.offset) {
-  case OFFSET_length:
-    return Expected<AnyExpression>(
-        std::in_place, LengthIntrinsic{std::move(source_expression)});
+  case OFFSET_length: {
+    LengthIntrinsic length_intrinsic{
+        &boundary.tape->all_programs[boundary.program_idx]->resource};
+    length_intrinsic.argument = std::move(source_expression);
+    return AnyExpression{std::move(length_intrinsic)};
+  }
   default:
     std::breakpoint();
     return std::unexpected<InvalidPropertyAccess>(std::in_place);
@@ -1346,8 +1303,10 @@ Expected<AnyExpression> PropertyFinder::operator()(StringType) {
 }
 
 AnyExpression ExpressionStringifier::operator()(NumberType) {
-  return AnyExpression::Alternative(std::in_place_type<StringifyIntrinsic>,
-                                    std::move(source_expression));
+  StringifyIntrinsic stringify_intrinsic{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  stringify_intrinsic.argument = std::move(source_expression);
+  return AnyExpression{std::move(stringify_intrinsic)};
 }
 
 Expected<AnyExpression>
@@ -1384,8 +1343,10 @@ RvalueAnalyzer::operator()(const BinaryExpression &expression) {
            not right_analyzed)
     return right_analyzed;
   else {
-    BinaryExpression output_expression{std::move(*left_analyzed),
-                                       std::move(*right_analyzed)};
+    auto &program = *boundary.tape->all_programs[boundary.program_idx];
+    BinaryExpression output_expression(&program.resource);
+    output_expression.left = std::move(*left_analyzed);
+    output_expression.right = std::move(*right_analyzed);
     output_expression.op = expression.op;
     return AnyExpression{std::move(output_expression)};
   }
@@ -1398,7 +1359,7 @@ RvalueAnalyzer::operator()(const MemberExpression &expression) {
     return std::unexpected(object_analyzed.error());
   DatatypeAnalyzer datatype_visitor{boundary};
   auto datatype_analyzed = object_analyzed->alt->visit(datatype_visitor);
-  PropertyFinder property_visitor{std::move(*object_analyzed)};
+  PropertyFinder property_visitor{boundary, std::move(*object_analyzed)};
   property_visitor.identifier = expression.property;
   return datatype_analyzed.alt.visit(property_visitor);
 }
@@ -1409,17 +1370,22 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
     return std::unexpected<InvalidMethodAccess>(std::in_place);
   if (identifier.offset != OFFSET_log)
     return std::unexpected<InvalidMethodAccess>(std::in_place);
-  ConsoleCall console_call{};
-  for (const AnyExpression &argument : arguments) {
+  ConsoleCall console_call{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  console_call.arguments.resize(arguments.size());
+  std::ranges::zip_view argument_tuples{console_call.arguments, arguments};
+  for (std::tuple<AnyExpression &, const AnyExpression &> argument_tuple :
+       argument_tuples) {
     RvalueAnalyzer rvalue_visitor{boundary};
-    std::expected argument_analyzed{argument.alt->visit(rvalue_visitor)};
+    std::expected argument_analyzed{
+        std::get<1>(argument_tuple).alt->visit(rvalue_visitor)};
     if (not argument_analyzed)
       return std::unexpected(argument_analyzed.error());
     DatatypeAnalyzer datatype_visitor{boundary};
     auto argument_type = argument_analyzed->alt->visit(datatype_visitor);
-    ExpressionStringifier stringifier{std::move(*argument_analyzed)};
+    ExpressionStringifier stringifier{boundary, std::move(*argument_analyzed)};
     AnyExpression stringified_argument{argument_type.alt.visit(stringifier)};
-    console_call.arguments.push_back(std::move(stringified_argument));
+    std::get<0>(argument_tuple) = std::move(stringified_argument);
   }
   return AnyExpression{std::move(console_call)};
 }
@@ -1445,7 +1411,8 @@ CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   }
   if (auto analyze_result = definition->analyze(); not analyze_result)
     return std::unexpected(analyze_result.error());
-  DirectFunctionCall direct_call{};
+  DirectFunctionCall direct_call{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
   direct_call.callee = definition;
   return AnyExpression{std::move(direct_call)};
 }
