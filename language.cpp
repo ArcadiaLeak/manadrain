@@ -528,27 +528,43 @@ struct ConsoleMessage {
   std::string encode_for_print() const;
 };
 
-struct RuntimeFrame {
-  const LexicalBoundary *boundary;
-  std::span<std::byte> local_memory;
-  std::span<RuntimeFrame *> closure;
-  std::span<std::byte> return_val;
+struct RuntimeBytesDeleter {
+  std::pmr::memory_resource *resource;
+  std::size_t total_bytes;
+  std::size_t alignment;
+  void operator()(void *ptr_bytes) const noexcept;
+};
+
+void RuntimeBytesDeleter::operator()(void *ptr_bytes) const noexcept {
+  if (not ptr_bytes)
+    return;
+  resource->deallocate(ptr_bytes, total_bytes, alignment);
+}
+
+class RuntimeFrame {
+public:
+  RuntimeFrame(Machine &m, const LexicalBoundary &b,
+               std::pmr::memory_resource *resource_ptr);
+  Machine &machine;
+  const LexicalBoundary &boundary;
+  std::pmr::vector<RuntimeFrame *> closure_stack;
+  std::unique_ptr<void, RuntimeBytesDeleter> local_memory;
+  void evaluate();
 };
 
 struct RuntimeMemory {
   std::pmr::monotonic_buffer_resource resource{65536};
   std::pmr::list<RuntimeFrame> runtime_frames{&resource};
-  std::pmr::list<std::pmr::vector<RuntimeFrame *>> scope_traces{&resource};
-  std::pmr::list<std::pmr::vector<std::byte>> structures{&resource};
 };
 
 class Machine {
 public:
   Machine() : runtime_memory{std::make_unique<RuntimeMemory>()} {}
   std::list<ConsoleMessage> collect_console_messages(std::stop_token stopper);
+  void evaluate(const LexicalBoundary &boundary);
 
 private:
-  RuntimeFrame *top_frame;
+  friend class RuntimeFrame;
   std::unique_ptr<RuntimeMemory> runtime_memory;
   std::mutex console_mutex;
   std::condition_variable_any console_condition;
@@ -1586,6 +1602,33 @@ Expected<void> ModuleDefinition::analyze() {
   return Expected<void>{};
 }
 
+void Machine::evaluate(const LexicalBoundary &boundary) {
+  RuntimeFrame &runtime_frame = runtime_memory->runtime_frames.emplace_back(
+      *this, boundary, &runtime_memory->resource);
+  runtime_frame.evaluate();
+}
+
+RuntimeFrame::RuntimeFrame(Machine &m, const LexicalBoundary &b,
+                           std::pmr::memory_resource *resource_ptr)
+    : machine{m}, boundary{b}, closure_stack{resource_ptr} {
+  std::size_t total_bytes = boundary.local_layout.total_bytes,
+              alignment = boundary.local_layout.largest_alignment;
+  if (total_bytes == 0)
+    return;
+  void *memory_pointer =
+      machine.runtime_memory->resource.allocate(total_bytes, alignment);
+  RuntimeBytesDeleter memory_deleter{&machine.runtime_memory->resource,
+                                     total_bytes, alignment};
+  local_memory = {memory_pointer, memory_deleter};
+}
+
+void RuntimeFrame::evaluate() {
+  const auto &program = *boundary.tape->all_programs[boundary.program_idx];
+  for (const AnyStatement &statement : program.statements) {
+    std::breakpoint();
+  }
+}
+
 Language::Language() { machine = std::make_unique<Machine>(); }
 Language::~Language() = default;
 Language::Language(Language &&other) noexcept = default;
@@ -1613,6 +1656,10 @@ bool Language::compile_and_execute() {
     variant_error.emplace(parse_result.error());
   else if (auto analyze_result = definition.analyze(); not analyze_result)
     variant_error.emplace(analyze_result.error());
+
+  Machine machine{};
+  machine.evaluate(definition);
+
   return not variant_error.has_value();
 }
 } // namespace Manadrain
