@@ -414,7 +414,7 @@ class ConsoleCall final : public Expression {
 public:
   ConsoleCall(std::pmr::memory_resource *resource_ptr)
       : arguments{resource_ptr} {}
-  std::pmr::vector<AnyExpression> arguments;
+  std::pmr::list<AnyExpression> arguments;
 };
 
 class LengthIntrinsic final : public Expression {
@@ -521,7 +521,7 @@ void RuntimeBytesDeleter::operator()(void *ptr_bytes) const noexcept {
 class RuntimeFrame {
 public:
   RuntimeFrame(Machine &m, const LexicalBoundary &b,
-               std::pmr::memory_resource *resource_ptr);
+               std::pmr::memory_resource *r);
   Machine &machine;
   const LexicalBoundary &boundary;
   std::pmr::vector<RuntimeFrame *> closure_stack;
@@ -1012,7 +1012,10 @@ Parser<T>::PostfixExpressionSaga::operator()(AnyExpression expression) {
 template <typename T>
 Expected<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
     AnyExpression expression) {
-  std::vector<AnyExpression> arguments{};
+  auto &program =
+      *parser.boundary.tape->all_programs[parser.boundary.program_idx];
+  AliasedFunctionCall function_call{&program.resource};
+  function_call.callee = std::move(expression);
   while (1) {
     if (auto token_result = parser.tokenizer.tokenize(); not token_result)
       return std::unexpected(token_result.error());
@@ -1021,22 +1024,13 @@ Expected<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
     auto argument_expression = parser.parse_expression();
     if (not argument_expression)
       return std::unexpected(argument_expression.error());
-    arguments.push_back(std::move(*argument_expression));
+    function_call.arguments.push_back(std::move(*argument_expression));
     if (parser.tokenizer.last_token == Token{U')'})
       break;
     auto assert_result = parser.tokenizer.assert_punct(',');
     if (not assert_result)
       return std::unexpected(assert_result.error());
   }
-  auto &program =
-      *parser.boundary.tape->all_programs[parser.boundary.program_idx];
-  AliasedFunctionCall function_call{&program.resource};
-  function_call.arguments.resize(arguments.size());
-  std::ranges::zip_view argument_tuples{function_call.arguments, arguments};
-  for (std::tuple<AnyExpression &, AnyExpression &> argument_tuple :
-       argument_tuples)
-    std::swap(std::get<0>(argument_tuple), std::get<1>(argument_tuple));
-  function_call.callee = std::move(expression);
   return Expected<AnyExpression>(std::in_place, std::move(function_call))
       .and_then(*this);
 }
@@ -1293,18 +1287,6 @@ struct DatatypeAnalyzer {
   LexicalBoundary &boundary;
 };
 
-struct ExpressionStringifier {
-  AnyExpression operator()(NumberType);
-  template <std::derived_from<ValueType> T> AnyExpression operator()(T) {
-    std::unreachable();
-  }
-
-  LexicalBoundary &boundary;
-  AnyExpression source_expression;
-  ExpressionStringifier(LexicalBoundary &b, AnyExpression e)
-      : boundary{b}, source_expression{std::move(e)} {}
-};
-
 Expected<AnyExpression> PropertyFinder::operator()(StringType) {
   switch (identifier.offset) {
   case OFFSET_length: {
@@ -1317,13 +1299,6 @@ Expected<AnyExpression> PropertyFinder::operator()(StringType) {
     std::breakpoint();
     return std::unexpected<InvalidPropertyAccess>(std::in_place);
   }
-}
-
-AnyExpression ExpressionStringifier::operator()(NumberType) {
-  StringifyIntrinsic stringify_intrinsic{
-      &boundary.tape->all_programs[boundary.program_idx]->resource};
-  stringify_intrinsic.argument = std::move(source_expression);
-  return AnyExpression{std::move(stringify_intrinsic)};
 }
 
 Expected<AnyExpression>
@@ -1389,20 +1364,13 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
     return std::unexpected<InvalidMethodAccess>(std::in_place);
   ConsoleCall console_call{
       &boundary.tape->all_programs[boundary.program_idx]->resource};
-  console_call.arguments.resize(arguments.size());
-  std::ranges::zip_view argument_tuples{console_call.arguments, arguments};
-  for (std::tuple<AnyExpression &, const AnyExpression &> argument_tuple :
-       argument_tuples) {
-    RvalueAnalyzer rvalue_visitor{boundary};
-    std::expected argument_analyzed{
-        std::get<1>(argument_tuple).alt->visit(rvalue_visitor)};
+  for (const AnyExpression &argument : arguments) {
+    Expected<AnyExpression> argument_analyzed{
+        argument.alt->visit(RvalueAnalyzer{boundary})};
     if (not argument_analyzed)
       return std::unexpected(argument_analyzed.error());
-    DatatypeAnalyzer datatype_visitor{boundary};
-    auto argument_type = argument_analyzed->alt->visit(datatype_visitor);
-    ExpressionStringifier stringifier{boundary, std::move(*argument_analyzed)};
-    AnyExpression stringified_argument{argument_type.alt->visit(stringifier)};
-    std::get<0>(argument_tuple) = std::move(stringified_argument);
+    AnyExpression &expression = console_call.arguments.emplace_back();
+    std::swap(expression, *argument_analyzed);
   }
   return AnyExpression{std::move(console_call)};
 }
@@ -1617,8 +1585,8 @@ void Machine::evaluate(const LexicalBoundary &boundary) {
 }
 
 RuntimeFrame::RuntimeFrame(Machine &m, const LexicalBoundary &b,
-                           std::pmr::memory_resource *resource_ptr)
-    : machine{m}, boundary{b}, closure_stack{resource_ptr} {
+                           std::pmr::memory_resource *r)
+    : machine{m}, boundary{b}, closure_stack{r} {
   std::size_t total_bytes = boundary.local_layout.total_bytes,
               alignment = boundary.local_layout.largest_alignment;
   if (total_bytes == 0)
@@ -1630,11 +1598,64 @@ RuntimeFrame::RuntimeFrame(Machine &m, const LexicalBoundary &b,
   local_memory = {memory_pointer, memory_deleter};
 }
 
+struct StatementEvaluator {
+  void operator()(const ExpressionStatement &statement);
+  template <typename T> void operator()(const T &) { std::unreachable(); }
+  RuntimeFrame &runtime_frame;
+};
+
+template <typename T> struct ExpressionEvaluator {
+  T operator()(const ConsoleCall &expression);
+  T operator()(const DirectFunctionCall &expression);
+  template <typename U> T operator()(const U &) { std::unreachable(); }
+  RuntimeFrame &runtime_frame;
+};
+
+void StatementEvaluator::operator()(const ExpressionStatement &statement) {
+  statement.argument->alt->visit(ExpressionEvaluator<void>{runtime_frame});
+}
+
+template <typename T>
+T ExpressionEvaluator<T>::operator()(const ConsoleCall &expression) {
+  std::unreachable();
+}
+
+template <>
+void ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
+  for (const AnyExpression &expression : expression.arguments) {
+    ExpressionEvaluator<VariantStringView> expression_visitor{runtime_frame};
+    expression.alt->visit(expression_visitor);
+  }
+}
+
+template <typename T>
+T ExpressionEvaluator<T>::operator()(const DirectFunctionCall &expression) {
+  std::unreachable();
+}
+
+template <>
+double
+ExpressionEvaluator<double>::operator()(const DirectFunctionCall &expression) {
+  std::breakpoint();
+  return double{};
+}
+
+template <>
+VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+    const DirectFunctionCall &expression) {
+  auto return_visitor = [&]<typename T>(T datatype) -> void {
+    ExpressionEvaluator<typename T::Representation> expression_visitor{
+        runtime_frame};
+    expression_visitor(expression);
+  };
+  expression.callee->return_type.alt->visit(return_visitor);
+  return VariantStringView{};
+}
+
 void RuntimeFrame::evaluate() {
   const auto &program = *boundary.tape->all_programs[boundary.program_idx];
-  for (const AnyStatement &statement : program.statements) {
-    std::breakpoint();
-  }
+  for (const AnyStatement &statement : program.statements)
+    statement.alt->visit(StatementEvaluator{*this});
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
