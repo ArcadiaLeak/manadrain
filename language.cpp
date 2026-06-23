@@ -123,76 +123,49 @@ public:
   auto operator<=>(const ValueType &) const = default;
 };
 
-class NumberType final : public ValueType {
-public:
-  NumberType() = default;
+struct NumberType final : public ValueType {
+  explicit NumberType() = default;
   auto operator<=>(const NumberType &) const = default;
+  using Representation = double;
 };
 
 using VariantStringView = std::variant<std::string_view, std::u16string_view>;
-class StringType final : public ValueType {
-public:
-  StringType() = default;
+struct StringType final : public ValueType {
+  explicit StringType() = default;
   auto operator<=>(const StringType &) const = default;
-};
-
-struct DynamicValue;
-class DynamicType final : public ValueType {
-public:
-  DynamicType() = default;
-  auto operator<=>(const DynamicType &) const = default;
-};
-
-class LambdaType;
-
-class VariantType {
-public:
-  using Alternative =
-      std::variant<NumberType, StringType, const LambdaType *, DynamicType>;
-  std::optional<Alternative> alt;
-
-  VariantType() = default;
-  VariantType(Alternative a) : alt{std::move(a)} {};
-
-  auto operator<=>(const VariantType &) const = default;
-  std::size_t type_size() const;
-  std::size_t type_alignment() const;
+  using Representation = VariantStringView;
 };
 
 struct DynamicValue {};
-struct LambdaDescriptor {};
-
-class LambdaType final : public ValueType {
-public:
-  LambdaType() = default;
-  std::vector<VariantType> parameter_types;
-  VariantType return_type;
-  auto operator<=>(const LambdaType &) const = default;
+struct DynamicType final : public ValueType {
+  explicit DynamicType() = default;
+  auto operator<=>(const DynamicType &) const = default;
+  using Representation = DynamicValue;
 };
 
-std::size_t VariantType::type_size() const {
-  struct SizeVisitor {
-    std::size_t operator()(NumberType) { return sizeof(double); }
-    std::size_t operator()(StringType) { return sizeof(VariantStringView); }
-    std::size_t operator()(DynamicType) { return sizeof(DynamicValue); }
-    std::size_t operator()(const LambdaType *) {
-      return sizeof(LambdaDescriptor);
-    }
-  };
-  return alt->visit(SizeVisitor{});
-}
+struct LambdaSignature;
+struct LambdaDescriptor {};
+struct LambdaType final : public ValueType {
+  explicit LambdaType() = default;
+  const LambdaSignature *signature;
+  auto operator<=>(const LambdaType &) const = default;
+  using Representation = LambdaDescriptor;
+};
 
-std::size_t VariantType::type_alignment() const {
-  struct AlignmentVisitor {
-    std::size_t operator()(NumberType) { return alignof(double); }
-    std::size_t operator()(StringType) { return alignof(VariantStringView); }
-    std::size_t operator()(DynamicType) { return alignof(DynamicValue); }
-    std::size_t operator()(const LambdaType *) {
-      return alignof(LambdaDescriptor);
-    }
-  };
-  return alt->visit(AlignmentVisitor{});
-}
+struct VariantType {
+  using Alternative =
+      std::variant<NumberType, StringType, LambdaType, DynamicType>;
+  std::optional<Alternative> alt;
+  VariantType() = default;
+  VariantType(Alternative a) : alt{std::move(a)} {};
+  auto operator<=>(const VariantType &) const = default;
+};
+
+struct LambdaSignature {
+  std::vector<VariantType> parameter_types;
+  VariantType return_type;
+  auto operator<=>(const LambdaSignature &) const = default;
+};
 
 class ObjectShape {
 public:
@@ -487,12 +460,13 @@ public:
   std::pmr::indirect<AnyExpression> rvalue;
 };
 
-class InitializeScope final : public Statement {
+template <typename T> class InitializeScope final : public Statement {
 public:
   InitializeScope(std::pmr::memory_resource *resource_ptr)
       : rvalue{std::allocator_arg, resource_ptr} {};
   std::size_t local_offset;
   std::pmr::indirect<AnyExpression> rvalue;
+  T datatype;
 };
 
 class ReturnStatement final : public Statement {
@@ -510,8 +484,10 @@ public:
 };
 
 struct AnyStatement {
-  using Alternative = std::variant<InitializeVariable, InitializeScope,
-                                   ReturnStatement, ExpressionStatement>;
+  using Alternative =
+      std::variant<InitializeVariable, InitializeScope<NumberType>,
+                   InitializeScope<StringType>, ReturnStatement,
+                   ExpressionStatement>;
   std::optional<Alternative> alt;
   AnyStatement() = default;
   AnyStatement(Alternative a) : alt{std::move(a)} {};
@@ -1236,7 +1212,6 @@ struct PropertyFinder {
   Expected<AnyExpression> operator()(T) {
     std::unreachable();
   }
-  Expected<AnyExpression> operator()(const LambdaType *) { std::unreachable(); }
 
   LexicalBoundary &boundary;
   AnyExpression source_expression;
@@ -1322,7 +1297,6 @@ struct ExpressionStringifier {
   template <std::derived_from<ValueType> T> AnyExpression operator()(T) {
     std::unreachable();
   }
-  AnyExpression operator()(const LambdaType *) { std::unreachable(); }
 
   LexicalBoundary &boundary;
   AnyExpression source_expression;
@@ -1481,11 +1455,25 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
   return find_local_linkedly(boundary->parent_boundary, scope_offset + 1);
 }
 
+struct InitializeScopeAnalyzer {
+  template <typename T> Expected<AnyStatement> operator()(T datatype);
+  Expected<AnyStatement> operator()(DynamicType datatype) {
+    std::unreachable();
+  }
+  Expected<AnyStatement> operator()(LambdaType datatype) { std::unreachable(); }
+
+  InitializeScopeAnalyzer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+  AnyExpression rvalue_analyzed;
+  Identifier variable_name;
+};
+
 struct StatementAnalyzer {
   Expected<AnyStatement> operator()(const ExpressionStatement &statement);
   Expected<AnyStatement> operator()(const InitializeVariable &statement);
   Expected<AnyStatement> operator()(const ReturnStatement &statement);
-  Expected<AnyStatement> operator()(const InitializeScope &statement) {
+  template <typename T>
+  Expected<AnyStatement> operator()(const InitializeScope<T> &statement) {
     std::unreachable();
   }
 
@@ -1507,29 +1495,40 @@ StatementAnalyzer::operator()(const ExpressionStatement &statement) {
 
 Expected<AnyStatement>
 StatementAnalyzer::operator()(const InitializeVariable &statement) {
-  auto rvalue_analyzed = statement.rvalue->alt->visit(RvalueAnalyzer{boundary});
+  Expected<AnyExpression> rvalue_analyzed{
+      statement.rvalue->alt->visit(RvalueAnalyzer{boundary})};
   if (not rvalue_analyzed)
     return std::unexpected(rvalue_analyzed.error());
-  InitializeScope initialize_scope{
-      &boundary.tape->all_programs[boundary.program_idx]->resource};
-  initialize_scope.rvalue = std::move(*rvalue_analyzed);
   VariantType datatype_analyzed{
-      initialize_scope.rvalue->alt->visit(DatatypeAnalyzer{boundary})};
-  for (auto &layout_entry : boundary.local_layout.entries) {
-    if (layout_entry.identifier == statement.variable_name) {
-      std::size_t total_bytes{boundary.local_layout.total_bytes};
-      std::size_t alignment{datatype_analyzed.type_alignment()};
-      layout_entry.variant_type = datatype_analyzed;
-      layout_entry.offset = (total_bytes + alignment - 1) & ~(alignment - 1);
-      boundary.local_layout.total_bytes =
-          layout_entry.offset + datatype_analyzed.type_size();
-      boundary.local_layout.largest_alignment =
-          std::max(boundary.local_layout.largest_alignment, alignment);
-      initialize_scope.local_offset = layout_entry.offset;
-      break;
-    } else
-      assert(layout_entry.variant_type.alt.has_value());
-  }
+      rvalue_analyzed->alt->visit(DatatypeAnalyzer{boundary})};
+  InitializeScopeAnalyzer initialize_scope_analyzer{boundary};
+  initialize_scope_analyzer.rvalue_analyzed = std::move(*rvalue_analyzed);
+  initialize_scope_analyzer.variable_name = statement.variable_name;
+  return datatype_analyzed.alt->visit(initialize_scope_analyzer);
+}
+
+template <typename T>
+Expected<AnyStatement> InitializeScopeAnalyzer::operator()(T datatype) {
+  InitializeScope<T> initialize_scope{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  initialize_scope.rvalue = std::move(rvalue_analyzed);
+  initialize_scope.datatype = datatype;
+  auto &entries = boundary.local_layout.entries;
+  auto entry_it =
+      std::ranges::find(entries, variable_name, &LocalLayoutEntry::identifier);
+  auto type_is_known = [](auto &e) { return e.variant_type.alt.has_value(); };
+  assert(entry_it != entries.end());
+  assert(std::all_of(entries.begin(), entry_it, type_is_known));
+  std::size_t total_bytes{boundary.local_layout.total_bytes};
+  std::size_t alignment{alignof(typename T::Representation)};
+  std::size_t offset{(total_bytes + alignment - 1) & ~(alignment - 1)};
+  initialize_scope.local_offset = offset;
+  entry_it->offset = offset;
+  entry_it->variant_type = VariantType{datatype};
+  boundary.local_layout.total_bytes =
+      offset + sizeof(typename T::Representation);
+  boundary.local_layout.largest_alignment =
+      std::max(boundary.local_layout.largest_alignment, alignment);
   return AnyStatement{std::move(initialize_scope)};
 }
 
@@ -1635,7 +1634,7 @@ Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
 bool Language::compile_and_execute() {
-  std::set<LambdaType> lambda_types{};
+  std::set<LambdaSignature> lambda_signatures{};
   std::set<std::string> string_atlas{};
   std::set<std::u16string> u16string_atlas{};
   FunctionTape tape{};
