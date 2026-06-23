@@ -244,6 +244,7 @@ public:
   }
 
 private:
+  Expected<void> do_analyze();
   Expected<void> analyze_formal_parameters();
 };
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
@@ -1572,18 +1573,26 @@ Expected<void> FunctionDefinition::analyze_formal_parameters() {
   return Expected<void>{};
 }
 
+Expected<void> FunctionDefinition::do_analyze() {
+  if (auto parameters_ok = analyze_formal_parameters(); not parameters_ok)
+    return std::unexpected(parameters_ok.error());
+  else if (auto statements_ok = analyze_statements(); not statements_ok)
+    return std::unexpected(statements_ok.error());
+  else if (auto inner_functions_ok = analyze_inner_functions();
+           not inner_functions_ok)
+    return std::unexpected(inner_functions_ok.error());
+  else
+    return Expected<void>{};
+}
+
 Expected<void> FunctionDefinition::analyze() {
   switch (analyzer_mark) {
-  case AnalyzerMark::PENDING:
+  case AnalyzerMark::PENDING: {
     analyzer_mark = AnalyzerMark::INITIATED;
-    if (auto void_opt = analyze_formal_parameters(); not void_opt)
-      return std::unexpected(void_opt.error());
-    if (auto void_opt = analyze_statements(); not void_opt)
-      return std::unexpected(void_opt.error());
-    if (auto void_opt = analyze_inner_functions(); not void_opt)
-      return std::unexpected(void_opt.error());
+    auto analyzer_result = do_analyze();
     analyzer_mark = AnalyzerMark::COMPLETE;
-    return Expected<void>{};
+    return analyzer_result;
+  }
   case AnalyzerMark::INITIATED:
     std::breakpoint();
     return std::unexpected<UnresolvableCircularity>(std::in_place);
