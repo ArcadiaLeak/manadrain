@@ -156,6 +156,7 @@ public:
 
   auto operator<=>(const VariantType &) const = default;
   std::size_t type_size() const;
+  std::size_t type_alignment() const;
 };
 
 struct DynamicValue {};
@@ -181,6 +182,18 @@ std::size_t VariantType::type_size() const {
   return alt->visit(SizeVisitor{});
 }
 
+std::size_t VariantType::type_alignment() const {
+  struct AlignmentVisitor {
+    std::size_t operator()(NumberType) { return alignof(double); }
+    std::size_t operator()(StringType) { return alignof(VariantStringView); }
+    std::size_t operator()(DynamicType) { return alignof(DynamicValue); }
+    std::size_t operator()(const LambdaType *) {
+      return alignof(LambdaDescriptor);
+    }
+  };
+  return alt->visit(AlignmentVisitor{});
+}
+
 class ObjectShape {
 public:
   std::flat_map<Identifier, VariantType> properties;
@@ -191,10 +204,16 @@ struct AnyStatement;
 class FunctionDefinition;
 class ScopeAccessor;
 
-struct LayoutEntry {
+struct LocalLayoutEntry {
   Identifier identifier;
   VariantType variant_type;
   std::size_t offset;
+};
+
+struct LocalLayout {
+  std::vector<LocalLayoutEntry> entries;
+  std::size_t largest_alignment;
+  std::size_t total_bytes;
 };
 
 struct Program {
@@ -210,12 +229,12 @@ struct FunctionTape {
 class LexicalBoundary {
 public:
   LexicalBoundary *parent_boundary;
-
-  std::size_t program_idx;
-  std::vector<FunctionDefinition *> inner_functions;
   FunctionTape *tape;
 
-  std::vector<LayoutEntry> local_layout;
+  std::vector<FunctionDefinition *> inner_functions;
+
+  std::size_t program_idx;
+  LocalLayout local_layout;
 
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
   virtual std::optional<ScopeAccessor>
@@ -776,7 +795,7 @@ formal_parameter: {
     return std::unexpected<MissingFormalParameter>(std::in_place);
   }
   Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
-  auto &layout_entry = boundary.local_layout.emplace_back();
+  auto &layout_entry = boundary.local_layout.entries.emplace_back();
   layout_entry.identifier = parameter;
   boundary.arguments.push_back(parameter);
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
@@ -939,12 +958,12 @@ template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
   }
   if (auto assert_result = tokenizer.assert_punct(';'); not assert_result)
     return std::unexpected(assert_result.error());
-  if (std::ranges::contains(boundary.local_layout, variable_name,
-                            &LayoutEntry::identifier)) {
+  if (std::ranges::contains(boundary.local_layout.entries, variable_name,
+                            &LocalLayoutEntry::identifier)) {
     std::breakpoint();
     return std::unexpected<DuplicateDeclaration>(std::in_place);
   } else {
-    auto &layout_entry = boundary.local_layout.emplace_back();
+    auto &layout_entry = boundary.local_layout.entries.emplace_back();
     layout_entry.identifier = variable_name;
     return Expected<void>{};
   }
@@ -1164,12 +1183,13 @@ Expected<AnyExpression> Parser<T>::parse_primary_expression() {
 template <typename T>
 std::optional<ScopeAccessor>
 AbstractBoundary<T>::find_local(Identifier identifier) const {
-  auto has_type = [](const auto &layout_entry) {
-    return layout_entry.variant_type.alt.has_value();
+  auto placed_before = [](const auto &entry) {
+    return entry.variant_type.alt.has_value();
   };
-  auto eligible_entries = local_layout | std::views::take_while(has_type);
-  auto layout_entry_it =
-      std::ranges::find(eligible_entries, identifier, &LayoutEntry::identifier);
+  auto eligible_entries =
+      local_layout.entries | std::views::take_while(placed_before);
+  auto layout_entry_it = std::ranges::find(eligible_entries, identifier,
+                                           &LocalLayoutEntry::identifier);
   if (layout_entry_it == eligible_entries.end())
     return std::nullopt;
   ScopeAccessor accessor{layout_entry_it->variant_type};
@@ -1479,18 +1499,21 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
   initialize_scope.rvalue = std::move(*rvalue_analyzed);
   VariantType datatype_analyzed{
       initialize_scope.rvalue->alt->visit(DatatypeAnalyzer{boundary})};
-  std::size_t byte_offset{};
-  for (auto &layout_entry : boundary.local_layout) {
+  for (auto &layout_entry : boundary.local_layout.entries) {
     if (layout_entry.identifier == statement.variable_name) {
+      std::size_t total_bytes{boundary.local_layout.total_bytes};
+      std::size_t alignment{datatype_analyzed.type_alignment()};
       layout_entry.variant_type = datatype_analyzed;
-      layout_entry.offset = byte_offset;
+      layout_entry.offset = (total_bytes + alignment - 1) & ~(alignment - 1);
+      boundary.local_layout.total_bytes =
+          layout_entry.offset + datatype_analyzed.type_size();
+      boundary.local_layout.largest_alignment =
+          std::max(boundary.local_layout.largest_alignment, alignment);
+      initialize_scope.local_offset = layout_entry.offset;
       break;
-    } else {
+    } else
       assert(layout_entry.variant_type.alt.has_value());
-      byte_offset += layout_entry.variant_type.type_size();
-    }
   }
-  initialize_scope.local_offset = byte_offset;
   return AnyStatement{std::move(initialize_scope)};
 }
 
@@ -1513,25 +1536,24 @@ StatementAnalyzer::operator()(const ReturnStatement &statement) {
 template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
   std::unique_ptr<Program> input_program{std::make_unique<Program>()};
   std::swap(tape->all_programs[program_idx], input_program);
-  Expected<void> program_result{};
   for (const AnyStatement &any_statement : input_program->statements) {
-    auto output_stmt = any_statement.alt->visit(StatementAnalyzer{*this});
-    if (not output_stmt) {
-      program_result = std::unexpected{output_stmt.error()};
-      break;
-    } else {
-      auto &program = *tape->all_programs[program_idx];
-      program.statements.push_back(std::move(*output_stmt));
-    }
+    Expected<AnyStatement> analyzed_statement{
+        any_statement.alt->visit(StatementAnalyzer{*this})};
+    if (not analyzed_statement.has_value())
+      return std::unexpected{analyzed_statement.error()};
+    tape->all_programs[program_idx]->statements.push_back(
+        std::move(*analyzed_statement));
   }
-  std::ranges::sort(local_layout, {}, &LayoutEntry::identifier);
-  return program_result;
+  std::ranges::sort(local_layout.entries, {}, &LocalLayoutEntry::identifier);
+  return Expected<void>{};
 }
 
 Expected<void> FunctionDefinition::analyze_formal_parameters() {
-  for (Identifier argument : arguments)
-    std::ranges::find(local_layout, argument, &LayoutEntry::identifier)
-        ->variant_type.alt.emplace(std::in_place_type<DynamicType>);
+  for (Identifier argument : arguments) {
+    auto layout_entry_it = std::ranges::find(local_layout.entries, argument,
+                                             &LocalLayoutEntry::identifier);
+    layout_entry_it->variant_type.alt.emplace(std::in_place_type<DynamicType>);
+  }
   return Expected<void>{};
 }
 
