@@ -314,13 +314,13 @@ public:
   std::pmr::vector<AnyExpression> arguments;
 };
 
-class DirectFunctionCall final : public Expression {
+template <typename T> class DirectFunctionCall final : public Expression {
 public:
   DirectFunctionCall(std::pmr::memory_resource *resource_ptr)
       : passed_identifiers{resource_ptr}, passed_values{resource_ptr} {}
 
   const FunctionDefinition *callee;
-
+  T return_type;
   std::pmr::vector<Identifier> passed_identifiers;
   std::pmr::vector<AnyExpression> passed_values;
 };
@@ -432,11 +432,13 @@ public:
 };
 
 struct AnyExpression {
-  using Alternative = std::variant<
-      NumericLiteral, AsciiLiteral, UnicodeLiteral, AliasedFunctionCall,
-      DirectFunctionCall, MemberExpression, AssignExpression, LogicalExpression,
-      BinaryExpression, VariableAccessor, ScopeAccessor, IntrinsicAccessor,
-      LambdaExpression, ConsoleCall, LengthIntrinsic, StringifyIntrinsic>;
+  using Alternative =
+      std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
+                   AliasedFunctionCall, DirectFunctionCall<NumberType>,
+                   MemberExpression, AssignExpression, LogicalExpression,
+                   BinaryExpression, VariableAccessor, ScopeAccessor,
+                   IntrinsicAccessor, LambdaExpression, ConsoleCall,
+                   LengthIntrinsic, StringifyIntrinsic>;
   std::optional<Alternative> alt;
   AnyExpression() = default;
   AnyExpression(Alternative a) : alt{std::move(a)} {};
@@ -538,7 +540,7 @@ class Machine {
 public:
   Machine() : runtime_memory{std::make_unique<RuntimeMemory>()} {}
   std::list<ConsoleMessage> collect_console_messages(std::stop_token stopper);
-  void evaluate(const LexicalBoundary &boundary);
+  template <typename T> T evaluate(const LexicalBoundary &boundary);
 
 private:
   friend class RuntimeFrame;
@@ -1274,10 +1276,9 @@ struct DatatypeAnalyzer {
   VariantType operator()(const BinaryExpression &) {
     return VariantType{NumberType{}};
   }
-  VariantType operator()(const DirectFunctionCall &direct_call) {
-    assert(direct_call.callee != nullptr);
-    assert(direct_call.callee->return_type.alt.has_value());
-    return direct_call.callee->return_type;
+  template <typename T>
+  VariantType operator()(const DirectFunctionCall<T> &direct_call) {
+    return VariantType{direct_call.return_type};
   }
   template <std::derived_from<Expression> T> VariantType operator()(const T &) {
     std::unreachable();
@@ -1386,6 +1387,21 @@ CalleeAnalyzer::operator()(const MemberExpression &expression) {
   return member_object->alt->visit(method_visitor);
 }
 
+struct DirectFunctionCallAnalyzer {
+  template <typename T> AnyExpression operator()(T) { std::unreachable(); }
+  AnyExpression operator()(NumberType datatype);
+  LexicalBoundary &boundary;
+  FunctionDefinition *definition;
+};
+
+AnyExpression DirectFunctionCallAnalyzer::operator()(NumberType datatype) {
+  DirectFunctionCall<NumberType> direct_call{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  direct_call.callee = definition;
+  direct_call.return_type = datatype;
+  return AnyExpression{std::move(direct_call)};
+}
+
 Expected<AnyExpression>
 CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   FunctionDefinition *definition{
@@ -1393,13 +1409,13 @@ CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   if (not definition) {
     std::breakpoint();
     return std::unexpected<InvalidVariableAccess>(std::in_place);
+  } else if (auto definition_analysis = definition->analyze();
+             not definition_analysis) {
+    return std::unexpected(definition_analysis.error());
+  } else {
+    DirectFunctionCallAnalyzer return_visitor{boundary, definition};
+    return definition->return_type.alt->visit(return_visitor);
   }
-  if (auto analyze_result = definition->analyze(); not analyze_result)
-    return std::unexpected(analyze_result.error());
-  DirectFunctionCall direct_call{
-      &boundary.tape->all_programs[boundary.program_idx]->resource};
-  direct_call.callee = definition;
-  return AnyExpression{std::move(direct_call)};
 }
 
 FunctionDefinition *
@@ -1578,10 +1594,51 @@ Expected<void> ModuleDefinition::analyze() {
   return Expected<void>{};
 }
 
-void Machine::evaluate(const LexicalBoundary &boundary) {
+struct StatementEvaluator {
+  template <typename T> void operator()(const InitializeScope<T> &);
+  template <typename T> void operator()(const T &) { std::unreachable(); }
+  RuntimeFrame &runtime_frame;
+};
+
+template <typename T> struct ExpressionEvaluator {
+  template <typename U> T operator()(const U &) { std::unreachable(); }
+  RuntimeFrame &runtime_frame;
+};
+
+template <>
+template <>
+void ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
+  for (const AnyExpression &expression : expression.arguments) {
+    ExpressionEvaluator<VariantStringView> expression_visitor{runtime_frame};
+    expression.alt->visit(expression_visitor);
+  }
+}
+
+template <>
+template <>
+VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+    const DirectFunctionCall<NumberType> &expression) {
+  runtime_frame.machine.evaluate<double>(*expression.callee);
+  return VariantStringView{};
+}
+
+template <>
+void StatementEvaluator::operator()(const ExpressionStatement &statement) {
+  statement.argument->alt->visit(ExpressionEvaluator<void>{runtime_frame});
+}
+
+template <typename T>
+void StatementEvaluator::operator()(const InitializeScope<T> &statement) {
+  std::breakpoint();
+}
+
+template <typename T> T Machine::evaluate(const LexicalBoundary &boundary) {
   RuntimeFrame &runtime_frame = runtime_memory->runtime_frames.emplace_back(
       *this, boundary, &runtime_memory->resource);
-  runtime_frame.evaluate();
+  const auto &program = *boundary.tape->all_programs[boundary.program_idx];
+  for (const AnyStatement &statement : program.statements)
+    statement.alt->visit(StatementEvaluator{runtime_frame});
+  return T();
 }
 
 RuntimeFrame::RuntimeFrame(Machine &m, const LexicalBoundary &b,
@@ -1596,66 +1653,6 @@ RuntimeFrame::RuntimeFrame(Machine &m, const LexicalBoundary &b,
   RuntimeBytesDeleter memory_deleter{&machine.runtime_memory->resource,
                                      total_bytes, alignment};
   local_memory = {memory_pointer, memory_deleter};
-}
-
-struct StatementEvaluator {
-  void operator()(const ExpressionStatement &statement);
-  template <typename T> void operator()(const T &) { std::unreachable(); }
-  RuntimeFrame &runtime_frame;
-};
-
-template <typename T> struct ExpressionEvaluator {
-  T operator()(const ConsoleCall &expression);
-  T operator()(const DirectFunctionCall &expression);
-  template <typename U> T operator()(const U &) { std::unreachable(); }
-  RuntimeFrame &runtime_frame;
-};
-
-void StatementEvaluator::operator()(const ExpressionStatement &statement) {
-  statement.argument->alt->visit(ExpressionEvaluator<void>{runtime_frame});
-}
-
-template <typename T>
-T ExpressionEvaluator<T>::operator()(const ConsoleCall &expression) {
-  std::unreachable();
-}
-
-template <>
-void ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
-  for (const AnyExpression &expression : expression.arguments) {
-    ExpressionEvaluator<VariantStringView> expression_visitor{runtime_frame};
-    expression.alt->visit(expression_visitor);
-  }
-}
-
-template <typename T>
-T ExpressionEvaluator<T>::operator()(const DirectFunctionCall &expression) {
-  std::unreachable();
-}
-
-template <>
-double
-ExpressionEvaluator<double>::operator()(const DirectFunctionCall &expression) {
-  std::breakpoint();
-  return double{};
-}
-
-template <>
-VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
-    const DirectFunctionCall &expression) {
-  auto return_visitor = [&]<typename T>(T datatype) -> void {
-    ExpressionEvaluator<typename T::Representation> expression_visitor{
-        runtime_frame};
-    expression_visitor(expression);
-  };
-  expression.callee->return_type.alt->visit(return_visitor);
-  return VariantStringView{};
-}
-
-void RuntimeFrame::evaluate() {
-  const auto &program = *boundary.tape->all_programs[boundary.program_idx];
-  for (const AnyStatement &statement : program.statements)
-    statement.alt->visit(StatementEvaluator{*this});
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
@@ -1687,7 +1684,7 @@ bool Language::compile_and_execute() {
     variant_error.emplace(analyze_result.error());
 
   Machine machine{};
-  machine.evaluate(definition);
+  machine.evaluate<void>(definition);
 
   return not variant_error.has_value();
 }
