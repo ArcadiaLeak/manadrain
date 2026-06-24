@@ -175,7 +175,6 @@ public:
 struct AnyStatement;
 
 class FunctionDefinition;
-class ScopeAccessor;
 
 struct LocalLayoutEntry {
   Identifier identifier;
@@ -210,7 +209,7 @@ public:
   LocalLayout local_layout;
 
   virtual FunctionDefinition *find_function(Identifier identifier) = 0;
-  virtual std::optional<ScopeAccessor>
+  virtual std::optional<LocalLayoutEntry>
   find_local(Identifier identifier) const = 0;
 
   virtual Expected<void> put_return_type(VariantType variant_type) = 0;
@@ -219,7 +218,8 @@ public:
 template <typename T> class AbstractBoundary : public LexicalBoundary {
 public:
   FunctionDefinition *find_function(Identifier identifier) override;
-  std::optional<ScopeAccessor> find_local(Identifier identifier) const override;
+  std::optional<LocalLayoutEntry>
+  find_local(Identifier identifier) const override;
 
 protected:
   AbstractBoundary() = default;
@@ -364,17 +364,17 @@ class VariableAccessor final : public Expression {
 public:
   VariableAccessor() = default;
   Identifier identifier;
-  std::optional<ScopeAccessor>
-  find_local_linkedly(const LexicalBoundary *boundary,
-                      std::size_t scope_offset = 0) const;
+  AnyExpression find_local_linkedly(const LexicalBoundary *boundary,
+                                    std::size_t scope_offset = 0) const;
   FunctionDefinition *find_function_linkedly(LexicalBoundary *boundary) const;
 };
 
-class ScopeAccessor final : public Expression {
+template <typename T> class ScopeAccessor final : public Expression {
 public:
-  ScopeAccessor(VariantType t) : local_type{t} {}
-  VariantType local_type;
-  std::array<std::size_t, 2> location;
+  ScopeAccessor() = default;
+  T local_type;
+  std::size_t scope_offset;
+  std::size_t local_offset;
 };
 
 enum class IntrinsicObject { O_CONSOLE };
@@ -434,8 +434,9 @@ struct AnyExpression {
       NumericLiteral, AsciiLiteral, UnicodeLiteral, AliasedFunctionCall,
       DirectFunctionCall<NumberType>, MemberExpression, AssignExpression,
       LogicalExpression, BinaryExpression<'+'>, BinaryExpression<'-'>,
-      VariableAccessor, ScopeAccessor, IntrinsicAccessor, LambdaExpression,
-      ConsoleCall, LengthIntrinsic, StringifyIntrinsic>;
+      VariableAccessor, ScopeAccessor<StringType>, ScopeAccessor<NumberType>,
+      IntrinsicAccessor, LambdaExpression, ConsoleCall, LengthIntrinsic,
+      StringifyIntrinsic>;
   std::optional<Alternative> alt;
   AnyExpression() = default;
   AnyExpression(Alternative a) : alt{std::move(a)} {};
@@ -1174,20 +1175,16 @@ Expected<AnyExpression> Parser<T>::parse_primary_expression() {
 }
 
 template <typename T>
-std::optional<ScopeAccessor>
+std::optional<LocalLayoutEntry>
 AbstractBoundary<T>::find_local(Identifier identifier) const {
-  auto placed_before = [](const auto &entry) {
-    return entry.variant_type.alt.has_value();
+  auto placed_before = [](const auto &e) {
+    return e.variant_type.alt.has_value();
   };
-  auto eligible_entries =
-      local_layout.entries | std::views::take_while(placed_before);
-  auto layout_entry_it = std::ranges::find(eligible_entries, identifier,
-                                           &LocalLayoutEntry::identifier);
-  if (layout_entry_it == eligible_entries.end())
-    return std::nullopt;
-  ScopeAccessor accessor{layout_entry_it->variant_type};
-  std::get<1>(accessor.location) = layout_entry_it->offset;
-  return accessor;
+  auto entries = local_layout.entries | std::views::take_while(placed_before);
+  auto entry_it =
+      std::ranges::find(entries, identifier, &LocalLayoutEntry::identifier);
+  return entry_it != entries.end() ? std::make_optional(*entry_it)
+                                   : std::nullopt;
 }
 
 template <typename T>
@@ -1275,8 +1272,9 @@ struct DatatypeAnalyzer {
   VariantType operator()(const AsciiLiteral &) {
     return VariantType{StringType{}};
   }
-  VariantType operator()(const ScopeAccessor &accessor) {
-    return accessor.local_type;
+  template <typename T>
+  VariantType operator()(const ScopeAccessor<T> &accessor) {
+    return VariantType{accessor.local_type};
   }
   template <char32_t C> VariantType operator()(const BinaryExpression<C> &) {
     return VariantType{NumberType{}};
@@ -1316,10 +1314,10 @@ RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
 
 Expected<AnyExpression>
 RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
-  std::optional<ScopeAccessor> scope_accessor{
+  AnyExpression scope_accessor{
       variable_accessor.find_local_linkedly(&boundary)};
-  if (scope_accessor)
-    return AnyExpression{*scope_accessor};
+  if (scope_accessor.alt)
+    return scope_accessor;
   switch (variable_accessor.identifier.offset) {
   case OFFSET_console: {
     IntrinsicAccessor intrinsic_accessor{};
@@ -1432,17 +1430,35 @@ VariableAccessor::find_function_linkedly(LexicalBoundary *boundary) const {
                     : find_function_linkedly(boundary->parent_boundary);
 }
 
-std::optional<ScopeAccessor>
+struct ScopeAccessorAnalyzer {
+  template <typename T> AnyExpression operator()(T);
+  AnyExpression operator()(LambdaType datatype) { std::unreachable(); }
+  AnyExpression operator()(DynamicType datatype) { std::unreachable(); }
+  std::size_t scope_offset;
+  std::size_t local_offset;
+};
+
+template <typename T>
+AnyExpression ScopeAccessorAnalyzer::operator()(T datatype) {
+  ScopeAccessor<T> scope_accessor{};
+  scope_accessor.scope_offset = scope_offset;
+  scope_accessor.local_offset = local_offset;
+  return AnyExpression{std::move(scope_accessor)};
+}
+
+AnyExpression
 VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
                                       std::size_t scope_offset) const {
   if (not boundary)
-    return std::nullopt;
-  std::optional<ScopeAccessor> scope_accessor{boundary->find_local(identifier)};
-  if (scope_accessor) {
-    std::get<0>(scope_accessor->location) = scope_offset;
-    return scope_accessor;
-  }
-  return find_local_linkedly(boundary->parent_boundary, scope_offset + 1);
+    return AnyExpression{};
+  std::optional<LocalLayoutEntry> entry_opt{boundary->find_local(identifier)};
+  if (entry_opt) {
+    ScopeAccessorAnalyzer datatype_visitor{};
+    datatype_visitor.scope_offset = scope_offset;
+    datatype_visitor.local_offset = entry_opt->offset;
+    return entry_opt->variant_type.alt->visit(datatype_visitor);
+  } else
+    return find_local_linkedly(boundary->parent_boundary, scope_offset + 1);
 }
 
 struct InitializeScopeAnalyzer {
@@ -1606,9 +1622,6 @@ struct StatementEvaluator {
 };
 
 template <typename T> struct ExpressionEvaluator {
-  template <char32_t C> T operator()(const BinaryExpression<C> &e) {
-    std::unreachable();
-  }
   template <typename U> T operator()(const U &e) { std::unreachable(); }
   RuntimeFrame &runtime_frame;
 };
@@ -1638,16 +1651,50 @@ VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
 }
 
 template <>
-template <char32_t C>
+template <>
 double
-ExpressionEvaluator<double>::operator()(const BinaryExpression<C> &expression) {
+ExpressionEvaluator<double>::operator()(const NumericLiteral &expression) {
+  return expression.val;
+}
+
+template <>
+template <>
+double
+ExpressionEvaluator<double>::operator()(const LengthIntrinsic &expression) {
+  ExpressionEvaluator<VariantStringView> expression_visitor{runtime_frame};
+  VariantStringView argument_value{
+      expression.argument->alt->visit(expression_visitor)};
+  std::size_t argument_size{
+      argument_value.visit([](const auto &sv) { return sv.size(); })};
+  return static_cast<double>(argument_size);
+}
+
+template <>
+template <>
+double ExpressionEvaluator<double>::operator()(
+    const BinaryExpression<'+'> &expression) {
   ExpressionEvaluator<double> operand_visitor{runtime_frame};
-  double left_value{expression.left->alt->visit(operand_visitor)};
-  double right_value{expression.right->alt->visit(operand_visitor)};
-  if constexpr (C == '+')
-    return left_value + right_value;
-  if constexpr (C == '-')
-    return left_value - right_value;
+  double lhs_value{expression.left->alt->visit(operand_visitor)};
+  double rhs_value{expression.right->alt->visit(operand_visitor)};
+  return lhs_value + rhs_value;
+}
+
+template <>
+template <>
+double ExpressionEvaluator<double>::operator()(
+    const BinaryExpression<'-'> &expression) {
+  ExpressionEvaluator<double> operand_visitor{runtime_frame};
+  double lhs_value{expression.left->alt->visit(operand_visitor)};
+  double rhs_value{expression.right->alt->visit(operand_visitor)};
+  return lhs_value - rhs_value;
+}
+
+template <>
+template <>
+VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+    const ScopeAccessor<StringType> &expression) {
+  std::breakpoint();
+  return VariantStringView{};
 }
 
 template <>
