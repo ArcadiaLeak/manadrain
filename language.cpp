@@ -318,7 +318,6 @@ template <typename T> class DirectFunctionCall final : public Expression {
 public:
   DirectFunctionCall(std::pmr::memory_resource *resource_ptr)
       : passed_identifiers{resource_ptr}, passed_values{resource_ptr} {}
-
   const FunctionDefinition *callee;
   T return_type;
   std::pmr::vector<Identifier> passed_identifiers;
@@ -352,14 +351,13 @@ public:
   Operator op;
 };
 
-class BinaryExpression final : public Expression {
+template <char32_t> class BinaryExpression final : public Expression {
 public:
   BinaryExpression(std::pmr::memory_resource *resource_ptr)
       : left{std::allocator_arg, resource_ptr},
         right{std::allocator_arg, resource_ptr} {}
   std::pmr::indirect<AnyExpression> left;
   std::pmr::indirect<AnyExpression> right;
-  char32_t op;
 };
 
 class VariableAccessor final : public Expression {
@@ -432,13 +430,12 @@ public:
 };
 
 struct AnyExpression {
-  using Alternative =
-      std::variant<NumericLiteral, AsciiLiteral, UnicodeLiteral,
-                   AliasedFunctionCall, DirectFunctionCall<NumberType>,
-                   MemberExpression, AssignExpression, LogicalExpression,
-                   BinaryExpression, VariableAccessor, ScopeAccessor,
-                   IntrinsicAccessor, LambdaExpression, ConsoleCall,
-                   LengthIntrinsic, StringifyIntrinsic>;
+  using Alternative = std::variant<
+      NumericLiteral, AsciiLiteral, UnicodeLiteral, AliasedFunctionCall,
+      DirectFunctionCall<NumberType>, MemberExpression, AssignExpression,
+      LogicalExpression, BinaryExpression<'+'>, BinaryExpression<'-'>,
+      VariableAccessor, ScopeAccessor, IntrinsicAccessor, LambdaExpression,
+      ConsoleCall, LengthIntrinsic, StringifyIntrinsic>;
   std::optional<Alternative> alt;
   AnyExpression() = default;
   AnyExpression(Alternative a) : alt{std::move(a)} {};
@@ -1077,16 +1074,23 @@ Expected<AnyExpression> Parser<T>::parse_additive_expression() {
   char32_t binary_op{*operator_ahead};
   if (auto token_result = tokenizer.tokenize(); not token_result)
     return std::unexpected(token_result.error());
-  if (auto right_expression = parse_postfix_expression(); not right_expression)
+  auto right_expression = parse_postfix_expression();
+  if (not right_expression)
     return std::unexpected(right_expression.error());
-  else {
+  auto make_expression = [&]<char32_t C>() {
     auto &program = *boundary.tape->all_programs[boundary.program_idx];
-    BinaryExpression binary_expression(&program.resource);
+    BinaryExpression<C> binary_expression(&program.resource);
     binary_expression.left = std::move(*left_expression);
     binary_expression.right = std::move(*right_expression);
-    binary_expression.op = binary_op;
     return AnyExpression{std::move(binary_expression)};
+  };
+  switch (binary_op) {
+  case '+':
+    return make_expression.template operator()<'+'>();
+  case '-':
+    return make_expression.template operator()<'-'>();
   }
+  std::unreachable();
 }
 
 template <typename T> class Parser<T>::PrimaryExpressionSaga {
@@ -1241,7 +1245,8 @@ struct RvalueAnalyzer {
   }
   Expected<AnyExpression> operator()(const AliasedFunctionCall &expression);
   Expected<AnyExpression> operator()(const VariableAccessor &expression);
-  Expected<AnyExpression> operator()(const BinaryExpression &expression);
+  template <char32_t C>
+  Expected<AnyExpression> operator()(const BinaryExpression<C> &expression);
   Expected<AnyExpression> operator()(const MemberExpression &expression);
   template <std::derived_from<Expression> T>
   Expected<AnyExpression> operator()(const T &expression) {
@@ -1273,7 +1278,7 @@ struct DatatypeAnalyzer {
   VariantType operator()(const ScopeAccessor &accessor) {
     return accessor.local_type;
   }
-  VariantType operator()(const BinaryExpression &) {
+  template <char32_t C> VariantType operator()(const BinaryExpression<C> &) {
     return VariantType{NumberType{}};
   }
   template <typename T>
@@ -1327,8 +1332,9 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   }
 }
 
+template <char32_t C>
 Expected<AnyExpression>
-RvalueAnalyzer::operator()(const BinaryExpression &expression) {
+RvalueAnalyzer::operator()(const BinaryExpression<C> &expression) {
   if (auto left_analyzed = expression.left->alt->visit(*this);
       not left_analyzed)
     return left_analyzed;
@@ -1337,10 +1343,9 @@ RvalueAnalyzer::operator()(const BinaryExpression &expression) {
     return right_analyzed;
   else {
     auto &program = *boundary.tape->all_programs[boundary.program_idx];
-    BinaryExpression output_expression(&program.resource);
+    BinaryExpression<C> output_expression(&program.resource);
     output_expression.left = std::move(*left_analyzed);
     output_expression.right = std::move(*right_analyzed);
-    output_expression.op = expression.op;
     return AnyExpression{std::move(output_expression)};
   }
 }
@@ -1596,12 +1601,15 @@ Expected<void> ModuleDefinition::analyze() {
 
 struct StatementEvaluator {
   template <typename T> void operator()(const InitializeScope<T> &);
-  template <typename T> void operator()(const T &) { std::unreachable(); }
+  template <typename T> void operator()(const T &s) { std::unreachable(); }
   RuntimeFrame &runtime_frame;
 };
 
 template <typename T> struct ExpressionEvaluator {
-  template <typename U> T operator()(const U &) { std::unreachable(); }
+  template <char32_t C> T operator()(const BinaryExpression<C> &e) {
+    std::unreachable();
+  }
+  template <typename U> T operator()(const U &e) { std::unreachable(); }
   RuntimeFrame &runtime_frame;
 };
 
@@ -1623,13 +1631,37 @@ VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
 }
 
 template <>
+template <>
+VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+    const AsciiLiteral &expression) {
+  return expression.val_view;
+}
+
+template <>
+template <char32_t C>
+double
+ExpressionEvaluator<double>::operator()(const BinaryExpression<C> &expression) {
+  ExpressionEvaluator<double> operand_visitor{runtime_frame};
+  double left_value{expression.left->alt->visit(operand_visitor)};
+  double right_value{expression.right->alt->visit(operand_visitor)};
+  if constexpr (C == '+')
+    return left_value + right_value;
+  if constexpr (C == '-')
+    return left_value - right_value;
+}
+
+template <>
 void StatementEvaluator::operator()(const ExpressionStatement &statement) {
   statement.argument->alt->visit(ExpressionEvaluator<void>{runtime_frame});
 }
 
 template <typename T>
 void StatementEvaluator::operator()(const InitializeScope<T> &statement) {
-  std::breakpoint();
+  char *destination = static_cast<char *>(runtime_frame.local_memory.get()) +
+                      statement.local_offset;
+  using R = T::Representation;
+  ExpressionEvaluator<R> expression_visitor{runtime_frame};
+  new (destination) R{statement.rvalue->alt->visit(expression_visitor)};
 }
 
 template <typename T> T Machine::evaluate(const LexicalBoundary &boundary) {
