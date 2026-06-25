@@ -470,7 +470,7 @@ public:
   T datatype;
 };
 
-class ReturnStatement final : public Statement {
+template <typename T> class ReturnStatement final : public Statement {
 public:
   ReturnStatement(std::pmr::memory_resource *resource_ptr)
       : argument{std::allocator_arg, resource_ptr} {};
@@ -487,8 +487,8 @@ public:
 struct AnyStatement {
   using Alternative =
       std::variant<InitializeVariable, InitializeScope<NumberType>,
-                   InitializeScope<StringType>, ReturnStatement,
-                   ExpressionStatement>;
+                   InitializeScope<StringType>, ReturnStatement<void>,
+                   ReturnStatement<NumberType>, ExpressionStatement>;
   std::optional<Alternative> alt;
   AnyStatement() = default;
   AnyStatement(Alternative a) : alt{std::move(a)} {};
@@ -542,6 +542,9 @@ public:
 
 private:
   friend class RuntimeFrame;
+  template <typename T> friend struct ExpressionEvaluator;
+  friend struct StatementEvaluator;
+
   std::unique_ptr<RuntimeMemory> runtime_memory;
   std::mutex console_mutex;
   std::condition_variable_any console_condition;
@@ -855,9 +858,10 @@ template <typename T> Expected<void> Parser<T>::parse_return_stmt() {
   else {
     auto &program = *boundary.tape->all_programs[boundary.program_idx];
     auto &any_statement = program.statements.emplace_back();
-    any_statement.alt.emplace(std::in_place_type<ReturnStatement>,
+    any_statement.alt.emplace(std::in_place_type<ReturnStatement<void>>,
                               &program.resource);
-    auto &return_statement = std::get<ReturnStatement>(*any_statement.alt);
+    auto &return_statement =
+        std::get<ReturnStatement<void>>(*any_statement.alt);
     return_statement.argument = std::move(*expression_result);
     return tokenizer.assert_punct(';');
   }
@@ -1477,7 +1481,11 @@ struct InitializeScopeAnalyzer {
 struct StatementAnalyzer {
   Expected<AnyStatement> operator()(const ExpressionStatement &statement);
   Expected<AnyStatement> operator()(const InitializeVariable &statement);
-  Expected<AnyStatement> operator()(const ReturnStatement &statement);
+  Expected<AnyStatement> operator()(const ReturnStatement<void> &statement);
+  Expected<AnyStatement>
+  operator()(const ReturnStatement<NumberType> &statement) {
+    std::unreachable();
+  }
   template <typename T>
   Expected<AnyStatement> operator()(const InitializeScope<T> &statement) {
     std::unreachable();
@@ -1538,20 +1546,36 @@ Expected<AnyStatement> InitializeScopeAnalyzer::operator()(T datatype) {
   return AnyStatement{std::move(initialize_scope)};
 }
 
+struct ReturnStatementAnalyzer {
+  LexicalBoundary &boundary;
+  AnyExpression argument;
+
+  AnyStatement operator()(NumberType);
+  template <typename T> AnyStatement operator()(T datatype) {
+    std::unreachable();
+  }
+};
+
+AnyStatement ReturnStatementAnalyzer::operator()(NumberType) {
+  ReturnStatement<NumberType> return_statement{
+      &boundary.tape->all_programs[boundary.program_idx]->resource};
+  return_statement.argument = std::move(argument);
+  return AnyStatement::Alternative(std::move(return_statement));
+}
+
 Expected<AnyStatement>
-StatementAnalyzer::operator()(const ReturnStatement &statement) {
+StatementAnalyzer::operator()(const ReturnStatement<void> &statement) {
   auto argument_analyzed =
       statement.argument->alt->visit(RvalueAnalyzer{boundary});
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
-  ReturnStatement return_statement{
-      &boundary.tape->all_programs[boundary.program_idx]->resource};
-  return_statement.argument = std::move(*argument_analyzed);
   VariantType argument_type{
       argument_analyzed->alt->visit(DatatypeAnalyzer{boundary})};
   if (auto put_result = boundary.put_return_type(argument_type); not put_result)
     return std::unexpected(put_result.error());
-  return AnyStatement::Alternative(std::move(return_statement));
+  ReturnStatementAnalyzer return_visitor{boundary,
+                                         std::move(*argument_analyzed)};
+  return argument_type.alt->visit(return_visitor);
 }
 
 template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
@@ -1618,19 +1642,19 @@ Expected<void> ModuleDefinition::analyze() {
 struct StatementEvaluator {
   template <typename T> void operator()(const InitializeScope<T> &);
   template <typename T> void operator()(const T &s) { std::unreachable(); }
-  RuntimeFrame &runtime_frame;
+  RuntimeFrame &self_frame;
 };
 
 template <typename T> struct ExpressionEvaluator {
   template <typename U> T operator()(const U &e) { std::unreachable(); }
-  RuntimeFrame &runtime_frame;
+  RuntimeFrame &self_frame;
 };
 
 template <>
 template <>
 void ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
   for (const AnyExpression &expression : expression.arguments) {
-    ExpressionEvaluator<VariantStringView> expression_visitor{runtime_frame};
+    ExpressionEvaluator<VariantStringView> expression_visitor{self_frame};
     expression.alt->visit(expression_visitor);
   }
 }
@@ -1639,7 +1663,16 @@ template <>
 template <>
 VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
     const DirectFunctionCall<NumberType> &expression) {
-  runtime_frame.machine.evaluate<double>(*expression.callee);
+  const LexicalBoundary &boundary = *expression.callee;
+  RuntimeMemory &memory = *self_frame.machine.runtime_memory;
+  RuntimeFrame &child_frame = memory.runtime_frames.emplace_back(
+      self_frame.machine, boundary, &memory.resource);
+  child_frame.closure_stack.reserve(self_frame.closure_stack.size() + 1);
+  child_frame.closure_stack.push_back(&child_frame);
+  child_frame.closure_stack.append_range(self_frame.closure_stack);
+  const Program &program = *boundary.tape->all_programs[boundary.program_idx];
+  for (const AnyStatement &statement : program.statements)
+    statement.alt->visit(StatementEvaluator{child_frame});
   return VariantStringView{};
 }
 
@@ -1661,7 +1694,7 @@ template <>
 template <>
 double
 ExpressionEvaluator<double>::operator()(const LengthIntrinsic &expression) {
-  ExpressionEvaluator<VariantStringView> expression_visitor{runtime_frame};
+  ExpressionEvaluator<VariantStringView> expression_visitor{self_frame};
   VariantStringView argument_value{
       expression.argument->alt->visit(expression_visitor)};
   std::size_t argument_size{
@@ -1673,7 +1706,7 @@ template <>
 template <>
 double ExpressionEvaluator<double>::operator()(
     const BinaryExpression<'+'> &expression) {
-  ExpressionEvaluator<double> operand_visitor{runtime_frame};
+  ExpressionEvaluator<double> operand_visitor{self_frame};
   double lhs_value{expression.left->alt->visit(operand_visitor)};
   double rhs_value{expression.right->alt->visit(operand_visitor)};
   return lhs_value + rhs_value;
@@ -1683,7 +1716,7 @@ template <>
 template <>
 double ExpressionEvaluator<double>::operator()(
     const BinaryExpression<'-'> &expression) {
-  ExpressionEvaluator<double> operand_visitor{runtime_frame};
+  ExpressionEvaluator<double> operand_visitor{self_frame};
   double lhs_value{expression.left->alt->visit(operand_visitor)};
   double rhs_value{expression.right->alt->visit(operand_visitor)};
   return lhs_value - rhs_value;
@@ -1693,30 +1726,56 @@ template <>
 template <>
 VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
     const ScopeAccessor<StringType> &expression) {
-  std::breakpoint();
-  return VariantStringView{};
+  RuntimeFrame &source_frame =
+      *self_frame.closure_stack[expression.scope_offset];
+  char *source_memory = static_cast<char *>(source_frame.local_memory.get()) +
+                        expression.local_offset;
+  VariantStringView *source_ptr =
+      std::launder(reinterpret_cast<VariantStringView *>(source_memory));
+  return *source_ptr;
+}
+
+template <>
+template <>
+double ExpressionEvaluator<double>::operator()(
+    const ScopeAccessor<NumberType> &expression) {
+  RuntimeFrame &source_frame =
+      *self_frame.closure_stack[expression.scope_offset];
+  char *source_memory = static_cast<char *>(source_frame.local_memory.get()) +
+                        expression.local_offset;
+  double *source_ptr = std::launder(reinterpret_cast<double *>(source_memory));
+  return *source_ptr;
 }
 
 template <>
 void StatementEvaluator::operator()(const ExpressionStatement &statement) {
-  statement.argument->alt->visit(ExpressionEvaluator<void>{runtime_frame});
+  statement.argument->alt->visit(ExpressionEvaluator<void>{self_frame});
+}
+
+template <>
+void StatementEvaluator::operator()(
+    const ReturnStatement<NumberType> &statement) {
+  ExpressionEvaluator<double> expression_visitor{self_frame};
+  double return_value{statement.argument->alt->visit(expression_visitor)};
+  std::breakpoint();
 }
 
 template <typename T>
 void StatementEvaluator::operator()(const InitializeScope<T> &statement) {
-  char *destination = static_cast<char *>(runtime_frame.local_memory.get()) +
+  char *destination = static_cast<char *>(self_frame.local_memory.get()) +
                       statement.local_offset;
   using R = T::Representation;
-  ExpressionEvaluator<R> expression_visitor{runtime_frame};
+  ExpressionEvaluator<R> expression_visitor{self_frame};
   new (destination) R{statement.rvalue->alt->visit(expression_visitor)};
 }
 
 template <typename T> T Machine::evaluate(const LexicalBoundary &boundary) {
-  RuntimeFrame &runtime_frame = runtime_memory->runtime_frames.emplace_back(
+  RuntimeFrame &self_frame = runtime_memory->runtime_frames.emplace_back(
       *this, boundary, &runtime_memory->resource);
+  self_frame.closure_stack.push_back(&self_frame);
   const auto &program = *boundary.tape->all_programs[boundary.program_idx];
   for (const AnyStatement &statement : program.statements)
-    statement.alt->visit(StatementEvaluator{runtime_frame});
+    statement.alt->visit(StatementEvaluator{self_frame});
   return T();
 }
 
