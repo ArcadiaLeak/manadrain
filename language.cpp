@@ -212,7 +212,8 @@ public:
   virtual std::optional<LocalLayoutEntry>
   find_local(Identifier identifier) const = 0;
 
-  virtual Expected<void> put_return_type(VariantType variant_type) = 0;
+  virtual FunctionDefinition *as_function_definition() = 0;
+  virtual const FunctionDefinition *as_function_definition() const = 0;
 };
 
 template <typename T> class AbstractBoundary : public LexicalBoundary {
@@ -238,22 +239,23 @@ public:
   AnalyzerMark analyzer_mark;
   Expected<void> analyze();
 
-  Expected<void> put_return_type(VariantType variant_type) override {
-    return_type = variant_type;
-    return Expected<void>{};
+  FunctionDefinition *as_function_definition() override { return this; }
+  const FunctionDefinition *as_function_definition() const override {
+    return this;
   }
 
 private:
   Expected<void> do_analyze();
   Expected<void> analyze_formal_parameters();
 };
+
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
   Expected<void> analyze();
 
-  Expected<void> put_return_type(VariantType variant_type) override {
-    std::breakpoint();
-    return std::unexpected<InvalidReturnStatement>(std::in_place);
+  FunctionDefinition *as_function_definition() override { return nullptr; }
+  const FunctionDefinition *as_function_definition() const override {
+    return nullptr;
   }
 };
 
@@ -518,20 +520,22 @@ void RuntimeBytesDeleter::operator()(void *ptr_bytes) const noexcept {
   resource->deallocate(ptr_bytes, total_bytes, alignment);
 }
 
-class RuntimeFrame {
+class BoundaryFrame {
 public:
-  RuntimeFrame(Machine &m, const LexicalBoundary &b,
-               std::pmr::memory_resource *r);
+  BoundaryFrame(Machine &m, const LexicalBoundary &b,
+                std::pmr::memory_resource *r);
   Machine &machine;
   const LexicalBoundary &boundary;
-  std::pmr::vector<RuntimeFrame *> closure_stack;
+  std::pmr::vector<BoundaryFrame *> closure_stack;
   std::unique_ptr<void, RuntimeBytesDeleter> local_memory;
+  std::unique_ptr<void, RuntimeBytesDeleter> return_memory;
   void evaluate();
 };
 
 struct RuntimeMemory {
   std::pmr::monotonic_buffer_resource resource{65536};
-  std::pmr::list<RuntimeFrame> runtime_frames{&resource};
+  std::pmr::list<BoundaryFrame> boundary_frames{&resource};
+  std::pmr::list<std::string> strings{&resource};
 };
 
 class Machine {
@@ -541,7 +545,7 @@ public:
   template <typename T> T evaluate(const LexicalBoundary &boundary);
 
 private:
-  friend class RuntimeFrame;
+  friend class BoundaryFrame;
   template <typename T> friend struct ExpressionEvaluator;
   friend struct StatementEvaluator;
 
@@ -1569,13 +1573,17 @@ StatementAnalyzer::operator()(const ReturnStatement<void> &statement) {
       statement.argument->alt->visit(RvalueAnalyzer{boundary});
   if (not argument_analyzed)
     return std::unexpected(argument_analyzed.error());
-  VariantType argument_type{
-      argument_analyzed->alt->visit(DatatypeAnalyzer{boundary})};
-  if (auto put_result = boundary.put_return_type(argument_type); not put_result)
-    return std::unexpected(put_result.error());
-  ReturnStatementAnalyzer return_visitor{boundary,
-                                         std::move(*argument_analyzed)};
-  return argument_type.alt->visit(return_visitor);
+  if (FunctionDefinition *definition = boundary.as_function_definition();
+      not definition) {
+    std::breakpoint();
+    return std::unexpected<InvalidReturnStatement>(std::in_place);
+  } else {
+    definition->return_type =
+        argument_analyzed->alt->visit(DatatypeAnalyzer{boundary});
+    ReturnStatementAnalyzer return_visitor{boundary,
+                                           std::move(*argument_analyzed)};
+    return definition->return_type.alt->visit(return_visitor);
+  }
 }
 
 template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
@@ -1642,12 +1650,12 @@ Expected<void> ModuleDefinition::analyze() {
 struct StatementEvaluator {
   template <typename T> void operator()(const InitializeScope<T> &);
   template <typename T> void operator()(const T &s) { std::unreachable(); }
-  RuntimeFrame &self_frame;
+  BoundaryFrame &self_frame;
 };
 
 template <typename T> struct ExpressionEvaluator {
   template <typename U> T operator()(const U &e) { std::unreachable(); }
-  RuntimeFrame &self_frame;
+  BoundaryFrame &self_frame;
 };
 
 template <>
@@ -1657,15 +1665,16 @@ void ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
     ExpressionEvaluator<VariantStringView> expression_visitor{self_frame};
     expression.alt->visit(expression_visitor);
   }
+  std::breakpoint();
 }
 
 template <>
 template <>
-VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+double ExpressionEvaluator<double>::operator()(
     const DirectFunctionCall<NumberType> &expression) {
   const LexicalBoundary &boundary = *expression.callee;
   RuntimeMemory &memory = *self_frame.machine.runtime_memory;
-  RuntimeFrame &child_frame = memory.runtime_frames.emplace_back(
+  BoundaryFrame &child_frame = memory.boundary_frames.emplace_back(
       self_frame.machine, boundary, &memory.resource);
   child_frame.closure_stack.reserve(self_frame.closure_stack.size() + 1);
   child_frame.closure_stack.push_back(&child_frame);
@@ -1673,7 +1682,24 @@ VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
   const Program &program = *boundary.tape->all_programs[boundary.program_idx];
   for (const AnyStatement &statement : program.statements)
     statement.alt->visit(StatementEvaluator{child_frame});
-  return VariantStringView{};
+  return *std::launder(reinterpret_cast<double *>(
+      static_cast<char *>(child_frame.return_memory.get())));
+}
+
+template <>
+template <>
+VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+    const DirectFunctionCall<NumberType> &expression) {
+  double original_value{
+      ExpressionEvaluator<double>{self_frame}.operator()(expression)};
+  std::string buffer(24, '\0');
+  auto [ptr, ec] = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
+                                 original_value);
+  assert(ec == std::errc{});
+  buffer.resize(ptr - buffer.data());
+  std::string_view stringified_value{
+      self_frame.machine.runtime_memory->strings.emplace_back(buffer)};
+  return stringified_value;
 }
 
 template <>
@@ -1726,7 +1752,7 @@ template <>
 template <>
 VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
     const ScopeAccessor<StringType> &expression) {
-  RuntimeFrame &source_frame =
+  BoundaryFrame &source_frame =
       *self_frame.closure_stack[expression.scope_offset];
   char *source_memory = static_cast<char *>(source_frame.local_memory.get()) +
                         expression.local_offset;
@@ -1739,7 +1765,7 @@ template <>
 template <>
 double ExpressionEvaluator<double>::operator()(
     const ScopeAccessor<NumberType> &expression) {
-  RuntimeFrame &source_frame =
+  BoundaryFrame &source_frame =
       *self_frame.closure_stack[expression.scope_offset];
   char *source_memory = static_cast<char *>(source_frame.local_memory.get()) +
                         expression.local_offset;
@@ -1755,9 +1781,10 @@ void StatementEvaluator::operator()(const ExpressionStatement &statement) {
 template <>
 void StatementEvaluator::operator()(
     const ReturnStatement<NumberType> &statement) {
-  ExpressionEvaluator<double> expression_visitor{self_frame};
-  double return_value{statement.argument->alt->visit(expression_visitor)};
-  std::breakpoint();
+  double return_value{
+      statement.argument->alt->visit(ExpressionEvaluator<double>{self_frame})};
+  char *destination = static_cast<char *>(self_frame.return_memory.get());
+  new (destination) double{return_value};
 }
 
 template <typename T>
@@ -1770,7 +1797,7 @@ void StatementEvaluator::operator()(const InitializeScope<T> &statement) {
 }
 
 template <typename T> T Machine::evaluate(const LexicalBoundary &boundary) {
-  RuntimeFrame &self_frame = runtime_memory->runtime_frames.emplace_back(
+  BoundaryFrame &self_frame = runtime_memory->boundary_frames.emplace_back(
       *this, boundary, &runtime_memory->resource);
   self_frame.closure_stack.push_back(&self_frame);
   const auto &program = *boundary.tape->all_programs[boundary.program_idx];
@@ -1779,18 +1806,34 @@ template <typename T> T Machine::evaluate(const LexicalBoundary &boundary) {
   return T();
 }
 
-RuntimeFrame::RuntimeFrame(Machine &m, const LexicalBoundary &b,
-                           std::pmr::memory_resource *r)
+BoundaryFrame::BoundaryFrame(Machine &m, const LexicalBoundary &b,
+                             std::pmr::memory_resource *r)
     : machine{m}, boundary{b}, closure_stack{r} {
   std::size_t total_bytes = boundary.local_layout.total_bytes,
               alignment = boundary.local_layout.largest_alignment;
   if (total_bytes == 0)
     return;
-  void *memory_pointer =
+  void *local_pointer =
       machine.runtime_memory->resource.allocate(total_bytes, alignment);
-  RuntimeBytesDeleter memory_deleter{&machine.runtime_memory->resource,
-                                     total_bytes, alignment};
-  local_memory = {memory_pointer, memory_deleter};
+  RuntimeBytesDeleter local_deleter{&machine.runtime_memory->resource,
+                                    total_bytes, alignment};
+  local_memory = {local_pointer, local_deleter};
+  const FunctionDefinition *definition = boundary.as_function_definition();
+  if (not definition || not definition->return_type.alt)
+    return;
+  auto size_visitor = []<typename T>(T datatype) {
+    return sizeof(typename T::Representation);
+  };
+  auto return_size = definition->return_type.alt->visit(size_visitor);
+  auto align_visitor = []<typename T>(T datatype) {
+    return alignof(typename T::Representation);
+  };
+  auto return_alignment = definition->return_type.alt->visit(align_visitor);
+  void *return_pointer =
+      machine.runtime_memory->resource.allocate(return_size, return_alignment);
+  RuntimeBytesDeleter return_deleter{&machine.runtime_memory->resource,
+                                     return_size, return_alignment};
+  return_memory = {return_pointer, return_deleter};
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
