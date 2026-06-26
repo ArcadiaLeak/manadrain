@@ -575,20 +575,6 @@ static const std::flat_map<std::string_view, std::size_t> identifier_atlas{
 static const std::array persistent_identifiers{
     std::to_array<std::string_view>({"console", "log", "length"})};
 
-std::string normalize(std::u16string_view unicode_view) {
-  auto encode_u16 =
-      [](std::uint16_t uchar) -> std::inplace_vector<std::uint8_t, 3> {
-    std::array<std::uint8_t, 3> buffer{};
-    std::size_t buffer_len{buffer.size()};
-    uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
-    assert(result != nullptr);
-    return {std::from_range, buffer | std::views::take(buffer_len)};
-  };
-  auto encoded_message =
-      unicode_view | std::views::transform(encode_u16) | std::views::join;
-  return std::string{std::from_range, encoded_message};
-}
-
 std::optional<char32_t> Tokenizer::forward() {
   if (position >= text_buffer->size())
     backtrace.push_back(std::nullopt);
@@ -1661,11 +1647,20 @@ template <typename T> struct ExpressionEvaluator {
 template <>
 template <>
 void ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
-  for (const AnyExpression &expression : expression.arguments) {
-    ExpressionEvaluator<VariantStringView> expression_visitor{self_frame};
-    expression.alt->visit(expression_visitor);
-  }
-  std::breakpoint();
+  auto put_console_message = [&](auto message_parts) {
+    std::lock_guard console_lock{self_frame.machine.console_mutex};
+    ConsoleMessage &console_message =
+        self_frame.machine.console_messages.emplace_back();
+    console_message.parts = std::move(message_parts);
+  };
+  auto evaluate_argument = [&](const AnyExpression &argument) {
+    ExpressionEvaluator<VariantStringView> argument_visitor{self_frame};
+    return argument.alt->visit(argument_visitor);
+  };
+  put_console_message(expression.arguments |
+                      std::ranges::views::transform(evaluate_argument) |
+                      std::ranges::to<std::vector>());
+  self_frame.machine.console_condition.notify_one();
 }
 
 template <>
@@ -1806,6 +1801,16 @@ template <typename T> T Machine::evaluate(const LexicalBoundary &boundary) {
   return T();
 }
 
+std::list<ConsoleMessage>
+Machine::collect_console_messages(std::stop_token stopper) {
+  std::unique_lock console_lock{console_mutex};
+  auto check_messages = [&] { return console_messages.size() > 0; };
+  console_condition.wait(console_lock, stopper, check_messages);
+  std::list<ConsoleMessage> message_list{};
+  console_messages.swap(message_list);
+  return message_list;
+}
+
 BoundaryFrame::BoundaryFrame(Machine &m, const LexicalBoundary &b,
                              std::pmr::memory_resource *r)
     : machine{m}, boundary{b}, closure_stack{r} {
@@ -1834,6 +1839,54 @@ BoundaryFrame::BoundaryFrame(Machine &m, const LexicalBoundary &b,
   RuntimeBytesDeleter return_deleter{&machine.runtime_memory->resource,
                                      return_size, return_alignment};
   return_memory = {return_pointer, return_deleter};
+}
+
+struct VariantStringEncoder {
+  std::string operator()(std::u16string_view unicode_view);
+  std::string operator()(std::string_view ascii_view) {
+    return std::string{ascii_view};
+  }
+};
+
+std::string VariantStringEncoder::operator()(std::u16string_view unicode_view) {
+  auto encode_u16 =
+      [](std::uint16_t uchar) -> std::inplace_vector<std::uint8_t, 3> {
+    std::array<std::uint8_t, 3> buffer{};
+    std::size_t buffer_len{buffer.size()};
+    uint8_t *result = u16_to_u8(&uchar, 1, buffer.data(), &buffer_len);
+    assert(result != nullptr);
+    return {std::from_range, buffer | std::views::take(buffer_len)};
+  };
+  auto encoded_message =
+      unicode_view | std::views::transform(encode_u16) | std::views::join;
+  return std::string{std::from_range, encoded_message};
+}
+
+std::string ConsoleMessage::encode_for_print() const {
+  auto encode_message_part = [](VariantStringView sv) {
+    return sv.visit(VariantStringEncoder{});
+  };
+  auto encoded_parts = parts | std::views::transform(encode_message_part) |
+                       std::views::join_with(' ');
+  return std::string{std::from_range, encoded_parts};
+}
+
+struct ConsoleWorker {
+  void print_messages(std::stop_token stopper);
+  void operator()(std::stop_token stopper);
+  Machine &machine;
+};
+
+void ConsoleWorker::print_messages(std::stop_token stopper) {
+  std::list<ConsoleMessage> messages{machine.collect_console_messages(stopper)};
+  for (const ConsoleMessage &message : messages)
+    std::println("{}", message.encode_for_print());
+};
+
+void ConsoleWorker::operator()(std::stop_token stopper) {
+  do
+    print_messages(stopper);
+  while (not stopper.stop_requested());
 }
 
 Language::Language() { machine = std::make_unique<Machine>(); }
@@ -1866,6 +1919,9 @@ bool Language::compile_and_execute() {
 
   Machine machine{};
   machine.evaluate<void>(definition);
+
+  ConsoleWorker console_worker{machine};
+  std::jthread console_thread(console_worker);
 
   return not variant_error.has_value();
 }
