@@ -25,6 +25,69 @@
 #include "language.hpp"
 
 namespace Manadrain {
+class UnexpectedStringEnd final : public LanguageError {
+public:
+  UnexpectedStringEnd() : LanguageError{"unexpected string end!"} {}
+};
+class UnexpectedToken final : public LanguageError {
+public:
+  UnexpectedToken() : LanguageError{"unexpected token!"} {}
+};
+class MissingPunctuation final : public LanguageError {
+public:
+  MissingPunctuation(char32_t ch)
+      : LanguageError{"missing punctuation!"}, must_be{ch} {}
+  char32_t must_be;
+};
+class MissingFormalParameter final : public LanguageError {
+public:
+  MissingFormalParameter() : LanguageError{"missing formal parameter!"} {}
+};
+class MissingFunctionName final : public LanguageError {
+public:
+  MissingFunctionName() : LanguageError{"missing function_name!"} {}
+};
+class DuplicateDeclaration final : public LanguageError {
+public:
+  DuplicateDeclaration() : LanguageError{"duplicate declaration!"} {}
+};
+class MissingPropertyName final : public LanguageError {
+public:
+  MissingPropertyName() : LanguageError{"missing property name!"} {}
+};
+class InvalidPropertyName final : public LanguageError {
+public:
+  InvalidPropertyName() : LanguageError{"invalid property name!"} {}
+};
+class InvalidPropertyAccess final : public LanguageError {
+public:
+  InvalidPropertyAccess() : LanguageError{"invalid property access!"} {}
+};
+class MissingVariableName final : public LanguageError {
+public:
+  MissingVariableName() : LanguageError{"missing variable name!"} {}
+};
+class InvalidMethodAccess final : public LanguageError {
+public:
+  InvalidMethodAccess() : LanguageError{"invalid method access!"} {}
+};
+class InvalidVariableAccess final : public LanguageError {
+public:
+  InvalidVariableAccess() : LanguageError{"invalid variable access!"} {}
+};
+class InvalidReturnStatement final : public LanguageError {
+public:
+  InvalidReturnStatement() : LanguageError{"invalid return statement!"} {}
+};
+class InvalidAssignment final : public LanguageError {
+public:
+  InvalidAssignment() : LanguageError{"invalid assignment!"} {}
+};
+class UnresolvableCircularity final : public LanguageError {
+public:
+  UnresolvableCircularity() : LanguageError{"unresolvable circularity!"} {}
+};
+
 enum class Keyword {
   MONOSTATE,
   K_CONST,
@@ -80,8 +143,6 @@ inline constexpr std::size_t OFFSET_console{0};
 inline constexpr std::size_t OFFSET_log{1};
 inline constexpr std::size_t OFFSET_length{2};
 
-template <typename T> using Expected = std::expected<T, VariantError>;
-
 class Tokenizer {
 public:
   std::unique_ptr<const std::vector<std::uint8_t>> text_buffer;
@@ -104,13 +165,15 @@ private:
   void backward();
   void backward(std::size_t N);
 
-  Expected<Token> tokenize_identifier(char32_t leading);
-  Expected<Token> tokenize_string_literal(char32_t separator);
-  Expected<Token> tokenize_numeric_literal(char32_t leading);
+  std::expected<Token, LanguageError *> tokenize_identifier(char32_t leading);
+  std::expected<Token, LanguageError *>
+  tokenize_string_literal(char32_t separator);
+  std::expected<Token, LanguageError *>
+  tokenize_numeric_literal(char32_t leading);
 
   Token last_token;
-  Expected<void> assert_punct(char32_t must_be);
-  Expected<void> tokenize();
+  std::expected<void, LanguageError *> assert_punct(char32_t must_be);
+  std::expected<void, LanguageError *> tokenize();
 };
 
 struct AnyExpression;
@@ -224,8 +287,8 @@ public:
 
 protected:
   AbstractBoundary() = default;
-  Expected<void> analyze_statements();
-  Expected<void> analyze_inner_functions();
+  std::expected<void, LanguageError *> analyze_statements();
+  std::expected<void, LanguageError *> analyze_inner_functions();
 };
 
 class FunctionDefinition final : public AbstractBoundary<FunctionDefinition> {
@@ -237,7 +300,7 @@ public:
 
   enum class AnalyzerMark { PENDING, INITIATED, COMPLETE };
   AnalyzerMark analyzer_mark;
-  Expected<void> analyze();
+  std::expected<void, LanguageError *> analyze();
 
   FunctionDefinition *as_function_definition() override { return this; }
   const FunctionDefinition *as_function_definition() const override {
@@ -245,13 +308,13 @@ public:
   }
 
 private:
-  Expected<void> do_analyze();
-  Expected<void> analyze_formal_parameters();
+  std::expected<void, LanguageError *> do_analyze();
+  std::expected<void, LanguageError *> analyze_formal_parameters();
 };
 
 class ModuleDefinition final : public AbstractBoundary<ModuleDefinition> {
 public:
-  Expected<void> analyze();
+  std::expected<void, LanguageError *> analyze();
 
   FunctionDefinition *as_function_definition() override { return nullptr; }
   const FunctionDefinition *as_function_definition() const override {
@@ -261,16 +324,16 @@ public:
 
 template <typename T> class Parser {
 public:
-  Expected<void> parse_function_stmt();
-  Expected<void> parse_return_stmt();
-  Expected<void> parse_expression_stmt();
-  Expected<void> parse_variable_decl();
-  Expected<void> parse_statement();
+  std::expected<void, LanguageError *> parse_function_stmt();
+  std::expected<void, LanguageError *> parse_return_stmt();
+  std::expected<void, LanguageError *> parse_expression_stmt();
+  std::expected<void, LanguageError *> parse_variable_decl();
+  std::expected<void, LanguageError *> parse_statement();
 
-  Expected<AnyExpression> parse_expression();
-  Expected<AnyExpression> parse_assign_expression();
-  Expected<AnyExpression> parse_logical_disjunct();
-  Expected<AnyExpression> parse_additive_expression();
+  std::expected<AnyExpression, LanguageError *> parse_expression();
+  std::expected<AnyExpression, LanguageError *> parse_assign_expression();
+  std::expected<AnyExpression, LanguageError *> parse_logical_disjunct();
+  std::expected<AnyExpression, LanguageError *> parse_additive_expression();
 
 protected:
   Parser(T &b, Tokenizer &t) : boundary{b}, tokenizer{t} {}
@@ -279,15 +342,18 @@ protected:
 
 private:
   struct PostfixExpressionSaga {
-    Expected<AnyExpression> parse_member_expression(AnyExpression expression);
-    Expected<AnyExpression> parse_function_call(AnyExpression expression);
-    Expected<AnyExpression> operator()(AnyExpression expression);
+    std::expected<AnyExpression, LanguageError *>
+    parse_member_expression(AnyExpression expression);
+    std::expected<AnyExpression, LanguageError *>
+    parse_function_call(AnyExpression expression);
+    std::expected<AnyExpression, LanguageError *>
+    operator()(AnyExpression expression);
     Parser &parser;
   };
-  Expected<AnyExpression> parse_postfix_expression();
+  std::expected<AnyExpression, LanguageError *> parse_postfix_expression();
 
   struct PrimaryExpressionSaga;
-  Expected<AnyExpression> parse_primary_expression();
+  std::expected<AnyExpression, LanguageError *> parse_primary_expression();
 
   friend class Language;
 };
@@ -295,12 +361,12 @@ private:
 class FunctionParser final : public Parser<FunctionDefinition> {
 public:
   FunctionParser(FunctionDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  Expected<void> parse_function_decl();
+  std::expected<void, LanguageError *> parse_function_decl();
 };
 class ModuleParser final : public Parser<ModuleDefinition> {
 public:
   ModuleParser(ModuleDefinition &b, Tokenizer &t) : Parser{b, t} {}
-  Expected<void> parse_module();
+  std::expected<void, LanguageError *> parse_module();
 };
 
 class Expression {
@@ -529,7 +595,6 @@ public:
   std::pmr::vector<BoundaryFrame *> closure_stack;
   std::unique_ptr<void, RuntimeBytesDeleter> local_memory;
   std::unique_ptr<void, RuntimeBytesDeleter> return_memory;
-  void evaluate();
 };
 
 struct RuntimeMemory {
@@ -542,7 +607,8 @@ class Machine {
 public:
   Machine() : runtime_memory{std::make_unique<RuntimeMemory>()} {}
   std::list<ConsoleMessage> collect_console_messages(std::stop_token stopper);
-  template <typename T> T evaluate(const LexicalBoundary &boundary);
+  std::expected<void, LanguageError *>
+  evaluate(const LexicalBoundary &boundary);
 
 private:
   friend class BoundaryFrame;
@@ -620,7 +686,8 @@ void Tokenizer::backward(std::size_t N) {
     backward();
 }
 
-Expected<Token> Tokenizer::tokenize_identifier(char32_t leading) {
+std::expected<Token, LanguageError *>
+Tokenizer::tokenize_identifier(char32_t leading) {
   std::string identifier_str{std::from_range, traverse_u8(leading)};
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto xid_continue_view =
@@ -641,7 +708,8 @@ Expected<Token> Tokenizer::tokenize_identifier(char32_t leading) {
   return emplace_ret.first->second;
 }
 
-Expected<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
+std::expected<Token, LanguageError *>
+Tokenizer::tokenize_string_literal(char32_t separator) {
   std::u16string u16_literal{};
   auto match_literal_end = [separator](auto code_point) {
     return code_point != separator;
@@ -653,7 +721,7 @@ Expected<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
       backward();
     if (not leading || leading == '\r' || leading == '\n') {
       std::breakpoint();
-      return std::unexpected<UnexpectedStringEnd>(std::in_place);
+      return std::unexpected(new UnexpectedStringEnd{});
     }
     u16_literal.append_range(traverse_u16(*leading));
   }
@@ -668,7 +736,8 @@ Expected<Token> Tokenizer::tokenize_string_literal(char32_t separator) {
   return *u16string_iter;
 }
 
-Expected<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
+std::expected<Token, LanguageError *>
+Tokenizer::tokenize_numeric_literal(char32_t leading) {
   std::string numeric_str{std::from_range, traverse_u8(leading)};
   auto match_nullopt = [](auto an_optional) { return an_optional.has_value(); };
   auto match_digit = [](char32_t code_point) {
@@ -685,7 +754,7 @@ Expected<Token> Tokenizer::tokenize_numeric_literal(char32_t leading) {
   return num_literal;
 }
 
-Expected<void> Tokenizer::tokenize() {
+std::expected<void, LanguageError *> Tokenizer::tokenize() {
   auto does_exist = [](auto an_optional) { return an_optional.has_value(); };
   auto match_lineterm = [](std::optional<char32_t> uchar) {
     static const std::array lineterm{std::to_array<std::optional<char32_t>>(
@@ -710,14 +779,14 @@ Expected<void> Tokenizer::tokenize() {
     headbuf.append_range(forward());
     if (std::ranges::equal(headbuf, std::to_array({'|', '|'}))) {
       last_token = Operator::LOGICAL_DISJUNCT;
-      return Expected<void>{};
+      return std::expected<void, LanguageError *>{};
     } else
       backward();
     if (std::ranges::binary_search(std::to_array({'"', '\'', '`'}), leading)) {
       std::expected token_opt{tokenize_string_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Expected<void>{};
+        return std::expected<void, LanguageError *>{};
       } else
         return std::unexpected(token_opt.error());
     }
@@ -725,7 +794,7 @@ Expected<void> Tokenizer::tokenize() {
       std::expected token_opt{tokenize_identifier(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Expected<void>{};
+        return std::expected<void, LanguageError *>{};
       } else
         return std::unexpected(token_opt.error());
     }
@@ -733,34 +802,34 @@ Expected<void> Tokenizer::tokenize() {
         {'(', ')', '*', '+', ',', '-', '.', '/', ':', ';', '=', '{', '}'})};
     if (std::ranges::binary_search(legal_punct, leading)) {
       last_token.emplace<char32_t>(leading);
-      return Expected<void>{};
+      return std::expected<void, LanguageError *>{};
     }
     if (std::isdigit(leading)) {
       std::expected token_opt{tokenize_numeric_literal(leading)};
       if (token_opt) {
         last_token = *token_opt;
-        return Expected<void>{};
+        return std::expected<void, LanguageError *>{};
       } else
         return std::unexpected(token_opt.error());
     }
     std::breakpoint();
-    return std::unexpected<UnexpectedToken>(std::in_place);
+    return std::unexpected(new UnexpectedToken{});
   }
   last_token.emplace<std::monostate>();
-  return Expected<void>{};
+  return std::expected<void, LanguageError *>{};
 }
 
-Expected<void> Tokenizer::assert_punct(char32_t must_be) {
+std::expected<void, LanguageError *> Tokenizer::assert_punct(char32_t must_be) {
   char32_t *alter_ptr = std::get_if<char32_t>(&last_token);
   if (alter_ptr && *alter_ptr == must_be)
-    return Expected<void>{};
+    return std::expected<void, LanguageError *>{};
   else {
     std::breakpoint();
-    return std::unexpected<MissingPunctuation>(std::in_place, must_be);
+    return std::unexpected(new MissingPunctuation{must_be});
   }
 }
 
-Expected<void> FunctionParser::parse_function_decl() {
+std::expected<void, LanguageError *> FunctionParser::parse_function_decl() {
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
     return std::unexpected(void_opt.error());
   if (not std::holds_alternative<Identifier>(tokenizer.last_token))
@@ -778,7 +847,7 @@ formal_parameter: {
     goto after_parameters;
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    return std::unexpected<MissingFormalParameter>(std::in_place);
+    return std::unexpected(new MissingFormalParameter{});
   }
   Identifier parameter{std::get<Identifier>(tokenizer.last_token)};
   auto &layout_entry = boundary.local_layout.entries.emplace_back();
@@ -802,29 +871,30 @@ body_statement: {
     return std::unexpected(void_opt.error());
   if (std::holds_alternative<std::monostate>(tokenizer.last_token)) {
     std::breakpoint();
-    return std::unexpected<MissingPunctuation>(std::in_place, '}');
+    return std::unexpected(new MissingPunctuation{'}'});
   }
   char32_t *alter_ptr{std::get_if<char32_t>(&tokenizer.last_token)};
   if (alter_ptr && *alter_ptr == '}')
-    return Expected<void>{};
+    return std::expected<void, LanguageError *>{};
   if (auto void_opt = parse_statement(); not void_opt)
     return std::unexpected(void_opt.error());
   goto body_statement;
 }
 }
 
-Expected<void> ModuleParser::parse_module() {
+std::expected<void, LanguageError *> ModuleParser::parse_module() {
   while (1) {
     if (auto token_result = tokenizer.tokenize(); not token_result)
       return std::unexpected(token_result.error());
     if (std::holds_alternative<std::monostate>(tokenizer.last_token))
-      return Expected<void>{};
+      return std::expected<void, LanguageError *>{};
     if (auto statement_result = parse_statement(); not statement_result)
       return std::unexpected(statement_result.error());
   }
 }
 
-template <typename T> Expected<void> Parser<T>::parse_statement() {
+template <typename T>
+std::expected<void, LanguageError *> Parser<T>::parse_statement() {
   Keyword keyword{};
   if (std::holds_alternative<Keyword>(tokenizer.last_token))
     keyword = std::get<Keyword>(tokenizer.last_token);
@@ -840,7 +910,8 @@ template <typename T> Expected<void> Parser<T>::parse_statement() {
   }
 }
 
-template <typename T> Expected<void> Parser<T>::parse_return_stmt() {
+template <typename T>
+std::expected<void, LanguageError *> Parser<T>::parse_return_stmt() {
   if (auto token_opt = tokenizer.tokenize(); not token_opt)
     return std::unexpected(token_opt.error());
   if (auto expression_result = parse_expression(); not expression_result)
@@ -857,7 +928,8 @@ template <typename T> Expected<void> Parser<T>::parse_return_stmt() {
   }
 }
 
-template <typename T> Expected<void> Parser<T>::parse_expression_stmt() {
+template <typename T>
+std::expected<void, LanguageError *> Parser<T>::parse_expression_stmt() {
   if (auto expression_result = parse_expression(); not expression_result)
     return std::unexpected(expression_result.error());
   else {
@@ -872,7 +944,8 @@ template <typename T> Expected<void> Parser<T>::parse_expression_stmt() {
   }
 }
 
-template <typename T> Expected<void> Parser<T>::parse_function_stmt() {
+template <typename T>
+std::expected<void, LanguageError *> Parser<T>::parse_function_stmt() {
   FunctionDefinition *definition{
       &boundary.tape->function_definition_list.emplace_back()};
   definition->parent_boundary = &boundary;
@@ -884,22 +957,23 @@ template <typename T> Expected<void> Parser<T>::parse_function_stmt() {
     return std::unexpected(void_opt.error());
   if (not definition->function_name) {
     std::breakpoint();
-    return std::unexpected<MissingFunctionName>(std::in_place);
+    return std::unexpected(new MissingFunctionName{});
   }
   bool duplicate_exists =
       std::ranges::contains(boundary.inner_functions, definition->function_name,
                             [](const auto &el) { return el->function_name; });
   if (duplicate_exists) {
     std::breakpoint();
-    return std::unexpected<DuplicateDeclaration>(std::in_place);
+    return std::unexpected(new DuplicateDeclaration{});
   } else {
     boundary.inner_functions.push_back(definition);
-    return Expected<void>{};
+    return std::expected<void, LanguageError *>{};
   }
 }
 
 template <typename T>
-Expected<AnyExpression> Parser<T>::parse_assign_expression() {
+std::expected<AnyExpression, LanguageError *>
+Parser<T>::parse_assign_expression() {
   auto left_expression = parse_logical_disjunct();
   if (not left_expression)
     return std::unexpected(left_expression.error());
@@ -917,12 +991,13 @@ Expected<AnyExpression> Parser<T>::parse_assign_expression() {
   return AnyExpression{std::move(assign_expression)};
 }
 
-template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
+template <typename T>
+std::expected<void, LanguageError *> Parser<T>::parse_variable_decl() {
   if (auto void_opt = tokenizer.tokenize(); not void_opt)
     return std::unexpected(void_opt.error());
   if (not std::holds_alternative<Identifier>(tokenizer.last_token)) {
     std::breakpoint();
-    return std::unexpected<MissingVariableName>(std::in_place);
+    return std::unexpected(new MissingVariableName{});
   }
   Identifier variable_name{std::get<Identifier>(tokenizer.last_token)};
   if (auto token_result = tokenizer.tokenize(); not token_result)
@@ -948,20 +1023,22 @@ template <typename T> Expected<void> Parser<T>::parse_variable_decl() {
   if (std::ranges::contains(boundary.local_layout.entries, variable_name,
                             &LocalLayoutEntry::identifier)) {
     std::breakpoint();
-    return std::unexpected<DuplicateDeclaration>(std::in_place);
+    return std::unexpected(new DuplicateDeclaration{});
   } else {
     auto &layout_entry = boundary.local_layout.entries.emplace_back();
     layout_entry.identifier = variable_name;
-    return Expected<void>{};
+    return std::expected<void, LanguageError *>{};
   }
 }
 
-template <typename T> Expected<AnyExpression> Parser<T>::parse_expression() {
+template <typename T>
+std::expected<AnyExpression, LanguageError *> Parser<T>::parse_expression() {
   return parse_assign_expression();
 }
 
 template <typename T>
-Expected<AnyExpression> Parser<T>::parse_logical_disjunct() {
+std::expected<AnyExpression, LanguageError *>
+Parser<T>::parse_logical_disjunct() {
   auto left_expression = parse_additive_expression();
   if (not left_expression)
     return std::unexpected(left_expression.error());
@@ -988,7 +1065,7 @@ right_expression: {
 }
 
 template <typename T>
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 Parser<T>::PostfixExpressionSaga::operator()(AnyExpression expression) {
   if (auto token_result = parser.tokenizer.tokenize(); not token_result)
     return std::unexpected(token_result.error());
@@ -1004,7 +1081,8 @@ Parser<T>::PostfixExpressionSaga::operator()(AnyExpression expression) {
 }
 
 template <typename T>
-Expected<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
+std::expected<AnyExpression, LanguageError *>
+Parser<T>::PostfixExpressionSaga::parse_function_call(
     AnyExpression expression) {
   auto &program =
       *parser.boundary.tape->all_programs[parser.boundary.program_idx];
@@ -1025,12 +1103,13 @@ Expected<AnyExpression> Parser<T>::PostfixExpressionSaga::parse_function_call(
     if (not assert_result)
       return std::unexpected(assert_result.error());
   }
-  return Expected<AnyExpression>(std::in_place, std::move(function_call))
+  return std::expected<AnyExpression, LanguageError *>(std::in_place,
+                                                       std::move(function_call))
       .and_then(*this);
 }
 
 template <typename T>
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 Parser<T>::PostfixExpressionSaga::parse_member_expression(
     AnyExpression expression) {
   if (auto token_result = parser.tokenizer.tokenize(); not token_result)
@@ -1038,25 +1117,28 @@ Parser<T>::PostfixExpressionSaga::parse_member_expression(
   if (auto *field_name = std::get_if<Identifier>(&parser.tokenizer.last_token);
       not field_name) {
     std::breakpoint();
-    return std::unexpected<MissingPropertyName>(std::in_place);
+    return std::unexpected(new MissingPropertyName{});
   } else {
     auto &program =
         *parser.boundary.tape->all_programs[parser.boundary.program_idx];
     MemberExpression member_expression(&program.resource);
     member_expression.property = *field_name;
     member_expression.object = std::move(expression);
-    return Expected<AnyExpression>(std::in_place, std::move(member_expression))
+    return std::expected<AnyExpression, LanguageError *>(
+               std::in_place, std::move(member_expression))
         .and_then(*this);
   }
 }
 
 template <typename T>
-Expected<AnyExpression> Parser<T>::parse_postfix_expression() {
+std::expected<AnyExpression, LanguageError *>
+Parser<T>::parse_postfix_expression() {
   return parse_primary_expression().and_then(PostfixExpressionSaga(*this));
 }
 
 template <typename T>
-Expected<AnyExpression> Parser<T>::parse_additive_expression() {
+std::expected<AnyExpression, LanguageError *>
+Parser<T>::parse_additive_expression() {
   auto left_expression = parse_postfix_expression();
   if (not left_expression)
     return std::unexpected(left_expression.error());
@@ -1095,44 +1177,48 @@ private:
 public:
   PrimaryExpressionSaga(Parser &p) : parser{p} {}
 
-  Expected<AnyExpression> operator()(char32_t punct);
-  Expected<AnyExpression> operator()(Keyword keyword);
+  std::expected<AnyExpression, LanguageError *> operator()(char32_t punct);
+  std::expected<AnyExpression, LanguageError *> operator()(Keyword keyword);
 
-  Expected<AnyExpression> operator()(std::monostate) {
+  std::expected<AnyExpression, LanguageError *> operator()(std::monostate) {
     std::breakpoint();
-    return std::unexpected<UnexpectedToken>(std::in_place);
+    return std::unexpected(new UnexpectedToken{});
   }
 
-  Expected<AnyExpression> operator()(std::int64_t number) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(std::int64_t number) {
     NumericLiteral num_literal{};
     num_literal.val = static_cast<double>(number);
     return AnyExpression{num_literal};
   }
 
-  Expected<AnyExpression> operator()(double number) {
+  std::expected<AnyExpression, LanguageError *> operator()(double number) {
     NumericLiteral numeric_literal{};
     numeric_literal.val = number;
     return AnyExpression{numeric_literal};
   }
 
-  Expected<AnyExpression> operator()(Operator op) {
+  std::expected<AnyExpression, LanguageError *> operator()(Operator op) {
     std::breakpoint();
-    return std::unexpected<UnexpectedToken>(std::in_place);
+    return std::unexpected(new UnexpectedToken{});
   }
 
-  Expected<AnyExpression> operator()(Identifier identifier) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(Identifier identifier) {
     VariableAccessor variable_accessor{};
     variable_accessor.identifier = identifier;
     return AnyExpression{variable_accessor};
   }
 
-  Expected<AnyExpression> operator()(std::string_view ascii_view) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(std::string_view ascii_view) {
     AsciiLiteral ascii_literal{};
     ascii_literal.val_view = ascii_view;
     return AnyExpression{ascii_literal};
   }
 
-  Expected<AnyExpression> operator()(std::u16string_view unicode_view) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(std::u16string_view unicode_view) {
     UnicodeLiteral unicode_literal{};
     unicode_literal.val_view = unicode_view;
     return AnyExpression{unicode_literal};
@@ -1140,18 +1226,18 @@ public:
 };
 
 template <typename T>
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 Parser<T>::PrimaryExpressionSaga::operator()(char32_t punct) {
   std::breakpoint();
-  return std::unexpected<UnexpectedToken>(std::in_place);
+  return std::unexpected(new UnexpectedToken{});
 }
 
 template <typename T>
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 Parser<T>::PrimaryExpressionSaga::operator()(Keyword keyword) {
   if (keyword != Keyword::K_FUNCTION) {
     std::breakpoint();
-    return std::unexpected<UnexpectedToken>(std::in_place);
+    return std::unexpected(new UnexpectedToken{});
   }
   LambdaExpression lambda_expression{};
   lambda_expression.definition =
@@ -1164,7 +1250,8 @@ Parser<T>::PrimaryExpressionSaga::operator()(Keyword keyword) {
 }
 
 template <typename T>
-Expected<AnyExpression> Parser<T>::parse_primary_expression() {
+std::expected<AnyExpression, LanguageError *>
+Parser<T>::parse_primary_expression() {
   return tokenizer.last_token.visit(PrimaryExpressionSaga(*this));
 }
 
@@ -1189,19 +1276,20 @@ FunctionDefinition *AbstractBoundary<T>::find_function(Identifier identifier) {
 }
 
 template <typename T>
-Expected<void> AbstractBoundary<T>::analyze_inner_functions() {
+std::expected<void, LanguageError *>
+AbstractBoundary<T>::analyze_inner_functions() {
   for (FunctionDefinition *definition : inner_functions) {
     definition->parent_boundary = this;
     if (auto void_opt = definition->analyze(); not void_opt)
       return std::unexpected(void_opt.error());
   }
-  return Expected<void>{};
+  return std::expected<void, LanguageError *>{};
 }
 
 struct PropertyFinder {
-  Expected<AnyExpression> operator()(StringType);
+  std::expected<AnyExpression, LanguageError *> operator()(StringType);
   template <std::derived_from<ValueType> T>
-  Expected<AnyExpression> operator()(T) {
+  std::expected<AnyExpression, LanguageError *> operator()(T) {
     std::unreachable();
   }
 
@@ -1215,10 +1303,13 @@ struct PropertyFinder {
 struct RvalueAnalyzer;
 
 struct CalleeAnalyzer {
-  Expected<AnyExpression> operator()(const MemberExpression &expression);
-  Expected<AnyExpression> operator()(const VariableAccessor &expression);
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const MemberExpression &expression);
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const VariableAccessor &expression);
   template <std::derived_from<Expression> T>
-  Expected<AnyExpression> operator()(const T &expression) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const T &expression) {
     std::unreachable();
   }
 
@@ -1228,19 +1319,26 @@ struct CalleeAnalyzer {
 };
 
 struct RvalueAnalyzer {
-  Expected<AnyExpression> operator()(const AsciiLiteral &ascii_literal) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const AsciiLiteral &ascii_literal) {
     return AnyExpression{ascii_literal};
   }
-  Expected<AnyExpression> operator()(const NumericLiteral &numeric_literal) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const NumericLiteral &numeric_literal) {
     return AnyExpression{numeric_literal};
   }
-  Expected<AnyExpression> operator()(const AliasedFunctionCall &expression);
-  Expected<AnyExpression> operator()(const VariableAccessor &expression);
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const AliasedFunctionCall &expression);
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const VariableAccessor &expression);
   template <char32_t C>
-  Expected<AnyExpression> operator()(const BinaryExpression<C> &expression);
-  Expected<AnyExpression> operator()(const MemberExpression &expression);
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const BinaryExpression<C> &expression);
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const MemberExpression &expression);
   template <std::derived_from<Expression> T>
-  Expected<AnyExpression> operator()(const T &expression) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const T &expression) {
     std::unreachable();
   }
 
@@ -1249,10 +1347,11 @@ struct RvalueAnalyzer {
 };
 
 struct MethodAnalyzer {
-  Expected<AnyExpression>
+  std::expected<AnyExpression, LanguageError *>
   operator()(const IntrinsicAccessor &intrinsic_accessor);
   template <std::derived_from<Expression> T>
-  Expected<AnyExpression> operator()(const T &expression) {
+  std::expected<AnyExpression, LanguageError *>
+  operator()(const T &expression) {
     std::unreachable();
   }
 
@@ -1285,7 +1384,8 @@ struct DatatypeAnalyzer {
   LexicalBoundary &boundary;
 };
 
-Expected<AnyExpression> PropertyFinder::operator()(StringType) {
+std::expected<AnyExpression, LanguageError *>
+PropertyFinder::operator()(StringType) {
   switch (identifier.offset) {
   case OFFSET_length: {
     LengthIntrinsic length_intrinsic{
@@ -1295,18 +1395,18 @@ Expected<AnyExpression> PropertyFinder::operator()(StringType) {
   }
   default:
     std::breakpoint();
-    return std::unexpected<InvalidPropertyAccess>(std::in_place);
+    return std::unexpected(new InvalidPropertyAccess{});
   }
 }
 
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 RvalueAnalyzer::operator()(const AliasedFunctionCall &function_call) {
   CalleeAnalyzer callee_visitor{boundary};
   callee_visitor.arguments = function_call.arguments;
   return function_call.callee->alt->visit(callee_visitor);
 }
 
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   AnyExpression scope_accessor{
       variable_accessor.find_local_linkedly(&boundary)};
@@ -1320,12 +1420,12 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   }
   default:
     std::breakpoint();
-    return std::unexpected<InvalidVariableAccess>(std::in_place);
+    return std::unexpected(new InvalidVariableAccess{});
   }
 }
 
 template <char32_t C>
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 RvalueAnalyzer::operator()(const BinaryExpression<C> &expression) {
   if (auto left_analyzed = expression.left->alt->visit(*this);
       not left_analyzed)
@@ -1342,7 +1442,7 @@ RvalueAnalyzer::operator()(const BinaryExpression<C> &expression) {
   }
 }
 
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 RvalueAnalyzer::operator()(const MemberExpression &expression) {
   auto object_analyzed = expression.object->alt->visit(*this);
   if (not object_analyzed)
@@ -1354,16 +1454,16 @@ RvalueAnalyzer::operator()(const MemberExpression &expression) {
   return datatype_analyzed.alt->visit(property_visitor);
 }
 
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   if (intrinsic_accessor.object_type != IntrinsicObject::O_CONSOLE)
-    return std::unexpected<InvalidMethodAccess>(std::in_place);
+    return std::unexpected(new InvalidMethodAccess{});
   if (identifier.offset != OFFSET_log)
-    return std::unexpected<InvalidMethodAccess>(std::in_place);
+    return std::unexpected(new InvalidMethodAccess{});
   ConsoleCall console_call{
       &boundary.tape->all_programs[boundary.program_idx]->resource};
   for (const AnyExpression &argument : arguments) {
-    Expected<AnyExpression> argument_analyzed{
+    std::expected<AnyExpression, LanguageError *> argument_analyzed{
         argument.alt->visit(RvalueAnalyzer{boundary})};
     if (not argument_analyzed)
       return std::unexpected(argument_analyzed.error());
@@ -1373,7 +1473,7 @@ MethodAnalyzer::operator()(const IntrinsicAccessor &intrinsic_accessor) {
   return AnyExpression{std::move(console_call)};
 }
 
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 CalleeAnalyzer::operator()(const MemberExpression &expression) {
   auto member_object = expression.object->alt->visit(RvalueAnalyzer{boundary});
   if (not member_object)
@@ -1399,13 +1499,13 @@ AnyExpression DirectFunctionCallAnalyzer::operator()(NumberType datatype) {
   return AnyExpression{std::move(direct_call)};
 }
 
-Expected<AnyExpression>
+std::expected<AnyExpression, LanguageError *>
 CalleeAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   FunctionDefinition *definition{
       variable_accessor.find_function_linkedly(&boundary)};
   if (not definition) {
     std::breakpoint();
-    return std::unexpected<InvalidVariableAccess>(std::in_place);
+    return std::unexpected(new InvalidVariableAccess{});
   } else if (auto definition_analysis = definition->analyze();
              not definition_analysis) {
     return std::unexpected(definition_analysis.error());
@@ -1456,11 +1556,15 @@ VariableAccessor::find_local_linkedly(const LexicalBoundary *boundary,
 }
 
 struct InitializeScopeAnalyzer {
-  template <typename T> Expected<AnyStatement> operator()(T datatype);
-  Expected<AnyStatement> operator()(DynamicType datatype) {
+  template <typename T>
+  std::expected<AnyStatement, LanguageError *> operator()(T datatype);
+  std::expected<AnyStatement, LanguageError *>
+  operator()(DynamicType datatype) {
     std::unreachable();
   }
-  Expected<AnyStatement> operator()(LambdaType datatype) { std::unreachable(); }
+  std::expected<AnyStatement, LanguageError *> operator()(LambdaType datatype) {
+    std::unreachable();
+  }
 
   InitializeScopeAnalyzer(LexicalBoundary &b) : boundary{b} {}
   LexicalBoundary &boundary;
@@ -1469,15 +1573,19 @@ struct InitializeScopeAnalyzer {
 };
 
 struct StatementAnalyzer {
-  Expected<AnyStatement> operator()(const ExpressionStatement &statement);
-  Expected<AnyStatement> operator()(const InitializeVariable &statement);
-  Expected<AnyStatement> operator()(const ReturnStatement<void> &statement);
-  Expected<AnyStatement>
+  std::expected<AnyStatement, LanguageError *>
+  operator()(const ExpressionStatement &statement);
+  std::expected<AnyStatement, LanguageError *>
+  operator()(const InitializeVariable &statement);
+  std::expected<AnyStatement, LanguageError *>
+  operator()(const ReturnStatement<void> &statement);
+  std::expected<AnyStatement, LanguageError *>
   operator()(const ReturnStatement<NumberType> &statement) {
     std::unreachable();
   }
   template <typename T>
-  Expected<AnyStatement> operator()(const InitializeScope<T> &statement) {
+  std::expected<AnyStatement, LanguageError *>
+  operator()(const InitializeScope<T> &statement) {
     std::unreachable();
   }
 
@@ -1485,7 +1593,7 @@ struct StatementAnalyzer {
   LexicalBoundary &boundary;
 };
 
-Expected<AnyStatement>
+std::expected<AnyStatement, LanguageError *>
 StatementAnalyzer::operator()(const ExpressionStatement &statement) {
   std::expected argument_analyzed{
       statement.argument->alt->visit(RvalueAnalyzer{boundary})};
@@ -1497,9 +1605,9 @@ StatementAnalyzer::operator()(const ExpressionStatement &statement) {
   return AnyStatement::Alternative(std::move(expression_statement));
 }
 
-Expected<AnyStatement>
+std::expected<AnyStatement, LanguageError *>
 StatementAnalyzer::operator()(const InitializeVariable &statement) {
-  Expected<AnyExpression> rvalue_analyzed{
+  std::expected<AnyExpression, LanguageError *> rvalue_analyzed{
       statement.rvalue->alt->visit(RvalueAnalyzer{boundary})};
   if (not rvalue_analyzed)
     return std::unexpected(rvalue_analyzed.error());
@@ -1512,7 +1620,8 @@ StatementAnalyzer::operator()(const InitializeVariable &statement) {
 }
 
 template <typename T>
-Expected<AnyStatement> InitializeScopeAnalyzer::operator()(T datatype) {
+std::expected<AnyStatement, LanguageError *>
+InitializeScopeAnalyzer::operator()(T datatype) {
   InitializeScope<T> initialize_scope{
       &boundary.tape->all_programs[boundary.program_idx]->resource};
   initialize_scope.rvalue = std::move(rvalue_analyzed);
@@ -1553,7 +1662,7 @@ AnyStatement ReturnStatementAnalyzer::operator()(NumberType) {
   return AnyStatement::Alternative(std::move(return_statement));
 }
 
-Expected<AnyStatement>
+std::expected<AnyStatement, LanguageError *>
 StatementAnalyzer::operator()(const ReturnStatement<void> &statement) {
   auto argument_analyzed =
       statement.argument->alt->visit(RvalueAnalyzer{boundary});
@@ -1562,7 +1671,7 @@ StatementAnalyzer::operator()(const ReturnStatement<void> &statement) {
   if (FunctionDefinition *definition = boundary.as_function_definition();
       not definition) {
     std::breakpoint();
-    return std::unexpected<InvalidReturnStatement>(std::in_place);
+    return std::unexpected(new InvalidReturnStatement{});
   } else {
     definition->return_type =
         argument_analyzed->alt->visit(DatatypeAnalyzer{boundary});
@@ -1572,11 +1681,12 @@ StatementAnalyzer::operator()(const ReturnStatement<void> &statement) {
   }
 }
 
-template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
+template <typename T>
+std::expected<void, LanguageError *> AbstractBoundary<T>::analyze_statements() {
   std::unique_ptr<Program> input_program{std::make_unique<Program>()};
   std::swap(tape->all_programs[program_idx], input_program);
   for (const AnyStatement &any_statement : input_program->statements) {
-    Expected<AnyStatement> analyzed_statement{
+    std::expected<AnyStatement, LanguageError *> analyzed_statement{
         any_statement.alt->visit(StatementAnalyzer{*this})};
     if (not analyzed_statement.has_value())
       return std::unexpected{analyzed_statement.error()};
@@ -1584,19 +1694,20 @@ template <typename T> Expected<void> AbstractBoundary<T>::analyze_statements() {
         std::move(*analyzed_statement));
   }
   std::ranges::sort(local_layout.entries, {}, &LocalLayoutEntry::identifier);
-  return Expected<void>{};
+  return std::expected<void, LanguageError *>{};
 }
 
-Expected<void> FunctionDefinition::analyze_formal_parameters() {
+std::expected<void, LanguageError *>
+FunctionDefinition::analyze_formal_parameters() {
   for (Identifier argument : arguments) {
     auto layout_entry_it = std::ranges::find(local_layout.entries, argument,
                                              &LocalLayoutEntry::identifier);
     layout_entry_it->variant_type.alt.emplace(std::in_place_type<DynamicType>);
   }
-  return Expected<void>{};
+  return std::expected<void, LanguageError *>{};
 }
 
-Expected<void> FunctionDefinition::do_analyze() {
+std::expected<void, LanguageError *> FunctionDefinition::do_analyze() {
   if (auto parameters_ok = analyze_formal_parameters(); not parameters_ok)
     return std::unexpected(parameters_ok.error());
   else if (auto statements_ok = analyze_statements(); not statements_ok)
@@ -1605,10 +1716,10 @@ Expected<void> FunctionDefinition::do_analyze() {
            not inner_functions_ok)
     return std::unexpected(inner_functions_ok.error());
   else
-    return Expected<void>{};
+    return std::expected<void, LanguageError *>{};
 }
 
-Expected<void> FunctionDefinition::analyze() {
+std::expected<void, LanguageError *> FunctionDefinition::analyze() {
   switch (analyzer_mark) {
   case AnalyzerMark::PENDING: {
     analyzer_mark = AnalyzerMark::INITIATED;
@@ -1618,54 +1729,70 @@ Expected<void> FunctionDefinition::analyze() {
   }
   case AnalyzerMark::INITIATED:
     std::breakpoint();
-    return std::unexpected<UnresolvableCircularity>(std::in_place);
+    return std::unexpected(new UnresolvableCircularity{});
   case AnalyzerMark::COMPLETE:
-    return Expected<void>{};
+    return std::expected<void, LanguageError *>{};
   }
   std::unreachable();
 }
 
-Expected<void> ModuleDefinition::analyze() {
+std::expected<void, LanguageError *> ModuleDefinition::analyze() {
   if (auto void_opt = analyze_statements(); not void_opt)
     return std::unexpected(void_opt.error());
   if (auto void_opt = analyze_inner_functions(); not void_opt)
     return std::unexpected(void_opt.error());
-  return Expected<void>{};
+  return std::expected<void, LanguageError *>{};
 }
 
 struct StatementEvaluator {
-  template <typename T> void operator()(const InitializeScope<T> &);
-  template <typename T> void operator()(const T &s) { std::unreachable(); }
+  template <typename T>
+  std::expected<void, LanguageError *> operator()(const InitializeScope<T> &);
+  template <typename T>
+  std::expected<void, LanguageError *> operator()(const T &s) {
+    std::unreachable();
+  }
   BoundaryFrame &self_frame;
 };
 
 template <typename T> struct ExpressionEvaluator {
-  template <typename U> T operator()(const U &e) { std::unreachable(); }
+  template <typename U>
+  std::expected<T, LanguageError *> operator()(const U &e) {
+    std::unreachable();
+  }
   BoundaryFrame &self_frame;
 };
 
 template <>
 template <>
-void ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
-  auto put_console_message = [&](auto message_parts) {
-    std::lock_guard console_lock{self_frame.machine.console_mutex};
-    ConsoleMessage &console_message =
-        self_frame.machine.console_messages.emplace_back();
-    console_message.parts = std::move(message_parts);
-  };
+std::expected<void, LanguageError *>
+ExpressionEvaluator<void>::operator()(const ConsoleCall &expression) {
   auto evaluate_argument = [&](const AnyExpression &argument) {
     ExpressionEvaluator<VariantStringView> argument_visitor{self_frame};
     return argument.alt->visit(argument_visitor);
   };
-  put_console_message(expression.arguments |
-                      std::ranges::views::transform(evaluate_argument) |
-                      std::ranges::to<std::vector>());
+  auto argument_values =
+      expression.arguments | std::ranges::views::transform(evaluate_argument);
+  std::vector<VariantStringView> message_parts{};
+  for (auto message_part : argument_values) {
+    if (message_part) {
+      message_parts.push_back(*message_part);
+      continue;
+    }
+    return std::unexpected(message_part.error());
+  }
+  {
+    std::lock_guard console_lock{self_frame.machine.console_mutex};
+    ConsoleMessage &console_message =
+        self_frame.machine.console_messages.emplace_back();
+    console_message.parts = std::move(message_parts);
+  }
   self_frame.machine.console_condition.notify_one();
+  return std::expected<void, LanguageError *>{};
 }
 
 template <>
 template <>
-double ExpressionEvaluator<double>::operator()(
+std::expected<double, LanguageError *> ExpressionEvaluator<double>::operator()(
     const DirectFunctionCall<NumberType> &expression) {
   const LexicalBoundary &boundary = *expression.callee;
   RuntimeMemory &memory = *self_frame.machine.runtime_memory;
@@ -1675,21 +1802,28 @@ double ExpressionEvaluator<double>::operator()(
   child_frame.closure_stack.push_back(&child_frame);
   child_frame.closure_stack.append_range(self_frame.closure_stack);
   const Program &program = *boundary.tape->all_programs[boundary.program_idx];
-  for (const AnyStatement &statement : program.statements)
-    statement.alt->visit(StatementEvaluator{child_frame});
+  for (const AnyStatement &statement : program.statements) {
+    auto statement_result =
+        statement.alt->visit(StatementEvaluator{child_frame});
+    if (not statement_result)
+      return std::unexpected(statement_result.error());
+  }
   return *std::launder(reinterpret_cast<double *>(
       static_cast<char *>(child_frame.return_memory.get())));
 }
 
 template <>
 template <>
-VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+std::expected<VariantStringView, LanguageError *>
+ExpressionEvaluator<VariantStringView>::operator()(
     const DirectFunctionCall<NumberType> &expression) {
-  double original_value{
-      ExpressionEvaluator<double>{self_frame}.operator()(expression)};
+  auto original_value =
+      ExpressionEvaluator<double>{self_frame}.operator()(expression);
+  if (not original_value)
+    return std::unexpected(original_value.error());
   std::string buffer(24, '\0');
   auto [ptr, ec] = std::to_chars(buffer.data(), buffer.data() + buffer.size(),
-                                 original_value);
+                                 *original_value);
   assert(ec == std::errc{});
   buffer.resize(ptr - buffer.data());
   std::string_view stringified_value{
@@ -1699,53 +1833,64 @@ VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
 
 template <>
 template <>
-VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+std::expected<VariantStringView, LanguageError *>
+ExpressionEvaluator<VariantStringView>::operator()(
     const AsciiLiteral &expression) {
   return expression.val_view;
 }
 
 template <>
 template <>
-double
+std::expected<double, LanguageError *>
 ExpressionEvaluator<double>::operator()(const NumericLiteral &expression) {
   return expression.val;
 }
 
 template <>
 template <>
-double
+std::expected<double, LanguageError *>
 ExpressionEvaluator<double>::operator()(const LengthIntrinsic &expression) {
   ExpressionEvaluator<VariantStringView> expression_visitor{self_frame};
-  VariantStringView argument_value{
-      expression.argument->alt->visit(expression_visitor)};
+  auto argument_value = expression.argument->alt->visit(expression_visitor);
+  if (not argument_value)
+    return std::unexpected(argument_value.error());
   std::size_t argument_size{
-      argument_value.visit([](const auto &sv) { return sv.size(); })};
+      argument_value->visit([](const auto &sv) { return sv.size(); })};
   return static_cast<double>(argument_size);
 }
 
 template <>
 template <>
-double ExpressionEvaluator<double>::operator()(
+std::expected<double, LanguageError *> ExpressionEvaluator<double>::operator()(
     const BinaryExpression<'+'> &expression) {
   ExpressionEvaluator<double> operand_visitor{self_frame};
-  double lhs_value{expression.left->alt->visit(operand_visitor)};
-  double rhs_value{expression.right->alt->visit(operand_visitor)};
-  return lhs_value + rhs_value;
+  auto lhs_value = expression.left->alt->visit(operand_visitor);
+  if (not lhs_value)
+    return std::unexpected(lhs_value.error());
+  auto rhs_value = expression.right->alt->visit(operand_visitor);
+  if (not rhs_value)
+    return std::unexpected(rhs_value.error());
+  return *lhs_value + *rhs_value;
 }
 
 template <>
 template <>
-double ExpressionEvaluator<double>::operator()(
+std::expected<double, LanguageError *> ExpressionEvaluator<double>::operator()(
     const BinaryExpression<'-'> &expression) {
   ExpressionEvaluator<double> operand_visitor{self_frame};
-  double lhs_value{expression.left->alt->visit(operand_visitor)};
-  double rhs_value{expression.right->alt->visit(operand_visitor)};
-  return lhs_value - rhs_value;
+  auto lhs_value = expression.left->alt->visit(operand_visitor);
+  if (not lhs_value)
+    return std::unexpected(lhs_value.error());
+  auto rhs_value = expression.right->alt->visit(operand_visitor);
+  if (not rhs_value)
+    return std::unexpected(rhs_value.error());
+  return *lhs_value - *rhs_value;
 }
 
 template <>
 template <>
-VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
+std::expected<VariantStringView, LanguageError *>
+ExpressionEvaluator<VariantStringView>::operator()(
     const ScopeAccessor<StringType> &expression) {
   BoundaryFrame &source_frame =
       *self_frame.closure_stack[expression.scope_offset];
@@ -1758,7 +1903,7 @@ VariantStringView ExpressionEvaluator<VariantStringView>::operator()(
 
 template <>
 template <>
-double ExpressionEvaluator<double>::operator()(
+std::expected<double, LanguageError *> ExpressionEvaluator<double>::operator()(
     const ScopeAccessor<NumberType> &expression) {
   BoundaryFrame &source_frame =
       *self_frame.closure_stack[expression.scope_offset];
@@ -1769,36 +1914,50 @@ double ExpressionEvaluator<double>::operator()(
 }
 
 template <>
-void StatementEvaluator::operator()(const ExpressionStatement &statement) {
-  statement.argument->alt->visit(ExpressionEvaluator<void>{self_frame});
+std::expected<void, LanguageError *>
+StatementEvaluator::operator()(const ExpressionStatement &statement) {
+  return statement.argument->alt->visit(ExpressionEvaluator<void>{self_frame});
 }
 
 template <>
-void StatementEvaluator::operator()(
-    const ReturnStatement<NumberType> &statement) {
-  double return_value{
-      statement.argument->alt->visit(ExpressionEvaluator<double>{self_frame})};
+std::expected<void, LanguageError *>
+StatementEvaluator::operator()(const ReturnStatement<NumberType> &statement) {
+  auto argument_value =
+      statement.argument->alt->visit(ExpressionEvaluator<double>{self_frame});
+  if (not argument_value)
+    return std::unexpected(argument_value.error());
   char *destination = static_cast<char *>(self_frame.return_memory.get());
-  new (destination) double{return_value};
+  new (destination) double{*argument_value};
+  return {};
 }
 
 template <typename T>
-void StatementEvaluator::operator()(const InitializeScope<T> &statement) {
+std::expected<void, LanguageError *>
+StatementEvaluator::operator()(const InitializeScope<T> &statement) {
   char *destination = static_cast<char *>(self_frame.local_memory.get()) +
                       statement.local_offset;
   using R = T::Representation;
   ExpressionEvaluator<R> expression_visitor{self_frame};
-  new (destination) R{statement.rvalue->alt->visit(expression_visitor)};
+  auto expression_value = statement.rvalue->alt->visit(expression_visitor);
+  if (not expression_value)
+    return std::unexpected(expression_value.error());
+  new (destination) R{*expression_value};
+  return {};
 }
 
-template <typename T> T Machine::evaluate(const LexicalBoundary &boundary) {
+std::expected<void, LanguageError *>
+Machine::evaluate(const LexicalBoundary &boundary) {
   BoundaryFrame &self_frame = runtime_memory->boundary_frames.emplace_back(
       *this, boundary, &runtime_memory->resource);
   self_frame.closure_stack.push_back(&self_frame);
   const auto &program = *boundary.tape->all_programs[boundary.program_idx];
-  for (const AnyStatement &statement : program.statements)
-    statement.alt->visit(StatementEvaluator{self_frame});
-  return T();
+  for (const AnyStatement &statement : program.statements) {
+    auto statement_result =
+        statement.alt->visit(StatementEvaluator{self_frame});
+    if (not statement_result)
+      return std::unexpected(statement_result.error());
+  }
+  return std::expected<void, LanguageError *>{};
 }
 
 std::list<ConsoleMessage>
@@ -1894,7 +2053,7 @@ Language::~Language() = default;
 Language::Language(Language &&other) noexcept = default;
 Language &Language::operator=(Language &&other) noexcept = default;
 
-bool Language::compile_and_execute() {
+void Language::compile_and_execute() {
   std::set<LambdaSignature> lambda_signatures{};
   std::set<std::string> string_atlas{};
   std::set<std::u16string> u16string_atlas{};
@@ -1911,18 +2070,21 @@ bool Language::compile_and_execute() {
   definition.tape = &tape;
 
   ModuleParser parser{definition, tokenizer};
-
-  if (auto parse_result = parser.parse_module(); not parse_result)
-    variant_error.emplace(parse_result.error());
-  else if (auto analyze_result = definition.analyze(); not analyze_result)
-    variant_error.emplace(analyze_result.error());
-
   Machine machine{};
-  machine.evaluate<void>(definition);
-
   ConsoleWorker console_worker{machine};
   std::jthread console_thread(console_worker);
 
-  return not variant_error.has_value();
+  if (auto result = parser.parse_module(); not result) {
+    error_occurred = std::unique_ptr<LanguageError>{result.error()};
+    return;
+  }
+  if (auto result = definition.analyze(); not result) {
+    error_occurred = std::unique_ptr<LanguageError>{result.error()};
+    return;
+  }
+  if (auto result = machine.evaluate(definition); not result) {
+    error_occurred = std::unique_ptr<LanguageError>{result.error()};
+    return;
+  }
 }
 } // namespace Manadrain
