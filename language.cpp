@@ -419,7 +419,8 @@ public:
   Operator op;
 };
 
-template <char32_t> class BinaryExpression final : public Expression {
+template <char32_t, typename T>
+class BinaryExpression final : public Expression {
 public:
   BinaryExpression(std::pmr::memory_resource *resource_ptr)
       : left{std::allocator_arg, resource_ptr},
@@ -501,10 +502,11 @@ struct AnyExpression {
   using Alternative = std::variant<
       NumericLiteral, AsciiLiteral, UnicodeLiteral, AliasedFunctionCall,
       DirectFunctionCall<NumberType>, MemberExpression, AssignExpression,
-      LogicalExpression, BinaryExpression<'+'>, BinaryExpression<'-'>,
-      VariableAccessor, ScopeAccessor<StringType>, ScopeAccessor<NumberType>,
-      IntrinsicAccessor, LambdaExpression, ConsoleCall, LengthIntrinsic,
-      StringifyIntrinsic>;
+      LogicalExpression, BinaryExpression<'+', NumberType>,
+      BinaryExpression<'-', NumberType>, BinaryExpression<'+', DynamicType>,
+      BinaryExpression<'-', DynamicType>, VariableAccessor,
+      ScopeAccessor<StringType>, ScopeAccessor<NumberType>, IntrinsicAccessor,
+      LambdaExpression, ConsoleCall, LengthIntrinsic, StringifyIntrinsic>;
   std::optional<Alternative> alt;
   AnyExpression() = default;
   AnyExpression(Alternative a) : alt{std::move(a)} {};
@@ -1139,33 +1141,36 @@ Parser<T>::parse_postfix_expression() {
 template <typename T>
 std::expected<AnyExpression, LanguageError *>
 Parser<T>::parse_additive_expression() {
-  auto left_expression = parse_postfix_expression();
-  if (not left_expression)
-    return std::unexpected(left_expression.error());
+  auto make_expression = [this]<char32_t C>(AnyExpression &lhs_expression,
+                                            AnyExpression &rhs_expression) {
+    auto &program = *boundary.tape->all_programs[boundary.program_idx];
+    BinaryExpression<C, DynamicType> binary_expression(&program.resource);
+    binary_expression.left = std::move(lhs_expression);
+    binary_expression.right = std::move(rhs_expression);
+    return AnyExpression{std::move(binary_expression)};
+  };
+  auto lhs_expression = parse_postfix_expression();
+  if (not lhs_expression)
+    return std::unexpected(lhs_expression.error());
   auto *operator_ahead = std::get_if<char32_t>(&tokenizer.last_token);
   static const std::array additive_punct = std::to_array<char32_t>({'+', '-'});
   bool should_proceed =
       operator_ahead && std::ranges::contains(additive_punct, *operator_ahead);
   if (not should_proceed)
-    return std::move(*left_expression);
+    return std::move(*lhs_expression);
   char32_t binary_op{*operator_ahead};
   if (auto token_result = tokenizer.tokenize(); not token_result)
     return std::unexpected(token_result.error());
-  auto right_expression = parse_postfix_expression();
-  if (not right_expression)
-    return std::unexpected(right_expression.error());
-  auto make_expression = [&]<char32_t C>() {
-    auto &program = *boundary.tape->all_programs[boundary.program_idx];
-    BinaryExpression<C> binary_expression(&program.resource);
-    binary_expression.left = std::move(*left_expression);
-    binary_expression.right = std::move(*right_expression);
-    return AnyExpression{std::move(binary_expression)};
-  };
+  auto rhs_expression = parse_postfix_expression();
+  if (not rhs_expression)
+    return std::unexpected(rhs_expression.error());
   switch (binary_op) {
   case '+':
-    return make_expression.template operator()<'+'>();
+    return make_expression.template operator()<'+'>(*lhs_expression,
+                                                    *rhs_expression);
   case '-':
-    return make_expression.template operator()<'-'>();
+    return make_expression.template operator()<'-'>(*lhs_expression,
+                                                    *rhs_expression);
   }
   std::unreachable();
 }
@@ -1242,6 +1247,11 @@ Parser<T>::PrimaryExpressionSaga::operator()(Keyword keyword) {
   LambdaExpression lambda_expression{};
   lambda_expression.definition =
       &parser.boundary.tape->function_definition_list.emplace_back();
+  lambda_expression.definition->parent_boundary = &parser.boundary;
+  lambda_expression.definition->program_idx =
+      parser.boundary.tape->all_programs.size();
+  parser.boundary.tape->all_programs.push_back(std::make_unique<Program>());
+  lambda_expression.definition->tape = parser.boundary.tape;
   FunctionParser function_parser{*lambda_expression.definition,
                                  parser.tokenizer};
   if (auto void_opt = function_parser.parse_function_decl(); not void_opt)
@@ -1333,7 +1343,7 @@ struct RvalueAnalyzer {
   operator()(const VariableAccessor &expression);
   template <char32_t C>
   std::expected<AnyExpression, LanguageError *>
-  operator()(const BinaryExpression<C> &expression);
+  operator()(const BinaryExpression<C, DynamicType> &expression);
   std::expected<AnyExpression, LanguageError *>
   operator()(const MemberExpression &expression);
   template <std::derived_from<Expression> T>
@@ -1362,21 +1372,32 @@ struct MethodAnalyzer {
 };
 
 struct DatatypeAnalyzer {
-  VariantType operator()(const AsciiLiteral &) {
+  VariantType operator()(const NumericLiteral &expression) {
+    return VariantType{NumberType{}};
+  }
+  VariantType operator()(const LengthIntrinsic &expression) {
+    return VariantType{NumberType{}};
+  }
+  VariantType operator()(const AsciiLiteral &expression) {
+    return VariantType{StringType{}};
+  }
+  VariantType operator()(const UnicodeLiteral &expression) {
     return VariantType{StringType{}};
   }
   template <typename T>
   VariantType operator()(const ScopeAccessor<T> &accessor) {
     return VariantType{accessor.local_type};
   }
-  template <char32_t C> VariantType operator()(const BinaryExpression<C> &) {
-    return VariantType{NumberType{}};
+  template <char32_t C, typename T>
+  VariantType operator()(const BinaryExpression<C, T> &expression) {
+    return VariantType{T{}};
   }
   template <typename T>
   VariantType operator()(const DirectFunctionCall<T> &direct_call) {
     return VariantType{direct_call.return_type};
   }
-  template <std::derived_from<Expression> T> VariantType operator()(const T &) {
+  template <std::derived_from<Expression> T>
+  VariantType operator()(const T &expression) {
     std::unreachable();
   }
 
@@ -1424,22 +1445,46 @@ RvalueAnalyzer::operator()(const VariableAccessor &variable_accessor) {
   }
 }
 
+template <char32_t> struct BinaryExpressionAnalyzer {
+  template <typename T, typename U>
+  AnyExpression operator()(T lhs_datatype, U rhs_datatype) {
+    std::unreachable();
+  }
+  AnyExpression operator()(NumberType, NumberType);
+  AnyExpression lhs_analyzed;
+  AnyExpression rhs_analyzed;
+
+  BinaryExpressionAnalyzer(LexicalBoundary &b) : boundary{b} {}
+  LexicalBoundary &boundary;
+};
+
+template <char32_t C>
+AnyExpression BinaryExpressionAnalyzer<C>::operator()(NumberType, NumberType) {
+  Program &program = *boundary.tape->all_programs[boundary.program_idx];
+  BinaryExpression<C, NumberType> output_expression(&program.resource);
+  output_expression.left = std::move(lhs_analyzed);
+  output_expression.right = std::move(rhs_analyzed);
+  return AnyExpression{std::move(output_expression)};
+}
+
 template <char32_t C>
 std::expected<AnyExpression, LanguageError *>
-RvalueAnalyzer::operator()(const BinaryExpression<C> &expression) {
-  if (auto left_analyzed = expression.left->alt->visit(*this);
-      not left_analyzed)
-    return left_analyzed;
-  else if (auto right_analyzed = expression.right->alt->visit(*this);
-           not right_analyzed)
-    return right_analyzed;
-  else {
-    auto &program = *boundary.tape->all_programs[boundary.program_idx];
-    BinaryExpression<C> output_expression(&program.resource);
-    output_expression.left = std::move(*left_analyzed);
-    output_expression.right = std::move(*right_analyzed);
-    return AnyExpression{std::move(output_expression)};
-  }
+RvalueAnalyzer::operator()(const BinaryExpression<C, DynamicType> &expression) {
+  DatatypeAnalyzer datatype_visitor{boundary};
+  std::expected<AnyExpression, LanguageError *> lhs_analyzed{
+      expression.left->alt->visit(*this)};
+  if (not lhs_analyzed)
+    return std::unexpected(lhs_analyzed.error());
+  VariantType lhs_datatype{lhs_analyzed->alt->visit(datatype_visitor)};
+  std::expected<AnyExpression, LanguageError *> rhs_analyzed{
+      expression.right->alt->visit(*this)};
+  if (not rhs_analyzed)
+    return std::unexpected(rhs_analyzed.error());
+  VariantType rhs_datatype{rhs_analyzed->alt->visit(datatype_visitor)};
+  BinaryExpressionAnalyzer<C> operand_visitor{boundary};
+  operand_visitor.lhs_analyzed = std::move(*lhs_analyzed);
+  operand_visitor.rhs_analyzed = std::move(*rhs_analyzed);
+  return std::visit(operand_visitor, *lhs_datatype.alt, *rhs_datatype.alt);
 }
 
 std::expected<AnyExpression, LanguageError *>
@@ -1862,7 +1907,7 @@ ExpressionEvaluator<double>::operator()(const LengthIntrinsic &expression) {
 template <>
 template <>
 std::expected<double, LanguageError *> ExpressionEvaluator<double>::operator()(
-    const BinaryExpression<'+'> &expression) {
+    const BinaryExpression<'+', NumberType> &expression) {
   ExpressionEvaluator<double> operand_visitor{self_frame};
   auto lhs_value = expression.left->alt->visit(operand_visitor);
   if (not lhs_value)
@@ -1876,7 +1921,7 @@ std::expected<double, LanguageError *> ExpressionEvaluator<double>::operator()(
 template <>
 template <>
 std::expected<double, LanguageError *> ExpressionEvaluator<double>::operator()(
-    const BinaryExpression<'-'> &expression) {
+    const BinaryExpression<'-', NumberType> &expression) {
   ExpressionEvaluator<double> operand_visitor{self_frame};
   auto lhs_value = expression.left->alt->visit(operand_visitor);
   if (not lhs_value)
@@ -2074,17 +2119,10 @@ void Language::compile_and_execute() {
   ConsoleWorker console_worker{machine};
   std::jthread console_thread(console_worker);
 
-  if (auto result = parser.parse_module(); not result) {
+  auto result = parser.parse_module()
+                    .and_then([&] { return definition.analyze(); })
+                    .and_then([&] { return machine.evaluate(definition); });
+  if (not result)
     error_occurred = std::unique_ptr<LanguageError>{result.error()};
-    return;
-  }
-  if (auto result = definition.analyze(); not result) {
-    error_occurred = std::unique_ptr<LanguageError>{result.error()};
-    return;
-  }
-  if (auto result = machine.evaluate(definition); not result) {
-    error_occurred = std::unique_ptr<LanguageError>{result.error()};
-    return;
-  }
 }
 } // namespace Manadrain
